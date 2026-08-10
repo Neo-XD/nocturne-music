@@ -81,6 +81,14 @@ impl Db {
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
         let _ = conn.execute("DELETE FROM plays WHERE video_id LIKE 'LOCAL:%'", []);
+        // Sweep dead stream URLs here as well as on write. `put_stream` only runs on a cache miss,
+        // so a session spent replaying cached tracks never triggers one, and the backlog that
+        // built up before anything pruned at all (1803 rows, 1772 of them expired, on a real
+        // install) would sit there until it happened to.
+        let _ = conn.execute(
+            "DELETE FROM stream_url_cache WHERE expires_at <= ?1",
+            [now_secs()],
+        );
         Ok(Db(Mutex::new(conn)))
     }
 
