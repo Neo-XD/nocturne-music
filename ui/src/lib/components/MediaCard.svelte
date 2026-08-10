@@ -25,13 +25,23 @@
 	// Google's CDN doesn't serve every rewritten size — asking for one it doesn't have 404s, and the
 	// browser then paints its broken-image glyph. So: try the sized URL, retry the original once, and
 	// only then fall back to a neutral icon tile.
-	// ponytail: 400 for every card, small tiles included — it's the size proven to work everywhere.
 	let attempt = $state(0);
 	$effect(() => {
 		item.thumbnail; // re-arm when the card is reused for a different item
 		attempt = 0;
 	});
 	const sized = $derived(thumb(item.thumbnail, 400));
+	// The cover slot is 144px (`.card-grid` is 10rem columns), so 400px is roughly seven times the
+	// pixels a 1x display can show, and WebKit holds the decoded bitmap at the size it was given.
+	// srcset hands the choice to the engine instead of guessing: 200 where that is all the screen
+	// has, 400 where the pixels are real. Both sizes verified live against yt3 covers, and the
+	// retry chain below still catches a size the CDN turns out not to serve.
+	const small = $derived(thumb(item.thumbnail, 200));
+	// Undefined when `thumb` left the URL alone (not a Google CDN URL, or a local file), where two
+	// candidates would be the same image twice, and on the retry, which is deliberately unsized.
+	const srcset = $derived(
+		attempt === 0 && small && sized && small !== sized ? `${small} 1x, ${sized} 2x` : undefined
+	);
 	const src = $derived(attempt === 0 ? sized : item.thumbnail);
 	// Skip the retry when `thumb` left the URL untouched — it would refetch the same dead URL.
 	const imgFailed = () => (attempt = attempt === 0 && sized !== item.thumbnail ? 1 : 2);
@@ -95,6 +105,7 @@
 				{#if item.thumbnail && attempt < 2 && !onRepeat}
 					<img
 						{src}
+						{srcset}
 						alt=""
 						class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
 						loading="lazy"
