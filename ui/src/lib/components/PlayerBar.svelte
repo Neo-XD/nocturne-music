@@ -105,11 +105,19 @@
 	const onVolume = (e: Event) => dragVolume(Number((e.target as HTMLInputElement).value));
 	const onVolumeCommit = (e: Event) => commitVolume(Number((e.target as HTMLInputElement).value));
 
+	const isControl = (t: EventTarget | null) =>
+		!!(t as HTMLElement | null)?.closest?.('button, a, input, [role="button"]');
+
+	// Dragging a slider past its end and releasing outside it retargets the click at the bar (the
+	// click lands on the common ancestor of press and release), which used to toggle the view.
+	// So judge by where the press started, not where the release happened.
+	let pressedControl = false;
+
 	// Anywhere on the bar that isn't a control opens (or closes) the now-playing view: the bar is
 	// what's left of it once it's minimised, so it's the way back in. Deliberately no pointer
 	// cursor, because this is the whole bar, not a button, and every real button keeps its own click.
 	function onBarClick(e: MouseEvent) {
-		if ((e.target as HTMLElement).closest('button, a, input, [role="button"]')) return;
+		if (pressedControl || isControl(e.target)) return;
 		np.open = !np.open;
 	}
 </script>
@@ -118,6 +126,7 @@
      stays a plain region rather than becoming a focusable control wrapping every other control. -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 <footer
+	onpointerdown={(e) => (pressedControl = isControl(e.target))}
 	onclick={onBarClick}
 	class="flex items-center gap-2 border-t bg-card px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3"
 >
