@@ -105,6 +105,9 @@ struct QueueState {
     /// The client that served the primed lookahead track — promoted to `current_client` on a
     /// gapless advance so the failure feedback still knows the client.
     lookahead_client: Option<String>,
+    /// Loudness gain (dB) for the primed lookahead. mpv's `af` is global, so this can't ride along
+    /// with the appended entry — it's applied when the gapless advance is observed.
+    lookahead_gain: Option<Option<f64>>,
     /// Watch-history tracking URL for the current track + the primed lookahead's (promoted on a
     /// gapless advance, mirroring current/lookahead_client). context/01 §registerPlayback.
     playback_url: Option<String>,
@@ -781,6 +784,13 @@ impl AppState {
         let gen = self.generation.load(Ordering::SeqCst);
         {
             let mut q = self.queue.lock().await;
+            // `af` is global in mpv and the appended entry couldn't carry its own, so the new track
+            // is playing at the *previous* one's gain until this lands.
+            if let Some(gain) = q.lookahead_gain.take() {
+                if let Err(e) = self.player.set_gain(gain) {
+                    tracing::warn!(error = %e, "applying lookahead loudness gain failed");
+                }
+            }
             // The primed entry is what's playing now — nothing is primed beyond it. (Also what
             // lets a single-item repeat-all queue re-prime itself instead of "already primed".)
             q.lookahead_loaded = None;
@@ -1062,6 +1072,7 @@ impl AppState {
         }
         q.lookahead_loaded = Some(next_idx);
         q.lookahead_client = Some(data.stream_client.clone());
+        q.lookahead_gain = Some(loudness_gain(data.loudness_db));
         q.lookahead_playback_url = data.playback_url.clone();
         // Same backfill as start_current: a gapless advance emits this item straight from the
         // queue, so the repair has to land before it becomes the current track.
@@ -2398,13 +2409,26 @@ fn now_secs() -> i64 {
 }
 
 /// Per-track loudness gain (dB) from YouTube's `loudnessDb` (context/03, context/14). Attenuate
-/// only toward reference loudness: loud masters (`loudnessDb > 0`) get `-loudnessDb`; quieter
-/// tracks aren't boosted, so there's no clipping and no limiter to add.
+/// only toward reference loudness: loud masters get pulled down, quieter tracks aren't boosted,
+/// so there's no clipping and no limiter to add.
+///
+/// `loudnessDb` is measured against **-14 LUFS** (YouTube's own response proves it:
+/// `perceptualLoudnessDb == loudnessDb - 14`, i.e. the track's absolute LUFS). Applying it raw
+/// normalizes to -14 like the *video* site, but YouTube **Music** only pulls down what exceeds
+/// **-7 LUFS**, so raw made us ~6 dB quieter than YTM web on a typical modern master and left
+/// most tracks attenuated that YTM never touches at all. Normalize to the same -7 target.
+///
+/// `None` means "no filter", and that's most tracks now: below the target there is nothing to
+/// attenuate, so mpv gets its `af` cleared rather than a `volume=0dB` no-op in the chain.
 // ponytail: attenuate-only, clamped to -24 dB. If quiet tracks feel too soft, allow positive gain
 // plus an `alimiter` af to catch the resulting peaks.
 fn loudness_gain(loudness_db: Option<f64>) -> Option<f64> {
-    loudness_db.map(|l| (-l).clamp(-24.0, 0.0))
+    let gain = TARGET_LUFS - (loudness_db? - 14.0);
+    (gain < -0.05).then(|| gain.max(-24.0))
 }
+
+/// Loudness target, matching YouTube Music's own player rather than the video site's -14.
+const TARGET_LUFS: f64 = -7.0;
 
 #[cfg(test)]
 mod tests {
@@ -2927,11 +2951,14 @@ mod tests {
     }
 
     #[test]
-    fn loudness_gain_attenuates_loud_only() {
-        // Loud master (+7 dB over reference) → attenuate 7 dB.
-        assert_eq!(loudness_gain(Some(7.0)), Some(-7.0));
-        // Quiet track (−5 dB) → no boost (clamped to 0).
-        assert_eq!(loudness_gain(Some(-5.0)), Some(0.0));
+    fn loudness_gain_attenuates_only_above_the_target() {
+        // "As It Was" measures loudnessDb 7.77 ⇒ -6.23 LUFS, 0.77 dB over the -7 target.
+        assert_eq!(loudness_gain(Some(7.77)).map(|g| (g * 100.0).round()), Some(-77.0));
+        // Exactly on target, and everything below -7 LUFS, gets no filter at all — YTM doesn't
+        // touch these either. (Real values: "Levitating" 6.85, "Shape of You" 6.35, "bad guy" 0.11.)
+        for l in [7.0, 6.85, 6.35, 0.11, -5.0] {
+            assert_eq!(loudness_gain(Some(l)), None, "loudnessDb {l} should not attenuate");
+        }
         // Extreme loudness clamps at −24 dB.
         assert_eq!(loudness_gain(Some(40.0)), Some(-24.0));
         // No metadata → no filter.

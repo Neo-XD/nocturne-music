@@ -113,7 +113,7 @@ impl Player {
         gain_db: Option<f64>,
     ) -> Result<(), Error> {
         self.apply_headers(headers)?;
-        self.apply_gain(gain_db)?;
+        self.set_gain(gain_db)?;
         self.mpv.command("loadfile", &[&quoted(url), "replace"])?;
         Ok(())
     }
@@ -197,7 +197,14 @@ impl Player {
     /// Apply a per-track loudness gain (dB) as an mpv `volume` audio filter. context/14. Kept
     /// YouTube-agnostic: the caller computes the gain from `loudnessDb` (see `state::loudness_gain`);
     /// this just applies whatever dB it's handed.
-    fn apply_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
+    ///
+    /// `af` is a **global** mpv property, not a per-playlist-entry one, so a gaplessly-advanced
+    /// track keeps whatever the last [`Self::load`] set. The orchestrator has to call this itself
+    /// on a gapless advance or every track after the first plays at the first track's gain.
+    // ponytail: set on advance, so the head of a gapless track carries the old gain for the event
+    // round-trip (a few ms) and the filter chain reinits mid-stream. If that ever clicks audibly,
+    // keep one labelled filter (`af=@gain:lavfi=[volume=0dB]`) and retune it with `af-command`.
+    pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
         match gain_db {
             Some(g) => self
                 .mpv
