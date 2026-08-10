@@ -1120,6 +1120,7 @@ impl AppState {
             "paused": !self.is_playing.load(Ordering::Relaxed),
             "position": self.current_position(),
             "duration": duration,
+            "volume": saved_volume(&self.db),
         })
     }
 
@@ -2399,6 +2400,14 @@ fn backfill_metadata(item: &mut SongItem, length_seconds: Option<&str>, author: 
             item.artist_runs.clear();
         }
     }
+}
+
+/// The level to come up at: what the user left the slider on last run. Written by the UI on
+/// commit rather than by `set_volume`, which a drag calls every frame (and every settings write
+/// is an fsync). mpv would start at 100 otherwise.
+pub fn saved_volume(db: &Db) -> i64 {
+    let v = db.get_setting("volume").and_then(|s| s.parse().ok());
+    v.filter(|v| (0..=100).contains(v)).unwrap_or(100)
 }
 
 fn now_secs() -> i64 {

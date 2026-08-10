@@ -293,26 +293,36 @@ export function toggleNowPlayingLike(): Promise<void> {
 // Shared by the player bar and the mini player, which means there is one behaviour to get right
 // instead of two to keep in step.
 
-// Live while dragging (the user hears it), but trailing-throttled so a drag doesn't flood IPC.
-let volTimer: ReturnType<typeof setTimeout> | null = null;
+// Live while dragging (the user hears it), coalesced to one update per frame so a drag doesn't
+// flood IPC. One *frame*, not a 100ms throttle, because mpv has no volume ramp: `ao_apply_gain`
+// (audio/out/ao.c) multiplies the next output buffer by the new gain and that's it, so every
+// update is a step discontinuity in the waveform and the bigger the step the louder the click.
+// At 100ms a drag landed as a handful of ~12dB jumps, which popped audibly; a frame keeps each
+// step small enough to be masked by the music.
+// ponytail: smaller steps, not a real ramp. If a fast drag still pops, slew toward the target in
+// Rust (~30ms of small steps, cancelled by the next set_volume) rather than shrinking this again.
+let volFrame: number | null = null;
 
 export function dragVolume(v: number) {
 	playback.volume = v;
-	if (volTimer) return;
-	volTimer = setTimeout(() => {
-		volTimer = null;
+	if (volFrame !== null) return;
+	volFrame = requestAnimationFrame(() => {
+		volFrame = null;
 		api.setVolume(playback.volume);
-	}, 100);
+	});
 }
 
-/** Pointer released: always send the final value, throttle window or not. */
+/** Pointer released: always send the final value, pending frame or not. */
 export function commitVolume(v: number) {
-	if (volTimer) {
-		clearTimeout(volTimer);
-		volTimer = null;
+	if (volFrame !== null) {
+		cancelAnimationFrame(volFrame);
+		volFrame = null;
 	}
 	playback.volume = v;
 	api.setVolume(v);
+	// Persisted here rather than in Rust's `set_volume`: a drag calls that once per frame and every
+	// settings write is an fsync. A commit is one per gesture, and it's the level to reopen at.
+	api.setSetting('volume', String(v)).catch(() => {});
 }
 
 // Mute *is* volume 0 — no separate flag, so dragging the slider off zero un-mutes for free and the
@@ -507,7 +517,7 @@ export function initApp(mini = false): () => void {
 		api.onVolume((v) => {
 			// Not while our own drag is in flight: the echo is a value the pointer has already
 			// moved past, and applying it would yank the thumb backwards mid-drag.
-			if (!volTimer) playback.volume = v;
+			if (volFrame === null) playback.volume = v;
 		}),
 		api.onPlaybackError((msg) => (playback.error = msg)),
 		api.onPlaybackNotice((msg) => toast(msg)), // auto-skipped an unplayable track
@@ -541,6 +551,7 @@ export function initApp(mini = false): () => void {
 	// is created mid-song. Ask for the current state once rather than guessing at it.
 	api.getPlayback()
 		.then((s) => {
+			playback.volume = s.volume; // before the guard below: the slider is stale either way
 			if (playback.now) return; // a real now-playing event beat us to it
 			playback.now = s.now;
 			playback.liked = s.now?.liked ?? false;

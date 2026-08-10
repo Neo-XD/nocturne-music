@@ -233,6 +233,8 @@ export interface PlaybackSnapshot {
 	paused: boolean;
 	position: number;
 	duration: number;
+	/** The level restored from last run (or the one another window already set). */
+	volume: number;
 }
 export const getPlayback = () => invoke<PlaybackSnapshot>('get_playback');
 

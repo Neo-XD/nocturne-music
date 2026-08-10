@@ -166,7 +166,8 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `data_sync_id`, `account_json`, `visitor_data`) and internal blobs (`queue_json`,
 /// `queue_position`) never cross into the webview — they'd otherwise ship the login credential to
 /// the renderer on every open — and the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 10] = [
+const UI_SETTINGS: [&str; 11] = [
+    "volume",
     "proxy",
     "quality",
     "enable_history",
