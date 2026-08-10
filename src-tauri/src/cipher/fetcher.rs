@@ -28,6 +28,25 @@ pub struct PlayerJs {
     pub hash: String,
 }
 
+/// What the last webview discovery found on one exact `player.js`: a usable signature function, a
+/// usable `n`-transform, or (KI-1's steady state) neither.
+///
+/// Cached on disk next to the player it describes, because finding out costs a whole hidden web
+/// process and a 2.9 MB script injection, and the answer cannot change until YouTube rotates the
+/// player. Dropped by [`PlayerJsFetcher::invalidate`], so a self-heal always re-probes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Discovery {
+    pub sig: bool,
+    pub n: bool,
+}
+
+impl Discovery {
+    /// Nothing on this player is usable, so a webview built for it can do no work at all.
+    pub fn is_dead(&self) -> bool {
+        !self.sig && !self.n
+    }
+}
+
 pub struct PlayerJsFetcher {
     http: reqwest::Client,
     cache_dir: PathBuf,
@@ -64,14 +83,32 @@ impl PlayerJsFetcher {
         Ok(PlayerJs { js, hash })
     }
 
-    /// Delete cached `player_*.js` + `current_hash.txt` (NOT the shared config files). context/05.
-    /// Forces the next `fetch` to re-download — the self-heal path after a stale-signature 403.
+    /// The stored [`Discovery`] verdict for `hash`, if this player has been probed before.
+    pub fn discovery(&self, hash: &str) -> Option<Discovery> {
+        parse_discovery(&std::fs::read_to_string(self.discovery_path(hash)).ok()?)
+    }
+
+    /// Record what discovery found, so the next launch on the same player needn't build a webview
+    /// to learn it again. Best-effort: a failed write only costs the probe next time.
+    pub fn set_discovery(&self, hash: &str, d: Discovery) {
+        let _ = std::fs::write(self.discovery_path(hash), format!("{},{}", d.sig as u8, d.n as u8));
+    }
+
+    fn discovery_path(&self, hash: &str) -> PathBuf {
+        self.cache_dir.join(format!("discovery_{hash}.txt"))
+    }
+
+    /// Delete cached `player_*.js` + `current_hash.txt` + the discovery verdicts (NOT the shared
+    /// config files). context/05. Forces the next `fetch` to re-download and the next
+    /// `ensure_analyzed` to re-probe — the self-heal path after a stale-signature 403.
     pub fn invalidate(&self) {
         if let Ok(entries) = std::fs::read_dir(&self.cache_dir) {
             for e in entries.flatten() {
                 let name = e.file_name();
                 let name = name.to_string_lossy();
-                if name.starts_with("player_") && name.ends_with(".js") || name == "current_hash.txt"
+                if name.starts_with("player_") && name.ends_with(".js")
+                    || name.starts_with("discovery_")
+                    || name == "current_hash.txt"
                 {
                     let _ = std::fs::remove_file(e.path());
                 }
@@ -90,6 +127,11 @@ impl PlayerJsFetcher {
 fn extract_hash(iframe_api_js: &str) -> Option<String> {
     let re = Regex::new(r"player\\?/([0-9A-Za-z_-]+)\\?/").ok()?;
     re.captures(iframe_api_js)?.get(1).map(|m| m.as_str().to_owned())
+}
+
+fn parse_discovery(raw: &str) -> Option<Discovery> {
+    let (sig, n) = raw.trim().split_once(',')?;
+    Some(Discovery { sig: sig == "1", n: n == "1" })
 }
 
 fn read_if_fresh(path: &Path) -> Option<String> {
@@ -122,5 +164,25 @@ mod tests {
             extract_hash("https://www.youtube.com/s/player/abcd1234/base.js").as_deref(),
             Some("abcd1234")
         );
+    }
+
+    #[test]
+    fn discovery_round_trips() {
+        for d in [
+            Discovery { sig: false, n: false },
+            Discovery { sig: true, n: false },
+            Discovery { sig: false, n: true },
+            Discovery { sig: true, n: true },
+        ] {
+            let written = format!("{},{}", d.sig as u8, d.n as u8);
+            assert_eq!(parse_discovery(&written), Some(d), "round trip of {d:?}");
+        }
+        // Only the all-false verdict is allowed to skip the webview build.
+        assert!(Discovery { sig: false, n: false }.is_dead());
+        assert!(!Discovery { sig: false, n: true }.is_dead());
+        assert!(!Discovery { sig: true, n: false }.is_dead());
+        // A truncated or empty file must read as "never probed", not as a dead player.
+        assert_eq!(parse_discovery(""), None);
+        assert_eq!(parse_discovery("1"), None);
     }
 }

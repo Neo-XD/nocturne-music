@@ -20,7 +20,7 @@ use tauri::AppHandle;
 use tokio::sync::Mutex;
 
 use crate::webview::Bridge;
-use fetcher::PlayerJsFetcher;
+use fetcher::{Discovery, PlayerJsFetcher};
 
 const CIPHER_LABEL: &str = "limusic-cipher";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -222,6 +222,33 @@ impl CipherDeobfuscator {
             .as_ref()
             .and_then(|c| c.n_fn.clone())
             .or_else(|| extractor::find_n_fn(&player.js));
+        // Neither function is statically nameable, and the last brute-force on this exact player
+        // came back empty: building the webview would spend a whole web process (and a 2.9 MB
+        // injection) re-learning that. Keep the analysis, which is where STS comes from, and skip
+        // it. Re-probed as soon as anything could change the answer: a rotated player.js (the
+        // verdict is keyed by hash), a config that names the functions (then these are `Some` and
+        // we fall through), or a self-heal (`invalidate` drops the verdict). context/05, KI-1.
+        if sig_fn.is_none() && n_fn.is_none() {
+            if self.fetcher.discovery(&player.hash).is_some_and(|d| d.is_dead()) {
+                let mut inner = self.inner.lock().await;
+                if let Some(b) = inner.bridge.take() {
+                    let _ = b.destroy();
+                }
+                inner.sts = sts;
+                inner.built_epoch = epoch;
+                inner.n_available = false;
+                inner.sig_available = false;
+                inner.analyzed = true;
+                tracing::info!(
+                    hash = player.hash,
+                    ?sts,
+                    "cipher: this player was already probed and has no usable sig/n — skipping the \
+                     webview build (KI-1)"
+                );
+                return Ok(());
+            }
+        }
+
         tracing::info!(hash = player.hash, ?sts, ?sig_fn, ?n_fn, "cipher: building webview");
         let injected = extractor::build_injection(&player.js, sig_fn.as_deref(), n_fn.as_deref());
 
@@ -247,6 +274,11 @@ impl CipherDeobfuscator {
             bridge.eval_json("window.__sig_ok?true:false".into(), CALL_TIMEOUT).await,
             Ok(Value::Bool(true))
         );
+
+        // Record the verdict before acting on it, so the next launch on this player can skip the
+        // build above entirely.
+        self.fetcher
+            .set_discovery(&player.hash, Discovery { sig: sig_available, n: n_available });
 
         let mut inner = self.inner.lock().await;
         if keep_bridge(sig_available, n_available) {
