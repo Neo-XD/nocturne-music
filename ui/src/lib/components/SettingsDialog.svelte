@@ -148,6 +148,7 @@
 	const autoplayOn = $derived(settings.autoplay !== 'false');
 	const hideVideosOn = $derived(settings.hide_videos === 'true');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
+	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const discordOn = $derived(settings.discord_rpc === 'true');
 	const trayOn = $derived(settings.close_to_tray !== 'false');
 	const autostartOn = $derived(settings.autostart === 'true');
@@ -192,6 +193,11 @@
 	async function setPreventDuplicates(on: boolean) {
 		settings.prevent_duplicates = on ? 'true' : 'false';
 		await api.setSetting('prevent_duplicates', settings.prevent_duplicates);
+	}
+
+	async function setUpdateBanner(on: boolean) {
+		settings.update_banner = on ? 'true' : 'false';
+		await api.setSetting('update_banner', settings.update_banner);
 	}
 
 	async function setDiscord(on: boolean) {
@@ -655,7 +661,7 @@
 						</p>
 						{#if version}<p class="mt-2 text-sm text-muted-foreground">Version {version}</p>{/if}
 					</div>
-					<div class="flex items-center justify-between gap-4 py-3">
+					<div class="flex items-center justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
 							<div class="font-medium">Updates</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
@@ -686,6 +692,16 @@
 							<AlertDescription>{updateResult.message}</AlertDescription>
 						</Alert>
 					{/if}
+					<div class="flex items-start justify-between gap-4 py-3">
+						<div class="min-w-0">
+							<div class="font-medium">Tell me about new versions</div>
+							<p class="mt-0.5 text-sm text-muted-foreground">
+								Check on launch and show a banner when a newer version is out. Off means no check
+								and no banner, so use the button above to look.
+							</p>
+						</div>
+						<Switch checked={updateBannerOn} onCheckedChange={setUpdateBanner} />
+					</div>
 				{/if}
 			</div>
 		</div>

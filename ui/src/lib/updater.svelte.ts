@@ -4,6 +4,7 @@
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { toast } from './player.svelte';
+import { getSettings } from './api';
 
 export const updateState = $state({
 	available: null as { version: string } | null, // set when a newer version is waiting
@@ -24,9 +25,12 @@ async function look(): Promise<boolean> {
 	return false;
 }
 
-/** On app open: show the update toast if one exists, stay silent otherwise. */
+/** On app open: show the update banner if one exists, stay silent otherwise. With `update_banner`
+ *  off the check is skipped entirely (no banner, no request), leaving Settings > About > Check for
+ *  updates as the only way to find one. */
 export async function checkForUpdatesQuiet() {
 	try {
+		if ((await getSettings()).update_banner === 'false') return;
 		await look();
 	} catch (e) {
 		console.error('update check failed', e); // no endpoint / offline — don't nag on launch
