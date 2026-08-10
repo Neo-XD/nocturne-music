@@ -25,6 +25,7 @@
 	import { ON_REPEAT_ID } from '$lib/api';
 	import type { BrowseItem, PlaylistPage, SongItem } from '$lib/api';
 	import { getCached, putCached, invalidateCached } from '$lib/pagecache';
+	import { rowWindow } from '$lib/rows';
 	import {
 		addPick,
 		enqueue,
@@ -180,6 +181,29 @@
 		} finally {
 			loadingMore = false;
 		}
+	}
+
+	// Only the rows around the viewport are rendered; the rest are two padded boxes (`rows.ts`).
+	// A Liked Songs list runs to five figures, and `content-visibility` spares the layout and the
+	// paint but not the DOM node, the style or the component.
+	let scrollTop = $state(0);
+	let viewportPx = $state(0);
+	const win = $derived(rowWindow(scrollTop, viewportPx, pl?.items.length ?? 0));
+
+	function scroller(node: HTMLElement) {
+		const read = () => {
+			scrollTop = node.scrollTop;
+			viewportPx = node.clientHeight;
+		};
+		read();
+		node.addEventListener('scroll', read, { passive: true });
+		// The container's own box changes on a window resize, never on a scroll, so this is cheap.
+		const ro = new ResizeObserver(read);
+		ro.observe(node);
+		return () => {
+			node.removeEventListener('scroll', read);
+			ro.disconnect();
+		};
 	}
 
 	// One page per approach to the bottom: the observer only fires when the sentinel *enters* view,
@@ -433,19 +457,28 @@
 				</div>
 			</div>
 		</div>
-		<div class="content-in min-h-0 flex-1 overflow-y-auto p-4">
-			{#each pl.items as item, i (item.video_id + i)}
-				<TrackRow
-					song={item}
-					index={i}
-					active={item.video_id === nowId}
-					onplay={() => playAll(i)}
-					onAdd={() => openAddToPlaylist(item)}
-					onRemove={isLiked || (editable && item.set_video_id) ? () => removeTrack(item) : undefined}
-				/>
+		<div class="content-in min-h-0 flex-1 overflow-y-auto p-4" {@attach scroller}>
+			{#if pl.items.length}
+				<!-- The padding stands in for the rows outside the window, so the scrollbar is the
+				     length of the whole playlist even though only ~30 rows exist. -->
+				<div style="padding-top:{win.padTop}px;padding-bottom:{win.padBottom}px">
+					{#each pl.items.slice(win.start, win.end) as item, i (item.video_id + (win.start + i))}
+						{@const n = win.start + i}
+						<TrackRow
+							song={item}
+							index={n}
+							active={item.video_id === nowId}
+							onplay={() => playAll(n)}
+							onAdd={() => openAddToPlaylist(item)}
+							onRemove={isLiked || (editable && item.set_video_id)
+								? () => removeTrack(item)
+								: undefined}
+						/>
+					{/each}
+				</div>
 			{:else}
 				<p class="p-4 text-sm text-muted-foreground">This playlist is empty.</p>
-			{/each}
+			{/if}
 			{#if pl.continuation}
 				{#if moreError}
 					<div class="p-3 text-center">
