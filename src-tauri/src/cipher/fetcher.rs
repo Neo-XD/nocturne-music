@@ -8,8 +8,10 @@ use std::time::{Duration, SystemTime};
 
 use regex::Regex;
 
-/// Desktop web UA — YouTube serves the web `player.js` to this. context/05.
-const WEB_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+// Desktop web UA: YouTube serves the web `player.js` to this (context/05). Sent per request rather
+// than baked into a client, so it stays visible at the fetch whose answer it decides.
+use crate::http::WEB_UA;
+
 const IFRAME_API: &str = "https://www.youtube.com/iframe_api";
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
@@ -48,7 +50,6 @@ impl Discovery {
 }
 
 pub struct PlayerJsFetcher {
-    http: reqwest::Client,
     cache_dir: PathBuf,
 }
 
@@ -56,11 +57,7 @@ impl PlayerJsFetcher {
     pub fn new(app_data_dir: &Path) -> Self {
         let cache_dir = app_data_dir.join("cipher_cache");
         let _ = std::fs::create_dir_all(&cache_dir);
-        let http = reqwest::Client::builder()
-            .user_agent(WEB_UA)
-            .build()
-            .unwrap_or_default();
-        PlayerJsFetcher { http, cache_dir }
+        PlayerJsFetcher { cache_dir }
     }
 
     /// Return the current `player.js` (cached if fresh, else fetched fresh and cached).
@@ -73,7 +70,7 @@ impl PlayerJsFetcher {
         }
         let url =
             format!("https://www.youtube.com/s/player/{hash}/player_ias.vflset/en_GB/base.js");
-        let js = self.http.get(&url).send().await?.error_for_status()?.text().await?;
+        let js = get(&url).await?.error_for_status()?.text().await?;
         std::fs::write(&cached, &js)?;
         std::fs::write(
             self.cache_dir.join("current_hash.txt"),
@@ -117,9 +114,15 @@ impl PlayerJsFetcher {
     }
 
     async fn current_hash(&self) -> Result<String, Error> {
-        let body = self.http.get(IFRAME_API).send().await?.error_for_status()?.text().await?;
+        let body = get(IFRAME_API).await?.error_for_status()?.text().await?;
         extract_hash(&body).ok_or(Error::NoHash)
     }
+}
+
+/// GET as the desktop web player. Both of this module's requests decide what YouTube hands
+/// back based on the User-Agent, so neither may go out without it.
+async fn get(url: &str) -> reqwest::Result<reqwest::Response> {
+    crate::http::client().get(url).header("User-Agent", WEB_UA).send().await
 }
 
 /// Extract the player hash from `iframe_api`. The URL there has escaped slashes

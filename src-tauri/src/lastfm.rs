@@ -120,7 +120,6 @@ pub fn spawn(session_key: Option<String>) -> LastfmHandle {
 }
 
 struct Scrobbler {
-    http: reqwest::Client,
     session: Option<String>,
     track: Option<Track>,
     /// Epoch secs when the current track started — the scrobble's `timestamp`.
@@ -132,7 +131,6 @@ struct Scrobbler {
 impl Scrobbler {
     fn new(session: Option<String>) -> Self {
         Scrobbler {
-            http: reqwest::Client::new(),
             session,
             track: None,
             started_at: 0,
@@ -174,7 +172,7 @@ impl Scrobbler {
         if let Some(album) = t.album.as_ref().filter(|a| !a.is_empty()) {
             params.push(("album".to_string(), album.clone()));
         }
-        match call(&self.http, "track.updateNowPlaying", params, true).await {
+        match call("track.updateNowPlaying", params, true).await {
             Ok(_) => tracing::debug!(track = %t.title, "last.fm now playing sent"),
             Err(e) => tracing::debug!(error = %e.message, "last.fm now playing failed"),
         }
@@ -197,7 +195,7 @@ impl Scrobbler {
         if self.duration > 0.0 {
             params.push(("duration".to_string(), (self.duration as i64).to_string()));
         }
-        match call(&self.http, "track.scrobble", params, true).await {
+        match call("track.scrobble", params, true).await {
             Ok(_) => tracing::info!(track = %t.title, "scrobbled to last.fm"),
             Err(e) => tracing::warn!(error = %e.message, "last.fm scrobble failed"),
         }
@@ -244,7 +242,6 @@ impl ApiError {
 /// `format=json` are added here (`format` is excluded from the signature, per the docs). Write
 /// methods POST; auth reads GET.
 async fn call(
-    http: &reqwest::Client,
     method: &str,
     mut params: Vec<(String, String)>,
     post: bool,
@@ -254,6 +251,7 @@ async fn call(
     params.push(("api_sig".to_string(), sign(&params)));
     params.push(("format".to_string(), "json".to_string()));
 
+    let http = crate::http::client();
     let req = if post {
         http.post(API_ROOT).form(&params)
     } else {
@@ -308,8 +306,7 @@ pub async fn connect(state: Arc<AppState>) -> Result<(), String> {
             .into());
     }
     let gen = state.lastfm.bump_gen();
-    let http = reqwest::Client::new();
-    let token = call(&http, "auth.getToken", vec![], false)
+    let token = call("auth.getToken", vec![], false)
         .await
         .map_err(|e| format!("Last.fm: {}", e.message))?
         .get("token")
@@ -326,7 +323,7 @@ pub async fn connect(state: Arc<AppState>) -> Result<(), String> {
                 return; // superseded by a newer connect, or a disconnect
             }
             let params = vec![("token".to_string(), token.clone())];
-            match call(&http, "auth.getSession", params, false).await {
+            match call("auth.getSession", params, false).await {
                 Ok(body) => {
                     let name = body.pointer("/session/name").and_then(|v| v.as_str());
                     let key = body.pointer("/session/key").and_then(|v| v.as_str());

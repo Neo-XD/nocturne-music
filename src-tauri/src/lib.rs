@@ -4,6 +4,7 @@ mod cipher;
 mod commands;
 mod db;
 mod discord;
+mod http;
 mod lastfm;
 mod listentogether;
 mod local;

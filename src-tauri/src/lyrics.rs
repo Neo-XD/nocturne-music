@@ -11,7 +11,6 @@
 //! A run where every provider merely *errored* (offline) caches nothing, so lyrics come back
 //! when the network does. Everything is best-effort — a lyrics failure is never a user error.
 
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -203,20 +202,20 @@ struct LrclibTrack {
     duration: Option<f64>,
 }
 
-/// Shared client. LRCLIB asks integrations to identify themselves via User-Agent.
-fn http() -> &'static reqwest::Client {
-    static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
-    HTTP.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .user_agent(concat!(
-                "Limusic v",
-                env!("CARGO_PKG_VERSION"),
-                " (https://github.com/SimoHypers/limusic)"
-            ))
-            .build()
-            .expect("build lyrics http client")
-    })
+/// LRCLIB asks integrations to identify themselves via User-Agent.
+const LRCLIB_UA: &str = concat!(
+    "Limusic v",
+    env!("CARGO_PKG_VERSION"),
+    " (https://github.com/SimoHypers/limusic)"
+);
+
+/// A GET to LRCLIB, carrying the two things this API wants from us: who we are, and a bound on how
+/// long we will wait. Both used to be baked into a client of our own.
+fn get(url: String) -> reqwest::RequestBuilder {
+    crate::http::client()
+        .get(url)
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(15))
 }
 
 /// `/api/get`: exact signature match. `Ok(None)` = definitive "not in LRCLIB" (404);
@@ -232,7 +231,7 @@ async fn lrclib_get(req: &LyricsRequest) -> Result<Option<LrclibTrack>, reqwest:
     if let Some(d) = req.duration.filter(|d| *d > 0.0) {
         q.push(("duration", format!("{}", d.round() as i64)));
     }
-    let resp = http().get(format!("{LRCLIB_ROOT}/get")).query(&q).send().await?;
+    let resp = get(format!("{LRCLIB_ROOT}/get")).query(&q).send().await?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
@@ -246,8 +245,7 @@ async fn lrclib_search(req: &LyricsRequest) -> Result<Option<LrclibTrack>, reqwe
         ("track_name", req.title.as_str()),
         ("artist_name", req.artists.as_str()),
     ];
-    let list: Vec<LrclibTrack> = http()
-        .get(format!("{LRCLIB_ROOT}/search"))
+    let list: Vec<LrclibTrack> = get(format!("{LRCLIB_ROOT}/search"))
         .query(&q)
         .send()
         .await?

@@ -42,7 +42,6 @@ pub struct PlayerConfig {
 pub struct PlayerConfigStore {
     entries: RwLock<HashMap<String, PlayerConfig>>,
     epoch: AtomicU64,
-    http: reqwest::Client,
     cache_file: PathBuf,
     /// Serializes refreshes and holds the last-refresh instant for rate-limiting.
     last_refresh: AsyncMutex<Option<Instant>>,
@@ -61,7 +60,6 @@ impl PlayerConfigStore {
         PlayerConfigStore {
             entries: RwLock::new(entries),
             epoch: AtomicU64::new(0),
-            http: reqwest::Client::new(),
             cache_file,
             last_refresh: AsyncMutex::new(None),
         }
@@ -97,7 +95,7 @@ impl PlayerConfigStore {
     }
 
     async fn fetch_and_merge(&self) -> bool {
-        let text = match self.http.get(REMOTE_CONFIG_URL).send().await {
+        let text = match crate::http::client().get(REMOTE_CONFIG_URL).send().await {
             Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
             Ok(r) => {
                 tracing::debug!(status = %r.status(), "remote player config not available");

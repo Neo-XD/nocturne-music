@@ -66,7 +66,6 @@ pub struct Orchestrator {
     clients: Clients,
     cipher: Arc<CipherDeobfuscator>,
     potoken: Arc<PoTokenGenerator>,
-    http: reqwest::Client,
     /// videoIds whose WEB_REMIX stream 403'd on the real GET → skip WEB_REMIX next time for them
     /// (context/06 §2). Cleared when the cipher self-heals. `Arc` so the off-hot-path self-heal
     /// task can clear it.
@@ -85,10 +84,6 @@ impl Orchestrator {
             clients,
             cipher,
             potoken,
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .unwrap_or_default(),
             web_remix_failed: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -294,7 +289,9 @@ impl Orchestrator {
 
     /// HEAD validation (context/06 §validateStatus). Success = 2xx. False on any error.
     async fn validate_head(&self, url: &str, ua: Option<&str>) -> bool {
-        let mut req = self.http.head(url);
+        // The 10s budget used to live on a client of its own; it is a property of this one
+        // probe, not of the app's HTTP.
+        let mut req = crate::http::client().head(url).timeout(Duration::from_secs(10));
         if let Some(ua) = ua {
             req = req.header("User-Agent", ua);
         }

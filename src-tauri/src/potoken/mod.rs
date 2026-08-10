@@ -19,11 +19,11 @@ use tauri::AppHandle;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
+use crate::http::WEB_UA;
 use crate::webview::{Bridge, Error as WebviewError};
 
 const GOOGLE_API_KEY: &str = "AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw";
 const REQUEST_KEY: &str = "O43z0dpjhgX20SCx4KAo";
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const CREATE: &str = "https://www.youtube.com/api/jnn/v1/Create";
 const GENERATE_IT: &str = "https://www.youtube.com/api/jnn/v1/GenerateIT";
 const POTOKEN_LABEL: &str = "limusic-potoken";
@@ -77,7 +77,6 @@ impl SessionToken {
 
 pub struct PoTokenGenerator {
     app: AppHandle,
-    http: reqwest::Client,
     minter: Mutex<Option<Minter>>,
     /// Session token cache (context/04: minted from visitorData, ~12h TTL). Lives OUTSIDE the
     /// webview minter so the mint-and-destroy idle teardown doesn't force a full BotGuard
@@ -90,10 +89,8 @@ pub struct PoTokenGenerator {
 
 impl PoTokenGenerator {
     pub fn new(app: AppHandle) -> Self {
-        let http = reqwest::Client::builder().user_agent(UA).build().unwrap_or_default();
         PoTokenGenerator {
             app,
-            http,
             minter: Mutex::new(None),
             session_token: Mutex::new(None),
             webview_bad: AtomicBool::new(false),
@@ -258,9 +255,9 @@ impl PoTokenGenerator {
 
     /// POST `/Create` and return the scrambled challenge blob (`create[1]`). Native HTTP.
     async fn create_challenge(&self) -> Result<String, MintError> {
-        let resp = self
-            .http
+        let resp = crate::http::client()
             .post(CREATE)
+            .header("User-Agent", WEB_UA)
             .header("Content-Type", "application/json+protobuf")
             .header("x-goog-api-key", GOOGLE_API_KEY)
             .header("x-user-agent", "grpc-web-javascript/0.1")
@@ -279,9 +276,9 @@ impl PoTokenGenerator {
     /// POST `/GenerateIT(botguardResponse)` → `(integrityToken bytes, ttlSeconds)`. Native HTTP.
     async fn generate_it(&self, botguard_response: &str) -> Result<(Vec<u8>, u64), MintError> {
         let body = serde_json::json!([REQUEST_KEY, botguard_response]).to_string();
-        let resp = self
-            .http
+        let resp = crate::http::client()
             .post(GENERATE_IT)
+            .header("User-Agent", WEB_UA)
             .header("Content-Type", "application/json+protobuf")
             .header("x-goog-api-key", GOOGLE_API_KEY)
             .header("x-user-agent", "grpc-web-javascript/0.1")
