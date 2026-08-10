@@ -7,7 +7,7 @@
 // two that make a windowed list feel broken rather than fast: a scroll height that changes as you
 // scroll (the scrollbar jumps under the pointer), and a window that does not actually cover the
 // viewport (blank strips at the edges).
-import { ROW_PX, rowWindow } from './rows.ts';
+import { blockWindows, fullWindow, HEADING_PX, ROW_PX, rowWindow } from './rows.ts';
 
 function ok(cond: boolean, what: string): void {
 	if (!cond) throw new Error(`FAIL: ${what}`);
@@ -72,5 +72,51 @@ const empty = rowWindow(0, VIEWPORT, 0);
 ok(empty.end === 0 && empty.padBottom === 0, 'an empty list is empty');
 const unmeasured = rowWindow(0, 0, TOTAL);
 ok(unmeasured.end > 0, 'renders a first slice before the container has been measured');
+
+// --- blocks (the queue panel) -----------------------------------------------------------------
+// Same two invariants, across a list of blocks: every block reserves exactly its own rows however
+// the windows move, and whichever block the viewport is over renders the rows that are on screen.
+const COUNTS = [1, 12, 3000, 40]; // now playing, a "Play next" block, a big playlist, autoplay
+const TOTAL_PX = COUNTS.reduce((a, c) => a + HEADING_PX + c * ROW_PX, 0);
+
+for (let top = 0; top <= TOTAL_PX; top += 613) {
+	const ws = blockWindows(top, VIEWPORT, COUNTS);
+	ok(ws.length === COUNTS.length, 'one window per block');
+
+	let rendered = 0;
+	let cursor = 0;
+	for (const [b, w] of ws.entries()) {
+		const own = (w.end - w.start) * ROW_PX;
+		ok(
+			w.padTop + own + w.padBottom === COUNTS[b] * ROW_PX,
+			`block ${b} reserves its own height at scrollTop=${top}`
+		);
+		rendered += w.end - w.start;
+
+		// A block the viewport actually overlaps has to render the rows inside that overlap.
+		cursor += HEADING_PX;
+		const overlapTop = Math.max(top, cursor);
+		const overlapBottom = Math.min(top + VIEWPORT, cursor + COUNTS[b] * ROW_PX);
+		if (overlapBottom > overlapTop) {
+			const firstVisible = Math.floor((overlapTop - cursor) / ROW_PX);
+			const lastVisible = Math.min(COUNTS[b] - 1, Math.floor((overlapBottom - cursor - 1) / ROW_PX));
+			ok(w.start <= firstVisible, `block ${b} covers the top of the overlap at scrollTop=${top}`);
+			ok(w.end > lastVisible, `block ${b} covers the bottom of the overlap at scrollTop=${top}`);
+		}
+		cursor += COUNTS[b] * ROW_PX;
+	}
+	// The whole point again: 3053 rows of queue, never more than a screenful or two rendered.
+	ok(rendered < 60, `only ${rendered} rows rendered across all blocks at scrollTop=${top}`);
+}
+
+// An empty block (the queue with nothing playing) contributes nothing and breaks nothing.
+const withEmpty = blockWindows(0, VIEWPORT, [0, 5]);
+ok(withEmpty[0].end === 0 && withEmpty[0].padBottom === 0, 'an empty block stays empty');
+ok(withEmpty[1].end === 5, 'the block after an empty one still renders');
+
+// The escape hatch for short queues, where windowing would cost the flip animation for nothing.
+const full = fullWindow(7);
+ok(full.start === 0 && full.end === 7, 'fullWindow renders everything');
+ok(full.padTop === 0 && full.padBottom === 0, 'fullWindow reserves nothing');
 
 console.log('ok');

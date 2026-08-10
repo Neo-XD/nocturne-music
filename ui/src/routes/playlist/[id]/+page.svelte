@@ -26,6 +26,7 @@
 	import type { BrowseItem, PlaylistPage, SongItem } from '$lib/api';
 	import { getCached, putCached, invalidateCached } from '$lib/pagecache';
 	import { rowWindow } from '$lib/rows';
+	import { rowScroller } from '$lib/rows.svelte';
 	import {
 		addPick,
 		enqueue,
@@ -186,25 +187,8 @@
 	// Only the rows around the viewport are rendered; the rest are two padded boxes (`rows.ts`).
 	// A Liked Songs list runs to five figures, and `content-visibility` spares the layout and the
 	// paint but not the DOM node, the style or the component.
-	let scrollTop = $state(0);
-	let viewportPx = $state(0);
-	const win = $derived(rowWindow(scrollTop, viewportPx, pl?.items.length ?? 0));
-
-	function scroller(node: HTMLElement) {
-		const read = () => {
-			scrollTop = node.scrollTop;
-			viewportPx = node.clientHeight;
-		};
-		read();
-		node.addEventListener('scroll', read, { passive: true });
-		// The container's own box changes on a window resize, never on a scroll, so this is cheap.
-		const ro = new ResizeObserver(read);
-		ro.observe(node);
-		return () => {
-			node.removeEventListener('scroll', read);
-			ro.disconnect();
-		};
-	}
+	const sc = rowScroller();
+	const win = $derived(rowWindow(sc.scrollTop, sc.viewportPx, pl?.items.length ?? 0, sc.rowPx));
 
 	// One page per approach to the bottom: the observer only fires when the sentinel *enters* view,
 	// so an appended page that pushes it back out is required before the next fetch. rootMargin
@@ -457,23 +441,26 @@
 				</div>
 			</div>
 		</div>
-		<div class="content-in min-h-0 flex-1 overflow-y-auto p-4" {@attach scroller}>
+		<div class="content-in min-h-0 flex-1 overflow-y-auto p-4" {@attach sc.attach}>
 			{#if pl.items.length}
 				<!-- The padding stands in for the rows outside the window, so the scrollbar is the
 				     length of the whole playlist even though only ~30 rows exist. -->
 				<div style="padding-top:{win.padTop}px;padding-bottom:{win.padBottom}px">
 					{#each pl.items.slice(win.start, win.end) as item, i (item.video_id + (win.start + i))}
 						{@const n = win.start + i}
-						<TrackRow
-							song={item}
-							index={n}
-							active={item.video_id === nowId}
-							onplay={() => playAll(n)}
-							onAdd={() => openAddToPlaylist(item)}
-							onRemove={isLiked || (editable && item.set_video_id)
-								? () => removeTrack(item)
-								: undefined}
-						/>
+						<!-- data-row: what the scroller measures a row's real height from. -->
+						<div data-row>
+							<TrackRow
+								song={item}
+								index={n}
+								active={item.video_id === nowId}
+								onplay={() => playAll(n)}
+								onAdd={() => openAddToPlaylist(item)}
+								onRemove={isLiked || (editable && item.set_video_id)
+									? () => removeTrack(item)
+									: undefined}
+							/>
+						</div>
 					{/each}
 				</div>
 			{:else}

@@ -6,6 +6,8 @@
 	import TrackRow from '$lib/components/TrackRow.svelte';
 	import * as api from '$lib/api';
 	import { queueBlocks, type QueueRow } from '$lib/queue';
+	import { blockWindows, fullWindow, type RowWindow } from '$lib/rows';
+	import { rowScroller } from '$lib/rows.svelte';
 	import { playback, openAddToPlaylist } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
 
@@ -15,34 +17,56 @@
 
 	// Blocks in play order, cut wherever the upcoming tracks change origin (`queue.ts`).
 	const view = $derived(queueBlocks(playback.queue));
+
+	// Playing a playlist queues the whole playlist, so this panel can be handed five figures of
+	// rows the moment it opens, at roughly 165 KB of web-process memory each (`rows.ts`). Past a
+	// couple of hundred it renders only what is near the viewport.
+	//
+	// Below that it is exactly what it always was, flip animation included: windowing costs the
+	// reorder animation (flip measures against the viewport, so it would fight the scroll), and
+	// that is a bad trade for a queue you can see the end of.
+	const WINDOW_ABOVE = 200;
+	const sc = rowScroller();
+	const counts = $derived([view.now ? 1 : 0, ...view.blocks.map((b) => b.rows.length)]);
+	const windowed = $derived(counts.reduce((a, c) => a + c, 0) > WINDOW_ABOVE);
+	const wins = $derived(
+		windowed
+			? blockWindows(sc.scrollTop, sc.viewportPx, counts, sc.rowPx)
+			: counts.map(fullWindow)
+	);
 </script>
 
-{#snippet rows(list: QueueRow[])}
-	{#each list as { item, key, i, n } (key)}
-		<div animate:flip={{ duration: 200, easing: cubicOut }}>
-			<TrackRow
-				song={item}
-				index={n - 1}
-				active={i === playback.queue.currentIndex}
-				onplay={() => api.playIndex(i)}
-				onAdd={() => openAddToPlaylist(item)}
-				onRemove={canRemove && i !== playback.queue.currentIndex
-					? () => api.removeFromQueue(i)
-					: undefined}
-				removeLabel="Remove from queue"
-			/>
-		</div>
-	{/each}
+{#snippet rows(list: QueueRow[], w: RowWindow)}
+	<!-- The padding stands in for the rows outside the window, so this block is exactly as tall as
+	     all of its rows and every heading below it stays where it was. -->
+	<div style="padding-top:{w.padTop}px;padding-bottom:{w.padBottom}px">
+		{#each list.slice(w.start, w.end) as { item, key, i, n } (key)}
+			<!-- data-row: what the scroller measures a row's real height from. -->
+			<div data-row animate:flip={{ duration: windowed ? 0 : 200, easing: cubicOut }}>
+				<TrackRow
+					song={item}
+					index={n - 1}
+					active={i === playback.queue.currentIndex}
+					onplay={() => api.playIndex(i)}
+					onAdd={() => openAddToPlaylist(item)}
+					onRemove={canRemove && i !== playback.queue.currentIndex
+						? () => api.removeFromQueue(i)
+						: undefined}
+					removeLabel="Remove from queue"
+				/>
+			</div>
+		{/each}
+	</div>
 {/snippet}
 
 <!-- The list on its own, so the side panel and the now-playing view's Queue tab render the same
      one instead of drifting apart. -->
-<div class="min-h-0 flex-1 overflow-y-auto p-2">
+<div class="min-h-0 flex-1 overflow-y-auto p-2" {@attach sc.attach}>
 	{#if view.now}
 		<h3 class="px-2 pt-2 pb-1.5 text-sm font-semibold">Now playing</h3>
-		{@render rows([view.now])}
+		{@render rows([view.now], wins[0])}
 
-		{#each view.blocks as block (block.key)}
+		{#each view.blocks as block, b (block.key)}
 			{#if block.autoplay}
 				<div
 					class="mt-3 flex items-center gap-2 border-t px-2 pt-2.5 pb-1.5 text-muted-foreground"
@@ -65,7 +89,7 @@
 					{/if}
 				</div>
 			{/if}
-			{@render rows(block.rows)}
+			{@render rows(block.rows, wins[b + 1])}
 		{/each}
 	{:else}
 		<p class="p-4 text-sm text-muted-foreground">The queue is empty.</p>

@@ -74,3 +74,42 @@ export function rowWindow(
 		padBottom: Math.max(0, (total - end) * rowPx)
 	};
 }
+
+/** Render everything: what a list short enough not to need windowing gets. */
+export function fullWindow(total: number): RowWindow {
+	return { start: 0, end: total, padTop: 0, padBottom: 0 };
+}
+
+/**
+ * Rough height of a heading in the queue panel.
+ *
+ * Rough is enough, and this is the reason the queue panel needs no pinned heading heights. Each
+ * block reserves exactly its own rows (padding plus rendered slice), so where a row lands on screen
+ * never depends on this number; it only shifts which slice is chosen. A few tens of px of error
+ * across a handful of blocks disappears into the overscan.
+ */
+export const HEADING_PX = 40;
+
+/**
+ * One window per block, for a list shaped as heading, rows, heading, rows.
+ *
+ * `counts` is each block's row count in render order. Blocks entirely above the viewport come back
+ * with everything skipped and all their height in `padTop`; blocks below, in `padBottom`. Either
+ * way a block's total height is exactly `rows * rowPx`, so the scroll height and every heading's
+ * position stay put as the windows move.
+ */
+export function blockWindows(
+	scrollTop: number,
+	viewportPx: number,
+	counts: number[],
+	rowPx: number = ROW_PX,
+	headingPx: number = HEADING_PX
+): RowWindow[] {
+	let top = 0;
+	return counts.map((count) => {
+		top += headingPx;
+		const w = rowWindow(scrollTop - top, viewportPx, count, rowPx);
+		top += count * rowPx;
+		return w;
+	});
+}
