@@ -7,6 +7,15 @@ use rusqlite::Connection;
 
 pub struct Db(Mutex<Connection>);
 
+/// Unix seconds. Lives here because every wall-clock value in the app is a column in this file
+/// (`expires_at`, `played_at`, `fetched_at`) or something stored alongside them.
+pub fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 /// A cached stream URL with its expiry. Never a source of truth — purely a latency cache.
 pub struct CachedStream {
     pub url: String,

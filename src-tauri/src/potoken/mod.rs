@@ -12,6 +12,7 @@
 mod jsutil;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -19,6 +20,7 @@ use tauri::AppHandle;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
+use crate::db::{now_secs, Db};
 use crate::http::WEB_UA;
 use crate::webview::{Bridge, Error as WebviewError};
 
@@ -60,23 +62,35 @@ impl Minter {
     }
 }
 
+/// Where the session token is persisted between runs. Internal: not in `UI_SETTINGS`, so the
+/// webview can neither read nor write it.
+const SESSION_TOKEN_KEY: &str = "potoken_session";
+
 /// Cached session token (context/04: minted from visitorData, ~12h TTL). Lives OUTSIDE the
 /// webview `Minter` so the mint-and-destroy idle teardown doesn't force a full BotGuard
 /// bootstrap on the next track start just to re-learn a string we already had.
+///
+/// Also survives the process, in `settings`. Google's own `/GenerateIT` says how long it is good
+/// for (43200s, ~12h), and re-minting means standing up a whole hidden web process and running
+/// BotGuard: measured at 88 MiB PSS and ~1.6s, at every launch, to re-learn a string we were told
+/// stays valid until tomorrow. `expires_at` is therefore wall-clock, not an `Instant`, which
+/// cannot outlive the process.
+#[derive(serde::Serialize, serde::Deserialize)]
 struct SessionToken {
     session_id: String,
     token: String,
-    expires_at: Instant,
+    expires_at: i64,
 }
 
 impl SessionToken {
-    fn valid_for(&self, session_id: &str) -> bool {
-        self.session_id == session_id && Instant::now() < self.expires_at
+    fn valid_for(&self, session_id: &str, now: i64) -> bool {
+        self.session_id == session_id && now < self.expires_at
     }
 }
 
 pub struct PoTokenGenerator {
     app: AppHandle,
+    db: Arc<Db>,
     minter: Mutex<Option<Minter>>,
     /// Session token cache (context/04: minted from visitorData, ~12h TTL). Lives OUTSIDE the
     /// webview minter so the mint-and-destroy idle teardown doesn't force a full BotGuard
@@ -88,13 +102,33 @@ pub struct PoTokenGenerator {
 }
 
 impl PoTokenGenerator {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle, db: Arc<Db>) -> Self {
+        // A token stored by a previous run is as good as one minted now, right up to its expiry.
+        // A wrong-session or expired one is simply never returned by `cached_session_token`, so it
+        // costs nothing to load it optimistically and let the normal validity check reject it.
+        let stored: Option<SessionToken> = db
+            .get_setting(SESSION_TOKEN_KEY)
+            .and_then(|raw| serde_json::from_str(&raw).ok());
+        if let Some(t) = &stored {
+            tracing::debug!(expires_in = t.expires_at - now_secs(), "loaded stored PoToken session");
+        }
         PoTokenGenerator {
             app,
+            db,
             minter: Mutex::new(None),
-            session_token: Mutex::new(None),
+            session_token: Mutex::new(stored),
             webview_bad: AtomicBool::new(false),
         }
+    }
+
+    /// Forget the session token, in memory and on disk.
+    ///
+    /// Called when a web-client stream is rejected (the orchestrator's off-hot-path self-heal).
+    /// Without this a token that Google stopped honouring early would be replayed for the rest of
+    /// its nominal 12 hours instead of only until the next launch.
+    pub async fn invalidate_session_token(&self) {
+        *self.session_token.lock().await = None;
+        self.db.delete_setting(SESSION_TOKEN_KEY);
     }
 
     /// Session token for the `/player` request body (context/04). Cheap when cached; otherwise
@@ -149,11 +183,12 @@ impl PoTokenGenerator {
     }
 
     async fn cached_session_token(&self, visitor_data: &str) -> Option<String> {
+        let now = now_secs();
         self.session_token
             .lock()
             .await
             .as_ref()
-            .filter(|t| t.valid_for(visitor_data))
+            .filter(|t| t.valid_for(visitor_data, now))
             .map(|t| t.token.clone())
     }
 
@@ -234,20 +269,26 @@ impl PoTokenGenerator {
 
         // 5. [webview] session token (identifier = visitorData). Minted exactly once.
         let session_pot = mint_token(bridge, session_id.as_bytes()).await?;
-        let expires_at = Instant::now() + Duration::from_secs(ttl).saturating_sub(EXPIRY_MARGIN);
+        // One lifetime, two clocks: the minter never outlives this process, so its expiry stays an
+        // `Instant`, while the session token is written to disk and needs wall-clock.
+        let good_for = Duration::from_secs(ttl).saturating_sub(EXPIRY_MARGIN);
 
-        // Cache the session token outside the minter (see `SessionToken` doc) so it survives the
-        // webview's mint-and-destroy idle teardown.
-        *self.session_token.lock().await = Some(SessionToken {
+        // Cache the session token outside the minter (see `SessionToken` doc) so it survives both
+        // the webview's mint-and-destroy idle teardown and the process itself.
+        let token = SessionToken {
             session_id: session_id.to_owned(),
             token: session_pot,
-            expires_at,
-        });
+            expires_at: now_secs() + good_for.as_secs() as i64,
+        };
+        if let Ok(json) = serde_json::to_string(&token) {
+            self.db.set_setting(SESSION_TOKEN_KEY, &json);
+        }
+        *self.session_token.lock().await = Some(token);
 
         tracing::info!(ttl, "PoToken minter ready");
         Ok(Minter {
             session_id: session_id.to_owned(),
-            expires_at,
+            expires_at: Instant::now() + good_for,
             bridge: bridge.clone(),
             last_used: Instant::now(),
         })
@@ -293,6 +334,15 @@ impl PoTokenGenerator {
     /// Warm the PoToken webview for `visitor_data` (context/04 §startup). Non-fatal.
     pub async fn prewarm(&self, visitor_data: &str) {
         if self.webview_bad.load(Ordering::SeqCst) {
+            return;
+        }
+        // The only reason to prewarm is to have the session token ready before the first /player
+        // call, and one stored by a previous run is exactly that. The per-video streaming path
+        // builds its own minter on demand if it ever needs one, so there is nothing else to warm.
+        // This is what turns the persisted token into a saved web process rather than a saved
+        // round trip.
+        if self.cached_session_token(visitor_data).await.is_some() {
+            tracing::info!("PoToken session token still valid — skipping the BotGuard bootstrap");
             return;
         }
         let mut guard = self.minter.lock().await;
@@ -361,33 +411,43 @@ enum MintError {
 mod tests {
     use super::*;
 
+    fn token(session_id: &str, expires_at: i64) -> SessionToken {
+        SessionToken {
+            session_id: session_id.to_owned(),
+            token: "tok".to_owned(),
+            expires_at,
+        }
+    }
+
     #[test]
     fn session_token_valid_for_matching_id_and_future_expiry() {
-        let t = SessionToken {
-            session_id: "vd123".to_owned(),
-            token: "tok".to_owned(),
-            expires_at: Instant::now() + Duration::from_secs(60),
-        };
-        assert!(t.valid_for("vd123"));
+        assert!(token("vd123", 1_000).valid_for("vd123", 900));
     }
 
     #[test]
     fn session_token_invalid_for_wrong_id() {
-        let t = SessionToken {
-            session_id: "vd123".to_owned(),
-            token: "tok".to_owned(),
-            expires_at: Instant::now() + Duration::from_secs(60),
-        };
-        assert!(!t.valid_for("other"));
+        // Signing in or out changes visitorData, so a token minted for the old one must not be
+        // replayed against the new one.
+        assert!(!token("vd123", 1_000).valid_for("other", 900));
     }
 
     #[test]
     fn session_token_invalid_when_expired() {
-        let t = SessionToken {
-            session_id: "vd123".to_owned(),
-            token: "tok".to_owned(),
-            expires_at: Instant::now() - Duration::from_secs(1),
-        };
-        assert!(!t.valid_for("vd123"));
+        assert!(!token("vd123", 1_000).valid_for("vd123", 1_000), "expiry is exclusive");
+        assert!(!token("vd123", 1_000).valid_for("vd123", 1_001));
+    }
+
+    #[test]
+    fn session_token_survives_a_round_trip_through_settings() {
+        // What is stored between runs. A shape change here silently turns every launch back into
+        // a full BotGuard bootstrap (the load is a best-effort `ok()`), so pin it.
+        let json = serde_json::to_string(&token("vd123", 4_000)).unwrap();
+        let back: SessionToken = serde_json::from_str(&json).unwrap();
+        assert!(back.valid_for("vd123", 3_999));
+        assert_eq!(back.token, "tok");
+
+        // Anything unreadable must read as "no token" rather than panic the constructor.
+        assert!(serde_json::from_str::<SessionToken>("{}").is_err());
+        assert!(serde_json::from_str::<SessionToken>("not json").is_err());
     }
 }
