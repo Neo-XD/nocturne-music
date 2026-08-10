@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fly } from 'svelte/transition';
+	import { fly, scale } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { beforeNavigate } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -8,9 +8,12 @@
 		Minimize01Icon,
 		Mic01Icon,
 		MusicNote01Icon,
+		PlayIcon,
+		PauseIcon,
 		Queue01Icon
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
+	import * as api from '$lib/api';
 	import { np, playback } from '$lib/player.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
@@ -43,6 +46,18 @@
 	const srcs = $derived([720, 400, 120].map((px) => thumb(playback.now?.thumbnail, px)));
 	const src = $derived(srcs[attempt]);
 	const imgFailed = () => attempt++;
+
+	// Clicking the artwork toggles playback, and flashes the action just taken over it so the click
+	// visibly did something. Read `paused` before the toggle: the backend event that flips it is a
+	// round trip away, and the icon has to be right on the frame the user clicked.
+	let flash: 'play' | 'pause' | null = $state(null);
+	let flashTimer: ReturnType<typeof setTimeout>;
+	function toggle() {
+		flash = playback.paused ? 'play' : 'pause';
+		clearTimeout(flashTimer);
+		flashTimer = setTimeout(() => (flash = null), 220);
+		api.togglePause();
+	}
 </script>
 
 <!-- Covers the page but not the sidebar (you navigate away to minimise) and not the player bar,
@@ -85,20 +100,46 @@
 			<!-- Centred against the full height of the column on the right. Below md there isn't room
 			     for both columns, and the queue wins. -->
 			<div class="hidden min-w-0 flex-1 items-center justify-center md:flex">
-				{#if src && attempt < srcs.length}
-					<img
-						{src}
-						alt=""
-						onerror={imgFailed}
-						class="aspect-square w-full max-w-[var(--art)] rounded-2xl object-cover shadow-2xl"
-					/>
-				{:else}
-					<div
-						class="flex aspect-square w-full max-w-[var(--art)] items-center justify-center rounded-2xl bg-muted text-muted-foreground/40"
-					>
-						<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
-					</div>
-				{/if}
+				<button
+					type="button"
+					onclick={toggle}
+					aria-label="Play/pause"
+					class="relative w-full max-w-[var(--art)] cursor-pointer"
+				>
+					{#if flash}
+						<!-- No backdrop-blur: re-blurring the plate on every frame of the scale is what made
+						     this stutter on WebKitGTK. Transform and opacity only. -->
+						<div
+							in:scale={{ start: 0.7, duration: 150, easing: cubicOut }}
+							out:scale={{ start: 1.3, duration: 320, easing: cubicOut }}
+							class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+						>
+							<div class="rounded-full bg-black/55 p-3.5 text-white">
+								<!-- icon is frozen at mount, so swap via showAlt, not a ternary. -->
+								<HugeiconsIcon
+									icon={PauseIcon}
+									altIcon={PlayIcon}
+									showAlt={flash === 'play'}
+									class="h-7 w-7"
+								/>
+							</div>
+						</div>
+					{/if}
+					{#if src && attempt < srcs.length}
+						<img
+							{src}
+							alt=""
+							onerror={imgFailed}
+							class="aspect-square w-full rounded-2xl object-cover shadow-2xl"
+						/>
+					{:else}
+						<div
+							class="flex aspect-square w-full items-center justify-center rounded-2xl bg-muted text-muted-foreground/40"
+						>
+							<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
+						</div>
+					{/if}
+				</button>
 			</div>
 		{/if}
 
