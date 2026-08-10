@@ -300,6 +300,7 @@ impl AppState {
                 data.itag,
                 now + data.expires_in_seconds.max(0),
                 data.loudness_db,
+                now,
             );
         }
         Ok(data)
