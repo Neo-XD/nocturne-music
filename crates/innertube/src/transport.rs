@@ -131,7 +131,10 @@ impl InnerTube {
     /// endpoints facade calls it. Reads and drops the lock synchronously (no `.await` inside).
     pub(crate) fn context_for(&self, client: &YouTubeClient) -> crate::models::context::Context {
         let s = self.session.read().unwrap();
-        client.to_context(&s.locale, s.visitor_data.as_deref(), s.data_sync_id.as_deref())
+        // `onBehalfOfUser` makes Google *require* a credential: with no cookie it turns a request
+        // that would have worked anonymously into a hard 401. Only send it when we can authenticate.
+        let dsid = s.cookie.as_ref().and(s.data_sync_id.as_deref());
+        client.to_context(&s.locale, s.visitor_data.as_deref(), dsid)
     }
 
     /// POST a JSON body to an InnerTube endpoint with this client's headers, retrying
@@ -168,6 +171,16 @@ impl InnerTube {
                     tracing::warn!(attempt, error = %e, "retrying InnerTube POST {path}");
                     tokio::time::sleep(delay).await;
                     delay *= 2;
+                }
+                // Signed in and Google says "no credential" (401) or "not for you" (403): the
+                // stored cookie has gone stale. Raw reqwest text here reads as a broken app and
+                // hands the user a URL instead of the one thing that fixes it.
+                Err(e)
+                    if self.is_logged_in()
+                        && e.status().is_some_and(|s| s == 401 || s == 403) =>
+                {
+                    tracing::warn!(status = ?e.status(), "InnerTube {path} rejected the session");
+                    return Err(Error::SessionExpired);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -369,6 +382,19 @@ mod tests {
         assert!(cpn.bytes().all(|b| CPN_CHARS.contains(&b)));
         // Two calls in quick succession must differ (counter salt).
         assert_ne!(generate_cpn(), generate_cpn());
+    }
+
+    #[test]
+    fn on_behalf_of_user_needs_a_cookie() {
+        let clients = crate::clients::Clients::bundled();
+        let web = clients.get(crate::clients::METADATA_CLIENT).unwrap();
+        let session = Session { data_sync_id: Some("abc123".into()), ..Default::default() };
+
+        let it = InnerTube::new(session, None).unwrap();
+        assert_eq!(it.context_for(web).user.on_behalf_of_user, None, "no cookie ⇒ no obo (401)");
+
+        it.set_cookie(Some("SAPISID=secret".into()));
+        assert_eq!(it.context_for(web).user.on_behalf_of_user.as_deref(), Some("abc123"));
     }
 
     #[test]
