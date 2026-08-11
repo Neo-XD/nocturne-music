@@ -53,6 +53,8 @@ pub enum ResolveError {
 /// Client keys that need the `n`-transform applied to their stream URLs. context/06.
 const NEEDS_N_TRANSFORM: [&str; 4] = ["WEB", "WEB_REMIX", "WEB_CREATOR", "TVHTML5"];
 
+// WEB_REMIX is validated with a HEAD like every other client — see `validate_head`.
+
 /// A remembered best-but-not-ideal stream, for the HIGH two-pass (context/06 §4).
 struct Candidate {
     format: Format,
@@ -156,7 +158,12 @@ impl Orchestrator {
 
         for idx in -1..=last_idx {
             let (key, resp): (String, PlayerResponse) = if idx == -1 {
-                if !main_ok || disabled.contains(MAIN_CLIENT) {
+                // A WEB_REMIX stream that already died in the player is not retried for this
+                // video: it passed HEAD and failed anyway, so validation has nothing left to say.
+                if !main_ok
+                    || disabled.contains(MAIN_CLIENT)
+                    || self.web_remix_failed.lock().await.contains(video_id)
+                {
                     continue;
                 }
                 (MAIN_CLIENT.to_owned(), main_resp.clone().unwrap())
@@ -220,21 +227,24 @@ impl Orchestrator {
                 continue;
             }
 
-            // The last client is validated like every other one. It used to be accepted blind
-            // ("last-ditch"), but rustypipe sits behind it, so there was never nothing to fall
-            // through to — all the shortcut did was hand mpv a URL we could have known was dead
-            // (IOS 403s every open-ended Range) and surface it as a playback error the retry path
-            // doesn't cover. HEAD status matches what mpv gets on every video sampled.
+            // EVERY client is validated, including WEB_REMIX and the last one in the chain. Both
+            // used to be accepted blind and both were wrong for an mpv-backed player:
             //
-            // WEB_REMIX still skips HEAD (its authed URL 403s on HEAD but streams on GET) unless
-            // it already failed for this id.
-            if idx == -1
-                && key == MAIN_CLIENT
-                && !self.web_remix_failed.lock().await.contains(video_id)
-            {
-                return Ok(self.build(video_id, format, url, expires, &key, audio_config_loudness, &main_resp));
-            }
-            // Otherwise validate with a HEAD request.
+            // - The last client had rustypipe behind it, so there was never nothing to fall
+            //   through to; skipping the check only hid a dead URL until playback.
+            // - WEB_REMIX skipped it on Metrolist's note that its authed URLs 403 on HEAD but
+            //   stream on GET. That holds for ExoPlayer, which fetches in bounded ranges. mpv opens
+            //   with `Range: bytes=0-`, and for the videos where googlevideo caps a WEB_REMIX URL
+            //   (only the first ~768 KiB is served, in ≤256 KiB pieces) that open-ended request
+            //   gets the same 403 the HEAD does.
+            //
+            // Measured on fresh URLs, HEAD agrees with what mpv gets every time — 200/206 for
+            // dQw4w9WgXcQ, 403/403 for XqZsoesa55w and D07O_cbJ_Rw. So the check costs one
+            // round trip and turns a guaranteed failed load, an error toast, a retry and a round
+            // of cipher/PoToken self-heal churn into a silent fall-through at resolve time.
+            //
+            // It also stays correct if a valid PoToken lifts the cap on those videos: then HEAD
+            // passes and WEB_REMIX is used. Nothing here has to know which way that goes.
             if self.validate_head(&url, client.map(|c| c.user_agent.as_str())).await {
                 return Ok(self.build(video_id, format, url, expires, &key, audio_config_loudness, &main_resp));
             } else if needs_n {
