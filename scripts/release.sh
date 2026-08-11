@@ -31,6 +31,35 @@ echo "==> Releasing $TAG"
 export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
+# Bake a snapshot of the community player-cipher registry into the binary, same as both CI
+# workflows do. src-tauri/cipher_configs.json is `include_str!`d and tracked-empty; the app
+# refreshes it from these registries at runtime, so the snapshot only matters on a first run that
+# can't reach raw.githubusercontent.com — without it that user has no cipher and every restricted
+# track is skipped. Never fatal: a third-party registry being down must not block a release.
+#
+# This machine is not a throwaway CI checkout, so the file is put back on exit however the script
+# ends — a 34 KB snapshot left staged in the working tree would get committed by accident.
+CIPHER_CONFIGS=src-tauri/cipher_configs.json
+restore_cipher_configs() { git checkout -- "$CIPHER_CONFIGS" 2>/dev/null || true; }
+trap restore_cipher_configs EXIT
+
+echo "==> Baking in the player-cipher registry…"
+snap="$(mktemp)"
+for url in \
+  https://raw.githubusercontent.com/MetrolistGroup/faraday/master/registry/player_configs.json \
+  https://raw.githubusercontent.com/ZemerTeam/zemer-cipher/master/library/src/main/assets/player_configs.json
+do
+  # Validate before overwriting: a 404 body must not replace the table with something the app
+  # silently parses as empty.
+  if curl -fsSL --max-time 30 "$url" -o "$snap" \
+     && jq -e '(.players | objects | length) > 0' "$snap" >/dev/null 2>&1; then
+    cp "$snap" "$CIPHER_CONFIGS"
+    echo "    bundled $(jq '.players | length' "$snap") player configs"
+    break
+  fi
+  echo "    WARNING: player-cipher registry unusable: $url"
+done
+
 echo "==> Building the rpm…"
 cargo tauri build --bundles rpm
 

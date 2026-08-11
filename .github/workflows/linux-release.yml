@@ -79,6 +79,37 @@ jobs:
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      # Bake a snapshot of the community player-cipher registry into src-tauri/cipher_configs.json,
+      # which is `include_str!`d into the binary. Nothing needing a deciphered stream URL plays
+      # without a config for the current player.js, and the tracked file is deliberately empty —
+      # the table is refreshed from these same registries at runtime.
+      #
+      # So this only covers the case where that refresh can't happen: a first run on a network that
+      # blocks raw.githubusercontent.com. Without a snapshot that user has no cipher at all and
+      # every restricted track is skipped. It goes stale within days either way, which is fine; the
+      # runtime refresh is what keeps it current.
+      #
+      # NEVER FATAL. These registries are third-party. A release must not fail because one is down,
+      # and shipping the empty table is exactly the behaviour we had before this step existed.
+      - name: Bake in the player-cipher registry
+        shell: bash
+        run: |
+          FARADAY=https://raw.githubusercontent.com/MetrolistGroup/faraday/master/registry/player_configs.json
+          ZEMER=https://raw.githubusercontent.com/ZemerTeam/zemer-cipher/master/library/src/main/assets/player_configs.json
+          tmp="$(mktemp)"
+          for url in "$FARADAY" "$ZEMER"; do
+            # Validate before overwriting: a 404 body or a half-written file must not replace a
+            # good table with something the app will silently parse as empty.
+            if curl -fsSL --max-time 30 "$url" -o "$tmp" \
+               && jq -e '(.players | objects | length) > 0' "$tmp" >/dev/null 2>&1; then
+              cp "$tmp" src-tauri/cipher_configs.json
+              echo "bundled $(jq '.players | length' "$tmp") player configs from $url"
+              exit 0
+            fi
+            echo "::warning::player-cipher registry unusable: $url"
+          done
+          echo "::warning::no player-cipher registry reachable — shipping the empty table; clients will fetch it at runtime"
+
       # webkit2gtk-4.1 + gtk3 + appindicator are Tauri's; libmpv-dev is ours (libmpv2-sys ships
       # pregenerated bindings and just emits `-lmpv`, so only the link-time lib is needed);
       # libdbus-1-dev comes from tao, libssl-dev from reqwest's native-tls path.
