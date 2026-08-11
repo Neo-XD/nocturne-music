@@ -85,7 +85,15 @@ pub const MAIN_CLIENT: &str = "WEB_REMIX";
 /// Registry keys for the stream fallback order tried after MAIN_CLIENT (context/06
 /// §minimal-but-correct). Direct-URL clients — no cipher, no PoToken — so they always play even
 /// when the cipher/PoToken webviews are unavailable (graceful degradation).
-pub const STREAM_FALLBACK_ORDER: [&str; 3] = ["VISIONOS", "ANDROID_VR_1_43_32", "IOS"];
+///
+/// IOS is deliberately absent. Its googlevideo URLs are served ONLY for bounded-Range requests:
+/// a plain GET, a HEAD, or `Range: bytes=0-` (exactly what mpv opens a stream with) all 403,
+/// while `Range: bytes=0-2047` returns 206. Measured on 21 of 22 sampled videos. That is the same
+/// behavior already documented for rustypipe URLs in `state.rs`, and it reaches the user as
+/// "YouTube rejected the stream link". Metrolist's ANDROID_VR 1.65 build takes the slot instead
+/// (its URLs answer an open-ended Range with 206), matching Metrolist's own default chain.
+pub const STREAM_FALLBACK_ORDER: [&str; 3] =
+    ["VISIONOS", "ANDROID_VR_1_65_10", "ANDROID_VR_1_43_32"];
 
 /// The metadata client for search/next (renderer shape only comes back as WEB_REMIX).
 pub const METADATA_CLIENT: &str = "WEB_REMIX";
@@ -114,6 +122,13 @@ mod tests {
         assert_eq!(c.get("WEB_REMIX").unwrap().client_id, "67");
         assert_eq!(c.get("VISIONOS").unwrap().client_id, "101");
         assert_eq!(c.get("ANDROID_VR_1_43_32").unwrap().client_id, "28");
-        assert_eq!(c.get("IOS").unwrap().client_id, "5");
+        assert_eq!(c.get("ANDROID_VR_1_65_10").unwrap().client_id, "28");
+    }
+
+    /// IOS only serves bounded-Range requests, which mpv never makes — it must never be a
+    /// stream client (see STREAM_FALLBACK_ORDER).
+    #[test]
+    fn ios_is_not_a_stream_client() {
+        assert!(!STREAM_FALLBACK_ORDER.contains(&"IOS"));
     }
 }

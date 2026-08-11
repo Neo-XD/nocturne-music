@@ -55,11 +55,16 @@
     "deviceModel": "iPhone16,2",
     "friendlyName": "iOS Music"
   },
-  "IOS": {
-    "clientName": "IOS",
-    "clientVersion": "21.03.1",
-    "clientId": "5",
-    "userAgent": "com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)",
-    "osVersion": "18.2.22C152"
+  "ANDROID_VR_1_65_10": {
+    "clientName": "ANDROID_VR",
+    "clientVersion": "1.65.10",
+    "clientId": "28",
+    "userAgent": "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+    "osName": "Android",
+    "osVersion": "12L",
+    "deviceMake": "Oculus",
+    "deviceModel": "Quest 3",
+    "androidSdkVersion": "32",
+    "friendlyName": "Android VR 1.65"
   }
 }

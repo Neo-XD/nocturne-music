@@ -225,12 +225,14 @@ impl Orchestrator {
                 continue;
             }
 
-            // Accept without validation on the last client (last-ditch).
-            if idx == last_idx {
-                return Ok(self.build(video_id, format, url, expires, &key, audio_config_loudness, &main_resp));
-            }
-            // WEB_REMIX skips HEAD (its authed URL 403s on HEAD, streams on GET) unless it already
-            // failed for this id.
+            // The last client is validated like every other one. It used to be accepted blind
+            // ("last-ditch"), but rustypipe sits behind it, so there was never nothing to fall
+            // through to — all the shortcut did was hand mpv a URL we could have known was dead
+            // (IOS 403s every open-ended Range) and surface it as a playback error the retry path
+            // doesn't cover. HEAD status matches what mpv gets on every video sampled.
+            //
+            // WEB_REMIX still skips HEAD (its authed URL 403s on HEAD but streams on GET) unless
+            // it already failed for this id.
             if idx == -1
                 && key == MAIN_CLIENT
                 && !self.web_remix_failed.lock().await.contains(video_id)
