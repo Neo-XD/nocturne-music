@@ -30,17 +30,20 @@ const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
 const HARNESS: &str = "<!doctype html><html><head><meta charset=utf-8></head><body>\
 <script>window._yt_player=window._yt_player||{};</script></body></html>";
 
-/// Discovery/validation for the `n` function (context/05): accept `_nTransformFunc` if it maps a
-/// sample input to a valid changed string, else brute-force a 1-arg fn on `window`.
+/// Discovery/validation (context/05): prove the injected exports actually WORK before the
+/// orchestrator commits to this player, by running each on a sample input.
+///
+/// The old brute-force ("scan `window` for any 1-arg function that transforms a probe string") is
+/// gone. It never had a chance — the sig function and `n` class live inside player.js's IIFE
+/// closure and are never on `window` — and calling every enumerable 1-arg global to find out is a
+/// side-effecting scan: it invokes `fetch` among others.
 const DISCOVERY_JS: &str = r#"(function(){
   var t="grut12Abc_-";
   function ok(s){return typeof s==='string'&&/^[A-Za-z0-9_-]+$/.test(s)&&s!==t;}
   window.__n_ok=false;
-  try{
-    if(typeof window._nTransformFunc==='function'&&ok(window._nTransformFunc(t))){window.__n_ok=true;}
-    else{for(var k in window){try{var f=window[k];if(typeof f==='function'&&f.length===1){var r=f(t);if(ok(r)){window._nTransformFunc=f;window.__n_ok=true;break;}}}catch(e){}}}
-  }catch(e){}
-  window.__sig_ok=(typeof window._cipherSigFunc==='function');
+  window.__sig_ok=false;
+  try{window.__n_ok=(typeof window._nTransformFunc==='function'&&ok(window._nTransformFunc(t)));}catch(e){}
+  try{window.__sig_ok=(typeof window._cipherSigFunc==='function'&&typeof window._cipherSigFunc(t)==='string');}catch(e){}
   window.__cipher_loaded=true;
 })();"#;
 
@@ -210,20 +213,17 @@ impl CipherDeobfuscator {
                 config.force_refresh().await;
             });
         }
-        let sts = cfg
-            .as_ref()
-            .and_then(|c| c.sts)
-            .or_else(|| extractor::extract_sts(&player.js));
-        let sig_fn = cfg
-            .as_ref()
-            .and_then(|c| c.sig_fn.clone())
-            .or_else(|| extractor::find_sig_fn(&player.js));
-        let n_fn = cfg
-            .as_ref()
-            .and_then(|c| c.n_fn.clone())
-            .or_else(|| extractor::find_n_fn(&player.js));
-        tracing::info!(hash = player.hash, ?sts, ?sig_fn, ?n_fn, "cipher: building webview");
-        let injected = extractor::build_injection(&player.js, sig_fn.as_deref(), n_fn.as_deref());
+        // STS still comes from player.js when the registry hasn't listed this hash yet: it is a
+        // plain literal and stays reliably greppable, and a correct STS keeps the /player requests
+        // valid for the direct-URL clients even while deciphering is impossible.
+        let sts = cfg.as_ref().and_then(|c| c.sts).or_else(|| extractor::extract_sts(&player.js));
+        tracing::info!(
+            hash = player.hash,
+            ?sts,
+            has_config = cfg.is_some(),
+            "cipher: building webview"
+        );
+        let injected = extractor::build_injection(&player.js, cfg.as_ref());
 
         // Tear down any stale webview, then create fresh and load the player.
         {
