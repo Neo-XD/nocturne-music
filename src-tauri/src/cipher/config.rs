@@ -112,7 +112,6 @@ fn parse_table(json: &str) -> HashMap<String, PlayerConfig> {
 pub struct PlayerConfigStore {
     entries: RwLock<HashMap<String, PlayerConfig>>,
     epoch: AtomicU64,
-    http: reqwest::Client,
     cache_file: PathBuf,
     /// Serializes refreshes and holds the last-refresh instant for rate-limiting.
     last_refresh: AsyncMutex<Option<Instant>>,
@@ -131,7 +130,6 @@ impl PlayerConfigStore {
         PlayerConfigStore {
             entries: RwLock::new(entries),
             epoch: AtomicU64::new(0),
-            http: reqwest::Client::new(),
             cache_file,
             last_refresh: AsyncMutex::new(None),
         }
@@ -170,7 +168,7 @@ impl PlayerConfigStore {
         let mut incoming: HashMap<String, PlayerConfig> = HashMap::new();
         let mut newest_raw: Option<String> = None;
         for url in REGISTRY_URLS {
-            let text = match self.http.get(url).send().await {
+            let text = match crate::http::client().get(url).send().await {
                 Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
                 Ok(r) => {
                     tracing::debug!(url, status = %r.status(), "player config registry unavailable");

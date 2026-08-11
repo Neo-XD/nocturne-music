@@ -59,6 +59,10 @@ pub fn open(app: &AppHandle) -> Result<(), String> {
         if let Some(p) = placement(app, &win) {
             let _ = win.set_position(p);
         }
+        // Same treatment as the main window: this is a second web process, and it needs the media
+        // and 3D stacks even less than the app does.
+        #[cfg(target_os = "linux")]
+        crate::tune_webview_labelled(app, LABEL);
         let _ = win.show();
         let _ = win.set_focus();
     }

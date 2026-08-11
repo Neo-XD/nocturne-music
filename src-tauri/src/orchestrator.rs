@@ -66,7 +66,6 @@ pub struct Orchestrator {
     clients: Clients,
     cipher: Arc<CipherDeobfuscator>,
     potoken: Arc<PoTokenGenerator>,
-    http: reqwest::Client,
     /// videoIds whose WEB_REMIX stream 403'd on the real GET → skip WEB_REMIX next time for them
     /// (context/06 §2). Cleared when the cipher self-heals. `Arc` so the off-hot-path self-heal
     /// task can clear it.
@@ -85,10 +84,6 @@ impl Orchestrator {
             clients,
             cipher,
             potoken,
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .unwrap_or_default(),
             web_remix_failed: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -247,8 +242,13 @@ impl Orchestrator {
                 // the hot path so it never blocks falling through (context/06 §7). If the heal
                 // changes the config table, clear the WEB_REMIX failure memory (context/06 §2).
                 let cipher = self.cipher.clone();
+                let potoken = self.potoken.clone();
                 let failed = self.web_remix_failed.clone();
                 tauri::async_runtime::spawn(async move {
+                    // The session PoToken now outlives the process, so a rejected web stream is
+                    // the only signal left that Google stopped honouring it early. Drop it here
+                    // rather than replay it for the rest of its nominal 12 hours.
+                    potoken.invalidate_session_token().await;
                     if cipher.on_stream_rejected().await {
                         failed.lock().await.clear();
                     }
@@ -296,7 +296,9 @@ impl Orchestrator {
 
     /// HEAD validation (context/06 §validateStatus). Success = 2xx. False on any error.
     async fn validate_head(&self, url: &str, ua: Option<&str>) -> bool {
-        let mut req = self.http.head(url);
+        // The 10s budget used to live on a client of its own; it is a property of this one
+        // probe, not of the app's HTTP.
+        let mut req = crate::http::client().head(url).timeout(Duration::from_secs(10));
         if let Some(ua) = ua {
             req = req.header("User-Agent", ua);
         }

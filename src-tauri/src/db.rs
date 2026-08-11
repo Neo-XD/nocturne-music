@@ -7,6 +7,15 @@ use rusqlite::Connection;
 
 pub struct Db(Mutex<Connection>);
 
+/// Unix seconds. Lives here because every wall-clock value in the app is a column in this file
+/// (`expires_at`, `played_at`, `fetched_at`) or something stored alongside them.
+pub fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 /// A cached stream URL with its expiry. Never a source of truth — purely a latency cache.
 pub struct CachedStream {
     pub url: String,
@@ -19,6 +28,14 @@ pub struct CachedStream {
 impl Db {
     pub fn open(path: &std::path::Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
+        // This file is a cache plus a little UI state, and it is written on every volume nudge,
+        // pause, track change and queue edit. WAL keeps those off a full rollback journal, and
+        // `synchronous=NORMAL` drops the fsync per commit: a power cut can lose the last few
+        // seconds of "what was playing", which is the correct trade for a music player, and no
+        // crash of ours can corrupt the file either way. `journal_mode` answers with a row, so it
+        // is a query rather than a `pragma_update`.
+        let _ = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get::<_, String>(0));
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS settings (
@@ -64,6 +81,14 @@ impl Db {
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
         let _ = conn.execute("DELETE FROM plays WHERE video_id LIKE 'LOCAL:%'", []);
+        // Sweep dead stream URLs here as well as on write. `put_stream` only runs on a cache miss,
+        // so a session spent replaying cached tracks never triggers one, and the backlog that
+        // built up before anything pruned at all (1803 rows, 1772 of them expired, on a real
+        // install) would sit there until it happened to.
+        let _ = conn.execute(
+            "DELETE FROM stream_url_cache WHERE expires_at <= ?1",
+            [now_secs()],
+        );
         Ok(Db(Mutex::new(conn)))
     }
 
@@ -126,6 +151,12 @@ impl Db {
         let _ = conn.execute("DELETE FROM stream_url_cache WHERE video_id = ?1", [video_id]);
     }
 
+    /// Cache one resolved URL, and drop every entry that has already expired.
+    ///
+    /// The prune rides along with the insert (same shape as [`Db::record_play`]) because nothing
+    /// else ever deleted a dead row: `get_stream` filters them out but leaves them, so the table
+    /// only ever grew. Measured on a real install before this: 1803 rows / 2.5 MB, nearly all of
+    /// them URLs that expired hours or weeks ago.
     pub fn put_stream(
         &self,
         video_id: &str,
@@ -133,6 +164,7 @@ impl Db {
         itag: i64,
         expires_at: i64,
         loudness_db: Option<f64>,
+        now: i64,
     ) {
         let conn = self.0.lock().unwrap();
         let _ = conn.execute(
@@ -140,6 +172,7 @@ impl Db {
              ON CONFLICT(video_id) DO UPDATE SET url = excluded.url, itag = excluded.itag, expires_at = excluded.expires_at, loudness_db = excluded.loudness_db",
             rusqlite::params![video_id, url, itag, expires_at, loudness_db],
         );
+        let _ = conn.execute("DELETE FROM stream_url_cache WHERE expires_at <= ?1", [now]);
     }
 
     /// Wipe the whole URL cache (settings "Clear caches"). context/11.
@@ -365,6 +398,16 @@ mod tests {
         std::fs::remove_file(&path).ok();
         {
             let d = Db::open(&path).unwrap();
+            // Piggybacking on the one file-backed test: `journal_mode` answers with a row, so
+            // setting it via `pragma_update` would silently do nothing (and `:memory:` cannot be
+            // WAL at all, which is why this can't live in its own in-memory test).
+            let mode: String = d
+                .0
+                .lock()
+                .unwrap()
+                .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(mode, "wal");
             d.record_play("LOCAL:/music/a.mp3", "{\"local\":1}", 1_000, 10_000);
             d.record_play("dQw4w9WgXcQ", "{\"yt\":1}", 1_000, 10_000);
             assert_eq!(d.top_plays(0, 20).len(), 2, "both were recorded");
@@ -373,6 +416,20 @@ mod tests {
         assert_eq!(d.top_plays(0, 20), vec![("{\"yt\":1}".to_string(), 1)], "only the YouTube play survives");
         drop(d);
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn put_stream_drops_entries_that_have_already_expired() {
+        let d = db();
+        d.put_stream("stale", "https://x/1", 251, 1_000, None, 900);
+        d.put_stream("live", "https://x/2", 251, 9_000, None, 900);
+        assert!(d.get_stream("stale", 900).is_some(), "not expired yet at t=900");
+
+        // t=2000: "stale" expired at 1_000, so writing anything now sweeps it.
+        d.put_stream("fresh", "https://x/3", 251, 8_000, None, 2_000);
+        assert!(d.get_stream("stale", 2_000).is_none());
+        assert!(d.get_stream("live", 2_000).is_some(), "unexpired rows survive the sweep");
+        assert!(d.get_stream("fresh", 2_000).is_some(), "the row just written survives it");
     }
 
     #[test]

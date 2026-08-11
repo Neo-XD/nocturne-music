@@ -4,6 +4,7 @@ mod cipher;
 mod commands;
 mod db;
 mod discord;
+mod http;
 mod lastfm;
 mod listentogether;
 mod local;
@@ -51,34 +52,63 @@ fn spawn_heap_trimmer() {
     });
 }
 
-/// Pull WebKitGTK off its full-browser cache defaults, which wry never touches.
+/// Pull WebKitGTK off its full-browser defaults, which wry never touches.
 ///
-/// WebKitGTK defaults to `WEBKIT_CACHE_MODEL_WEB_BROWSER` ("cache a very large number of resources
-/// and previously viewed content"), sized against total system RAM. A music client browsing YTM
-/// shelves fills that with thumbnails: measured 627 MiB of on-disk WebKitCache and a web process
-/// that would not give the memory back (`malloc_trim` there freed 1 MiB, so it is all live cache).
-/// `DocumentBrowser` keeps a working cache but drops dead resources instead of hoarding them.
+/// **Caches.** WebKitGTK defaults to `WEBKIT_CACHE_MODEL_WEB_BROWSER` ("cache a very large number of
+/// resources and previously viewed content"), sized against total system RAM. A music client
+/// browsing YTM shelves fills that with thumbnails: measured 627 MiB of on-disk WebKitCache and a
+/// web process that would not give the memory back (`malloc_trim` there freed 1 MiB, so it is all
+/// live cache). `DocumentBrowser` keeps a working cache but drops dead resources instead of
+/// hoarding them. wry also hard-enables the back/forward page cache (`webkitgtk/mod.rs:438`), which
+/// keeps whole previous documents alive; this is a SvelteKit SPA doing client-side routing, so it
+/// never gets a back/forward navigation to restore and that memory is pure waste.
 ///
-/// wry also hard-enables the back/forward page cache (`webkitgtk/mod.rs:438`), which keeps whole
-/// previous documents alive. This is a SvelteKit SPA doing client-side routing, so it never gets a
-/// back/forward navigation to restore and that memory is pure waste.
+/// **Subsystems.** Audio is libmpv's job and the UI has no `<audio>`, `<video>`, `AudioContext`,
+/// `getUserMedia` or WebGL anywhere in it (only 2D canvas, in `theme.svelte.ts`), yet every web
+/// process boots the media and 3D stacks regardless: GStreamer, libLLVM and Mesa's gallium are all
+/// mapped into it. Measured A/B in `cargo tauri dev`, same build otherwise, home feed loaded:
+/// **259 MiB → 247 MiB** PSS at T+180s (236 → 223 at T+60s).
+///
+/// Applies to one webview, because WebKit settings are per-view: the main window and the mini
+/// player each cost their own web process, so each has to be told. The hidden cipher/PoToken
+/// webviews are deliberately left at the defaults, since the fingerprinting code they exist to run
+/// is entitled to probe whatever it likes.
 #[cfg(target_os = "linux")]
-fn tune_webkit_caches(app: &tauri::AppHandle) {
+fn tune_webview(win: &tauri::WebviewWindow) {
     use webkit2gtk::{CacheModel, SettingsExt, WebContextExt, WebViewExt};
 
-    let Some(main) = app.get_webview_window("main") else { return };
-    let res = main.with_webview(|wv| {
+    let label = win.label().to_owned();
+    let res = win.with_webview(|wv| {
         let webview = wv.inner();
+        // Context-wide, so the second call is a no-op. Set here anyway: whichever window comes up
+        // first should not depend on the other existing.
         if let Some(ctx) = WebViewExt::context(&webview) {
             ctx.set_cache_model(CacheModel::DocumentBrowser);
         }
         if let Some(settings) = WebViewExt::settings(&webview) {
             settings.set_enable_page_cache(false);
+            settings.set_enable_media(false);
+            settings.set_enable_mediasource(false);
+            settings.set_enable_media_stream(false);
+            settings.set_enable_media_capabilities(false);
+            settings.set_enable_encrypted_media(false);
+            settings.set_enable_webaudio(false);
+            settings.set_enable_webrtc(false);
+            settings.set_enable_webgl(false);
+            settings.set_enable_html5_database(false); // WebSQL. localStorage is a separate switch.
         }
     });
     match res {
-        Ok(()) => tracing::info!("webkit: cache model DocumentBrowser, page cache off"),
-        Err(e) => tracing::warn!(error = %e, "webkit cache tuning failed (continuing)"),
+        Ok(()) => tracing::info!(label, "webkit: DocumentBrowser cache, page cache + media + webgl off"),
+        Err(e) => tracing::warn!(label, error = %e, "webkit tuning failed (continuing)"),
+    }
+}
+
+/// [`tune_webview`] for a window looked up by label. No-op if it isn't up.
+#[cfg(target_os = "linux")]
+pub(crate) fn tune_webview_labelled(app: &tauri::AppHandle, label: &str) {
+    if let Some(win) = app.get_webview_window(label) {
+        tune_webview(&win);
     }
 }
 
@@ -160,7 +190,9 @@ pub fn run() {
             let cache_dir = data_dir.join("audio-cache");
             std::fs::create_dir_all(&cache_dir).ok();
 
-            let db = Db::open(&data_dir.join("limusic.sqlite")).expect("open sqlite");
+            // Shared: the PoToken generator persists its session token through the same file,
+            // and it is built before AppState takes ownership of everything else.
+            let db = Arc::new(Db::open(&data_dir.join("limusic.sqlite")).expect("open sqlite"));
 
             // Session bootstrap (context/15 startup ordering): load the persisted login session
             // (cookie/dataSyncId/visitorData) from settings; fetch visitorData anonymously
@@ -197,7 +229,7 @@ pub fn run() {
             // Phase 2 extraction stack: cipher + PoToken hidden webviews behind the orchestrator.
             let config = Arc::new(PlayerConfigStore::new(&data_dir));
             let cipher = Arc::new(CipherDeobfuscator::new(handle.clone(), &data_dir, config));
-            let potoken = Arc::new(PoTokenGenerator::new(handle.clone()));
+            let potoken = Arc::new(PoTokenGenerator::new(handle.clone(), db.clone()));
             let orchestrator = Arc::new(Orchestrator::new(
                 it.clone(),
                 clients.clone(),
@@ -317,7 +349,7 @@ pub fn run() {
 
             #[cfg(target_os = "linux")]
             {
-                tune_webkit_caches(app.handle());
+                tune_webview_labelled(app.handle(), "main");
                 spawn_heap_trimmer();
             }
             Ok(())

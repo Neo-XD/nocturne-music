@@ -202,12 +202,12 @@ impl CipherDeobfuscator {
                 }
             }
         }
-        // Fetch player.js and resolve sig/n names (config table wins, regex is the fallback).
+        // Fetch player.js and look up its config — the only way in on the 2025+ players.
         let player = self.fetcher.fetch().await.map_err(|e| e.to_string())?;
         let cfg = self.config.get(&player.hash);
         if cfg.is_none() {
-            // Unknown player hash — pull the remote overlay off the hot path; a validated config
-            // for it lands on the next rebuild (context/05 §forceRefresh). This run uses regex.
+            // Unknown player hash — pull the registries off the hot path; a validated config for it
+            // lands on the next rebuild (context/05 §forceRefresh). This run can't decipher.
             let config = self.config.clone();
             tauri::async_runtime::spawn(async move {
                 config.force_refresh().await;
@@ -217,12 +217,29 @@ impl CipherDeobfuscator {
         // plain literal and stays reliably greppable, and a correct STS keeps the /player requests
         // valid for the direct-URL clients even while deciphering is impossible.
         let sts = cfg.as_ref().and_then(|c| c.sts).or_else(|| extractor::extract_sts(&player.js));
-        tracing::info!(
-            hash = player.hash,
-            ?sts,
-            has_config = cfg.is_some(),
-            "cipher: building webview"
-        );
+        // No config for this player means `build_injection` splices no exports at all, so the
+        // webview could only discover what we already know. Skip it rather than spend a whole web
+        // process and a 2.9 MB injection proving it. Keep the analysis, which is where STS comes
+        // from. Re-probed as soon as the answer could change: a rotated player.js, or a registry
+        // entry landing for this hash (then `cfg` is `Some` and we fall through). context/05, KI-1.
+        if cfg.is_none() {
+            let mut inner = self.inner.lock().await;
+            if let Some(b) = inner.bridge.take() {
+                let _ = b.destroy();
+            }
+            inner.sts = sts;
+            inner.built_epoch = epoch;
+            inner.n_available = false;
+            inner.sig_available = false;
+            inner.analyzed = true;
+            tracing::info!(
+                hash = player.hash,
+                ?sts,
+                "cipher: no player config for this hash — skipping the webview build (KI-1)"
+            );
+            return Ok(());
+        }
+        tracing::info!(hash = player.hash, ?sts, "cipher: building webview");
         let injected = extractor::build_injection(&player.js, cfg.as_ref());
 
         // Tear down any stale webview, then create fresh and load the player.
