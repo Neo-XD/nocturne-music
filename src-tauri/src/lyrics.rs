@@ -1329,7 +1329,11 @@ mod tests {
         assert_eq!(muxed[0].translation.as_deref(), Some("Halo dunia"));
     }
 
+    /// Hits the live Boidu API, so it is NOT in the default run (context/17: network tests are
+    /// opt-in, or `cargo test` fails offline and on any machine that can't reach the service):
+    ///   cargo test -p limusic-app --lib -- --ignored --nocapture
     #[tokio::test]
+    #[ignore = "hits the live Boidu API"]
     async fn boidu_fetches_real_lyrics() {
         let req = LyricsRequest {
             video_id: "test".into(),
