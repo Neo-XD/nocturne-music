@@ -166,7 +166,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `data_sync_id`, `account_json`, `visitor_data`) and internal blobs (`queue_json`,
 /// `queue_position`) never cross into the webview — they'd otherwise ship the login credential to
 /// the renderer on every open — and the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 12] = [
+const UI_SETTINGS: [&str; 13] = [
     "volume",
     "proxy",
     "quality",
@@ -179,6 +179,7 @@ const UI_SETTINGS: [&str; 12] = [
     "hide_videos",
     "prevent_duplicates",
     "update_banner",
+    "lyrics_boidu",
 ];
 
 #[tauri::command]
@@ -212,6 +213,11 @@ pub async fn set_setting(
     // Applies to what's fetched from here on: the live queue keeps whatever is already in it.
     if key == "hide_videos" {
         state.it.set_hide_videos(value == "true");
+    }
+    // Cached lyrics outlive the setting that produced them, so a track fetched while Boidu was on
+    // would keep its word timings (and one fetched while off would never gain them) forever.
+    if key == "lyrics_boidu" {
+        state.db.clear_lyrics_cache();
     }
     // Registers/removes the login autostart entry on toggle; the OS persists it from there.
     // ponytail: no startup re-sync against the OS state — add reconciliation only if drift is

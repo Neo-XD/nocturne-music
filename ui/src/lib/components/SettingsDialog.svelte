@@ -147,6 +147,7 @@
 	const historyOn = $derived(settings.enable_history !== 'false');
 	const autoplayOn = $derived(settings.autoplay !== 'false');
 	const hideVideosOn = $derived(settings.hide_videos === 'true');
+	const boiduOn = $derived(settings.lyrics_boidu !== 'false');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const discordOn = $derived(settings.discord_rpc === 'true');
@@ -188,6 +189,11 @@
 	async function setHideVideos(on: boolean) {
 		settings.hide_videos = on ? 'true' : 'false';
 		await api.setSetting('hide_videos', settings.hide_videos);
+	}
+
+	async function setBoidu(on: boolean) {
+		settings.lyrics_boidu = on ? 'true' : 'false';
+		await api.setSetting('lyrics_boidu', settings.lyrics_boidu);
 	}
 
 	async function setPreventDuplicates(on: boolean) {
@@ -607,6 +613,18 @@
 							</p>
 						</div>
 						<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />
+					</div>
+					<div class="flex items-start justify-between gap-4 border-b py-3">
+						<div class="min-w-0">
+							<div class="font-medium">Word-by-word lyrics</div>
+							<p class="mt-0.5 text-sm text-muted-foreground">
+								Asks lyrics-api.boidu.dev first, the only source here with per-word timings, so
+								lyrics can highlight as they're sung. It's checked for every track, so turning
+								this off keeps your listening off that service. Other sources still provide
+								line-by-line lyrics.
+							</p>
+						</div>
+						<Switch checked={boiduOn} onCheckedChange={setBoidu} />
 					</div>
 					<div class="py-3">
 						<div class="font-medium">Stream clients</div>

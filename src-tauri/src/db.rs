@@ -182,6 +182,14 @@ impl Db {
         let _ = conn.execute("DELETE FROM lyrics_cache", []);
     }
 
+    /// Drop cached lyrics only, leaving stream URLs alone. Changing which providers are allowed
+    /// has to invalidate what earlier ones already answered, or the setting appears to do nothing
+    /// on every track whose lyrics were already fetched (cache hits never expire).
+    pub fn clear_lyrics_cache(&self) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute("DELETE FROM lyrics_cache", []);
+    }
+
     // --- lyrics cache -----------------------------------------------------------------------
 
     /// Cached lyrics JSON for a track. `Some(None)` = a cached "no lyrics" verdict (NULL row),

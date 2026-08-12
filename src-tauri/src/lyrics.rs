@@ -1,11 +1,16 @@
 //! Lyrics fetching. Provider chain (plan `graceful-kindling`):
 //!
-//! 1. **LRCLIB** `/api/get` (exact match) → synced LRC lyrics. Free, no key, best coverage —
+//! 1. **Boidu** (`lyrics-api.boidu.dev`) → word-level timings, which nothing else here returns and
+//!    the karaoke sweep needs. First because of that, and behind the `lyrics_boidu` setting
+//!    because first also means it sees every track played.
+//! 2. **LRCLIB** `/api/get` (exact match) → synced LRC lyrics. Free, no key, best coverage —
 //!    what Metrolist defaults to.
-//! 2. **YouTube Music timed** — `next(videoId)` → lyrics browseId → mobile-client browse
+//! 3. **YouTube Music timed** — `next(videoId)` → lyrics browseId → mobile-client browse
 //!    (`timedLyricsData`). The same real-time lyrics the YTM app shows.
-//! 3. Plain fallbacks: LRCLIB plain (from step 1's response) → YT plain (WEB_REMIX browse) →
-//!    LRCLIB `/api/search` fuzzy.
+//! 4. **Netease / QQ / Kugou** → synced LRC, plus translations from Netease. Search hits are
+//!    matched on length (`best_by_duration`); these catalogues rank remixes next to originals.
+//! 5. Plain fallbacks: LRCLIB fuzzy search → LRCLIB plain (from step 2's response) → YT plain
+//!    (WEB_REMIX browse) → the fuzzy search's plain text.
 //!
 //! Results are cached in SQLite (`lyrics_cache`): hits forever, "no lyrics" verdicts for 24h.
 //! A run where every provider merely *errored* (offline) caches nothing, so lyrics come back
@@ -164,9 +169,14 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         return (hit.ok().flatten(), false);
     }
 
-    // 1. Boidu provider (boidu.rs from minilyricsv2 — FIRST provider!)
-    if let Ok(Some(l)) = boidu_get(req).await {
-        return (Some(l), req.duration.is_some());
+    // 1. Boidu, ahead of LRCLIB because it is the only provider here that returns word-level
+    //    timings, and those are what the karaoke sweep renders. Going first also means it is the
+    //    one provider that sees every track played rather than only the ones LRCLIB misses, so it
+    //    is behind a setting. Off falls straight through to the chain as it was before.
+    if state.db.get_setting("lyrics_boidu").as_deref() != Some("false") {
+        if let Ok(Some(l)) = boidu_get(req).await {
+            return (Some(l), req.duration.is_some());
+        }
     }
 
     // 2. LRCLIB exact match.
