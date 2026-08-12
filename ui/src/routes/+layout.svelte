@@ -118,7 +118,7 @@
 	<SettingsDialog />
 	<ListenTogether />
 
-	<!-- The three notification banners below run at z-[100]. Dialogs and menus sit at z-50 and portal to
+	<!-- The two notification banners below run at z-[100]. Dialogs and menus sit at z-50 and portal to
 	     <body>, so a z-50 banner loses the tie on DOM order and hides behind an open modal. -->
 	{#if updateState.available}
 		<div
@@ -158,20 +158,6 @@
 				/>
 			{/if}
 			{t.msg}
-		</div>
-	{/if}
-
-	{#if playback.error}
-		<div
-			transition:fly={{ y: 16, duration: 220, easing: cubicOut }}
-			class="fixed bottom-24 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-lg border border-destructive/40 bg-card px-4 py-2 text-sm text-destructive shadow-lg"
-		>
-			<span>{playback.error}</span>
-			<button
-				class="text-muted-foreground hover:text-foreground"
-				aria-label="Dismiss"
-				onclick={() => (playback.error = null)}>✕</button
-			>
 		</div>
 	{/if}
 {/if}

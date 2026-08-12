@@ -16,7 +16,6 @@ export const playback = $state({
 	position: 0,
 	duration: 0,
 	volume: 100,
-	error: null as string | null,
 	// Like state for the current track — seeded from the track's real `likeStatus` on each change,
 	// then optimistic on toggle.
 	liked: false
@@ -512,7 +511,6 @@ export function initApp(mini = false): () => void {
 		api.onNowPlaying((n) => {
 			playback.now = n;
 			playback.liked = n.liked ?? false; // reflect the track's real like status when known
-			playback.error = null; // a track started → clear any stale dead-end banner
 			// Feeds Shortcuts recency and the community shelf's artist seed. Every play lands here,
 			// gapless advances included, so it's the one hook that sees them all.
 			pl.touchPick(personal, n.videoId);
@@ -528,7 +526,7 @@ export function initApp(mini = false): () => void {
 			// moved past, and applying it would yank the thumb backwards mid-drag.
 			if (volFrame === null) playback.volume = v;
 		}),
-		api.onPlaybackError((msg) => (playback.error = msg)),
+		api.onPlaybackError((msg) => toast.error(msg)),
 		api.onPlaybackNotice((msg) => toast(msg)), // auto-skipped an unplayable track
 		api.onLocalChanged(forgetLocal), // a local file turned out to be gone — drop it everywhere
 		api.onAuthChanged((a) => {
