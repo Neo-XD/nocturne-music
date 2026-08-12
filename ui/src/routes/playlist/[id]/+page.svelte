@@ -67,6 +67,14 @@
 	// Only offer rename/delete on playlists the signed-in user actually owns (backend `owned` flag).
 	// Liked Music reports owned but can't be renamed/deleted, so exclude it explicitly.
 	const editable = $derived((pl?.owned ?? false) && !isLiked);
+	// YouTube's header count includes rows that never make it into the list (unavailable or
+	// region-blocked tracks), so it reads high. Once every page is in, we know the real number, so
+	// swap it in. Until then the header's own count is the only estimate of the total there is.
+	const subtitle = $derived(
+		pl && !pl.continuation && pl.items.length
+			? (pl.subtitle ?? '').replace(/^[\d,.]+ songs?/i, `${pl.items.length} songs`)
+			: pl?.subtitle
+	);
 
 	async function load(pid: string) {
 		const key = `playlist:${pid}`;
@@ -206,7 +214,7 @@
 		kind: 'playlist',
 		id,
 		title: pl?.title ?? 'Playlist',
-		subtitle: pl?.subtitle,
+		subtitle,
 		// On Repeat stays artwork-free wherever it's rendered (shortcuts, recents) so it always
 		// draws its icon rather than one of its songs' covers.
 		thumbnail: isOnRepeat ? undefined : (pl?.thumbnail ?? bgImage ?? undefined)
@@ -414,7 +422,7 @@
 					{pl.title ?? 'Playlist'}
 				</h1>
 				{/if}
-				{#if pl.subtitle}<p class="mt-2 text-sm text-muted-foreground">{pl.subtitle}</p>{/if}
+				{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
 				<div class="mt-4 flex items-center gap-2">
 					<Button class="gap-2" onclick={() => playAll(null)} disabled={!pl.items.length}>
 						<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />

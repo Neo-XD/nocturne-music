@@ -8,7 +8,8 @@
 		Add01Icon,
 		Tick02Icon,
 		MoreVerticalIcon,
-		DashboardSquare02Icon
+		DashboardSquare02Icon,
+		ArrowRight01Icon
 	} from '@hugeicons/core-free-icons';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
 	import TrackRow from '$lib/components/TrackRow.svelte';
@@ -17,7 +18,7 @@
 	import Shelf from '$lib/components/Shelf.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as api from '$lib/api';
-	import type { ArtistPage, BrowseItem } from '$lib/api';
+	import type { ArtistPage, BrowseItem, PlaylistPage } from '$lib/api';
 	import {
 		addPick,
 		playback,
@@ -34,6 +35,7 @@
 	let expanded = $state(false);
 	let subscribed = $state(false);
 	let subBusy = $state(false);
+	let shuffleBusy = $state(false);
 
 	const id = $derived(page.params.id ?? '');
 	const nowId = $derived(playback.now?.videoId);
@@ -90,11 +92,32 @@
 		thumbnail: artist?.thumbnail
 	});
 
-	function shuffle() {
-		if (!artist?.topSongs.length) return;
-		// ponytail: shuffles the ~5 top songs, not the artist's full catalog radio. Deepen with the
-		// header's shuffle playlistId if the shallow mix feels thin.
-		playFrom(asItem(), artist.topSongs, null, undefined, true);
+	// Shuffles the whole top-songs playlist (what "See all" opens), not just the 5 rows on this
+	// page. The backend walks the continuation in the background, so playback starts immediately
+	// on the first ~100. Artists without that playlist fall back to the visible rows.
+	async function shuffle() {
+		if (!artist || shuffleBusy) return;
+		const pid = artist.topSongsId;
+		if (pid) {
+			const cid = id;
+			shuffleBusy = true;
+			try {
+				const key = `playlist:${pid}`;
+				const pl = getCached<PlaylistPage>(key) ?? (await api.getPlaylist(pid));
+				if (cid !== id) return; // navigated away mid-fetch
+				putCached(key, pl);
+				if (pl.items.length) {
+					playFrom(asItem(), pl.items, null, pid, true, pl.continuation);
+					return;
+				}
+			} catch (e) {
+				toast.error(String(e));
+				return;
+			} finally {
+				shuffleBusy = false;
+			}
+		}
+		if (artist.topSongs.length) playFrom(asItem(), artist.topSongs, null, undefined, true);
 	}
 
 	async function toggleSub() {
@@ -162,8 +185,12 @@
 		></div>
 		<div class="relative max-w-3xl p-8">
 			<h1 class="font-heading text-5xl font-bold tracking-tight drop-shadow-lg">{artist.name}</h1>
-			{#if artist.subscribers}
-				<p class="mt-2 text-sm text-muted-foreground">{artist.subscribers}</p>
+			{#if artist.subscribers || artist.monthlyListeners}
+				<p class="mt-2 text-sm text-muted-foreground">
+					{#if artist.subscribers}{artist.subscribers}{/if}
+					{#if artist.subscribers && artist.monthlyListeners}<br />{/if}
+					{#if artist.monthlyListeners}{artist.monthlyListeners}{/if}
+				</p>
 			{/if}
 			{#if artist.description}
 				<p class="mt-3 max-w-2xl text-sm text-foreground/80 {expanded ? '' : 'line-clamp-2'}">
@@ -180,12 +207,12 @@
 				<button
 					class="flex items-center gap-2 rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-50"
 					onclick={shuffle}
-					disabled={!artist.topSongs.length}
+					disabled={!artist.topSongs.length || shuffleBusy}
 				>
 					<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> Shuffle
 				</button>
-				<!-- The deep counterpart to Shuffle above: that one only reaches the ~5 top songs on
-				     this page, this one asks YouTube for the artist's own endless mix. -->
+				<!-- The deep counterpart to Shuffle above: that one is the finite top-songs playlist,
+				     this one asks YouTube for the artist's own endless mix. -->
 				<button
 					class="flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10"
 					onclick={() => startRadio('artist', id, artist?.name)}
@@ -216,7 +243,27 @@
 	<div class="content-in flex flex-col gap-8 p-6">
 		{#if artist.topSongs.length}
 			<section>
-				<h2 class="mb-3 font-heading text-xl font-bold">Top songs</h2>
+				<!-- Same header shape as Shelf: title and "See all" both navigate. -->
+				<div class="mb-3 flex items-baseline justify-between gap-3">
+					{#if artist.topSongsId}
+						<button
+							class="min-w-0 cursor-pointer text-left hover:underline"
+							onclick={() => goto(`/playlist/${artist!.topSongsId}`)}
+							title="See all top songs"
+						>
+							<h2 class="truncate font-heading text-xl font-bold">Top songs</h2>
+						</button>
+						<button
+							class="flex shrink-0 cursor-pointer items-center gap-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+							onclick={() => goto(`/playlist/${artist!.topSongsId}`)}
+						>
+							See all
+							<HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" />
+						</button>
+					{:else}
+						<h2 class="truncate font-heading text-xl font-bold">Top songs</h2>
+					{/if}
+				</div>
 				{#each artist.topSongs as song, i (song.video_id + i)}
 					<TrackRow
 						{song}

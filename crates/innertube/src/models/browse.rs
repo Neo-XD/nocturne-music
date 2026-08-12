@@ -105,8 +105,12 @@ pub struct ArtistPage {
     /// The wide hero/banner image from the immersive header.
     pub thumbnail: Option<String>,
     pub description: Option<String>,
-    /// e.g. "137M monthly listeners" / "32.7M subscribers".
+    /// e.g. "32.7M subscribers" (the long form; the short one is a bare "32.7M").
     pub subscribers: Option<String>,
+    /// The header's other count line, e.g. "137M monthly audience". Absent on artists YouTube
+    /// publishes no listener figure for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monthly_listeners: Option<String>,
     /// Subscribe target — the channelId (falls back to the browseId, which is the same `UC…`).
     pub channel_id: String,
     pub subscribed: bool,
@@ -116,6 +120,10 @@ pub struct ArtistPage {
     pub radio_playlist_id: Option<String>,
     /// Top songs shelf (usually 5).
     pub top_songs: Vec<SongItem>,
+    /// The shelf's "Show all" target: a `VL…` playlist of the artist's songs, pageable like any
+    /// other playlist. Absent on artists whose shelf has no show-all link.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_songs_id: Option<String>,
     /// Card carousels (Albums / Singles / Videos / …), each with an optional "More" browse target.
     pub sections: Vec<ArtistCarousel>,
 }
@@ -534,12 +542,16 @@ pub fn parse_artist(root: &Value, browse_id: &str) -> ArtistPage {
         .map(str::to_owned)
         .unwrap_or_else(|| browse_id.to_owned());
     let subscribed = sub.and_then(|s| s.get("subscribed")).and_then(Value::as_bool).unwrap_or(false);
+    // Long form first: `subscriberCountText` is a bare "2.96M", `longSubscriberCountText` the
+    // labelled "2.96M subscribers" (localized by the context's hl, so don't relabel it here).
     let subscribers = sub.and_then(|s| {
-        text_or_runs(s.get("subscriberCountText")).or_else(|| text_or_runs(s.get("longSubscriberCountText")))
+        text_or_runs(s.get("longSubscriberCountText")).or_else(|| text_or_runs(s.get("subscriberCountText")))
     });
+    let monthly_listeners = header.and_then(|h| text_or_runs(h.get("monthlyListenerCount")));
 
     // Walk the section list: the first list shelf = top songs; every carousel = a card row.
     let mut top_songs = Vec::new();
+    let mut top_songs_id = None;
     let mut sections = Vec::new();
     if let Some(contents) = find_all(root, "sectionListRenderer")
         .into_iter()
@@ -552,6 +564,13 @@ pub fn parse_artist(root: &Value, browse_id: &str) -> ArtistPage {
                         .into_iter()
                         .filter_map(parse_list_item)
                         .collect();
+                    // "Show all" (and the shelf title, same endpoint) points at a `VL…` playlist
+                    // holding every top song. Prefix-checked: other shelves link a channel instead.
+                    top_songs_id = find_all(shelf.get("bottomEndpoint").unwrap_or(shelf), "browseId")
+                        .into_iter()
+                        .filter_map(Value::as_str)
+                        .find(|id| id.starts_with("VL"))
+                        .map(str::to_owned);
                 }
             } else if let Some(carousel) = node.get("musicCarouselShelfRenderer") {
                 if let Some(sec) = parse_artist_carousel(carousel) {
@@ -568,10 +587,12 @@ pub fn parse_artist(root: &Value, browse_id: &str) -> ArtistPage {
         thumbnail,
         description,
         subscribers,
+        monthly_listeners,
         channel_id,
         subscribed,
         radio_playlist_id,
         top_songs,
+        top_songs_id,
         sections,
     }
 }
@@ -1404,8 +1425,10 @@ mod tests {
                 "subscriptionButton": { "subscribeButtonRenderer": {
                     "channelId": "UCdrake",
                     "subscribed": true,
-                    "subscriberCountText": { "runs": [{ "text": "32.7M subscribers" }] }
-                } }
+                    "subscriberCountText": { "runs": [{ "text": "32.7M" }] },
+                    "longSubscriberCountText": { "runs": [{ "text": "32.7M subscribers" }] }
+                } },
+                "monthlyListenerCount": { "runs": [{ "text": "137M monthly audience" }] }
             } },
             "contents": { "singleColumnBrowseResultsRenderer": { "tabs": [{ "tabRenderer": { "content": {
                 "sectionListRenderer": { "contents": [
@@ -1417,7 +1440,8 @@ mod tests {
                                 { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Drake" }] } } }
                             ]
                         } }
-                    ] } },
+                    ],
+                    "bottomEndpoint": { "browseEndpoint": { "browseId": "VLOLAK5uy_drake" } } } },
                     { "musicCarouselShelfRenderer": {
                         "header": { "musicCarouselShelfBasicHeaderRenderer": {
                             "title": { "runs": [{ "text": "Albums" }] },
@@ -1442,8 +1466,10 @@ mod tests {
         assert_eq!(a.channel_id, "UCdrake");
         assert!(a.subscribed);
         assert_eq!(a.subscribers.as_deref(), Some("32.7M subscribers"));
+        assert_eq!(a.monthly_listeners.as_deref(), Some("137M monthly audience"));
         assert_eq!(a.top_songs.len(), 1);
         assert_eq!(a.top_songs[0].video_id, "song1");
+        assert_eq!(a.top_songs_id.as_deref(), Some("VLOLAK5uy_drake"));
         assert_eq!(a.sections.len(), 1);
         assert_eq!(a.sections[0].title, "Albums");
         assert_eq!(a.sections[0].items[0].kind, "album");

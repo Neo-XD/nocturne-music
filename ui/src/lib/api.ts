@@ -185,9 +185,12 @@ export interface ArtistPage {
 	thumbnail?: string;
 	description?: string;
 	subscribers?: string;
+	monthlyListeners?: string;
 	channelId: string;
 	subscribed: boolean;
 	topSongs: SongItem[];
+	/** `VL…` playlist of all the artist's top songs, behind the shelf's "See all". */
+	topSongsId?: string;
 	sections: ArtistCarousel[];
 }
 
