@@ -829,11 +829,6 @@ async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
 
 // --- TTML / AAML / eLRC Parsing & LRCMux ----------------------------------------------------
 
-#[allow(dead_code)]
-pub fn parse_lyrics_text(text: &str) -> Vec<LyricLine> {
-    parse_lrc_or_ttml(text)
-}
-
 fn parse_time_val(v: &serde_json::Value) -> Option<u64> {
     if let Some(f) = v.as_f64() {
         if f < 500.0 {
@@ -959,7 +954,7 @@ fn parse_lrc_or_ttml(text: &str) -> Vec<LyricLine> {
 }
 
 /// TTML and Apple Music AAML XML parser
-pub fn parse_ttml_aaml(xml: &str) -> Vec<LyricLine> {
+fn parse_ttml_aaml(xml: &str) -> Vec<LyricLine> {
     let mut lines = Vec::new();
     let mut pos = 0;
     while let Some(p_start) = xml[pos..].find("<p") {
@@ -1100,7 +1095,7 @@ fn parse_elrc(lrc: &str) -> Vec<LyricLine> {
 }
 
 /// LRCMux multiplexer: merges line lyrics with word timing or translations
-pub fn lrc_mux(mut primary: Vec<LyricLine>, word_source: Vec<LyricLine>) -> Vec<LyricLine> {
+fn lrc_mux(mut primary: Vec<LyricLine>, word_source: Vec<LyricLine>) -> Vec<LyricLine> {
     if word_source.is_empty() {
         return primary;
     }
