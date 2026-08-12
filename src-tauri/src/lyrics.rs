@@ -992,8 +992,13 @@ fn parse_elrc(lrc: &str) -> Vec<LyricLine> {
                         }
                     }
                 }
-                text_buf.push(line.text.chars().nth(pos).unwrap_or(' '));
-                pos += 1;
+                // `pos` is a BYTE offset, so step by the character's own width. Indexing it as a
+                // char offset silently mangles every non-ASCII line (and the CJK providers below
+                // are where word timings mostly come from). Every other jump above lands on an
+                // ASCII `<`/`>`, so slicing here is always on a char boundary.
+                let ch = line.text[pos..].chars().next().unwrap_or(' ');
+                text_buf.push(ch);
+                pos += ch.len_utf8();
             }
 
             if !words.is_empty() {
@@ -1161,6 +1166,18 @@ mod tests {
         assert_eq!(words.len(), 2);
         assert_eq!(words[0].text, "Hello ");
         assert_eq!(words[1].text, "world");
+    }
+
+    #[test]
+    fn elrc_keeps_non_ascii_text_intact() {
+        // Text before the first word tag goes through the char-by-char path, which used to walk
+        // byte offsets as if they were char offsets and shredded anything multi-byte.
+        let lines = parse_elrc("[00:12.00]私は<00:12.50>歌う");
+        assert_eq!(lines[0].text, "私は歌う");
+        let words = lines[0].words.as_ref().unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "歌う");
+        assert_eq!(words[0].end_ms, 12500);
     }
 
     #[test]
