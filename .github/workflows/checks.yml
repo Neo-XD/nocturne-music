@@ -1,0 +1,53 @@
+name: Checks
+
+# Formatting only, on purpose.
+#
+# WHY THIS EXISTS: PR #13 ran `cargo fmt` against a repo that had no `rustfmt.toml`, so rustfmt's
+# defaults reformatted 21 files the change never touched and buried ~900 lines of real work inside a
+# 2400-line diff. The convention was written down only in a gitignored CLAUDE.md, so the contributor
+# had no way to know. `rustfmt.toml` is committed now and the tree was normalised to it, which means
+# the drift is detectable mechanically instead of during review.
+#
+# WHY NOT ALSO BUILD AND TEST HERE: `limusic-app` links libmpv and webkit2gtk, so testing it needs
+# the full Tauri system-dependency install and a cold Rust compile. This job needs neither: rustfmt
+# parses the source and never builds it, so it finishes in seconds on a bare runner and stays cheap
+# enough to run on every push. If you do want tests in CI later, add a separate job rather than
+# weighing this one down, and note that `cargo test -p innertube -p player` covers the pure-Rust
+# crates without any of that system setup.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# A second push to the same PR makes the earlier run irrelevant.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rustfmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `components: rustfmt` rather than the default toolchain: nothing here compiles, so the rest
+      # would only be download time.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      # --all covers every workspace member, --check reports and exits non-zero instead of editing.
+      - name: cargo fmt --all --check
+        run: cargo fmt --all --check
+
+      - name: How to fix
+        if: failure()
+        run: |
+          echo "::notice::Run 'cargo fmt --all' locally and commit the result."
+          echo "rustfmt.toml at the repo root matches the existing style, so this should only"
+          echo "touch code you actually changed. If it wants to reformat files you never opened,"
+          echo "please open an issue instead of committing the churn."
