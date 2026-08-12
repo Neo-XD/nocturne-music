@@ -5,6 +5,7 @@
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { Maximize01Icon, Minimize01Icon } from '@hugeicons/core-free-icons';
 	import LyricsView from './LyricsView.svelte';
+	import { ui } from '$lib/player.svelte';
 
 	let { onClose, queueOpen = false }: { onClose: () => void; queueOpen?: boolean } = $props();
 
@@ -29,9 +30,9 @@
 <aside
 	transition:fly={{ x: 32, duration: 220, easing: cubicOut }}
 	class={expanded
-		? // ponytail: left offsets mirror Sidebar's w-16/lg:w-60, right offset mirrors QueuePanel's
-			// w-80 — keep in sync if those change.
-			`absolute inset-y-0 left-16 right-0 z-30 flex h-full flex-col border-l bg-card shadow-2xl lg:left-60 ${queueOpen ? 'lg:right-80' : ''}`
+		? // ponytail: left offsets mirror Sidebar's w-16/lg:w-60 (and its manual collapse), right
+			// offset mirrors QueuePanel's w-80 — keep in sync if those change.
+			`absolute inset-y-0 left-16 right-0 z-30 flex h-full flex-col border-l bg-card shadow-2xl ${ui.sidebarCollapsed ? '' : 'lg:left-60'} ${queueOpen ? 'lg:right-80' : ''}`
 		: `absolute inset-y-0 right-0 z-30 flex h-full w-80 max-w-[80vw] flex-col border-l bg-card shadow-2xl ${queueOpen ? 'lg:right-80' : ''}`}
 >
 	<div class="flex items-center justify-between border-b px-4 py-3">

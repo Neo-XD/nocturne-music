@@ -12,7 +12,9 @@
 		Add01Icon,
 		PinIcon,
 		MusicNote01Icon,
-		ListRestartIcon
+		ListRestartIcon,
+		SquareArrowLeft01Icon,
+		SquareArrowRight01Icon
 	} from '@hugeicons/core-free-icons';
 	import { toggleMode } from 'mode-watcher';
 	import { Button } from '$lib/components/ui/button';
@@ -21,7 +23,15 @@
 	import { ON_REPEAT_ID, type BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import PlaylistMenu from './PlaylistMenu.svelte';
-	import { auth, library, personal, ui, createLibraryPlaylist, toast } from '$lib/player.svelte';
+	import {
+		auth,
+		library,
+		personal,
+		ui,
+		createLibraryPlaylist,
+		toggleSidebar,
+		toast
+	} from '$lib/player.svelte';
 	import { orderLibrary } from '$lib/personal';
 
 	const nav = [
@@ -75,17 +85,51 @@
 	}
 
 	// Account lives in the titlebar now — see AccountMenu.svelte.
+
+	// Manual collapse is a large-screen preference: below lg the rail is already collapsed by the
+	// breakpoint, so the button is hidden there and `wide()` has nothing to drop. Every expanded
+	// style is an `lg:` class, so collapsing is just not emitting them. The flag lives in `ui`
+	// because the overlays that offset by the sidebar's width read it too.
+	const collapsed = $derived(ui.sidebarCollapsed);
+	const wide = (cls: string) => (collapsed ? '' : cls);
 </script>
 
 <aside
-	class="flex h-full w-16 shrink-0 flex-col border-r bg-sidebar p-3 text-sidebar-foreground lg:w-60"
+	class="flex h-full w-16 shrink-0 flex-col border-r bg-sidebar p-3 text-sidebar-foreground {wide(
+		'lg:w-60'
+	)}"
 >
-	<div class="flex items-center justify-center px-2 py-2 lg:justify-between">
-		<span class="hidden font-heading text-lg font-bold tracking-tight lg:block">Limusic</span>
-		<Button variant="ghost" size="icon-sm" onclick={toggleMode} aria-label="Toggle theme">
-			<HugeiconsIcon icon={Sun01Icon} class="h-4 w-4 dark:hidden" />
-			<HugeiconsIcon icon={Moon02Icon} class="hidden h-4 w-4 dark:block" />
-		</Button>
+	<div class="flex items-center justify-center px-2 py-2 {wide('lg:justify-between')}">
+		<span class="hidden font-heading text-lg font-bold tracking-tight {wide('lg:block')}">Limusic</span>
+		<!-- Column when collapsed: the two buttons don't fit side by side in the 64px rail. -->
+		<div class="flex items-center gap-1 {collapsed ? 'flex-col' : ''}">
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				class="hidden hover:text-primary lg:inline-flex"
+				onclick={toggleSidebar}
+				aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+			>
+				<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
+				<HugeiconsIcon
+					icon={SquareArrowLeft01Icon}
+					altIcon={SquareArrowRight01Icon}
+					showAlt={collapsed}
+					strokeWidth={2}
+					class="h-4 w-4"
+				/>
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				class="hover:text-primary"
+				onclick={toggleMode}
+				aria-label="Toggle theme"
+			>
+				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
+				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
+			</Button>
+		</div>
 	</div>
 
 	<nav class="mt-2 flex flex-col gap-1">
@@ -93,9 +137,9 @@
 			<a
 				href={n.href}
 				title={n.label}
-				class="group relative flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors lg:justify-start {isActive(
-					n.href
-				)
+				class="group relative flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors {wide(
+					'lg:justify-start'
+				)} {isActive(n.href)
 					? 'bg-primary/10 text-primary'
 					: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
 			>
@@ -109,26 +153,28 @@
 					icon={n.icon}
 					class="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
 				/>
-				<span class="hidden lg:inline">{n.label}</span>
+				<span class="hidden {wide('lg:inline')}">{n.label}</span>
 			</a>
 		{/each}
 		<button
 			onclick={() => (ui.settingsOpen = true)}
 			title="Settings"
-			class="group flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground lg:justify-start"
+			class="group flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground {wide(
+				'lg:justify-start'
+			)}"
 		>
 			<HugeiconsIcon
 				icon={Settings01Icon}
 				class="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
 			/>
-			<span class="hidden lg:inline">Settings</span>
+			<span class="hidden {wide('lg:inline')}">Settings</span>
 		</button>
 	</nav>
 
 	<!-- Playlists (signed in). Hidden on the icon rail — needs labels; matches YTM's collapsed rail.
 	     flex-1 lets the list fill the space and scroll. -->
 	{#if auth.account?.signedIn}
-		<div class="mt-3 hidden min-h-0 flex-1 flex-col border-t pt-3 lg:flex">
+		<div class="mt-3 hidden min-h-0 flex-1 flex-col border-t pt-3 {wide('lg:flex')}">
 			<Button
 				variant="outline"
 				size="sm"

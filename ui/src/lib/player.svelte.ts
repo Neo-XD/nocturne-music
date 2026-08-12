@@ -435,8 +435,17 @@ export const ui = $state({
 	addSongs: null as SongItem[] | null, // add-to-playlist picker target(s), full items for optimistic appends
 	toast: null as Toast | null,
 	settingsOpen: false, // the settings modal
-	ltOpen: false // the Listen Together modal
+	ltOpen: false, // the Listen Together modal
+	// Manual sidebar collapse, lg and up (below that the rail is already collapsed by the
+	// breakpoint). Here rather than in Sidebar because the now-playing view and the fullscreen
+	// lyrics panel are overlays that offset themselves by the sidebar's width.
+	sidebarCollapsed: browser && localStorage.getItem('sidebar_collapsed') === '1'
 });
+
+export function toggleSidebar() {
+	ui.sidebarCollapsed = !ui.sidebarCollapsed;
+	localStorage.setItem('sidebar_collapsed', ui.sidebarCollapsed ? '1' : '0');
+}
 
 export type Toast = { msg: string; kind: 'info' | 'success' | 'error' };
 

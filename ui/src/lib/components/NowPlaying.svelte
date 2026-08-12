@@ -14,7 +14,7 @@
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
-	import { np, playback } from '$lib/player.svelte';
+	import { np, playback, ui } from '$lib/player.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
 	import QueueList from './QueueList.svelte';
@@ -65,10 +65,13 @@
      z-20 matches the highest a page uses for its own chrome (home's sticky mood chips) and wins the
      tie on DOM order, since <main> is static and its z-indexes land in the same stacking context.
      The player bar and the queue/lyrics panels come later/higher, so they still paint above.
-     ponytail: left offsets mirror Sidebar's w-16/lg:w-60 — keep in sync if those change. -->
+     ponytail: left offsets mirror Sidebar's w-16/lg:w-60 (and its manual collapse) — keep in sync
+     if those change. -->
 <div
 	transition:fly={{ y: '100%', duration: 320, easing: cubicOut }}
-	class="absolute inset-y-0 left-16 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:left-60 lg:px-10"
+	class="absolute inset-y-0 left-16 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {ui.sidebarCollapsed
+		? ''
+		: 'lg:left-60'}"
 >
 	<!-- The artwork itself, blurred to a wash, is the background: same trick as HomeHero, and it
 	     needs no colour extraction (which a remote image would taint the canvas for anyway). The
