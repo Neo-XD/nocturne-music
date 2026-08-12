@@ -158,7 +158,7 @@
 					class="group block w-full origin-left cursor-pointer text-left font-heading font-bold leading-snug transition-all duration-300 ease-out hover:text-foreground
 						{expanded ? 'py-3 text-3xl' : 'py-2 text-xl'}
 						{isActive
-						? 'scale-[1.04] text-foreground filter drop-shadow-[0_0_12px_rgba(255,255,255,0.4)]'
+						? 'scale-[1.04] text-foreground'
 						: isPast
 							? 'text-muted-foreground/40'
 							: 'text-muted-foreground/70'}"
@@ -173,16 +173,15 @@
 									{@const progress = getWordProgress(word, posMs)}
 									{@const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)}
 									{@const isCurrentWord = progress > 0 && progress < 1}
+									<!-- Only the gradient stop moves per frame; the clip/fill are static, so they
+									     live in the class and aren't re-serialised 60 times a second. Both
+									     colours are theme tokens: the sung half was hardcoded white, which is
+									     invisible on every light theme. -->
 									<span
-										class="inline-block transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord
+										class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord
 											? 'scale-[1.03]'
 											: ''}"
-										style="
-											background: linear-gradient(90deg, var(--foreground, #fff) {pct}%, rgba(255, 255, 255, 0.35) {pct}%);
-											-webkit-background-clip: text;
-											-webkit-text-fill-color: transparent;
-											will-change: background, transform;
-										"
+										style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
 									>
 										{cleanText}
 									</span>
