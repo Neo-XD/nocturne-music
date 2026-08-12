@@ -36,6 +36,7 @@
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import ArtistLine from './ArtistLine.svelte';
+	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 
 	let {
@@ -151,7 +152,10 @@
 		{/key}
 		<div class="min-w-0">
 			<div class="flex items-center gap-1.5">
-				<div class="truncate text-sm font-medium">{playback.now?.title ?? 'Nothing playing'}</div>
+				<Marquee
+					text={playback.now?.title ?? 'Nothing playing'}
+					class="text-sm font-medium"
+				/>
 				{#if autoplayTrack}
 					<span
 						class="shrink-0 text-muted-foreground"
@@ -165,15 +169,24 @@
 			<ArtistLine
 				runs={playback.now?.artistRuns}
 				text={playback.now?.artists ?? ''}
+				marquee
 				class="block max-w-full text-xs text-muted-foreground"
 			/>
 		</div>
 		{#if playback.now}
 			<div class="flex items-center">
 				<!-- A local file has no YouTube identity (see api.isLocalId): nothing to like, and no
-				     YTM playlist to add it to. -->
+				     YTM playlist to add it to. Below lg both drop and the ⋮ menu carries them instead:
+				     on a narrow window three buttons here leave the title almost no room. lg, not md:
+				     the window's minWidth is 900 (tauri.conf.json), so md never fires. -->
 				{#if !api.isLocalId(playback.now.videoId)}
-					<Button variant="ghost" size="icon-sm" onclick={toggleLike} aria-label="Like">
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						class="hidden lg:inline-flex"
+						onclick={toggleLike}
+						aria-label="Like"
+					>
 						<span
 							class="inline-flex"
 							class:animate-heart-pop={justLiked}
@@ -188,6 +201,7 @@
 					<Button
 						variant="ghost"
 						size="icon-sm"
+						class="hidden lg:inline-flex"
 						onclick={() => {
 							const now = playback.now!;
 							openAddToPlaylist({
@@ -208,6 +222,7 @@
 					<TrackMenu
 						song={currentSong}
 						linksOnly
+						onAdd={() => openAddToPlaylist(currentSong!)}
 						triggerClass="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
 					/>
 				{/if}

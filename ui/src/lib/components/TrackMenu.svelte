@@ -122,9 +122,13 @@
 				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> Start radio
 			</button>
 		{/if}
-		{#if !isLocal && !linksOnly}
+		<!-- In the player bar (`linksOnly`) like and add-to-playlist have their own buttons, but those
+		     drop below lg to leave the title room, so the menu carries them at that width instead. -->
+		{#if !isLocal}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 {linksOnly
+					? 'flex lg:hidden'
+					: 'flex'}"
 				onclick={(e) => run(e, () => toggleLike(song))}
 			>
 				<HugeiconsIcon icon={FavouriteIcon} class="h-4 w-4 {liked ? 'fill-current text-primary' : ''}" />
@@ -166,7 +170,9 @@
 		</button>
 		{#if onAdd && !isLocal}
 			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				class="w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 {linksOnly
+					? 'flex lg:hidden'
+					: 'flex'}"
 				onclick={(e) => run(e, onAdd)}
 			>
 				<HugeiconsIcon icon={PlayListAddIcon} class="h-4 w-4" /> Add to playlist

@@ -33,6 +33,7 @@
 		toggleNowPlayingLike
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
+	import Marquee from './Marquee.svelte';
 
 	const now = $derived(playback.now);
 	const shuffleOn = $derived(playback.queue.shuffle ?? false);
@@ -196,10 +197,11 @@
 		</div>
 
 		<div class="min-w-0 [text-shadow:0_1px_4px_rgb(0_0_0/0.7)]">
-			<div class="truncate font-heading text-[0.95rem] font-semibold leading-tight text-white">
-				{now?.title ?? 'Nothing playing'}
-			</div>
-			<div class="truncate text-xs leading-snug text-white/75">{now?.artists ?? ''}</div>
+			<Marquee
+				text={now?.title ?? 'Nothing playing'}
+				class="font-heading text-[0.95rem] font-semibold leading-tight text-white"
+			/>
+			<Marquee text={now?.artists ?? ''} class="text-xs leading-snug text-white/75" />
 		</div>
 
 		<div class="flex items-center gap-2">
