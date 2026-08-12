@@ -2,7 +2,9 @@
 	import * as api from '$lib/api';
 	import { playback } from '$lib/player.svelte';
 
-	// `expanded` sizes the type and centres the column.
+	// `expanded` only sizes the type and centres the column. The owner of the extra room (the side
+	// panel, or the now-playing view) decides how much there is. Toggling it must not remount this
+	// component, or the lyrics refetch and the scroll position is lost.
 	let { expanded = false }: { expanded?: boolean } = $props();
 
 	/** "3:21" / "1:02:03" → seconds. */
@@ -32,19 +34,22 @@
 		const id = (requested = now.videoId);
 		loading = true;
 		lyrics = null;
+		// Album isn't in now-playing, but the queue item usually has it — better LRCLIB matching.
 		const album = playback.queue.items[playback.queue.currentIndex]?.album;
 		api.getLyrics({
 			videoId: id,
 			title: now.title,
 			artists: now.artists,
 			album: album ?? undefined,
+			// The track's own length — NOT playback.duration, which still holds the previous
+			// track's value for a moment after a track change.
 			duration: durationSecs(now.duration)
 		})
 			.then((l) => {
 				if (requested !== id) return;
 				lyrics = l;
 				loading = false;
-				hasScrolled = false;
+				hasScrolled = false; // first positioning on a new track is an instant jump
 			})
 			.catch(() => {
 				if (requested !== id) return;
@@ -52,7 +57,7 @@
 			});
 	});
 
-	// Last synced line whose cue has passed.
+	// Last synced line whose cue has passed (lines arrive sorted by time).
 	const activeIndex = $derived.by(() => {
 		if (!lyrics?.synced) return -1;
 		const currentMs = posMs;
@@ -66,6 +71,8 @@
 		return i;
 	});
 
+	// Auto-scroll pauses while the user is scrolling (wheel/touch/scrollbar), resumes after 3s.
+	// Tracked via input events, not `scroll`, so our own smooth scrolls don't trip it.
 	let userScrollUntil = 0;
 	let hasScrolled = false;
 	function onUserScroll() {
@@ -76,6 +83,8 @@
 
 	$effect(() => {
 		const i = activeIndex;
+		// Re-centre after the layout width/font changes, and jump rather than glide across it.
+		// (Also fires on the first run, where both values are already at their defaults.)
 		if (expanded !== wasExpanded) {
 			wasExpanded = expanded;
 			hasScrolled = false;
@@ -83,6 +92,7 @@
 		}
 		if (i < 0 || !scroller || Date.now() < userScrollUntil) return;
 		scroller.querySelector(`[data-line="${i}"]`)?.scrollIntoView({
+			// Opening mid-song jumps straight to the line; after that, glide.
 			behavior: hasScrolled ? 'smooth' : 'instant',
 			block: 'center'
 		});
@@ -92,8 +102,8 @@
 	function seekTo(line: api.LyricLine) {
 		if (line.time_ms === undefined) return;
 		const secs = line.time_ms / 1000;
-		playback.position = secs;
-		userScrollUntil = 0;
+		playback.position = secs; // optimistic — the mpv tick confirms
+		userScrollUntil = 0; // jump the view along with the seek
 		api.seek(secs);
 	}
 
@@ -131,7 +141,7 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_no_static_element_interactions -- handlers only detect scroll intent -->
 <div
 	bind:this={scroller}
 	onwheel={onUserScroll}
@@ -148,6 +158,7 @@
 	{:else if lyrics?.instrumental}
 		<p class="py-8 text-center text-lg text-muted-foreground">Instrumental ♪</p>
 	{:else if lyrics && lyrics.synced}
+		<!-- Padding lets the first/last lines center-scroll. -->
 		<div class="py-[35vh] {expanded ? 'mx-auto max-w-3xl' : ''}">
 			{#each lyrics.lines as line, i (i)}
 				{@const isActive = i === activeIndex}
@@ -155,7 +166,7 @@
 				<button
 					data-line={i}
 					onclick={() => seekTo(line)}
-					class="group block w-full origin-left cursor-pointer text-left font-heading font-bold leading-snug transition-all duration-300 ease-out hover:text-foreground
+					class="block w-full origin-left cursor-pointer text-left font-heading font-bold leading-snug transition-[color,transform] duration-300 ease-out hover:text-foreground
 						{expanded ? 'py-3 text-3xl' : 'py-2 text-xl'}
 						{isActive
 						? 'scale-[1.04] text-foreground'
