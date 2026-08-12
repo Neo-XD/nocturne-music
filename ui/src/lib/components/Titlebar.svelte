@@ -5,9 +5,12 @@
 	// close — per the design, the scrobbler lives with the window controls but visually apart.
 	// Account (sign in/out) sits first in that cluster, in its own component.
 	import { onMount } from 'svelte';
+	import { afterNavigate } from '$app/navigation';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
+		ArrowLeft01Icon,
+		ArrowRight01Icon,
 		MinusSignIcon,
 		SquareIcon,
 		Cancel01Icon,
@@ -24,6 +27,18 @@
 	import { openMiniPlayer, toast } from '$lib/player.svelte';
 
 	const win = getCurrentWindow();
+
+	// Back/forward. `depth` is how many history entries deep the session is, `deepest` how far it
+	// has ever been, so both buttons grey out instead of doing nothing. popstate carries a signed
+	// delta (the mouse's side buttons come through here); anything else is a push, which wipes the
+	// entries ahead of us.
+	let depth = $state(0);
+	let deepest = $state(0);
+	afterNavigate((nav) => {
+		if (nav.type === 'enter') depth = deepest = 0;
+		else if (nav.delta !== undefined) depth = Math.max(0, depth + nav.delta);
+		else deepest = depth += 1;
+	});
 
 	// Last.fm connection state. `connecting` is UI-local: set on click, cleared by the
 	// `lastfm-state` event (success, failure, or timeout) — the backend always answers.
@@ -126,8 +141,30 @@
 		Limusic
 	</span>
 
-	<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->
-	<img src={logo} alt="" class="pointer-events-none ml-3 h-4 w-4" />
+	<div class="flex h-full items-center">
+		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->
+		<img src={logo} alt="" class="pointer-events-none ml-3 mr-1 h-4 w-4" />
+		<!-- Bigger and heavier than the icons on the right: these are navigation, and at their
+		     weight the arrow read as decoration and got missed. -->
+		<button
+			class="flex h-full w-9 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+			onclick={() => history.back()}
+			disabled={depth === 0}
+			title="Back"
+			aria-label="Back"
+		>
+			<HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2.5} class="h-5 w-5" />
+		</button>
+		<button
+			class="flex h-full w-9 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+			onclick={() => history.forward()}
+			disabled={depth === deepest}
+			title="Forward"
+			aria-label="Forward"
+		>
+			<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2.5} class="h-5 w-5" />
+		</button>
+	</div>
 
 	<div class="flex h-full items-center">
 		<!-- Account first, then the integrations, then the window controls. The drag region lives on

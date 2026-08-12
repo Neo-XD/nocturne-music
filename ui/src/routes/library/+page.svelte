@@ -1,3 +1,9 @@
+<script module lang="ts">
+	// Module scope, so returning to the library (back from an album you opened, or via the sidebar)
+	// keeps the tab you were on instead of snapping to All.
+	let lastTab = 'all';
+</script>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
@@ -33,7 +39,10 @@
 	let busy = $state(false);
 	// `?tab=local` so anything that sends you back here (an album whose files were deleted) lands
 	// on the tab you came from instead of a sign-in prompt.
-	let tab = $state(page.url.searchParams.get('tab') ?? 'all');
+	let tab = $state(page.url.searchParams.get('tab') ?? lastTab);
+	$effect(() => {
+		lastTab = tab;
+	});
 
 	// Everything here lives in the shared `library` store, so a revisit renders the cached grid
 	// immediately and the forced refresh below swaps in fresh data behind it.

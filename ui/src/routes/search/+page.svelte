@@ -1,4 +1,12 @@
+<script module lang="ts">
+	// Survives remounts (module scope), so coming back to /search — from a result you clicked, or
+	// from the sidebar — shows the last search instead of a blank page. The results themselves come
+	// back from the page cache, so the rerun paints instantly and just revalidates.
+	let lastQuery = '';
+</script>
+
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -17,7 +25,7 @@
 	import { openAddToPlaylist, playSong } from '$lib/player.svelte';
 	import { asSong } from '$lib/browse';
 
-	let query = $state('');
+	let query = $state(lastQuery);
 	let res = $state<SearchResults | null>(null);
 	let searched = $state('');
 	let searching = $state(false);
@@ -30,6 +38,7 @@
 		if (!query.trim()) return;
 		const q = query;
 		latest = q;
+		lastQuery = q;
 		const key = `search:${q}`;
 		const hit = getCached<SearchResults>(key);
 		if (hit) {
@@ -68,6 +77,12 @@
 			query = urlQuery;
 			runSearch();
 		}
+	});
+
+	// Arriving without a ?q= (back from a result, or the sidebar link): rerun whatever was last
+	// searched. onMount, not the effect above, so a ?q= arrival still wins.
+	onMount(() => {
+		if (!urlQuery && query) runSearch();
 	});
 
 	// Sections are horizontal card rows, except Songs which is a vertical list. `top` has no "show more".
