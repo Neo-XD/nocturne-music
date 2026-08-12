@@ -97,42 +97,27 @@
 		api.seek(secs);
 	}
 
-	// 60 FPS smooth high-precision position interpolation for fluid word-by-word karaoke sweep
+	// mpv's position arrives ~4x a second. Run a local clock forward from each one so the karaoke
+	// sweep moves every frame instead of stepping four times a second.
 	let interpolatedPosSecs = $state(playback.position);
-	let lastBackendPos = playback.position;
-	let lastBackendTime = 0;
 
 	$effect(() => {
 		const pos = playback.position;
-		const paused = playback.paused;
-		const now = performance.now();
-
-		if (paused) {
+		if (playback.paused) {
 			interpolatedPosSecs = pos;
-			lastBackendPos = pos;
-			lastBackendTime = now;
 			return;
 		}
-
-		// When backend emits a new position tick (or jump/seek), resync base
-		if (Math.abs(pos - lastBackendPos) > 0.05 || lastBackendTime === 0) {
-			lastBackendPos = pos;
-			lastBackendTime = now;
-		}
-
-		let frameId: number;
-		function updateFrame() {
-			if (!playback.paused) {
-				const elapsedSecs = (performance.now() - lastBackendTime) / 1000;
-				interpolatedPosSecs = lastBackendPos + elapsedSecs;
-				frameId = requestAnimationFrame(updateFrame);
-			}
-		}
-		frameId = requestAnimationFrame(updateFrame);
-
-		return () => {
-			if (frameId) cancelAnimationFrame(frameId);
-		};
+		// Rebase on every run. Rebasing only when the value moved kept the base timestamp from
+		// before a pause, so resuming after N seconds paused ran the clock N seconds fast until
+		// the next tick corrected it.
+		const base = pos;
+		const baseAt = performance.now();
+		interpolatedPosSecs = pos;
+		let frameId = requestAnimationFrame(function tick() {
+			interpolatedPosSecs = base + (performance.now() - baseAt) / 1000;
+			frameId = requestAnimationFrame(tick);
+		});
+		return () => cancelAnimationFrame(frameId);
 	});
 
 	const posMs = $derived(interpolatedPosSecs * 1000);
