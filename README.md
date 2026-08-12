@@ -97,11 +97,19 @@ Open the panel with the microphone button in the player bar, next to the queue
 button. It takes the same side of the window as the queue, so opening one closes
 the other.
 
-Lyrics come from [LRCLIB](https://lrclib.net) first, then YouTube Music's own
-timed lyrics, falling back to plain un-timed text when nobody has a synced
-version. Matching is keyed on the track's exact length, because popular songs
-exist as several cuts and the wrong one drifts a few seconds out. Results are
-cached locally, so replaying a track is instant.
+Lyrics come from [Boidu](https://boidu.dev) first, then
+[LRCLIB](https://lrclib.net), then YouTube Music's own timed lyrics, then
+Netease, QQ Music and Kugou, falling back to plain un-timed text when nobody has
+a synced version. Matching is keyed on the track's exact length, because popular
+songs exist as several cuts and the wrong one drifts a few seconds out. Results
+are cached locally, so replaying a track is instant.
+
+Boidu is the only source with per-word timings, which is what lets a line
+highlight word by word as it's sung. It goes first for that reason, which also
+means it is asked about every track you play. Turn it off in **Settings ->
+Playback -> Word-by-word lyrics** and the other sources still provide
+line-by-line lyrics. Netease additionally supplies translations, shown under
+each line where it has them.
 
 Note that YouTube Music's lyrics are licensed per region and are missing
 entirely in some countries — where that's the case, LRCLIB does all the work.
