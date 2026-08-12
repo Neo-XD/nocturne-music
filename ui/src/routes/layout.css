@@ -473,14 +473,23 @@
 		   can paint rounded corners (see +layout.svelte). */
 		@apply bg-transparent text-foreground;
 	}
+	html,
+	body {
+		/* Chromium (WebView2, so Windows) rubber-bands the whole page when a wheel reaches the
+		   viewport with nothing left to scroll — and off Android it does that even along an axis
+		   that never scrolls, picking the axis from whatever delta is left over. The titlebar has
+		   no scrollable ancestor at all, so every wheel over it lands there, and a hair of sideways
+		   delta slides the page left or right. The window is transparent and undecorated, so the
+		   bounce pulls the app off its own frame and shows the desktop through the gap (issue #9).
+		   WebKitGTK has no elastic overscroll, hence never on Fedora.
+
+		   On both elements deliberately: Chromium takes the viewport's overscroll-behavior from the
+		   viewport-defining element, which is <body> while <html> has visible overflow. Only 140+
+		   reads it off <html>, so on an older WebView2 the <html> rule alone is dead CSS. */
+		overscroll-behavior: none;
+	}
 	html {
 		@apply font-sans;
-		/* Chromium (WebView2, so Windows) rubber-bands the whole page when a wheel reaches the
-		   viewport with nothing left to scroll. The titlebar has no scrollable ancestor at all, so
-		   every wheel over it lands there. The window is transparent and undecorated, so instead of
-		   a harmless wobble the bounce slides the titlebar off the top and shows the desktop
-		   through the gap (issue #9). WebKitGTK has no elastic overscroll, hence never on Fedora. */
-		overscroll-behavior: none;
 	}
 }
 
