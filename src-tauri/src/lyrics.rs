@@ -743,7 +743,7 @@ async fn qqmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Err
 async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
     let query = format!("{} {}", req.title, req.artists);
     let search_url = format!(
-        "http://songsearch.kugou.com/song_search_v2?keyword={}&page=1&pagesize=5",
+        "https://songsearch.kugou.com/song_search_v2?keyword={}&page=1&pagesize=5",
         urlencoding::encode(&query)
     );
     let resp: serde_json::Value = match crate::http::client()
@@ -770,7 +770,10 @@ async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
         return Ok(None);
     };
 
-    let krc_url = format!("http://krcs.kugou.com/search?b=1&h={h}");
+    // `hash=`, not `h=`: the latter is not a parameter this endpoint knows, so it answered
+    // "paramter_error: empty hash and keyword" for every track and the provider never returned
+    // anything at all.
+    let krc_url = format!("https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash={h}");
     let krc_resp: serde_json::Value = match crate::http::client()
         .get(&krc_url)
         .timeout(Duration::from_secs(8))
@@ -795,7 +798,7 @@ async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
     };
 
     let dl_url = format!(
-        "http://lyrics.kugou.com/download?ver=1&client=pc&id={id_str}&accesskey={key_str}&fmt=lrc"
+        "https://lyrics.kugou.com/download?ver=1&client=pc&id={id_str}&accesskey={key_str}&fmt=lrc"
     );
     let dl_resp: serde_json::Value = match crate::http::client()
         .get(&dl_url)
@@ -1344,4 +1347,5 @@ mod tests {
         assert!(lyrics.lines[0].words.is_some());
     }
 }
+
 
