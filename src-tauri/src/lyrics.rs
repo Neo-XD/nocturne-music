@@ -412,6 +412,26 @@ fn plain_from_text(text: Option<&str>, source: &str) -> Option<Lyrics> {
     })
 }
 
+/// A provider's parsed lines as a result, or `None` when there was nothing to show.
+///
+/// `synced` is derived from the lines rather than asserted by the caller. TTML without `begin`
+/// attributes, and JSON items carrying text but no time, both parse to real lines with no cue.
+/// Declaring those synced puts the UI in its synced view, where no line ever highlights (none has
+/// a cue to pass) and clicking one to seek does nothing: lyrics that look broken, rather than
+/// lyrics that read as plain text.
+fn from_parsed(source: &str, lines: Vec<LyricLine>) -> Option<Lyrics> {
+    if lines.is_empty() {
+        return None;
+    }
+    Some(Lyrics {
+        source: source.to_owned(),
+        // Any cue at all: an LRC with untimed credit or stanza lines is still a synced lyric.
+        synced: lines.iter().any(|l| l.time_ms.is_some()),
+        instrumental: false,
+        lines,
+    })
+}
+
 // --- LRC parsing ----------------------------------------------------------------------------
 
 /// Parse LRC text (`[mm:ss.xx] line`) into sorted lines. Handles multiple timestamps per line
@@ -534,20 +554,12 @@ async fn boidu_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
             None
         });
 
-    if let Some(lrc) = lrc_str {
-        let lines = parse_lrc_or_ttml(&lrc);
-        if !lines.is_empty() {
-            tracing::debug!(count = lines.len(), "lyrics: Boidu hit!");
-            return Ok(Some(Lyrics {
-                source: "Boidu".into(),
-                synced: true,
-                instrumental: false,
-                lines,
-            }));
-        }
+    let hit = lrc_str.and_then(|lrc| from_parsed("Boidu", parse_lrc_or_ttml(&lrc)));
+    match &hit {
+        Some(l) => tracing::debug!(count = l.lines.len(), synced = l.synced, "lyrics: Boidu hit"),
+        None => tracing::debug!("lyrics: Boidu returned no lines"),
     }
-    tracing::debug!("lyrics: Boidu returned no lines");
-    Ok(None)
+    Ok(hit)
 }
 
 /// How far a search hit's length may sit from the track we're actually playing. Same tolerance the
@@ -659,14 +671,7 @@ async fn netease_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Err
                 }
             }
         }
-        if !lines.is_empty() {
-            return Ok(Some(Lyrics {
-                source: "Netease Cloud Music".into(),
-                synced: true,
-                instrumental: false,
-                lines,
-            }));
-        }
+        return Ok(from_parsed("Netease Cloud Music", lines));
     }
     Ok(None)
 }
@@ -731,16 +736,7 @@ async fn qqmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Err
             lyric_raw = &decoded;
         }
     }
-    let lines = parse_lrc_or_ttml(lyric_raw);
-    if !lines.is_empty() {
-        return Ok(Some(Lyrics {
-            source: "QQ Music".into(),
-            synced: true,
-            instrumental: false,
-            lines,
-        }));
-    }
-    Ok(None)
+    Ok(from_parsed("QQ Music", parse_lrc_or_ttml(lyric_raw)))
 }
 
 /// Kugou provider
@@ -822,15 +818,7 @@ async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
         base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64_content)
     {
         if let Ok(lrc_str) = String::from_utf8(bytes) {
-            let lines = parse_lrc_or_ttml(&lrc_str);
-            if !lines.is_empty() {
-                return Ok(Some(Lyrics {
-                    source: "Kugou".into(),
-                    synced: true,
-                    instrumental: false,
-                    lines,
-                }));
-            }
+            return Ok(from_parsed("Kugou", parse_lrc_or_ttml(&lrc_str)));
         }
     }
     Ok(None)
@@ -1276,6 +1264,25 @@ mod tests {
         assert_eq!(words.len(), 1);
         assert_eq!(words[0].text, "歌う");
         assert_eq!(words[0].end_ms, 12500);
+    }
+
+    #[test]
+    fn from_parsed_derives_synced_from_the_lines() {
+        // TTML with no `begin` parses to real lines carrying no cue. Declaring those synced is
+        // what put the UI in a synced view whose highlight could never move.
+        let untimed = parse_lrc_or_ttml("<tt><body><div><p>no timing here</p></div></body></tt>");
+        assert!(!untimed.is_empty());
+        assert!(!from_parsed("X", untimed).unwrap().synced);
+
+        // Same for a JSON payload whose items carry text but no time.
+        let json = parse_lrc_or_ttml(r#"[{"text":"one"},{"text":"two"}]"#);
+        assert!(!json.is_empty());
+        assert!(!from_parsed("X", json).unwrap().synced);
+
+        let timed = parse_lrc_or_ttml("[00:01.00]one\n[00:02.00]two");
+        assert!(from_parsed("X", timed).unwrap().synced);
+
+        assert!(from_parsed("X", Vec::new()).is_none());
     }
 
     /// Real Kugou/Netease search shapes: the original is not first, and a remix sits inside the
