@@ -15,8 +15,8 @@ pub use clients::{
     STREAM_FALLBACK_ORDER,
 };
 pub use models::browse::{
-    AlbumPage, ArtistCarousel, ArtistPage, BrowseItem, HomePage, PlaylistContinuation, PlaylistPage,
-    SearchResults, Section,
+    AlbumPage, ArtistCarousel, ArtistPage, BrowseItem, HomePage, PlaylistContinuation,
+    PlaylistPage, SearchResults, Section,
 };
 pub use models::context::Locale;
 pub use models::lyrics::{PlainLyrics, TimedLyricLine};

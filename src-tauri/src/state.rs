@@ -175,10 +175,7 @@ impl AppState {
             .ok()
             .or_else(|| self.db.get_setting("disabled_stream_clients"))
             .unwrap_or_default();
-        raw.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+        raw.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
     }
 
     // --- auth (context/15) ------------------------------------------------------------------
@@ -287,10 +284,8 @@ impl AppState {
                 stream_client: "cache".to_owned(),
             });
         }
-        let data = self
-            .orchestrator
-            .resolve(video_id, self.quality(), &self.disabled_clients())
-            .await?;
+        let data =
+            self.orchestrator.resolve(video_id, self.quality(), &self.disabled_clients()).await?;
         // Never cache rustypipe URLs: googlevideo serves them only for bounded-Range requests,
         // which mpv doesn't send → LOADING_FAILED(-13). Caching one poisons the videoId for ~6h.
         if data.stream_client != "rustypipe" {
@@ -352,7 +347,15 @@ impl AppState {
         // directly (`RDAMVM<videoId>`): a bare next(videoId) returns only the seed song + an
         // automixPreviewVideoRenderer, so the queue would never grow past one track.
         let radio_id = format!("RDAMVM{video_id}");
-        match self.it.next(self.clients.get(innertube::METADATA_CLIENT).unwrap(), Some(&video_id), Some(&radio_id)).await {
+        match self
+            .it
+            .next(
+                self.clients.get(innertube::METADATA_CLIENT).unwrap(),
+                Some(&video_id),
+                Some(&radio_id),
+            )
+            .await
+        {
             Ok(next) => {
                 let mut q = self.queue.lock().await;
                 if self.generation.load(Ordering::SeqCst) != gen {
@@ -419,7 +422,9 @@ impl AppState {
             let keep_shuffled = q.shuffle_orig.is_some() || shuffle;
             let start = match start {
                 Some(i) => i.min(items.len() - 1),
-                None if keep_shuffled => rand::Rng::gen_range(&mut rand::thread_rng(), 0..items.len()),
+                None if keep_shuffled => {
+                    rand::Rng::gen_range(&mut rand::thread_rng(), 0..items.len())
+                }
                 None => 0,
             };
             // Unplayed manual adds survive a context switch (Spotify semantics) — spliced back in
@@ -561,8 +566,11 @@ impl AppState {
         let Some(video_id) = video_id else { return Err(NO_RADIO.into()) };
         let bare = self.it.next(client, Some(video_id), None).await.map_err(|e| e.to_string())?;
         if let Some(mix) = bare.automix_playlist_id {
-            let page =
-                self.it.next(client, Some(video_id), Some(&mix)).await.map_err(|e| e.to_string())?;
+            let page = self
+                .it
+                .next(client, Some(video_id), Some(&mix))
+                .await
+                .map_err(|e| e.to_string())?;
             if page.items.len() > 1 {
                 return Ok((page.items, mix));
             }
@@ -608,12 +616,7 @@ impl AppState {
     ///
     /// Guarded by `gen`: if the user starts something else mid-walk, the pages are dropped rather
     /// than appended to a queue they don't belong to. [`Fill`] says which queue the pages join.
-    async fn fill_playlist(
-        self: &std::sync::Arc<Self>,
-        gen: u64,
-        mut token: String,
-        fill: Fill,
-    ) {
+    async fn fill_playlist(self: &std::sync::Arc<Self>, gen: u64, mut token: String, fill: Fill) {
         // ponytail: ~5k tracks at 100/page. A bound so a playlist that keeps handing out tokens
         // can't walk forever; raise it if a real playlist ever hits the cap.
         const MAX_PAGES: usize = 50;
@@ -807,7 +810,7 @@ impl AppState {
         }
         self.emit_queue().await;
         self.persist_queue().await; // index advanced without an explicit load → persist it
-        // Listen Together host: announce the gapless advance to the room.
+                                    // Listen Together host: announce the gapless advance to the room.
         self.lt_broadcast_current_track(0, true).await;
         tracing::info!("advanced to next track (gapless)");
         // Prime off the pump, not on it. `prime_lookahead` resolves the next stream over the
@@ -931,7 +934,9 @@ impl AppState {
         if self.generation.load(Ordering::SeqCst) != gen {
             return false; // user moved on
         }
-        if let Err(e) = self.player.load(&data.stream_url, &data.headers, loudness_gain(data.loudness_db)) {
+        if let Err(e) =
+            self.player.load(&data.stream_url, &data.headers, loudness_gain(data.loudness_db))
+        {
             self.emit_error(&item.video_id, &e.to_string());
             return false;
         }
@@ -1043,7 +1048,13 @@ impl AppState {
     }
 
     /// Second half of [`Self::prime_lookahead`]: hand the resolved stream to mpv and record it.
-    async fn enqueue_lookahead(self: &std::sync::Arc<Self>, gen: u64, next_idx: usize, next_video: &str, data: PlaybackData) {
+    async fn enqueue_lookahead(
+        self: &std::sync::Arc<Self>,
+        gen: u64,
+        next_idx: usize,
+        next_video: &str,
+        data: PlaybackData,
+    ) {
         if self.generation.load(Ordering::SeqCst) != gen {
             return;
         }
@@ -1062,7 +1073,10 @@ impl AppState {
         // per end-file, that offsets mpv from `current` for the rest of the session: the dup replays
         // while the UI shows the track after it.
         if q.lookahead_loaded == Some(next_idx) {
-            tracing::debug!(index = next_idx, "lookahead already primed by a concurrent resolve — dropped");
+            tracing::debug!(
+                index = next_idx,
+                "lookahead already primed by a concurrent resolve — dropped"
+            );
             return;
         }
         // Headers are global in mpv; the direct-URL clients need none beyond UA, which the
@@ -1132,7 +1146,11 @@ impl AppState {
         if let Some(m) = &self.media {
             // MPRIS/SMTC want a URL; a local track's artwork is a path, so hand it a file:// one.
             let cover = item.thumbnail.as_ref().map(|t| {
-                if t.starts_with('/') { format!("file://{t}") } else { t.clone() }
+                if t.starts_with('/') {
+                    format!("file://{t}")
+                } else {
+                    t.clone()
+                }
             });
             m.set_metadata(&item.title, &item.artists, item.album.as_deref(), cover.as_deref());
         }
@@ -1243,9 +1261,10 @@ impl AppState {
     /// persistent error banner: the queue keeps playing, so this shouldn't read as a failure.
     fn emit_skip(&self, title: &str) {
         tracing::warn!(title, "skipping unplayable track");
-        let _ = self
-            .app
-            .emit("playback-notice", serde_json::json!({ "message": format!("Skipped (unavailable): {title}") }));
+        let _ = self.app.emit(
+            "playback-notice",
+            serde_json::json!({ "message": format!("Skipped (unavailable): {title}") }),
+        );
     }
 
     pub async fn queue_snapshot(&self) -> serde_json::Value {
@@ -1435,10 +1454,8 @@ impl AppState {
             .get("repeat")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-        let shuffle_orig: Option<Vec<SongItem>> = saved
-            .get("shuffleOrig")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .flatten();
+        let shuffle_orig: Option<Vec<SongItem>> =
+            saved.get("shuffleOrig").and_then(|v| serde_json::from_value(v.clone()).ok()).flatten();
         let radio_seed: Option<String> =
             saved.get("radioSeed").and_then(|v| v.as_str()).map(str::to_owned);
         let source_name: Option<String> =
@@ -1573,7 +1590,8 @@ impl AppState {
             // happened while we were away aren't missing until the next track change.
             self.lt_mirror_queue(state.queue).await;
         } else {
-            self.lt_apply_change_track(track, state.position_ms, state.is_playing, state.queue).await;
+            self.lt_apply_change_track(track, state.position_ms, state.is_playing, state.queue)
+                .await;
         }
     }
 
@@ -1612,13 +1630,16 @@ impl AppState {
         if self.generation.load(Ordering::SeqCst) != gen {
             return; // superseded by a newer sync
         }
-        if let Err(e) = self.player.load(&data.stream_url, &data.headers, loudness_gain(data.loudness_db)) {
+        if let Err(e) =
+            self.player.load(&data.stream_url, &data.headers, loudness_gain(data.loudness_db))
+        {
             self.emit_error(&track.id, &e.to_string());
             return;
         }
         // Seek first (mpv queues it until the file loads), then set play/pause — avoids a blip of
         // audio at 0 before the seek lands.
-        let target_ms = if playing { position_ms + t0.elapsed().as_millis() as i64 } else { position_ms };
+        let target_ms =
+            if playing { position_ms + t0.elapsed().as_millis() as i64 } else { position_ms };
         let pos = target_ms as f64 / 1000.0;
         if pos > 0.5 {
             let _ = self.player.seek(pos);
@@ -1720,7 +1741,8 @@ impl AppState {
         }
         self.player.seek(position).map_err(|e| e.to_string())?;
         if self.lt.is_host().await {
-            self.lt.broadcast_playback(Playback::at(PlaybackKind::Seek, (position * 1000.0) as i64))
+            self.lt
+                .broadcast_playback(Playback::at(PlaybackKind::Seek, (position * 1000.0) as i64))
                 .await;
         }
         Ok(())
@@ -1920,7 +1942,8 @@ impl AppState {
                 // A shuffle snapshot still holding the dropped tracks would resurrect them the
                 // moment shuffle goes off (it rebuilds the queue from the snapshot).
                 if let Some(orig) = q.shuffle_orig.take() {
-                    let kept: HashSet<String> = q.items.iter().map(|i| i.video_id.clone()).collect();
+                    let kept: HashSet<String> =
+                        q.items.iter().map(|i| i.video_id.clone()).collect();
                     q.shuffle_orig =
                         Some(orig.into_iter().filter(|i| kept.contains(&i.video_id)).collect());
                 }
@@ -2414,7 +2437,6 @@ pub fn saved_volume(db: &Db) -> i64 {
     v.filter(|v| (0..=100).contains(v)).unwrap_or(100)
 }
 
-
 /// Per-track loudness gain (dB) from YouTube's `loudnessDb` (context/03, context/14). Attenuate
 /// only toward reference loudness: loud masters get pulled down, quieter tracks aren't boosted,
 /// so there's no clipping and no limiter to add.
@@ -2441,10 +2463,9 @@ const TARGET_LUFS: f64 = -7.0;
 mod tests {
     use super::{
         append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration,
-        guest_insert_index, is_mix,
-        loudness_gain, merge_radio, next_index, parse_duration_ms, radio_seed_for,
-        shuffle_new_queue, shuffle_upcoming, splice_radio_into, unshuffled, upcoming_queued,
-        QueueState, RepeatMode,
+        guest_insert_index, is_mix, loudness_gain, merge_radio, next_index, parse_duration_ms,
+        radio_seed_for, shuffle_new_queue, shuffle_upcoming, splice_radio_into, unshuffled,
+        upcoming_queued, QueueState, RepeatMode,
     };
 
     #[test]
@@ -2490,7 +2511,10 @@ mod tests {
             artists: artists.into(),
             artist_runs: runs
                 .into_iter()
-                .map(|t| innertube::models::metadata::ArtistRun { text: t.into(), id: Some("UCstale".into()) })
+                .map(|t| innertube::models::metadata::ArtistRun {
+                    text: t.into(),
+                    id: Some("UCstale".into()),
+                })
                 .collect(),
             ..song("v", None)
         };
@@ -2502,7 +2526,11 @@ mod tests {
 
         // A display subtitle that was parsed as the artist → replaced, and the links that pointed
         // at the old text go with it (the UI renders runs instead of `artists` when they exist).
-        for bogus in ["Miley Cyrus • Plastic Hearts • 2020", "late night slow • 29M views", "Song • Dua Lipa"] {
+        for bogus in [
+            "Miley Cyrus • Plastic Hearts • 2020",
+            "late night slow • 29M views",
+            "Song • Dua Lipa",
+        ] {
             let mut it = with(bogus, vec![bogus]);
             backfill_metadata(&mut it, None, Some("Dua Lipa"));
             assert_eq!(it.artists, "Dua Lipa", "{bogus} should have been replaced");
@@ -2609,7 +2637,7 @@ mod tests {
         splice_radio_into(&mut q, page, "RDAMVMnow".into(), None);
 
         assert_eq!(q.items[0].video_id, "now"); // the playing track never moves
-        // Un-shuffle has the whole radio to restore, not just what was there before it started.
+                                                // Un-shuffle has the whole radio to restore, not just what was there before it started.
         let orig = q.shuffle_orig.as_ref().unwrap();
         assert_eq!(orig.len(), 51);
         let mut a: Vec<_> = orig.iter().map(|i| i.video_id.clone()).collect();
@@ -2654,8 +2682,8 @@ mod tests {
             assert_eq!(q.items.len(), 103);
             assert_eq!(q.items[0].video_id, "a"); // playing
             assert_eq!(q.items[1].video_id, "b"); // primed gapless slot, pinned
-            // Un-shuffle restores the whole playlist, including pages that arrived after playback
-            // started.
+                                                  // Un-shuffle restores the whole playlist, including pages that arrived after playback
+                                                  // started.
             assert_eq!(ids(q.shuffle_orig.as_ref().unwrap()).len(), 103);
             assert_eq!(ids(q.shuffle_orig.as_ref().unwrap())[..3], ["a", "b", "c"]);
             let mut sorted = ids(&q.items);
@@ -2757,7 +2785,11 @@ mod tests {
         assert_eq!(enqueue_at(&q), 2);
 
         // Filler that's *playing* is kept — the track finishes (nothing before `current + 1` goes).
-        let q = QueueState { items: vec![song("a", None), auto("r1")], current: 1, ..QueueState::default() };
+        let q = QueueState {
+            items: vec![song("a", None), auto("r1")],
+            current: 1,
+            ..QueueState::default()
+        };
         assert_eq!(enqueue_at(&q), 2);
 
         // A second add lands behind the first block, not inside it — and still ahead of filler.
@@ -2846,7 +2878,7 @@ mod tests {
         let mut want = ids.clone();
         want.sort();
         assert_eq!(got, want); // …and the rest is a permutation of everything else
-        // Degenerate cases: empty and single-item queues don't panic.
+                               // Degenerate cases: empty and single-item queues don't panic.
         let mut empty: Vec<innertube::SongItem> = vec![];
         assert_eq!(shuffle_new_queue(&mut empty, 3), 0);
         let mut one = vec![song("only", None)];
@@ -2859,8 +2891,7 @@ mod tests {
         let solo = |id: &str| innertube::SongItem { queued: true, ..song(id, None) };
         // Playing B (index 1); Q1/Q2 are unplayed manual adds, Q0 already played — only the
         // unplayed ones carry into a new queue.
-        let items =
-            vec![solo("q0"), song("b", None), solo("q1"), song("c", None), solo("q2")];
+        let items = vec![solo("q0"), song("b", None), solo("q1"), song("c", None), solo("q2")];
         let carried = upcoming_queued(&items, 1);
         let ids: Vec<_> = carried.iter().map(|i| i.video_id.as_str()).collect();
         assert_eq!(ids, ["q1", "q2"]);
@@ -2945,7 +2976,13 @@ mod tests {
         let existing: std::collections::HashSet<String> =
             items.iter().map(|i| i.video_id.clone()).collect();
         // "a" is already queued, "c" appears twice in the radio result — one copy survives.
-        let fresh = vec![song("a", None), song("c", None), song("c", None), song("d", None), song("e", None)];
+        let fresh = vec![
+            song("a", None),
+            song("c", None),
+            song("c", None),
+            song("d", None),
+            song("e", None),
+        ];
         let added = merge_radio(&mut items, fresh, existing.clone(), 2);
         assert_eq!(added, 2); // cap honored: c + d, e cut off
         let ids: Vec<_> = items.iter().map(|i| i.video_id.as_str()).collect();

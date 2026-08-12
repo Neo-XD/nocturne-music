@@ -48,9 +48,8 @@ impl InnerTube {
             playback_context: sts.map(|signature_timestamp| PlaybackContext {
                 content_playback_context: ContentPlaybackContext { signature_timestamp },
             }),
-            service_integrity_dimensions: po_token.map(|t| ServiceIntegrityDimensions {
-                po_token: t.to_owned(),
-            }),
+            service_integrity_dimensions: po_token
+                .map(|t| ServiceIntegrityDimensions { po_token: t.to_owned() }),
             content_check_ok: true,
             racy_check_ok: true,
         };
@@ -264,7 +263,10 @@ impl InnerTube {
     }
 
     /// Library playlists grid (`FEmusic_liked_playlists`). context/08. Needs login.
-    pub async fn library_playlists(&self, client: &YouTubeClient) -> Result<Vec<BrowseItem>, Error> {
+    pub async fn library_playlists(
+        &self,
+        client: &YouTubeClient,
+    ) -> Result<Vec<BrowseItem>, Error> {
         let value = self.browse(client, Some("FEmusic_liked_playlists"), None).await?;
         Ok(browse::parse_library(&value))
     }

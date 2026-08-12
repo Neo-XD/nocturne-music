@@ -176,8 +176,7 @@ impl InnerTube {
                 // stored cookie has gone stale. Raw reqwest text here reads as a broken app and
                 // hands the user a URL instead of the one thing that fixes it.
                 Err(e)
-                    if self.is_logged_in()
-                        && e.status().is_some_and(|s| s == 401 || s == 403) =>
+                    if self.is_logged_in() && e.status().is_some_and(|s| s == 401 || s == 403) =>
                 {
                     tracing::warn!(status = ?e.status(), "InnerTube {path} rejected the session");
                     return Err(Error::SessionExpired);
@@ -256,7 +255,12 @@ impl InnerTube {
 
 /// Build the playback-tracking GET URL. context/01 §registerPlayback. Pure — unit-tested. The
 /// `base_url` already carries YouTube's own query params, so we chain onto it.
-fn build_playback_url(base_url: &str, client_name: &str, cpn: &str, playlist_id: Option<&str>) -> String {
+fn build_playback_url(
+    base_url: &str,
+    client_name: &str,
+    cpn: &str,
+    playlist_id: Option<&str>,
+) -> String {
     let sep = if base_url.contains('?') { '&' } else { '?' };
     let mut url = format!(
         "{base_url}{sep}c={}&cpn={}&ver=2",

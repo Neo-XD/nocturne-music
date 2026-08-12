@@ -200,8 +200,8 @@ pub fn parse_account_menu(root: &Value) -> AccountInfo {
     let header = find_all(root, "activeAccountHeaderRenderer").into_iter().next();
     let name = header.and_then(|h| runs_text(h.get("accountName")));
     // YTM labels the second line `channelHandle` on newer accounts, `email` on older ones.
-    let handle =
-        header.and_then(|h| runs_text(h.get("channelHandle")).or_else(|| runs_text(h.get("email"))));
+    let handle = header
+        .and_then(|h| runs_text(h.get("channelHandle")).or_else(|| runs_text(h.get("email"))));
     let thumbnail = header.and_then(last_thumbnail);
 
     let rc = root.get("responseContext");
@@ -234,10 +234,7 @@ fn split_datasync_id(raw: &str) -> String {
 pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
     let video_id = list_item_video_id(node)?;
     let flex = node.get("flexColumns").and_then(Value::as_array);
-    let title = flex
-        .and_then(|c| c.first())
-        .and_then(flex_text)
-        .unwrap_or_default();
+    let title = flex.and_then(|c| c.first()).and_then(flex_text).unwrap_or_default();
     if title.is_empty() {
         return None;
     }
@@ -374,10 +371,7 @@ pub(crate) fn flex_runs(node: &Value, i: usize) -> Option<&Vec<Value>> {
 }
 
 pub(crate) fn flex_column_text(node: &Value, i: usize) -> Option<String> {
-    node.get("flexColumns")
-        .and_then(Value::as_array)
-        .and_then(|c| c.get(i))
-        .and_then(flex_text)
+    node.get("flexColumns").and_then(Value::as_array).and_then(|c| c.get(i)).and_then(flex_text)
 }
 
 /// videoId from any of the three known locations. context/08 / AlbumPage.kt.
@@ -444,10 +438,10 @@ fn subtitle_groups(runs: &[Value]) -> Vec<Group> {
     for run in runs {
         let t = run.get("text").and_then(Value::as_str).unwrap_or("");
         if t.trim() == "•" {
-            groups.push(std::mem::replace(&mut cur, Group {
-                text: String::new(),
-                artist_link: false,
-            }));
+            groups.push(std::mem::replace(
+                &mut cur,
+                Group { text: String::new(), artist_link: false },
+            ));
         } else {
             cur.text.push_str(t);
             cur.artist_link |= first_artist_id(std::slice::from_ref(run)).is_some();
@@ -465,7 +459,15 @@ fn subtitle_groups(runs: &[Value]) -> Vec<Group> {
 fn is_type_label(s: &str) -> bool {
     matches!(
         s,
-        "Song" | "Video" | "Album" | "Single" | "EP" | "Playlist" | "Artist" | "Episode" | "Podcast"
+        "Song"
+            | "Video"
+            | "Album"
+            | "Single"
+            | "EP"
+            | "Playlist"
+            | "Artist"
+            | "Episode"
+            | "Podcast"
     )
 }
 
@@ -619,7 +621,9 @@ mod tests {
         })));
 
         // Fail open: no tag (or an overlay carrying none) means audio, never hide.
-        assert!(!is_video_row(&json!({ "navigationEndpoint": { "watchEndpoint": { "videoId": "v" } } })));
+        assert!(!is_video_row(
+            &json!({ "navigationEndpoint": { "watchEndpoint": { "videoId": "v" } } })
+        ));
         assert!(!is_video_row(&json!({})));
     }
 

@@ -53,10 +53,7 @@ impl PlayerJsFetcher {
             format!("https://www.youtube.com/s/player/{hash}/player_ias.vflset/en_GB/base.js");
         let js = get(&url).await?.error_for_status()?.text().await?;
         std::fs::write(&cached, &js)?;
-        std::fs::write(
-            self.cache_dir.join("current_hash.txt"),
-            format!("{hash}\n{}", now_secs()),
-        )?;
+        std::fs::write(self.cache_dir.join("current_hash.txt"), format!("{hash}\n{}", now_secs()))?;
         tracing::info!(hash, bytes = js.len(), "fetched fresh player.js");
         Ok(PlayerJs { js, hash })
     }
@@ -68,7 +65,8 @@ impl PlayerJsFetcher {
             for e in entries.flatten() {
                 let name = e.file_name();
                 let name = name.to_string_lossy();
-                if name.starts_with("player_") && name.ends_with(".js") || name == "current_hash.txt"
+                if name.starts_with("player_") && name.ends_with(".js")
+                    || name == "current_hash.txt"
                 {
                     let _ = std::fs::remove_file(e.path());
                 }

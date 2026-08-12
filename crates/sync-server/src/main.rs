@@ -132,8 +132,7 @@ fn gen_code() -> String {
 }
 
 fn gen_user_id() -> String {
-    let nanos =
-        SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     format!("user_{}_{}", nanos, rand::thread_rng().gen_range(0..10000))
 }
 
@@ -216,7 +215,8 @@ impl Server {
                 // No reachable host means nobody can ever approve this request — say so instead of
                 // parking the joiner on "waiting for the host" forever.
                 if !room.host_is_reachable() {
-                    let _ = tx.send(err("host_unavailable", "The host isn't in that room right now."));
+                    let _ =
+                        tx.send(err("host_unavailable", "The host isn't in that room right now."));
                     return;
                 }
                 if room.peers.len() + room.pending.len() >= MAX_USERS_PER_ROOM {
@@ -827,7 +827,12 @@ mod tests {
         let (htx, _hrx) = dummy_tx();
         let (mut huid, mut hcode) = (None, None);
         server
-            .dispatch(ClientMessage::CreateRoom { username: "host".into() }, &htx, &mut huid, &mut hcode)
+            .dispatch(
+                ClientMessage::CreateRoom { username: "host".into() },
+                &htx,
+                &mut huid,
+                &mut hcode,
+            )
             .await;
         let code = hcode.clone().unwrap();
         server.dispatch(ClientMessage::LeaveRoom, &htx, &mut huid, &mut hcode).await;
@@ -855,7 +860,12 @@ mod tests {
         let (htx, _hrx) = dummy_tx();
         let (mut huid, mut hcode) = (None, None);
         server
-            .dispatch(ClientMessage::CreateRoom { username: "host".into() }, &htx, &mut huid, &mut hcode)
+            .dispatch(
+                ClientMessage::CreateRoom { username: "host".into() },
+                &htx,
+                &mut huid,
+                &mut hcode,
+            )
             .await;
         let code = hcode.clone().unwrap();
         server.handle_disconnect(huid.clone(), hcode.clone()).await;
@@ -881,7 +891,12 @@ mod tests {
         let (htx, _hrx) = dummy_tx();
         let (mut huid, mut hcode) = (None, None);
         server
-            .dispatch(ClientMessage::CreateRoom { username: "host".into() }, &htx, &mut huid, &mut hcode)
+            .dispatch(
+                ClientMessage::CreateRoom { username: "host".into() },
+                &htx,
+                &mut huid,
+                &mut hcode,
+            )
             .await;
         let code = hcode.clone().unwrap();
 

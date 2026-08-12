@@ -79,7 +79,10 @@ pub fn folders(db: &Db) -> Vec<String> {
 }
 
 fn set_folders(db: &Db, folders: &[String]) {
-    db.set_setting(FOLDERS_SETTING, &serde_json::to_string(folders).unwrap_or_else(|_| "[]".into()));
+    db.set_setting(
+        FOLDERS_SETTING,
+        &serde_json::to_string(folders).unwrap_or_else(|_| "[]".into()),
+    );
 }
 
 /// Add a folder (no-op if it's already watched, or nested inside one that is). Nesting is compared
@@ -674,7 +677,10 @@ mod tests {
         let long = album_key("x", &"あ".repeat(200));
         assert!(long.chars().count() <= KEY_CHARS + 16, "keys stay filename-sized");
         // Two albums that only differ past the cut are still two albums.
-        assert_ne!(album_key("x", &format!("{} one", "long ".repeat(30))), album_key("x", &format!("{} two", "long ".repeat(30))));
+        assert_ne!(
+            album_key("x", &format!("{} one", "long ".repeat(30))),
+            album_key("x", &format!("{} two", "long ".repeat(30)))
+        );
 
         // Two folders called "Downloads" are two different albums.
         assert_ne!(
@@ -741,7 +747,10 @@ mod tests {
             (Some("PARTYNEXTDOOR, Drake".into()), "CN TOWER".into())
         );
         // Only the first separator splits — the rest belongs to the title.
-        assert_eq!(split_filename("Artist - Song - Live"), (Some("Artist".into()), "Song - Live".into()));
+        assert_eq!(
+            split_filename("Artist - Song - Live"),
+            (Some("Artist".into()), "Song - Live".into())
+        );
         // Nothing claimed when there's no separator, or when either side would be empty.
         assert_eq!(split_filename("CN TOWER"), (None, "CN TOWER".into()));
         assert_eq!(split_filename(" - CN TOWER"), (None, " - CN TOWER".into()));
@@ -797,7 +806,10 @@ mod tests {
         }
 
         let lib = scan(&db, &dir.join("covers"));
-        assert!(lib.songs.is_empty() && lib.albums.is_empty(), "the rows are gone from the library");
+        assert!(
+            lib.songs.is_empty() && lib.albums.is_empty(),
+            "the rows are gone from the library"
+        );
         assert_eq!(lib.removed.len(), 5, "two songs, two albums and the one artist are removed");
         assert!(lib.removed.contains(&format!("{ARTIST_PREFIX}Band")), "the artist's circle too");
         assert!(lib.removed.iter().any(|id| id.ends_with("a.mp3")), "the song id the UI knows");
@@ -840,5 +852,3 @@ mod tests {
         assert!(playback_data("LOCAL:/nope/gone.mp3", "/nope/gone.mp3").is_err());
     }
 }
-
-

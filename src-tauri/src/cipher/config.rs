@@ -251,10 +251,8 @@ mod tests {
         assert!(valid_n_class("as"));
         assert!(!valid_n_class("as;alert(1)"));
         assert!(!valid_n_class(""));
-        assert!(parse_table(
-            r#"{"players":{"h":{"sig":"x(1,2,INPUT);evil()","nClass":"as"}}}"#
-        )
-        .is_empty());
+        assert!(parse_table(r#"{"players":{"h":{"sig":"x(1,2,INPUT);evil()","nClass":"as"}}}"#)
+            .is_empty());
     }
 
     #[test]

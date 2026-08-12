@@ -20,11 +20,7 @@ async fn probe(url: &str, ua: Option<&str>) -> reqwest::StatusCode {
 async fn direct_clients_resolve_and_stream() {
     let it = InnerTube::new(Session::default(), None).unwrap();
     let vd = it.fetch_visitor_data().await.ok();
-    let it = InnerTube::new(
-        Session { visitor_data: vd, ..Session::default() },
-        None,
-    )
-    .unwrap();
+    let it = InnerTube::new(Session { visitor_data: vd, ..Session::default() }, None).unwrap();
     let clients = Clients::bundled();
 
     let mut any_ok = false;
@@ -71,7 +67,11 @@ async fn owned_continuation_not_doubled() {
         return;
     };
     let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
-    let it = InnerTube::new(Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() }, None).unwrap();
+    let it = InnerTube::new(
+        Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
+        None,
+    )
+    .unwrap();
     let clients = Clients::bundled();
     let client = clients.get("WEB_REMIX").expect("WEB_REMIX client");
 
@@ -114,7 +114,9 @@ async fn every_surface_yields_a_scrobbleable_artist() {
     fn bad(artist: &str) -> Option<&'static str> {
         match artist {
             a if a.trim().is_empty() => Some("no artist (would never scrobble)"),
-            a if a.contains('•') => Some("display subtitle, not an artist (would scrobble wrong)"),
+            a if a.contains('•') => {
+                Some("display subtitle, not an artist (would scrobble wrong)")
+            }
             _ => None,
         }
     }
@@ -178,16 +180,23 @@ async fn every_surface_yields_a_scrobbleable_artist() {
         }
     }
 
-    assert!(checked > 40, "only {checked} tracks reached the check, so the surfaces came back empty");
-    assert!(problems.is_empty(), "{checked} tracks checked, {} unscrobbleable:\n  {}", problems.len(), problems.join("\n  "));
+    assert!(
+        checked > 40,
+        "only {checked} tracks reached the check, so the surfaces came back empty"
+    );
+    assert!(
+        problems.is_empty(),
+        "{checked} tracks checked, {} unscrobbleable:\n  {}",
+        problems.len(),
+        problems.join("\n  ")
+    );
     eprintln!("{checked} tracks across album / search / queue / artist surfaces, all with a usable artist");
 }
 
 #[tokio::test]
 async fn rustypipe_url_is_fetchable() {
-    let c = innertube::rustypipe_fallback::resolve(VIDEO_ID, true)
-        .await
-        .expect("rustypipe resolve");
+    let c =
+        innertube::rustypipe_fallback::resolve(VIDEO_ID, true).await.expect("rustypipe resolve");
     let bare = probe(&c.url, None).await;
     eprintln!("rustypipe itag {}: no-UA -> HTTP {bare}", c.itag);
     // mpv sends its own libmpv UA by default; also probe with a browser-ish UA for comparison.
@@ -230,10 +239,12 @@ async fn radio_seeds_resolve() {
     assert!(artist_radio.items.len() > 1, "playlist-only /next returned nothing");
 
     // 4. Album radio: `RDAMPL` over the album's *audio* playlist, again with no videoId.
-    let album_id = song.items.iter().find_map(|i| i.album_id.clone()).expect("a radio row with an album");
+    let album_id =
+        song.items.iter().find_map(|i| i.album_id.clone()).expect("a radio row with an album");
     let album = it.album(&client, &album_id).await.expect("album page");
     let pl = album.playlist_id.expect("album has no audio playlist");
-    let album_radio = it.next(&client, None, Some(&format!("RDAMPL{pl}"))).await.expect("album radio /next");
+    let album_radio =
+        it.next(&client, None, Some(&format!("RDAMPL{pl}"))).await.expect("album radio /next");
     eprintln!("RDAMPL{pl}: {} tracks", album_radio.items.len());
     assert!(album_radio.items.len() > 1, "album radio came back empty");
 }

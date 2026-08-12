@@ -82,7 +82,10 @@ enum Msg {
     Track(Box<Track>),
     Duration(f64),
     /// A position tick. `at` is when the value was read — the thread ages it before use.
-    Position { pos: f64, at: Instant },
+    Position {
+        pos: f64,
+        at: Instant,
+    },
     /// A real play/pause transition (mpv's pause flag), never inferred from position ticks.
     Playing(bool),
     Enabled(bool),
@@ -450,11 +453,7 @@ impl Presence {
             // Recorded even if Discord rejected the payload (warn-logged in check_response):
             // retrying an identical rejected frame in a loop helps nobody; the next real change
             // sends a fresh one.
-            self.sent = Some(Sent {
-                video_id: track.video_id,
-                start_ms,
-                duration: self.duration,
-            });
+            self.sent = Some(Sent { video_id: track.video_id, start_ms, duration: self.duration });
             self.client = Some(client);
         } else {
             // Broken socket — Discord quit. Drop it; the reconnect tick picks it back up.
@@ -528,10 +527,8 @@ fn check_response(client: &mut DiscordIpcClient, what: &str) -> bool {
     match client.recv() {
         Ok((_, resp)) => {
             if resp.get("evt").and_then(|v| v.as_str()) == Some("ERROR") {
-                let msg = resp
-                    .pointer("/data/message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
+                let msg =
+                    resp.pointer("/data/message").and_then(|v| v.as_str()).unwrap_or("unknown");
                 tracing::warn!(what, error = msg, "discord rejected the payload");
             }
             true
@@ -544,10 +541,7 @@ fn check_response(client: &mut DiscordIpcClient, what: &str) -> bool {
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64
 }
 
 /// Clamp a text field to Discord's 2–128 char window: truncate long values on a char boundary,
@@ -650,11 +644,7 @@ mod tests {
         assert_eq!(p.plan(), Act::Push, "with the length known, push immediately");
 
         // That single push carries the bar; nothing further is pending.
-        p.sent = Some(Sent {
-            video_id: "new".into(),
-            start_ms: now_ms(),
-            duration: 185.0,
-        });
+        p.sent = Some(Sent { video_id: "new".into(), start_ms: now_ms(), duration: 185.0 });
         p.last_send = Some(Instant::now());
         assert_eq!(p.plan(), Act::Idle, "one push per track change, not two");
     }
@@ -788,9 +778,16 @@ mod tests {
             discord_thumb("https://lh3.googleusercontent.com/x=w60-h60-l90-rj").as_deref(),
             Some("https://lh3.googleusercontent.com/x=w512-h512-l90-rj")
         );
-        assert_eq!(discord_thumb("https://yt3.ggpht.com/y=s176").as_deref(), Some("https://yt3.ggpht.com/y=s512"));
+        assert_eq!(
+            discord_thumb("https://yt3.ggpht.com/y=s176").as_deref(),
+            Some("https://yt3.ggpht.com/y=s512")
+        );
         let ytimg = "https://i.ytimg.com/vi/abc/maxresdefault.jpg";
-        assert_eq!(discord_thumb(ytimg).as_deref(), Some(ytimg), "path-variant thumbs pass through");
+        assert_eq!(
+            discord_thumb(ytimg).as_deref(),
+            Some(ytimg),
+            "path-variant thumbs pass through"
+        );
         let long = format!("https://example.com/{}", "a".repeat(300));
         assert_eq!(discord_thumb(&long), None, "over-long URLs are dropped, not sent");
     }

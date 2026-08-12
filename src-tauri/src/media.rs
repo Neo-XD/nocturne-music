@@ -31,7 +31,13 @@ pub struct MediaHandle {
 }
 
 impl MediaHandle {
-    pub fn set_metadata(&self, title: &str, artist: &str, album: Option<&str>, cover: Option<&str>) {
+    pub fn set_metadata(
+        &self,
+        title: &str,
+        artist: &str,
+        album: Option<&str>,
+        cover: Option<&str>,
+    ) {
         let _ = self.tx.send(MediaUpdate::Metadata {
             title: title.to_owned(),
             artist: artist.to_owned(),
@@ -53,9 +59,8 @@ impl MediaHandle {
 /// created (integration simply absent then — MPRIS-only fallback is blessed, context/16).
 pub fn spawn(app: AppHandle) -> Option<MediaHandle> {
     let (tx, rx) = channel::<MediaUpdate>();
-    let spawned = std::thread::Builder::new()
-        .name("media-controls".into())
-        .spawn(move || run(app, rx));
+    let spawned =
+        std::thread::Builder::new().name("media-controls".into()).spawn(move || run(app, rx));
     match spawned {
         Ok(_) => Some(MediaHandle { tx }),
         Err(e) => {
@@ -162,7 +167,11 @@ fn handle_event(app: &AppHandle, event: MediaControlEvent) {
                 let _ = state.player.seek(pos.as_secs_f64());
             }
             MediaControlEvent::SeekBy(dir, by) => {
-                let delta = if matches!(dir, SeekDirection::Forward) { by.as_secs_f64() } else { -by.as_secs_f64() };
+                let delta = if matches!(dir, SeekDirection::Forward) {
+                    by.as_secs_f64()
+                } else {
+                    -by.as_secs_f64()
+                };
                 let _ = state.player.seek((state.current_position() + delta).max(0.0));
             }
             MediaControlEvent::Seek(dir) => {

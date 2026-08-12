@@ -55,8 +55,8 @@ pub fn parse_challenge_data(scrambled: &str) -> Result<Value, String> {
 /// Parse the `/GenerateIT` response into `(integrityToken bytes, ttlSeconds)`.
 /// context/04 `parseIntegrityTokenData`: `[0]` = integrity token (base64), `[1]` = ttl seconds.
 pub fn parse_integrity_token_data(response_body: &str) -> Result<(Vec<u8>, u64), String> {
-    let raw: Value =
-        serde_json::from_str(response_body).map_err(|e| format!("genit json: {e} :: {response_body}"))?;
+    let raw: Value = serde_json::from_str(response_body)
+        .map_err(|e| format!("genit json: {e} :: {response_body}"))?;
     let tok_b64 = raw.get(0).and_then(|v| v.as_str()).ok_or("genit[0] not string")?;
     let ttl = raw.get(1).and_then(|v| v.as_u64()).unwrap_or(0);
     Ok((b64_decode_loose(tok_b64)?, ttl))

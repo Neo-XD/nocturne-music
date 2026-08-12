@@ -165,8 +165,7 @@ impl Player {
 
     /// Absolute seek in seconds.
     pub fn seek(&self, position_secs: f64) -> Result<(), Error> {
-        self.mpv
-            .command("seek", &[&position_secs.to_string(), "absolute"])?;
+        self.mpv.command("seek", &[&position_secs.to_string(), "absolute"])?;
         Ok(())
     }
 
@@ -206,9 +205,7 @@ impl Player {
     // keep one labelled filter (`af=@gain:lavfi=[volume=0dB]`) and retune it with `af-command`.
     pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
         match gain_db {
-            Some(g) => self
-                .mpv
-                .set_property("af", format!("lavfi=[volume={g}dB]").as_str())?,
+            Some(g) => self.mpv.set_property("af", format!("lavfi=[volume={g}dB]").as_str())?,
             None => self.mpv.set_property("af", "")?,
         }
         Ok(())
@@ -231,17 +228,27 @@ fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<Playe
         match ev.wait_event(1.0) {
             Some(Ok(event)) => {
                 let out = match event {
-                    Event::PropertyChange { name: "time-pos", change: PropertyData::Double(p), .. } => {
-                        Some(PlayerEvent::Position(p))
-                    }
-                    Event::PropertyChange { name: "duration", change: PropertyData::Double(d), .. } => {
-                        Some(PlayerEvent::Duration(d))
-                    }
-                    Event::PropertyChange { name: "pause", change: PropertyData::Flag(p), .. } => {
+                    Event::PropertyChange {
+                        name: "time-pos",
+                        change: PropertyData::Double(p),
+                        ..
+                    } => Some(PlayerEvent::Position(p)),
+                    Event::PropertyChange {
+                        name: "duration",
+                        change: PropertyData::Double(d),
+                        ..
+                    } => Some(PlayerEvent::Duration(d)),
+                    Event::PropertyChange {
+                        name: "pause", change: PropertyData::Flag(p), ..
+                    } => {
                         paused = p;
                         None
                     }
-                    Event::PropertyChange { name: "idle-active", change: PropertyData::Flag(i), .. } => {
+                    Event::PropertyChange {
+                        name: "idle-active",
+                        change: PropertyData::Flag(i),
+                        ..
+                    } => {
                         idle = i;
                         None
                     }

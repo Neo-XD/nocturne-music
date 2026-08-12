@@ -117,9 +117,8 @@ fn parse_pos(s: &str) -> Option<PhysicalPosition<i32>> {
 /// Is that point on a display that is currently connected? Checked on the top-left corner, which
 /// is what `set_position` sets and what the WM keeps reachable.
 fn on_a_display(win: &WebviewWindow, p: PhysicalPosition<i32>) -> bool {
-    win.available_monitors().is_ok_and(|monitors| {
-        monitors.iter().any(|m| contains(*m.position(), *m.size(), p))
-    })
+    win.available_monitors()
+        .is_ok_and(|monitors| monitors.iter().any(|m| contains(*m.position(), *m.size(), p)))
 }
 
 /// Bottom-right of the display the main window is on, inside its *work area* so a taskbar or dock
@@ -141,7 +140,11 @@ fn bottom_right(app: &AppHandle, win: &WebviewWindow) -> Option<PhysicalPosition
 
 /// Point-in-rect, physical pixels. Its own function because a second monitor placed left of or
 /// above the primary has a negative origin, which is exactly the case that goes wrong.
-fn contains(origin: PhysicalPosition<i32>, size: PhysicalSize<u32>, p: PhysicalPosition<i32>) -> bool {
+fn contains(
+    origin: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+    p: PhysicalPosition<i32>,
+) -> bool {
     (origin.x..origin.x + size.width as i32).contains(&p.x)
         && (origin.y..origin.y + size.height as i32).contains(&p.y)
 }

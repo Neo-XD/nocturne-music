@@ -25,15 +25,31 @@ pub enum SyncCommand {
     /// Full state (after join / reconnect / request-sync): resolve current track, seek to live
     /// position, set play/pause, mirror the queue.
     ApplyState(RoomState),
-    ChangeTrack { track: Track, position_ms: i64, playing: bool, queue: Vec<Track> },
-    Play { position_ms: i64, server_time_ms: i64 },
-    Pause { position_ms: i64 },
-    Seek { position_ms: i64 },
+    ChangeTrack {
+        track: Track,
+        position_ms: i64,
+        playing: bool,
+        queue: Vec<Track>,
+    },
+    Play {
+        position_ms: i64,
+        server_time_ms: i64,
+    },
+    Pause {
+        position_ms: i64,
+    },
+    Seek {
+        position_ms: i64,
+    },
     /// Guest: mirror the host's upcoming queue (a guest added/the host removed a track).
-    SyncQueue { queue: Vec<Track> },
+    SyncQueue {
+        queue: Vec<Track>,
+    },
     /// Host: a guest's track to insert at the guest boundary (auto-approved suggestion,
     /// `queued_by` already stamped with the guest's name).
-    GuestAdd { track: Track },
+    GuestAdd {
+        track: Track,
+    },
     /// We just became host of a freshly-created room — seed the room with our current now-playing.
     HostSeed,
     /// We left / were kicked / became host — stop applying remote playback.
@@ -136,7 +152,10 @@ pub struct LtSession {
 
 impl LtSession {
     /// Create the session. Returns the receiver the bridge task drains to drive guest playback.
-    pub fn new(app: AppHandle, server_url: String) -> (Arc<Self>, mpsc::UnboundedReceiver<SyncCommand>) {
+    pub fn new(
+        app: AppHandle,
+        server_url: String,
+    ) -> (Arc<Self>, mpsc::UnboundedReceiver<SyncCommand>) {
         // rustls needs a process-wide crypto provider before the first `wss://` handshake.
         let _ = rustls::crypto::ring::default_provider().install_default();
         let (sync_tx, sync_rx) = mpsc::unbounded_channel();
@@ -581,9 +600,10 @@ impl LtSession {
             }
         }
         let cmd = match p.kind {
-            PlaybackKind::Play => {
-                Some(SyncCommand::Play { position_ms: p.position_ms, server_time_ms: p.server_time_ms })
-            }
+            PlaybackKind::Play => Some(SyncCommand::Play {
+                position_ms: p.position_ms,
+                server_time_ms: p.server_time_ms,
+            }),
             PlaybackKind::Pause => Some(SyncCommand::Pause { position_ms: p.position_ms }),
             PlaybackKind::Seek => Some(SyncCommand::Seek { position_ms: p.position_ms }),
             PlaybackKind::ChangeTrack => p.track.map(|track| SyncCommand::ChangeTrack {
@@ -592,9 +612,7 @@ impl LtSession {
                 playing: p.playing,
                 queue: p.queue.unwrap_or_default(),
             }),
-            PlaybackKind::SyncQueue => {
-                p.queue.map(|queue| SyncCommand::SyncQueue { queue })
-            }
+            PlaybackKind::SyncQueue => p.queue.map(|queue| SyncCommand::SyncQueue { queue }),
             PlaybackKind::SetVolume => None,
         };
         if let Some(cmd) = cmd {

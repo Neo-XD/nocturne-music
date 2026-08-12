@@ -130,13 +130,7 @@ struct Scrobbler {
 
 impl Scrobbler {
     fn new(session: Option<String>) -> Self {
-        Scrobbler {
-            session,
-            track: None,
-            started_at: 0,
-            duration: 0.0,
-            scrobbled: false,
-        }
+        Scrobbler { session, track: None, started_at: 0, duration: 0.0, scrobbled: false }
     }
 
     async fn apply(&mut self, msg: Msg) {
@@ -252,16 +246,9 @@ async fn call(
     params.push(("format".to_string(), "json".to_string()));
 
     let http = crate::http::client();
-    let req = if post {
-        http.post(API_ROOT).form(&params)
-    } else {
-        http.get(API_ROOT).query(&params)
-    };
-    let resp = req
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(ApiError::transport)?;
+    let req =
+        if post { http.post(API_ROOT).form(&params) } else { http.get(API_ROOT).query(&params) };
+    let resp = req.timeout(Duration::from_secs(15)).send().await.map_err(ApiError::transport)?;
     let body: serde_json::Value = resp.json().await.map_err(ApiError::transport)?;
     if let Some(code) = body.get("error").and_then(|v| v.as_i64()) {
         let message = body
@@ -289,7 +276,12 @@ fn sign(params: &[(String, String)]) -> String {
 
 // --- auth flow (connect / disconnect / status) ----------------------------------------------
 
-fn emit_state(app: &tauri::AppHandle, connected: bool, username: Option<&str>, error: Option<&str>) {
+fn emit_state(
+    app: &tauri::AppHandle,
+    connected: bool,
+    username: Option<&str>,
+    error: Option<&str>,
+) {
     let _ = app.emit(
         "lastfm-state",
         serde_json::json!({ "connected": connected, "username": username, "error": error }),
@@ -328,7 +320,12 @@ pub async fn connect(state: Arc<AppState>) -> Result<(), String> {
                     let name = body.pointer("/session/name").and_then(|v| v.as_str());
                     let key = body.pointer("/session/key").and_then(|v| v.as_str());
                     let (Some(name), Some(key)) = (name, key) else {
-                        emit_state(&state.app, false, None, Some("Last.fm sent a malformed session"));
+                        emit_state(
+                            &state.app,
+                            false,
+                            None,
+                            Some("Last.fm sent a malformed session"),
+                        );
                         return;
                     };
                     state.db.set_setting("lastfm_session_key", key);

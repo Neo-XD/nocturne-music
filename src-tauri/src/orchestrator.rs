@@ -246,7 +246,15 @@ impl Orchestrator {
             // It also stays correct if a valid PoToken lifts the cap on those videos: then HEAD
             // passes and WEB_REMIX is used. Nothing here has to know which way that goes.
             if self.validate_head(&url, client.map(|c| c.user_agent.as_str())).await {
-                return Ok(self.build(video_id, format, url, expires, &key, audio_config_loudness, &main_resp));
+                return Ok(self.build(
+                    video_id,
+                    format,
+                    url,
+                    expires,
+                    &key,
+                    audio_config_loudness,
+                    &main_resp,
+                ));
             } else if needs_n {
                 // A cipher client that fails validation may have a stale config → self-heal off
                 // the hot path so it never blocks falling through (context/06 §7). If the heal
@@ -268,7 +276,15 @@ impl Orchestrator {
 
         // 6. HIGH wanted but only a non-HIGH found → use the remembered best.
         if let Some(c) = best {
-            return Ok(self.build(video_id, &c.format, c.url, c.expires, &c.client, audio_config_loudness, &main_resp));
+            return Ok(self.build(
+                video_id,
+                &c.format,
+                c.url,
+                c.expires,
+                &c.client,
+                audio_config_loudness,
+                &main_resp,
+            ));
         }
 
         // 7. Net: rustypipe whole-videoId resolution (last-ditch). context/06, seam #11.
@@ -376,19 +392,12 @@ fn better(a: &Format, b: Option<&Format>) -> bool {
             0u8
         }
     };
-    (
-        rank(a),
-        a.audio_channels.unwrap_or(2),
-        codec(a),
-        a.bitrate,
-    ) > (rank(b), b.audio_channels.unwrap_or(2), codec(b), b.bitrate)
+    (rank(a), a.audio_channels.unwrap_or(2), codec(a), a.bitrate)
+        > (rank(b), b.audio_channels.unwrap_or(2), codec(b), b.bitrate)
 }
 
 fn main_loudness(resp: &PlayerResponse) -> Option<f64> {
-    resp.player_config
-        .as_ref()
-        .and_then(|c| c.audio_config.as_ref())
-        .and_then(|a| a.loudness_db)
+    resp.player_config.as_ref().and_then(|c| c.audio_config.as_ref()).and_then(|a| a.loudness_db)
 }
 
 fn main_playback_url(resp: &PlayerResponse) -> Option<String> {

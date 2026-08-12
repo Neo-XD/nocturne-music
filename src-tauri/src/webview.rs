@@ -139,7 +139,10 @@ impl Bridge {
                 return Ok(bridge);
             }
             if Instant::now() >= deadline {
-                tracing::error!(label, "webview never became ready — harness never loaded / JS never round-tripped");
+                tracing::error!(
+                    label,
+                    "webview never became ready — harness never loaded / JS never round-tripped"
+                );
                 let _ = bridge.destroy();
                 return Err(Error::Timeout(Duration::from_secs(12)));
             }
@@ -199,7 +202,7 @@ impl Bridge {
         loop {
             match self.eval_json(format!("({expr})"), Duration::from_secs(3)).await {
                 Ok(v) if !v.is_null() => return Ok(v),
-                Ok(_) => {} // null → still pending
+                Ok(_) => {}                                        // null → still pending
                 Err(Error::Gone(l)) => return Err(Error::Gone(l)), // window died — stop
                 Err(_) => {} // a transient eval timeout/error → keep polling until the deadline
             }

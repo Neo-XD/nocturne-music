@@ -85,10 +85,7 @@ impl Db {
         // so a session spent replaying cached tracks never triggers one, and the backlog that
         // built up before anything pruned at all (1803 rows, 1772 of them expired, on a real
         // install) would sit there until it happened to.
-        let _ = conn.execute(
-            "DELETE FROM stream_url_cache WHERE expires_at <= ?1",
-            [now_secs()],
-        );
+        let _ = conn.execute("DELETE FROM stream_url_cache WHERE expires_at <= ?1", [now_secs()]);
         Ok(Db(Mutex::new(conn)))
     }
 
@@ -96,8 +93,7 @@ impl Db {
 
     pub fn get_setting(&self, key: &str) -> Option<String> {
         let conn = self.0.lock().unwrap();
-        conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0))
-            .ok()
+        conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).ok()
     }
 
     pub fn set_setting(&self, key: &str, value: &str) {
@@ -282,8 +278,15 @@ impl Db {
             let _ = tx.execute(
                 LOCAL_TRACK_UPSERT,
                 rusqlite::params![
-                    t.path, t.title, t.artist, t.album, t.album_key, t.track_no, t.duration_secs,
-                    t.cover, t.mtime
+                    t.path,
+                    t.title,
+                    t.artist,
+                    t.album,
+                    t.album_key,
+                    t.track_no,
+                    t.duration_secs,
+                    t.cover,
+                    t.mtime
                 ],
             );
         }
@@ -307,9 +310,11 @@ impl Db {
     /// collection is thousands of rows, so paging it would buy nothing.
     pub fn local_tracks(&self, album_key: Option<&str>) -> Vec<LocalTrack> {
         let conn = self.0.lock().unwrap();
-        let sql = "SELECT path, title, artist, album, album_key, track_no, duration_secs, cover, mtime
+        let sql =
+            "SELECT path, title, artist, album, album_key, track_no, duration_secs, cover, mtime
                    FROM local_tracks {WHERE} ORDER BY album, track_no, title";
-        let sql = sql.replace("{WHERE}", if album_key.is_some() { "WHERE album_key = ?1" } else { "" });
+        let sql =
+            sql.replace("{WHERE}", if album_key.is_some() { "WHERE album_key = ?1" } else { "" });
         let mut out = Vec::new();
         let row = |r: &rusqlite::Row| {
             Ok(LocalTrack {
@@ -409,19 +414,19 @@ mod tests {
             // Piggybacking on the one file-backed test: `journal_mode` answers with a row, so
             // setting it via `pragma_update` would silently do nothing (and `:memory:` cannot be
             // WAL at all, which is why this can't live in its own in-memory test).
-            let mode: String = d
-                .0
-                .lock()
-                .unwrap()
-                .query_row("PRAGMA journal_mode", [], |r| r.get(0))
-                .unwrap();
+            let mode: String =
+                d.0.lock().unwrap().query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
             assert_eq!(mode, "wal");
             d.record_play("LOCAL:/music/a.mp3", "{\"local\":1}", 1_000, 10_000);
             d.record_play("dQw4w9WgXcQ", "{\"yt\":1}", 1_000, 10_000);
             assert_eq!(d.top_plays(0, 20).len(), 2, "both were recorded");
         }
         let d = Db::open(&path).unwrap();
-        assert_eq!(d.top_plays(0, 20), vec![("{\"yt\":1}".to_string(), 1)], "only the YouTube play survives");
+        assert_eq!(
+            d.top_plays(0, 20),
+            vec![("{\"yt\":1}".to_string(), 1)],
+            "only the YouTube play survives"
+        );
         drop(d);
         std::fs::remove_file(&path).ok();
     }

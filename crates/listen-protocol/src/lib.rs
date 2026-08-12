@@ -132,27 +132,48 @@ impl Playback {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     /// Create a room and become host.
-    CreateRoom { username: String },
+    CreateRoom {
+        username: String,
+    },
     /// Request to join an existing room (host must approve).
-    JoinRoom { room_code: String, username: String },
+    JoinRoom {
+        room_code: String,
+        username: String,
+    },
     /// Re-attach after a dropped socket, using the token from create/join.
-    Reconnect { session_token: String },
+    Reconnect {
+        session_token: String,
+    },
     /// Leave the current room.
     LeaveRoom,
     /// Host: approve/reject a pending joiner.
-    ApproveJoin { user_id: String },
-    RejectJoin { user_id: String },
+    ApproveJoin {
+        user_id: String,
+    },
+    RejectJoin {
+        user_id: String,
+    },
     /// Host: remove a participant.
-    KickUser { user_id: String },
+    KickUser {
+        user_id: String,
+    },
     /// Host: hand the host role to another participant.
-    TransferHost { user_id: String },
+    TransferHost {
+        user_id: String,
+    },
     /// Host: a playback action to broadcast to everyone.
     Playback(Playback),
     /// Guest: suggest a track to the host.
-    Suggest { track: Track },
+    Suggest {
+        track: Track,
+    },
     /// Host: act on a suggestion.
-    ApproveSuggestion { id: String },
-    RejectSuggestion { id: String },
+    ApproveSuggestion {
+        id: String,
+    },
+    RejectSuggestion {
+        id: String,
+    },
     /// Pull the current authoritative state (drift correction / after reconnect).
     RequestSync,
     /// Keepalive.
@@ -163,26 +184,68 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    RoomCreated { room_code: String, user_id: String, session_token: String, state: RoomState },
+    RoomCreated {
+        room_code: String,
+        user_id: String,
+        session_token: String,
+        state: RoomState,
+    },
     /// Host receives this when someone requests to join.
-    JoinRequest { user_id: String, username: String },
-    JoinApproved { user_id: String, session_token: String, state: RoomState },
-    JoinRejected { reason: String },
-    Reconnected { user_id: String, is_host: bool, state: RoomState },
-    UserJoined { user: User },
-    UserLeft { user_id: String },
-    UserDisconnected { user_id: String },
-    UserReconnected { user_id: String },
-    HostChanged { host_id: String },
+    JoinRequest {
+        user_id: String,
+        username: String,
+    },
+    JoinApproved {
+        user_id: String,
+        session_token: String,
+        state: RoomState,
+    },
+    JoinRejected {
+        reason: String,
+    },
+    Reconnected {
+        user_id: String,
+        is_host: bool,
+        state: RoomState,
+    },
+    UserJoined {
+        user: User,
+    },
+    UserLeft {
+        user_id: String,
+    },
+    UserDisconnected {
+        user_id: String,
+    },
+    UserReconnected {
+        user_id: String,
+    },
+    HostChanged {
+        host_id: String,
+    },
     /// A playback action to apply (guests) / echo (host).
     SyncPlayback(Playback),
     /// Full state, in reply to `RequestSync`.
-    SyncState { state: RoomState },
-    SuggestionReceived { suggestion: Suggestion },
-    SuggestionApproved { id: String },
-    SuggestionRejected { id: String, reason: String },
-    Kicked { reason: String },
-    Error { code: String, message: String },
+    SyncState {
+        state: RoomState,
+    },
+    SuggestionReceived {
+        suggestion: Suggestion,
+    },
+    SuggestionApproved {
+        id: String,
+    },
+    SuggestionRejected {
+        id: String,
+        reason: String,
+    },
+    Kicked {
+        reason: String,
+    },
+    Error {
+        code: String,
+        message: String,
+    },
     Pong,
 }
 

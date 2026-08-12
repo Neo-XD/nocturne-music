@@ -197,8 +197,10 @@ pub fn parse_home(root: &Value) -> HomePage {
             let more = header
                 .and_then(|h| h.get("moreContentButton"))
                 .and_then(|b| find_all(b, "browseEndpoint").into_iter().next());
-            let more_browse_id = more.and_then(|e| e.get("browseId")).and_then(Value::as_str).map(str::to_owned);
-            let more_params = more.and_then(|e| e.get("params")).and_then(Value::as_str).map(str::to_owned);
+            let more_browse_id =
+                more.and_then(|e| e.get("browseId")).and_then(Value::as_str).map(str::to_owned);
+            let more_params =
+                more.and_then(|e| e.get("params")).and_then(Value::as_str).map(str::to_owned);
             sections.push(Section { title, items, more_browse_id, more_params });
         }
     }
@@ -209,8 +211,10 @@ pub fn parse_home(root: &Value) -> HomePage {
 /// come back as a grid of two-row cards; library artists come back as a shelf of list rows
 /// instead, so fall back to those when the grid is empty.
 pub fn parse_library(root: &Value) -> Vec<BrowseItem> {
-    let cards: Vec<BrowseItem> =
-        find_all(root, "musicTwoRowItemRenderer").into_iter().filter_map(parse_two_row_item).collect();
+    let cards: Vec<BrowseItem> = find_all(root, "musicTwoRowItemRenderer")
+        .into_iter()
+        .filter_map(parse_two_row_item)
+        .collect();
     if !cards.is_empty() {
         return cards;
     }
@@ -225,8 +229,8 @@ pub fn parse_playlist(root: &Value) -> PlaylistPage {
     let header = playlist_header(root);
     let title = header.and_then(|h| runs_text(h.get("title")));
     // `secondSubtitle` usually carries "N songs • Xh Ym"; fall back to `subtitle`.
-    let subtitle =
-        header.and_then(|h| runs_text(h.get("secondSubtitle")).or_else(|| runs_text(h.get("subtitle"))));
+    let subtitle = header
+        .and_then(|h| runs_text(h.get("secondSubtitle")).or_else(|| runs_text(h.get("subtitle"))));
     let thumbnail = header.and_then(last_thumbnail);
     let items = find_all_shallow(root, "musicResponsiveListItemRenderer")
         .into_iter()
@@ -234,7 +238,14 @@ pub fn parse_playlist(root: &Value) -> PlaylistPage {
         .collect();
     // Present only for playlists the signed-in user owns — the sole reliable ownership signal.
     let owned = !find_all(root, "musicEditablePlaylistDetailHeaderRenderer").is_empty();
-    PlaylistPage { title, subtitle, thumbnail, items, continuation: shelf_continuation(root), owned }
+    PlaylistPage {
+        title,
+        subtitle,
+        thumbnail,
+        items,
+        continuation: shelf_continuation(root),
+        owned,
+    }
 }
 
 /// Parse a browse continuation response (more playlist tracks). context/08.
@@ -247,7 +258,10 @@ pub fn parse_playlist_continuation(root: &Value) -> PlaylistContinuation {
         .collect();
     // A continuation response is mostly shelf already; the sweep stays as the fallback for the
     // `…ShelfContinuation` shapes that carry no `…ShelfRenderer` node to scope to.
-    PlaylistContinuation { items, continuation: shelf_continuation(root).or_else(|| continuation_token(root)) }
+    PlaylistContinuation {
+        items,
+        continuation: shelf_continuation(root).or_else(|| continuation_token(root)),
+    }
 }
 
 /// Categorized results for an unfiltered search: a mix of a "top result" set plus the per-type
@@ -368,8 +382,10 @@ fn card_shelf_main(card: &Value) -> Option<BrowseItem> {
         .and_then(|r0| r0.get("navigationEndpoint"))
         .or_else(|| card.get("onTap"))
         .or_else(|| card.get("navigationEndpoint"));
-    if let Some(vid) =
-        nav.and_then(|n| n.get("watchEndpoint")).and_then(|w| w.get("videoId")).and_then(Value::as_str)
+    if let Some(vid) = nav
+        .and_then(|n| n.get("watchEndpoint"))
+        .and_then(|w| w.get("videoId"))
+        .and_then(Value::as_str)
     {
         // Same as a song row: the top-result card's subtitle becomes the artist when it plays.
         let runs = card.get("subtitle").and_then(|s| s.get("runs")).and_then(Value::as_array);
@@ -415,7 +431,8 @@ pub fn parse_album(root: &Value) -> AlbumPage {
     let strapline_runs = strapline.and_then(|s| s.get("runs")).and_then(Value::as_array);
     let artist_id = strapline_runs.and_then(|r| first_artist_id(r));
     let runs = strapline_runs.map(|r| artist_runs(r)).unwrap_or_default();
-    let artist_thumbnail = header.and_then(|h| h.get("straplineThumbnail")).and_then(last_thumbnail);
+    let artist_thumbnail =
+        header.and_then(|h| h.get("straplineThumbnail")).and_then(last_thumbnail);
 
     // Target the header's own thumbnail subtree so we get the cover, not the artist avatar.
     let thumbnail = header.and_then(|h| h.get("thumbnail")).and_then(last_thumbnail);
@@ -463,9 +480,8 @@ pub fn parse_album(root: &Value) -> AlbumPage {
         // Track rows carry the OLAK id; an album with no playable rows still has it on the
         // header's save-to-library button.
         playlist_id: album_playlist_id(root).or_else(|| library_toggle_playlist_id(header)),
-        in_library: library_toggle(header).is_some_and(|t| {
-            t.get("isToggled").and_then(Value::as_bool).unwrap_or(false)
-        }),
+        in_library: library_toggle(header)
+            .is_some_and(|t| t.get("isToggled").and_then(Value::as_bool).unwrap_or(false)),
     }
 }
 
@@ -532,8 +548,10 @@ pub fn parse_artist(root: &Value, browse_id: &str) -> ArtistPage {
     let name = header.and_then(|h| runs_text(h.get("title")));
     let description = header.and_then(|h| runs_text(h.get("description")));
     // Target the header's own thumbnail subtree (avoids the subscribe-button avatar etc).
-    let thumbnail =
-        header.and_then(|h| h.get("thumbnail")).and_then(last_thumbnail).or_else(|| header.and_then(last_thumbnail));
+    let thumbnail = header
+        .and_then(|h| h.get("thumbnail"))
+        .and_then(last_thumbnail)
+        .or_else(|| header.and_then(last_thumbnail));
 
     let sub = header.and_then(|h| find_all(h, "subscribeButtonRenderer").into_iter().next());
     let channel_id = sub
@@ -541,11 +559,13 @@ pub fn parse_artist(root: &Value, browse_id: &str) -> ArtistPage {
         .and_then(Value::as_str)
         .map(str::to_owned)
         .unwrap_or_else(|| browse_id.to_owned());
-    let subscribed = sub.and_then(|s| s.get("subscribed")).and_then(Value::as_bool).unwrap_or(false);
+    let subscribed =
+        sub.and_then(|s| s.get("subscribed")).and_then(Value::as_bool).unwrap_or(false);
     // Long form first: `subscriberCountText` is a bare "2.96M", `longSubscriberCountText` the
     // labelled "2.96M subscribers" (localized by the context's hl, so don't relabel it here).
     let subscribers = sub.and_then(|s| {
-        text_or_runs(s.get("longSubscriberCountText")).or_else(|| text_or_runs(s.get("subscriberCountText")))
+        text_or_runs(s.get("longSubscriberCountText"))
+            .or_else(|| text_or_runs(s.get("subscriberCountText")))
     });
     let monthly_listeners = header.and_then(|h| text_or_runs(h.get("monthlyListenerCount")));
 
@@ -566,11 +586,12 @@ pub fn parse_artist(root: &Value, browse_id: &str) -> ArtistPage {
                         .collect();
                     // "Show all" (and the shelf title, same endpoint) points at a `VL…` playlist
                     // holding every top song. Prefix-checked: other shelves link a channel instead.
-                    top_songs_id = find_all(shelf.get("bottomEndpoint").unwrap_or(shelf), "browseId")
-                        .into_iter()
-                        .filter_map(Value::as_str)
-                        .find(|id| id.starts_with("VL"))
-                        .map(str::to_owned);
+                    top_songs_id =
+                        find_all(shelf.get("bottomEndpoint").unwrap_or(shelf), "browseId")
+                            .into_iter()
+                            .filter_map(Value::as_str)
+                            .find(|id| id.starts_with("VL"))
+                            .map(str::to_owned);
                 }
             } else if let Some(carousel) = node.get("musicCarouselShelfRenderer") {
                 if let Some(sec) = parse_artist_carousel(carousel) {
@@ -623,7 +644,8 @@ fn parse_artist_carousel(node: &Value) -> Option<ArtistCarousel> {
     let more = header
         .and_then(|h| h.get("moreContentButton"))
         .and_then(|b| find_all(b, "browseEndpoint").into_iter().next());
-    let more_browse_id = more.and_then(|e| e.get("browseId")).and_then(Value::as_str).map(str::to_owned);
+    let more_browse_id =
+        more.and_then(|e| e.get("browseId")).and_then(Value::as_str).map(str::to_owned);
     let more_params = more.and_then(|e| e.get("params")).and_then(Value::as_str).map(str::to_owned);
     Some(ArtistCarousel { title, items, more_browse_id, more_params })
 }
@@ -672,8 +694,10 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
     let nav = node.get("navigationEndpoint");
 
     // Song → watchEndpoint.videoId.
-    if let Some(vid) =
-        nav.and_then(|n| n.get("watchEndpoint")).and_then(|w| w.get("videoId")).and_then(Value::as_str)
+    if let Some(vid) = nav
+        .and_then(|n| n.get("watchEndpoint"))
+        .and_then(|w| w.get("videoId"))
+        .and_then(Value::as_str)
     {
         // Same rule as a search row: a song card's subtitle becomes its artist once it plays (and
         // scrobbles), so keep the artist field alone, never the whole "Aqua • 1.7B views" or
@@ -774,8 +798,9 @@ fn shelf_continuation(root: &Value) -> Option<String> {
 
 /// Paging token, modern (`continuationCommand.token`) or legacy (`nextContinuationData`). context/08.
 fn continuation_token(root: &Value) -> Option<String> {
-    if let Some(t) =
-        find_all(root, "continuationCommand").into_iter().find_map(|c| c.get("token").and_then(Value::as_str))
+    if let Some(t) = find_all(root, "continuationCommand")
+        .into_iter()
+        .find_map(|c| c.get("token").and_then(Value::as_str))
     {
         return Some(t.to_owned());
     }
@@ -1224,7 +1249,11 @@ mod tests {
         assert_eq!(r.songs[0].id, "svid");
         // A song card keeps its artist links: played from search, the player bar navigates.
         assert_eq!(
-            r.songs[0].artist_runs.iter().map(|x| (x.text.as_str(), x.id.as_deref())).collect::<Vec<_>>(),
+            r.songs[0]
+                .artist_runs
+                .iter()
+                .map(|x| (x.text.as_str(), x.id.as_deref()))
+                .collect::<Vec<_>>(),
             [("An Artist", Some("UCart")), (" & ", None), ("Another", Some("UCtwo"))]
         );
         // A card that navigates carries none — its subtitle is a descriptor, not an artist line.
@@ -1356,7 +1385,10 @@ mod tests {
         );
         // A row that names its own artist keeps it (compilations, features).
         assert_eq!(a.items[1].artists, "Someone Else");
-        assert!(a.items[1].artist_runs.is_empty(), "an unlinked row artist must not borrow the header's links");
+        assert!(
+            a.items[1].artist_runs.is_empty(),
+            "an unlinked row artist must not borrow the header's links"
+        );
         // Every track on an album page is on *this* album; Last.fm takes the album too.
         assert_eq!(a.items[0].album.as_deref(), Some("Sjelen"));
         assert_eq!(a.items[1].album.as_deref(), Some("Sjelen"));

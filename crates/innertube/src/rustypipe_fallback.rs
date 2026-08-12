@@ -75,9 +75,9 @@ fn pick_audio(streams: &[AudioStream], prefer_high: bool) -> Option<&AudioStream
         }
     }
     if prefer_high {
-        streams
-            .iter()
-            .max_by(|a, b| codec_score(&a.mime).cmp(&codec_score(&b.mime)).then(a.bitrate.cmp(&b.bitrate)))
+        streams.iter().max_by(|a, b| {
+            codec_score(&a.mime).cmp(&codec_score(&b.mime)).then(a.bitrate.cmp(&b.bitrate))
+        })
     } else {
         let capped: Vec<&AudioStream> = streams.iter().filter(|s| s.bitrate <= 128_000).collect();
         if capped.is_empty() {

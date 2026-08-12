@@ -15,15 +15,8 @@ type St<'a> = State<'a, Arc<AppState>>;
 
 #[tauri::command]
 pub async fn search(state: St<'_>, query: String) -> Result<Vec<SongItem>, String> {
-    let client = state
-        .clients
-        .get(innertube::METADATA_CLIENT)
-        .ok_or("metadata client missing")?;
-    let result = state
-        .it
-        .search_songs(client, &query)
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = state.clients.get(innertube::METADATA_CLIENT).ok_or("metadata client missing")?;
+    let result = state.it.search_songs(client, &query).await.map_err(|e| e.to_string())?;
     Ok(result.items)
 }
 
@@ -555,7 +548,11 @@ pub async fn like(state: St<'_>, video_id: String, liked: bool) -> Result<(), St
 /// Save an album to the library, or remove it. `playlist_id` is the album's `OLAK5uy_…`
 /// (`AlbumPage.playlistId`).
 #[tauri::command]
-pub async fn set_album_saved(state: St<'_>, playlist_id: String, saved: bool) -> Result<(), String> {
+pub async fn set_album_saved(
+    state: St<'_>,
+    playlist_id: String,
+    saved: bool,
+) -> Result<(), String> {
     let client = require_login(&state)?;
     state.it.like_playlist(client, &playlist_id, saved).await.map_err(|e| e.to_string())
 }
@@ -604,7 +601,11 @@ pub async fn create_playlist(state: St<'_>, title: String) -> Result<String, Str
 }
 
 #[tauri::command]
-pub async fn rename_playlist(state: St<'_>, playlist_id: String, name: String) -> Result<(), String> {
+pub async fn rename_playlist(
+    state: St<'_>,
+    playlist_id: String,
+    name: String,
+) -> Result<(), String> {
     let client = editable_playlist(&state, &playlist_id)?;
     state.it.playlist_rename(client, &playlist_id, &name).await.map_err(|e| e.to_string())
 }
@@ -811,7 +812,10 @@ mod tests {
             ..Default::default()
         };
         let row = shed_queue_context(played.clone());
-        assert_eq!(row, SongItem { video_id: "abc".into(), title: "Grace".into(), ..Default::default() });
+        assert_eq!(
+            row,
+            SongItem { video_id: "abc".into(), title: "Grace".into(), ..Default::default() }
+        );
         assert_eq!(row.title, played.title, "the song itself survives");
     }
 }

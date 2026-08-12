@@ -130,8 +130,7 @@ mod imp {
     }
 
     pub fn init(app: &AppHandle) -> tauri::Result<()> {
-        let tray =
-            LimusicTray { app: app.clone(), playing: false, icon: icon_pixmap(app) };
+        let tray = LimusicTray { app: app.clone(), playing: false, icon: icon_pixmap(app) };
         // Registering with the StatusNotifierWatcher is async and can outlive setup(); a failure
         // here costs the tray, not the app, so it's logged rather than propagated.
         tauri::async_runtime::spawn(async move {

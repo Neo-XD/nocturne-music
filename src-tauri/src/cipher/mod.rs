@@ -157,9 +157,11 @@ impl CipherDeobfuscator {
             js_string(&decoded)
         );
         match bridge.eval_json(js, CALL_TIMEOUT).await.ok()? {
-            Value::String(newn) if !newn.is_empty() && newn != decoded => {
-                Some(url.replacen(&format!("n={enc}"), &format!("n={}", urlencoding::encode(&newn)), 1))
-            }
+            Value::String(newn) if !newn.is_empty() && newn != decoded => Some(url.replacen(
+                &format!("n={enc}"),
+                &format!("n={}", urlencoding::encode(&newn)),
+                1,
+            )),
             _ => None,
         }
     }
