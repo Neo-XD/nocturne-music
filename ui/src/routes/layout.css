@@ -475,11 +475,11 @@
 	}
 	html {
 		@apply font-sans;
-		/* Chromium (WebView2, so Windows) rubber-bands the whole page when a scroll runs past the
-		   end of its container and chains up to the viewport. The window is transparent and
-		   undecorated, so instead of a harmless wobble the bounce slides the titlebar off the top
-		   and shows the desktop through the gap (seen scrolling the mood chips at the top of
-		   home, issue #9). WebKitGTK has no elastic overscroll, which is why Fedora never sees it. */
+		/* Chromium (WebView2, so Windows) rubber-bands the whole page when a wheel reaches the
+		   viewport with nothing left to scroll. The titlebar has no scrollable ancestor at all, so
+		   every wheel over it lands there. The window is transparent and undecorated, so instead of
+		   a harmless wobble the bounce slides the titlebar off the top and shows the desktop
+		   through the gap (issue #9). WebKitGTK has no elastic overscroll, hence never on Fedora. */
 		overscroll-behavior: none;
 	}
 }
