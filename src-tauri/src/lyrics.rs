@@ -1329,12 +1329,24 @@ mod tests {
         assert_eq!(muxed[0].translation.as_deref(), Some("Halo dunia"));
     }
 
-    /// Hits the live Boidu API, so it is NOT in the default run (context/17: network tests are
-    /// opt-in, or `cargo test` fails offline and on any machine that can't reach the service):
+    /// Are the external providers still alive? Hits all four for real, so it is NOT in the default
+    /// run (context/17: network tests are opt-in, or `cargo test` fails offline):
     ///   cargo test -p limusic-app --lib -- --ignored --nocapture
+    ///
+    /// This exists because a provider that is *broken* and a provider that simply *has no lyrics
+    /// for this track* both return `Ok(None)`, and nothing else in the chain can tell them apart:
+    /// each one just falls through to the next. Netease and Kugou both shipped in PR #13 querying
+    /// endpoints that answered an error for every track, and stayed unnoticed for exactly that
+    /// reason. Run this after touching a provider, and whenever lyrics quietly get worse.
+    ///
+    /// **Read the output, don't just trust the pass.** It fails only when *every* provider is
+    /// silent, because a single "no hit" is not proof of breakage: these are third-party
+    /// catalogues, they drop tracks, and Kugou in particular throttles by IP and answers
+    /// `total: 0` to everything for a while rather than returning an error. A provider that is
+    /// genuinely dead prints "no hit" on every track you try, run after run.
     #[tokio::test]
-    #[ignore = "hits the live Boidu API"]
-    async fn boidu_fetches_real_lyrics() {
+    #[ignore = "hits four live lyrics APIs"]
+    async fn providers_are_alive() {
         let req = LyricsRequest {
             video_id: "test".into(),
             title: "Shape of You".into(),
@@ -1342,14 +1354,36 @@ mod tests {
             album: None,
             duration: Some(233.0),
         };
-        let res = boidu_get(&req).await.unwrap();
-        assert!(res.is_some());
-        let lyrics = res.unwrap();
-        assert_eq!(lyrics.source, "Boidu");
-        assert!(lyrics.synced);
-        assert!(!lyrics.lines.is_empty());
-        assert!(lyrics.lines[0].words.is_some());
+        let mut alive = 0;
+        for (name, hit) in [
+            ("Boidu", boidu_get(&req).await),
+            ("Netease Cloud Music", netease_get(&req).await),
+            ("QQ Music", qqmusic_get(&req).await),
+            ("Kugou", kugou_get(&req).await),
+        ] {
+            match hit {
+                Ok(Some(l)) => {
+                    println!("{name}: {} lines, synced={}", l.lines.len(), l.synced);
+                    assert_eq!(l.source, name);
+                    assert!(!l.lines.is_empty());
+                    alive += 1;
+                }
+                // Transport errors never reach here: the providers collapse them into Ok(None),
+                // which is exactly why a dead one is invisible in normal use.
+                Ok(None) => println!("{name}: NO HIT"),
+                Err(e) => println!("{name}: ERROR {e}"),
+            }
+        }
+        assert!(alive > 0, "no lyrics from any provider (offline?)");
+
+        // Boidu is the only provider carrying per-word timings, and the karaoke sweep renders
+        // nothing without them. Checked here rather than in its own test: a second live test runs
+        // concurrently with this one, and the added latency alone was enough to trip another
+        // provider's 8s timeout and fail the run.
+        let boidu = boidu_get(&req).await.unwrap().expect("Boidu hit");
+        assert!(boidu.lines.iter().any(|l| l.words.is_some()));
     }
 }
+
 
 
