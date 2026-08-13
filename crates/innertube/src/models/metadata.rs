@@ -270,14 +270,11 @@ pub fn parse_account_identities(root: &Value) -> Vec<AccountIdentity> {
     }
 
     for section in sections {
+        // Only the Google-account header. A section *title* is a group label ("Brand accounts"),
+        // not an address, and putting one in `email` shows it under a channel name in the picker.
         let email = find_all(section, "googleAccountHeaderRenderer")
             .into_iter()
-            .find_map(|h| account_text(h.get("email")))
-            .or_else(|| {
-                find_all(section, "accountItemSectionHeaderRenderer")
-                    .into_iter()
-                    .find_map(|h| account_text(h.get("title")))
-            });
+            .find_map(|h| account_text(h.get("email")));
         for item in find_all(section, "accountItem") {
             push_account_identity(&mut identities, item, email.as_deref(), response_id.as_deref());
         }
