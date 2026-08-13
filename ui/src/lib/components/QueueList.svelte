@@ -62,12 +62,12 @@
 	<!-- The padding stands in for the rows outside the window, so this block is exactly as tall as
 	     all of its rows and every heading below it stays where it was. -->
 	<div style="padding-top:{w.padTop}px;padding-bottom:{w.padBottom}px">
-		{#each list.slice(w.start, w.end) as { item, key, i, n } (key)}
+		{#each list.slice(w.start, w.end) as { item, key, i } (key)}
 			<!-- data-row: what the scroller measures a row's real height from. -->
 			<div data-row animate:flip={{ duration: windowed ? 0 : 200, easing: cubicOut }}>
 				<TrackRow
 					song={item}
-					index={n - 1}
+					index={i}
 					active={i === playback.queue.currentIndex}
 					hideRating
 					onplay={() => api.playIndex(i)}

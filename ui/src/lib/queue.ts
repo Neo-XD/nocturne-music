@@ -7,10 +7,8 @@ export interface QueueRow {
 	item: SongItem;
 	/** video_id + occurrence, so `animate:flip` slides rows instead of recreating them. */
 	key: string;
-	/** Index in the backend queue — what play/remove act on. */
+	/** Index in the backend queue — what play/remove act on, and what the row is numbered by. */
 	i: number;
-	/** Display number, renumbered from 1 over the visible rows. */
-	n: number;
 }
 
 export interface QueueBlock {
@@ -52,12 +50,11 @@ export function queueBlocks(q: QueueState): {
 	const { items, currentIndex, sourceName } = q;
 	const playedFrom = Math.min(q.playedFrom ?? currentIndex, currentIndex);
 	const seen = new Map<string, number>();
-	let n = 0;
 	const row = (i: number): QueueRow => {
 		const item = items[i];
 		const occ = seen.get(item.video_id) ?? 0;
 		seen.set(item.video_id, occ + 1);
-		return { item, key: `${item.video_id}:${occ}`, i, n: ++n };
+		return { item, key: `${item.video_id}:${occ}`, i };
 	};
 	// Occurrence counting must walk the whole prefix, not just the played part of it, or a repeated
 	// track's key would collide with an earlier copy that isn't on screen.
@@ -66,10 +63,8 @@ export function queueBlocks(q: QueueState): {
 		const r = row(i);
 		if (i >= playedFrom) prev.push(r);
 	}
-	// Each run numbers itself from 1: the previously-played rows, then the playing track and
-	// everything after it. Continuous numbering would renumber the playing row as history loads.
-	prev.forEach((r, k) => (r.n = k + 1));
-	n = 0;
+	// Rows are drawn in queue order throughout, so the number is the queue index and nothing else:
+	// counting per run restarted the playing track at 1 under the two tracks already heard (#25).
 	const now = items[currentIndex] ? row(currentIndex) : null;
 
 	// Where the shuffled run starts: shuffle pins the leading "Play next" block in place and

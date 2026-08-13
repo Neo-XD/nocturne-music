@@ -50,9 +50,8 @@ ok(v.blocks[1].heading === 'Next from: Nightcore Bangers', 'the added block is n
 ok(v.blocks[1].rows.map((r) => r.item.video_id).join() === 'n1,n2', 'the whole added block');
 ok(v.blocks[2].autoplay, 'autoplay filler is last and marked');
 ok(v.blocks[1].clearable && !v.blocks[0].clearable, 'Clear queue sits on the manual block');
-// Row numbering runs 1..n over what's visible, and indices still point at the backend queue.
-ok(v.now?.n === 1 && v.blocks[0].rows[0].n === 2 && v.blocks[2].rows[0].n === 5, 'numbered in order');
-ok(v.blocks[1].rows[0].i === 2, 'index is the queue index, not the display number');
+// The row number is the queue index (drawn as i + 1), which is also what play/remove act on.
+ok(v.now?.i === 0 && v.blocks[0].rows[0].i === 1 && v.blocks[2].rows[0].i === 4, 'numbered in order');
 
 // "Play next" (queued) stays right behind the current track, ahead of the context.
 v = queueBlocks(q([song('a1'), song('p1', { queued: true }), song('a2')], 0, 'Afro'));
@@ -94,8 +93,9 @@ ok(v.prev.length === 0, 'starting mid-playlist has played nothing');
 v = queueBlocks(q([song('a'), song('b'), song('c'), song('now')], 3, 'Afro', false, 1));
 ok(v.prev.map((r) => r.item.video_id).join() === 'b,c', 'skipped-over tracks count as played');
 ok(v.prev.map((r) => r.i).join() === '1,2', 'indices still point at the backend queue');
-ok(v.prev.map((r) => r.n).join() === '1,2', 'the played run numbers itself from 1');
-ok(v.now?.n === 1, 'the playing row keeps its number when history loads');
+// #25: the played rows and the playing row share one run of numbers, so the third track of an
+// album reads 3 rather than restarting at 1 under the two above it.
+ok(v.now?.i === 3, 'the playing row follows the history it was played after');
 
 // A blob saved before this existed (no `playedFrom`) restores with nothing played, rather than
 // claiming the whole prefix was heard.
