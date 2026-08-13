@@ -23,6 +23,7 @@
 		hideThumb = false,
 		compact = false,
 		showPlayCount = false,
+		hideRating = false,
 		onplay,
 		onAdd,
 		onRemove,
@@ -45,6 +46,11 @@
 		 * page (queue, previously played) and a narrow panel has no width to spare for it.
 		 */
 		showPlayCount?: boolean;
+		/**
+		 * Drop the inline thumbs (the queue panel): two buttons plus the duration leave nothing for
+		 * the title and artists at that width. The ⋯ menu carries like and dislike either way.
+		 */
+		hideRating?: boolean;
 		onplay: () => void;
 		/** Adds an "Add to playlist" menu item. */
 		onAdd?: () => void;
@@ -60,7 +66,7 @@
 	const rated = $derived(ratingOf(song));
 	// A local file has no YouTube identity, so there is nothing to rate (the same guard the ⋯ menu
 	// applies to its like item). The compact variant has no room: it keeps its single heart.
-	const showRating = $derived(!compact && !api.isLocalId(song.video_id));
+	const showRating = $derived(!compact && !hideRating && !api.isLocalId(song.video_id));
 
 	// The whole row is a play target (role="button"), so mirror native button keyboard activation.
 	// Only when the key lands on the row itself — keydowns bubble up from nested interactive

@@ -69,6 +69,7 @@
 					song={item}
 					index={n - 1}
 					active={i === playback.queue.currentIndex}
+					hideRating
 					onplay={() => api.playIndex(i)}
 					onAdd={() => openAddToPlaylist(item)}
 					onRemove={canRemove && i !== playback.queue.currentIndex
