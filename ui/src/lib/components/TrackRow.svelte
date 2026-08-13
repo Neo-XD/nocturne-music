@@ -126,6 +126,16 @@
 		</div>
 	</div>
 
+	<!-- Album rows only, and only where the row has spare width to give: a wide row is mostly empty
+	     between the title and the duration. -->
+	{#if song.play_count && !compact}
+		<div
+			class="hidden min-w-0 flex-1 items-center justify-center text-xs text-muted-foreground lg:flex"
+		>
+			<span class="truncate">{song.play_count} plays</span>
+		</div>
+	{/if}
+
 	<div class="flex shrink-0 items-center {compact ? 'gap-0.5' : 'gap-2'}">
 		{#if song.duration && !compact}
 			<span class="text-xs text-muted-foreground">{song.duration}</span>

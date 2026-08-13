@@ -32,6 +32,10 @@ pub struct SongItem {
     pub album_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<String>,
+    /// The row's play count as YouTube abbreviates it ("53M"), from an album page's plays column.
+    /// Absent on rows that don't carry one (playlists, search, queue).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play_count: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thumbnail: Option<String>,
     /// `playlistSetVideoId` — the item's id *within a playlist*, needed to remove it (context/01
@@ -258,6 +262,7 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
         album,
         album_id: album_id(node),
         duration,
+        play_count: play_count(node),
         thumbnail: last_thumbnail(node),
         set_video_id,
         liked: like_status(node),
@@ -268,6 +273,15 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
         autoplay: false,
         is_video: is_video_row(node),
     })
+}
+
+/// The play count from an album row's third flex column ("53M plays" → "53M"). Playlist rows put
+/// the album name in that column instead, so the trailing "plays" is the discriminator — the
+/// locale is pinned to en (models::context), so it's always that word. Live-verified 2026-08.
+fn play_count(node: &Value) -> Option<String> {
+    let text = flex_column_text(node, 2)?;
+    let (count, unit) = text.trim().rsplit_once(' ')?;
+    unit.eq_ignore_ascii_case("plays").then(|| count.to_owned())
 }
 
 /// The album's browseId (`MPRE…`): either the linked album run or the row menu's "Go to album"
@@ -345,6 +359,7 @@ fn parse_panel_video(node: &Value) -> Option<SongItem> {
         album: None,
         album_id: album_id(node),
         duration,
+        play_count: None,
         thumbnail: last_thumbnail(node),
         set_video_id: None,
         liked: like_status(node),
@@ -700,6 +715,27 @@ mod tests {
         assert_eq!(s.album_id.as_deref(), Some("MPREalbum1"));
         assert_eq!(s.duration.as_deref(), Some("3:21"));
         assert_eq!(s.thumbnail.as_deref(), Some("big.jpg"));
+    }
+
+    // Album rows carry "53M plays" in the third flex column; playlist rows put the album name
+    // there. Confusing the two would print an album title where the play count goes.
+    #[test]
+    fn play_count_comes_only_from_a_plays_column() {
+        let row = |third: Value| {
+            json!({ "musicResponsiveListItemRenderer": {
+                "playlistItemData": { "videoId": "abc123" },
+                "flexColumns": [
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Song Title" }] } } },
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "The Artist" }] } } },
+                    { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": third }] } } }
+                ]
+            }})
+        };
+        let plays = |third: Value| parse_list_item(&row(third)["musicResponsiveListItemRenderer"]);
+        assert_eq!(plays(json!("53M plays")).unwrap().play_count.as_deref(), Some("53M"));
+        assert_eq!(plays(json!("1,234 plays")).unwrap().play_count.as_deref(), Some("1,234"));
+        assert_eq!(plays(json!("The Album")).unwrap().play_count, None);
+        assert_eq!(plays(json!("")).unwrap().play_count, None);
     }
 
     #[test]

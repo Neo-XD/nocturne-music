@@ -22,6 +22,8 @@ export interface SongItem {
 	/** The album's browseId (`MPRE…`), when linked — makes the album navigable. */
 	album_id?: string;
 	duration?: string;
+	/** Play count as YouTube abbreviates it ("53M"). Album rows only. */
+	play_count?: string;
 	thumbnail?: string;
 	/** Item id within a playlist — present only on playlist tracks; needed to remove them. */
 	set_video_id?: string;
