@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { Search01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons';
+	import { Search01Icon, UserGroup02Icon } from '@hugeicons/core-free-icons';
 	import { Input } from '$lib/components/ui/input';
 	import { auth, playback, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
@@ -82,7 +82,7 @@
 						? 'border-primary text-primary hover:bg-primary/10'
 						: 'border-border text-muted-foreground hover:bg-muted hover:text-foreground'}"
 				>
-					<HugeiconsIcon icon={UserMultiple02Icon} class="h-5 w-5" />
+					<HugeiconsIcon icon={UserGroup02Icon} class="h-5 w-5" />
 					{#if lt.role !== 'none'}
 						<span
 							class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background"
