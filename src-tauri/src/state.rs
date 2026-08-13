@@ -198,6 +198,10 @@ fn selected_identity_from_db(db: &Db) -> Option<SelectedIdentity> {
         })
 }
 
+fn auth_selection_pending(db: &Db) -> bool {
+    db.get_setting("account_selection_pending").as_deref() == Some("true")
+}
+
 /// Startup compatibility: prefer the canonical model, then fall back to the pre-switcher setting.
 pub(crate) fn persisted_data_sync_id(db: &Db) -> Option<String> {
     selected_identity_from_db(db)
@@ -384,9 +388,6 @@ impl AppState {
             }
         };
 
-        // Plaintext SQLite — acceptable for a single-user personal tool (context/15). Persist the
-        // cookie only after account_menu proved it authenticates.
-        self.db.set_setting("session_cookie", &cookie);
         let active_visitor_data = active.visitor_data.clone();
 
         // Losing the list endpoint must not regress ordinary one-channel sign-in. It only removes
@@ -479,10 +480,11 @@ impl AppState {
         }
 
         if identities.len() > 1 {
-            // No persisted choice for these cookies: keep the authenticated cookie, but remove any
-            // stale legacy projection so a restart cannot silently act as the old channel.
+            // No persisted choice for these cookies: atomically keep the authenticated cookie,
+            // mark the login unfinished, and remove stale projections. A restart will reopen the
+            // required picker instead of silently acting as YouTube's default channel.
             self.it.set_data_sync_id(None);
-            self.db.clear_auth_identity().map_err(|error| {
+            self.db.set_pending_auth_selection(&cookie).map_err(|error| {
                 self.restore_auth_transport(previous_cookie.clone(), previous_data_sync_id.clone());
                 self.restore_session_cookie_setting(previous_cookie.as_deref());
                 error.to_string()
@@ -572,8 +574,17 @@ impl AppState {
         let account = selected.account_json(true);
         let selected_json = serde_json::to_string(&selected).map_err(|e| e.to_string())?;
         let account_json = account.to_string();
+        let session_cookie = self
+            .it
+            .cookie()
+            .ok_or("The YouTube session expired before the channel could be saved.")?;
         self.db
-            .set_auth_identity(&selected_json, selected.data_sync_id.as_deref(), &account_json)
+            .set_auth_identity(
+                &session_cookie,
+                &selected_json,
+                selected.data_sync_id.as_deref(),
+                &account_json,
+            )
             .map_err(|e| format!("Couldn't save the selected YouTube channel: {e}"))?;
         self.persist_visitor_data(visitor_data);
         self.it.set_data_sync_id(selected.data_sync_id.clone());
@@ -612,6 +623,13 @@ impl AppState {
     /// Current account for the UI. New installs derive it from the canonical selected identity;
     /// legacy `account_json` remains a read fallback so existing databases migrate without a wipe.
     pub fn account_snapshot(&self) -> serde_json::Value {
+        if auth_selection_pending(&self.db) && self.it.is_logged_in() {
+            return serde_json::json!({
+                "signedIn": true,
+                "selectionRequired": true,
+                "canSwitch": true,
+            });
+        }
         if let Some(selected) = selected_identity_from_db(&self.db) {
             return selected.account_json(self.it.is_logged_in());
         }

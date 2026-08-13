@@ -81,6 +81,8 @@ export interface Account {
 	thumbnail?: string | null;
 	channelId?: string | null;
 	canSwitch?: boolean;
+	/** The cookie authenticated, but a multi-channel login is not complete until one is chosen. */
+	selectionRequired?: boolean;
 }
 
 export interface AccountIdentity {

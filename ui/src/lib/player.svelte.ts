@@ -628,6 +628,10 @@ export function initApp(mini = false): () => void {
 	api.getAccount()
 		.then((a) => {
 			auth.account = a;
+			if (a.signedIn && a.selectionRequired) {
+				openChannelPicker(true);
+				return;
+			}
 			if (a.signedIn) {
 				loadLibrary();
 				// Older databases predate `canSwitch`. Refresh just the safe display list so those

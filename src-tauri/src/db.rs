@@ -115,12 +115,18 @@ impl Db {
     /// prevents a restart from pairing one channel's request delegation with another's display.
     pub fn set_auth_identity(
         &self,
+        session_cookie: &str,
         selected_json: &str,
         data_sync_id: Option<&str>,
         account_json: &str,
     ) -> rusqlite::Result<()> {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO settings(key, value) VALUES('session_cookie', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [session_cookie],
+        )?;
         tx.execute(
             "INSERT INTO settings(key, value) VALUES('selected_identity_json', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -140,13 +146,38 @@ impl Db {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             [account_json],
         )?;
+        tx.execute("DELETE FROM settings WHERE key = 'account_selection_pending'", [])?;
+        tx.commit()
+    }
+
+    /// Persist an authenticated cookie while deliberately leaving the account unfinished. Keeping
+    /// the marker and removal of stale identity projections in the same transaction means a crash
+    /// during the required picker cannot restart into YouTube's default channel silently.
+    pub fn set_pending_auth_selection(&self, session_cookie: &str) -> rusqlite::Result<()> {
+        let mut conn = self.0.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO settings(key, value) VALUES('session_cookie', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [session_cookie],
+        )?;
+        for key in ["selected_identity_json", "data_sync_id", "account_json"] {
+            tx.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        }
+        tx.execute(
+            "INSERT INTO settings(key, value) VALUES('account_selection_pending', 'true')
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [],
+        )?;
         tx.commit()
     }
 
     pub fn clear_auth_identity(&self) -> rusqlite::Result<()> {
         let mut conn = self.0.lock().unwrap();
         let tx = conn.transaction()?;
-        for key in ["selected_identity_json", "data_sync_id", "account_json"] {
+        for key in
+            ["selected_identity_json", "data_sync_id", "account_json", "account_selection_pending"]
+        {
             tx.execute("DELETE FROM settings WHERE key = ?1", [key])?;
         }
         tx.commit()
@@ -499,6 +530,7 @@ mod tests {
     fn auth_identity_projections_are_updated_and_cleared_together() {
         let d = db();
         d.set_auth_identity(
+            "SAPISID=cookie-a",
             r#"{"data_sync_id":"channel-a"}"#,
             Some("channel-a"),
             r#"{"name":"Channel A"}"#,
@@ -510,10 +542,24 @@ mod tests {
             Some(r#"{"data_sync_id":"channel-a"}"#)
         );
         assert_eq!(d.get_setting("account_json").as_deref(), Some(r#"{"name":"Channel A"}"#));
+        assert_eq!(d.get_setting("session_cookie").as_deref(), Some("SAPISID=cookie-a"));
 
-        d.set_auth_identity(r#"{"data_sync_id":null}"#, None, r#"{"name":"Single channel"}"#)
-            .unwrap();
+        d.set_pending_auth_selection("SAPISID=cookie-b").unwrap();
+        assert_eq!(d.get_setting("session_cookie").as_deref(), Some("SAPISID=cookie-b"));
+        assert_eq!(d.get_setting("selected_identity_json"), None);
+        assert_eq!(d.get_setting("data_sync_id"), None);
+        assert_eq!(d.get_setting("account_json"), None);
+        assert_eq!(d.get_setting("account_selection_pending").as_deref(), Some("true"));
+
+        d.set_auth_identity(
+            "SAPISID=cookie-b",
+            r#"{"data_sync_id":null}"#,
+            None,
+            r#"{"name":"Single channel"}"#,
+        )
+        .unwrap();
         assert_eq!(d.get_setting("data_sync_id"), None, "a stale delegated id must be deleted");
+        assert_eq!(d.get_setting("account_selection_pending"), None);
 
         d.clear_auth_identity().unwrap();
         assert_eq!(d.get_setting("selected_identity_json"), None);
