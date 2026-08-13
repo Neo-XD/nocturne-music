@@ -5,7 +5,7 @@
 # ORDER MATTERS. The release is created and both workflows are dispatched BEFORE the local rpm
 # build, not after: CI's ~13 minutes and this machine's ~5 minutes then overlap instead of queueing.
 # The rpm is uploaded to the already-published release afterwards. The cost of that ordering is that
-# a failed rpm build leaves a published release with no rpm on it — recoverable with one
+# a failed rpm build leaves a published release with no rpm on it, recoverable with one
 # `gh release upload`, and the script tells you the exact command if it happens.
 #
 # The AppImage is NOT built here. An AppImage inherits its build host's glibc floor, and this
@@ -44,27 +44,27 @@ echo "==> Preflight…"
 
 [ -f "$KEY" ] || die "signing key not found at $KEY"
 command -v gh >/dev/null || die "gh is not installed"
-gh auth status >/dev/null 2>&1 || die "gh is not authenticated — run: gh auth login"
+gh auth status >/dev/null 2>&1 || die "gh is not authenticated. Run: gh auth login"
 
 # The two version files must agree. tauri.conf.json is what the updater compares, but a Cargo.toml
 # left behind means the binary reports a different version than the release it shipped in.
 CARGO_VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
 [ "$CARGO_VERSION" = "$VERSION" ] \
-  || die "Cargo.toml says $CARGO_VERSION but src-tauri/tauri.conf.json says $VERSION — bump both"
+  || die "Cargo.toml says $CARGO_VERSION but src-tauri/tauri.conf.json says $VERSION. Bump both"
 
 # The rpm is built from this working tree; the tag is cut from remote master. Anything uncommitted
 # means the shipped rpm and the source the tag names are different code.
 git diff --quiet && git diff --cached --quiet \
-  || die "uncommitted changes to tracked files — commit or stash them first"
+  || die "uncommitted changes to tracked files. Commit or stash them first"
 
 # THE rule. `gh release create` creates the tag from whatever the REMOTE master points at, so
 # releasing without pushing tags code the binaries were not built from.
 git fetch --quiet origin master
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ] \
-  || die "HEAD ($(git rev-parse --short HEAD)) is not origin/master ($(git rev-parse --short origin/master)) — run: git push origin master"
+  || die "HEAD ($(git rev-parse --short HEAD)) is not origin/master ($(git rev-parse --short origin/master)). Run: git push origin master"
 
 ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
-  || die "$TAG is already published — bump the version"
+  || die "$TAG is already published. Bump the version"
 
 # Compare against what is actually PUBLISHED, not against local tags. `gh release create` makes the
 # tag on the remote, so a tag can be live without ever being fetched here: before v0.3.14
@@ -73,7 +73,7 @@ git fetch --quiet origin master
 HIGHEST="$(gh release list --repo "$REPO" --limit 50 --json tagName --jq '.[].tagName' \
   | sed 's/^v//' | sort -V | tail -1)"
 [ "$(printf '%s\n%s\n' "$VERSION" "$HIGHEST" | sort -V | head -1)" != "$VERSION" ] \
-  || die "$VERSION is not above the newest published release (${HIGHEST:-none}) — installed users would never be prompted"
+  || die "$VERSION is not above the newest published release (${HIGHEST:-none}). Installed users would never be prompted"
 
 echo "    clean tree, pushed, $VERSION > ${HIGHEST:-none}"
 
@@ -131,7 +131,7 @@ gh release create "$TAG" \
   target/release/bundle/latest.json
 
 # Newest run id for a workflow, or 0 if it has never run. Used to tell the run we are about to
-# dispatch apart from whatever ran last — `gh workflow run` does not report the run it creates.
+# dispatch apart from whatever ran last: `gh workflow run` does not report the run it creates.
 latest_run() { gh run list --repo "$REPO" --workflow "$1" --limit 1 --json databaseId --jq '.[0].databaseId // 0'; }
 wait_for_run() { # $1 = workflow name, $2 = run id seen before the dispatch
   local id
@@ -183,11 +183,11 @@ echo "    attached $(basename "$RPM")"
 # script exits on a half-published release and the first sign of a failed job
 # is a user reporting they were never offered the update.
 # ---------------------------------------------------------------------------
-echo "==> Waiting for CI (Ctrl-C is safe — the builds keep running without this terminal)…"
+echo "==> Waiting for CI (Ctrl-C is safe, the builds keep running without this terminal)…"
 CI_OK=1
 for run in "$RUN_LINUX" "$RUN_WIN"; do
   if [ -z "$run" ] || [ "$run" = "0" ]; then
-    echo "    could not resolve a run id — watch it at Actions instead"
+    echo "    could not resolve a run id, watch it at Actions instead"
     CI_OK=0
     continue
   fi
@@ -215,7 +215,7 @@ else
   echo "      gh run list --repo $REPO --limit 5" >&2
   echo "      gh workflow run \"Linux release binaries\"   --repo $REPO --ref master -f tag=$TAG" >&2
   echo "      gh workflow run \"Windows release binaries\" --repo $REPO --ref master -f tag=$TAG" >&2
-  echo "    Only fixes to .github/workflows/ take effect on a re-dispatch — anything in scripts/," >&2
+  echo "    Only fixes to .github/workflows/ take effect on a re-dispatch; anything in scripts/," >&2
   echo "    src/ or ui/ needs a new version, since the run checks out the tag." >&2
   exit 1
 fi

@@ -79,7 +79,7 @@ jobs:
       # produces the binaries users auto-update to, so nothing in it should be able to change under
       # us. To bump one: read the SHA off the action's release, update the pin and the trailing
       # version comment together.
-      # persist-credentials: false — nothing after this step uses git, so there is no reason to
+      # persist-credentials: false, because nothing after this step uses git and there is no reason to
       # leave a writable token in .git/config for the rest of the job to find.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -293,7 +293,7 @@ jobs:
           fail=0
           for pid in $pids; do wait "$pid" || fail=1; done
 
-          # Print both logs whatever happened — on a failure this is the only evidence there is.
+          # Print both logs whatever happened. On a failure this is the only evidence there is.
           for image in $IMAGES; do
             echo "── $image"
             cat "/tmp/check-${image%%:*}.log"
@@ -335,7 +335,7 @@ jobs:
 
           # Every GitHub API call below goes through this. Without it a single transient failure
           # anywhere in this step aborts the job with the AppImage already uploaded, latest.json
-          # un-merged and the release never marked Latest — a state only a manual re-dispatch fixes,
+          # un-merged and the release never marked Latest, a state only a manual re-dispatch fixes,
           # and one nothing would have told you about. All three calls are idempotent (`--clobber`
           # on upload, read-only download, `--latest` is a set-not-toggle), so retrying is safe.
           retry() { # retry <attempts> <command…>

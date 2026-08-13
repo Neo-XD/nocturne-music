@@ -72,7 +72,7 @@ jobs:
       # holds TAURI_SIGNING_PRIVATE_KEY and produces the installers users auto-update to, so
       # nothing in it should be able to change under us. To bump one: read the SHA off the action's
       # release, update the pin and the trailing version comment together.
-      # persist-credentials: false — nothing after this step uses git, so there is no reason to
+      # persist-credentials: false, because nothing after this step uses git and there is no reason to
       # leave a writable token in .git/config for the rest of the job to find.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -237,7 +237,7 @@ jobs:
             export RUSTFLAGS="$RUSTFLAGS -C linker-flavor=lld-link -C linker=$RUST_LLD"
             echo "linking with rust-lld ($RUST_LLD)"
           else
-            echo "::warning::rust-lld not found at $RUST_LLD — falling back to MSVC link.exe"
+            echo "::warning::rust-lld not found at $RUST_LLD, falling back to MSVC link.exe"
           fi
 
           (cd ui && pnpm build)
@@ -254,9 +254,9 @@ jobs:
       # Nothing in this job ever launches the app, so a dry run can prove the build succeeded and
       # not that the result starts. Hand the installer over as a workflow artifact instead: a
       # toolchain change (the linker above, the mpv import lib) can then be installed and clicked
-      # before it goes anywhere near a real release. Artifacts are not release assets — no user
+      # before it goes anywhere near a real release. Artifacts are not release assets, so no user
       # sees this, and latest.json is untouched.
-      - name: Dry run — keep the installer as an artifact
+      - name: Dry run, keep the installer as an artifact
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -278,7 +278,7 @@ jobs:
 
           # Every GitHub API call below goes through this. Without it a single transient failure
           # anywhere in this step aborts the job with the installers already uploaded and
-          # latest.json un-merged — so Windows installs are never offered the update, and nothing
+          # latest.json un-merged, so Windows installs are never offered the update, and nothing
           # says so. All calls are idempotent (`--clobber` on upload, read-only download), so
           # retrying is safe.
           retry() { # retry <attempts> <command…>
