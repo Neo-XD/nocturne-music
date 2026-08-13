@@ -404,6 +404,7 @@
                 song={item}
                 index={i}
                 hideThumb
+                showPlayCount
                 active={item.video_id === nowId}
                 onplay={() => playAll(i)}
                 onAdd={isLocal ? undefined : () => openAddManyToPlaylist([item])}

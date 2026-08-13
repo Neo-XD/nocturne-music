@@ -22,6 +22,7 @@
 		active = false,
 		hideThumb = false,
 		compact = false,
+		showPlayCount = false,
 		onplay,
 		onAdd,
 		onRemove,
@@ -39,6 +40,11 @@
 		 * for a separate duration column, and hearting is the whole point of that shelf.
 		 */
 		compact?: boolean;
+		/**
+		 * Opt-in, because `play_count` rides along on the song object wherever it goes after an album
+		 * page (queue, previously played) and a narrow panel has no width to spare for it.
+		 */
+		showPlayCount?: boolean;
 		onplay: () => void;
 		/** Adds an "Add to playlist" menu item. */
 		onAdd?: () => void;
@@ -156,12 +162,11 @@
 		</div>
 	</div>
 
-	<!-- Album rows only, and only where the row has spare width to give: a wide row is mostly empty
-	     between the title and the duration. -->
-	{#if song.play_count && !compact}
-		<div
-			class="hidden min-w-0 flex-1 items-center justify-center text-xs text-muted-foreground lg:flex"
-		>
+	<!-- Album rows only. Wide rows are mostly empty between the title and the duration, so it takes a
+	     centred column of its own there; narrow ones sit it next to the duration at its natural width
+	     rather than dropping it, since it never needs more than "1,234 plays" worth of room. -->
+	{#if song.play_count && showPlayCount && !compact}
+		<div class="flex shrink-0 items-center justify-center text-xs text-muted-foreground lg:flex-1">
 			<span class="truncate">{song.play_count} plays</span>
 		</div>
 	{/if}
