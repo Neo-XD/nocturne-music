@@ -63,6 +63,11 @@
 	// reflect that in the hover icon + label so the row doesn't lie.
 	const guestAdd = $derived(lt.role === 'guest');
 
+	// Digits and colons, nothing else. A queue saved before the parser stopped reading a name with a
+	// colon in it ("Cast of EPIC: The Musical") as a length still holds those strings, and printing
+	// one here squeezes the title and artists down to nothing.
+	const duration = $derived(/^[\d:]+$/.test(song.duration ?? '') ? song.duration : undefined);
+
 	const rated = $derived(ratingOf(song));
 	// A local file has no YouTube identity, so there is nothing to rate (the same guard the ⋯ menu
 	// applies to its like item). The compact variant has no room: it keeps its single heart.
@@ -161,8 +166,8 @@
 			</div>
 			<div class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
 				<ArtistLine runs={song.artist_runs} text={song.artists} />
-				{#if compact && song.duration}
-					<span class="shrink-0">· {song.duration}</span>
+				{#if compact && duration}
+					<span class="shrink-0">· {duration}</span>
 				{/if}
 			</div>
 		</div>
@@ -192,8 +197,8 @@
 				{@render rateButton(ThumbsDownIcon, 'dislike', 'Dislike')}
 			</div>
 		{/if}
-		{#if song.duration && !compact}
-			<span class="text-xs text-muted-foreground">{song.duration}</span>
+		{#if duration && !compact}
+			<span class="shrink-0 text-xs tabular-nums text-muted-foreground">{duration}</span>
 		{/if}
 		{#if compact}
 			<!-- Persistent, not hover-only: a filled heart is state the row has to keep showing. -->

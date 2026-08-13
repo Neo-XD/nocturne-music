@@ -437,7 +437,7 @@ fn fixed_column_text(node: &Value) -> Option<String> {
                 .and_then(|r| r.get("text"))
                 .and_then(runs_text_opt)
         })
-        .filter(|s| s.contains(':'))
+        .filter(|s| is_duration(s))
 }
 
 fn flex_text(col: &Value) -> Option<String> {
@@ -503,6 +503,14 @@ fn is_type_label(s: &str) -> bool {
     )
 }
 
+/// "3:02" / "1:04:11", and nothing else. A colon alone doesn't make a duration: an artist or album
+/// can carry one ("Jorge Rivera-Herrans & Cast of EPIC: The Musical"), and taking that as the
+/// length prints the whole title where the time goes and squeezes the rest of the row out.
+fn is_duration(s: &str) -> bool {
+    let s = s.trim();
+    s.contains(':') && s.chars().all(|c| c.is_ascii_digit() || c == ':')
+}
+
 /// Split a "• "-separated subtitle run list into (artists, album, duration). context/08.
 fn split_subtitle(runs: Option<&Vec<Value>>) -> (String, Option<String>, Option<String>) {
     let Some(runs) = runs else { return (String::new(), None, None) };
@@ -518,8 +526,8 @@ fn split_subtitle(runs: Option<&Vec<Value>>) -> (String, Option<String>, Option<
     }
     let groups: Vec<String> = groups.into_iter().map(|g| g.text).collect();
     let artists = groups.first().cloned().unwrap_or_default();
-    // Last group that looks like a duration (contains ':') is the duration; the middle is album.
-    let duration = groups.iter().rev().find(|g| g.contains(':')).cloned();
+    // Last group that is a duration is the duration; the middle is album.
+    let duration = groups.iter().rev().find(|g| is_duration(g)).cloned();
     let album = groups.get(1).filter(|g| Some(*g) != duration.as_ref()).cloned();
     (artists, album, duration)
 }
@@ -527,6 +535,13 @@ fn split_subtitle(runs: Option<&Vec<Value>>) -> (String, Option<String>, Option<
 /// Just the artist field of a subtitle run list, for the surfaces that keep a flat string.
 pub(crate) fn artists_from_runs(runs: Option<&Vec<Value>>) -> Option<String> {
     Some(split_subtitle(runs).0).filter(|s| !s.is_empty())
+}
+
+/// Just the duration field ("Song • Delara • 3:02" → "3:02"). Song cards carry it in the same
+/// subtitle they take their artist from, and dropping it leaves the row blank where the time goes
+/// once the card is queued.
+pub(crate) fn duration_from_runs(runs: Option<&Vec<Value>>) -> Option<String> {
+    split_subtitle(runs).2
 }
 
 /// Deepest/last thumbnail URL under this node (highest resolution).
@@ -769,6 +784,30 @@ mod tests {
         assert_eq!(plays(json!("1,234 plays")).unwrap().play_count.as_deref(), Some("1,234"));
         assert_eq!(plays(json!("The Album")).unwrap().play_count, None);
         assert_eq!(plays(json!("")).unwrap().play_count, None);
+    }
+
+    // An artist or album with a colon in its name ("Cast of EPIC: The Musical") used to read as the
+    // duration, so the row printed that whole string where the time goes and lost the real length.
+    #[test]
+    fn a_colon_in_a_name_is_not_a_duration() {
+        let row = json!({
+            "playlistItemData": { "videoId": "abc123" },
+            "flexColumns": [
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Monster" }] } } },
+                { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [
+                    { "text": "Jorge Rivera-Herrans & Cast of EPIC: The Musical",
+                      "navigationEndpoint": { "browseEndpoint": { "browseId": "UCjorge" } } },
+                    { "text": " • " }, { "text": "EPIC: The Musical" }
+                ] } } }
+            ],
+            "fixedColumns": [
+                { "musicResponsiveListItemFixedColumnRenderer": { "text": { "runs": [{ "text": "4:32" }] } } }
+            ]
+        });
+        let s = parse_list_item(&row).unwrap();
+        assert_eq!(s.artists, "Jorge Rivera-Herrans & Cast of EPIC: The Musical");
+        assert_eq!(s.album.as_deref(), Some("EPIC: The Musical"));
+        assert_eq!(s.duration.as_deref(), Some("4:32"));
     }
 
     #[test]

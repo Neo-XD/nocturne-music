@@ -11,7 +11,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::metadata::{
-    artist_runs, artists_from_runs, find_all, find_all_shallow, find_first_str, first_artist_id,
+    artist_runs, artists_from_runs, duration_from_runs, find_all, find_all_shallow, find_first_str,
+    first_artist_id,
     flex_column_text, flex_runs, is_video_endpoint, is_video_row, last_thumbnail,
     list_item_video_id, parse_list_item, runs_text, runs_text_opt, ArtistRun, SongItem,
 };
@@ -363,7 +364,7 @@ fn list_item_to_browse_item(node: &Value) -> Option<BrowseItem> {
         title,
         subtitle,
         thumbnail,
-        duration: None,
+        duration: duration_from_runs(runs),
         artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
         is_video: is_video_row(node),
     })
@@ -396,7 +397,7 @@ fn card_shelf_main(card: &Value) -> Option<BrowseItem> {
             title,
             subtitle,
             thumbnail,
-            duration: None,
+            duration: duration_from_runs(runs),
             artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
             is_video: nav.is_some_and(is_video_endpoint),
         });
@@ -711,7 +712,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
             title,
             subtitle,
             thumbnail,
-            duration: None,
+            duration: duration_from_runs(runs),
             artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
             is_video: is_video_row(node),
         });
