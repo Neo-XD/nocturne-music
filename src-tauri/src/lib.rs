@@ -201,7 +201,7 @@ pub fn run() {
             // (context/04 §A) only if we've never stored one.
             let proxy = db.get_setting("proxy");
             let cookie = db.get_setting("session_cookie").filter(|s| !s.is_empty());
-            let data_sync_id = db.get_setting("data_sync_id").filter(|s| !s.is_empty());
+            let data_sync_id = state::persisted_data_sync_id(&db);
             let visitor_data = db.get_setting("visitor_data").filter(|s| !s.is_empty());
             // First run (no stored visitorData): bootstrap it in the background after the window is
             // up, rather than blocking setup on a network GET (up to 60s on a bad connection). See
@@ -379,6 +379,8 @@ pub fn run() {
             commands::get_stream_clients,
             commands::clear_caches,
             commands::get_account,
+            commands::get_account_identities,
+            commands::switch_account,
             commands::sign_out,
             commands::login_webview,
             commands::open_mini,

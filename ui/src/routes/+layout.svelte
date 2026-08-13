@@ -23,6 +23,7 @@
 	import LyricsPanel from '$lib/components/LyricsPanel.svelte';
 	import AddToPlaylist from '$lib/components/AddToPlaylist.svelte';
 	import SettingsDialog from '$lib/components/SettingsDialog.svelte';
+	import ChannelPicker from '$lib/components/ChannelPicker.svelte';
 	import ListenTogether from '$lib/components/ListenTogether.svelte';
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
@@ -116,6 +117,7 @@
 
 	<AddToPlaylist />
 	<SettingsDialog />
+	<ChannelPicker />
 	<ListenTogether />
 
 	<!-- The two notification banners below run at z-[100]. Dialogs and menus sit at z-50 and portal to

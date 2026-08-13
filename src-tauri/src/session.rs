@@ -13,7 +13,7 @@ use std::time::Duration;
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
-use crate::state::AppState;
+use crate::state::{AppState, SignInOutcome};
 
 const LOGIN_LABEL: &str = "login";
 
@@ -45,9 +45,13 @@ pub fn open_login(app: AppHandle, state: Arc<AppState>) {
                     let cookie = read_login_cookies(&app);
                     if innertube::cookie_sapisid(&cookie).is_some() {
                         match state.sign_in(cookie).await {
-                            Ok(_) => {
+                            Ok(SignInOutcome::Complete) => {
                                 let _ = app.emit("login-done", ());
                             }
+                            // The authenticated cookie is saved, but the account remains
+                            // deliberately unfinished until the main-window picker selects a
+                            // server-issued delegated identity.
+                            Ok(SignInOutcome::SelectionRequired) => {}
                             Err(e) => {
                                 let _ = app.emit("login-error", e);
                             }

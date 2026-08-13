@@ -164,9 +164,10 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 }
 
 /// Settings the UI is allowed to read *and write*. Session/auth material (`session_cookie`,
-/// `data_sync_id`, `account_json`, `visitor_data`) and internal blobs (`queue_json`,
-/// `queue_position`) never cross into the webview — they'd otherwise ship the login credential to
-/// the renderer on every open — and the webview can't overwrite them either.
+/// `selected_identity_json`, `data_sync_id`, `account_json`, `account_selection_pending`,
+/// `visitor_data`) and internal blobs (`queue_json`, `queue_position`) never cross into the webview
+/// — they'd otherwise ship the login credential to the renderer on every open — and the webview
+/// can't overwrite them either.
 const UI_SETTINGS: [&str; 13] = [
     "volume",
     "proxy",
@@ -290,6 +291,19 @@ pub async fn clear_caches(state: St<'_>) -> Result<(), String> {
 #[tauri::command]
 pub async fn get_account(state: St<'_>) -> Result<serde_json::Value, String> {
     Ok(state.account_snapshot())
+}
+
+#[tauri::command]
+pub async fn get_account_identities(state: St<'_>) -> Result<Vec<serde_json::Value>, String> {
+    state.account_identities().await
+}
+
+#[tauri::command]
+pub async fn switch_account(
+    state: St<'_>,
+    selection_key: String,
+) -> Result<serde_json::Value, String> {
+    state.switch_account(&selection_key).await
 }
 
 #[tauri::command]
