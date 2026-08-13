@@ -144,6 +144,42 @@ jobs:
         shell: bash
         run: rustup default stable-msvc
 
+      # RUSTFLAGS is set HERE, before rust-cache, and never in a later step. The action hashes
+      # RUSTFLAGS into its cache key, and cargo hashes it into every unit's fingerprint. Set it
+      # after the action (or scoped to the build step, where it used to live) and the two disagree:
+      # the key stays the same, so the action restores a target dir built with different flags,
+      # cargo rejects every unit and rebuilds from scratch, and then the post step declines to save
+      # the rebuilt artifacts because the key it restored was an exact match. The result is a full
+      # cold compile on every single release, for ever. Keep this step above the cache.
+      #
+      # Two flags go in:
+      #   -L native=…\.libmpv   the mpv.lib synthesised further down (link-time only; libmpv2-sys
+      #                         ships pregenerated bindings and just emits `cargo:rustc-link-lib`)
+      #   rust-lld              LLD instead of MSVC's link.exe. Cargo is the bulk of this job, and
+      #                         with `codegen-units = 1` + thin LTO most of that is the codegen and
+      #                         link of limusic-app itself. The Linux job took its release build
+      #                         from 6m56 to 3m33 by moving to mold; this is the same lever on the
+      #                         platform that has no mold. rust-lld ships inside the toolchain, so
+      #                         there is nothing to install and nothing to pin.
+      #
+      # The rust-lld half is a SOFT fallback on purpose: if rustup moves the binary, warn and build
+      # with link.exe. A linker optimisation must never be the reason a release fails to build.
+      - name: Resolve RUSTFLAGS (linker + libmpv link path)
+        shell: bash
+        run: |
+          set -euo pipefail
+          FLAGS="-L native=${{ github.workspace }}\.libmpv"
+          SYSROOT="$(rustc --print sysroot | tr '\\' '/')"
+          RUST_LLD="$SYSROOT/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe"
+          if [ -f "$RUST_LLD" ]; then
+            FLAGS="$FLAGS -C linker-flavor=lld-link -C linker=$RUST_LLD"
+            echo "linking with rust-lld ($RUST_LLD)"
+          else
+            echo "::warning::rust-lld not found at $RUST_LLD, falling back to MSVC link.exe"
+          fi
+          echo "RUSTFLAGS=$FLAGS" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=$FLAGS"
+
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: . -> target
@@ -211,8 +247,8 @@ jobs:
           # Scoped to this step only — no other step (or third-party action) sees the signing key.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Point the linker at the mpv.lib we just built.
-          RUSTFLAGS: -L native=${{ github.workspace }}\.libmpv
+          # NOTE: RUSTFLAGS is deliberately NOT set here. It is exported to $GITHUB_ENV before
+          # rust-cache runs, so the cache key and cargo's fingerprints agree. See that step.
         run: |
           set -euo pipefail
           if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
@@ -220,26 +256,7 @@ jobs:
             exit 1
           fi
 
-          # Link with LLD instead of MSVC's link.exe. Cargo is 8m44 of this job's ~13 min, and with
-          # `codegen-units = 1` + thin LTO most of that is the codegen and link of limusic-app
-          # itself. The Linux job took its release build from 6m56 to 3m33 by switching to mold;
-          # this is the same lever on the platform that has no mold. rust-lld ships inside the
-          # toolchain, so there is nothing to install and nothing to pin.
-          #
-          # Soft fallback ON PURPOSE: if rustup moves the binary, warn and build with link.exe.
-          # A linker optimisation must never be the reason a release fails to build.
-          #
-          # NOTE: RUSTFLAGS is part of cargo's fingerprint, so the first run after this changed was
-          # a full rebuild. Compare timings against a second run, not the first.
-          SYSROOT="$(rustc --print sysroot | tr '\\' '/')"
-          RUST_LLD="$SYSROOT/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe"
-          if [ -f "$RUST_LLD" ]; then
-            export RUSTFLAGS="$RUSTFLAGS -C linker-flavor=lld-link -C linker=$RUST_LLD"
-            echo "linking with rust-lld ($RUST_LLD)"
-          else
-            echo "::warning::rust-lld not found at $RUST_LLD, falling back to MSVC link.exe"
-          fi
-
+          echo "building with RUSTFLAGS=${RUSTFLAGS:-<unset>}"
           (cd ui && pnpm build)
           # beforeBuildCommand emptied: we just ran it. Left on, tauri runs `pnpm build` from the
           # repo root, which has no package.json, so pnpm's choice between ui/ and website/ is down
