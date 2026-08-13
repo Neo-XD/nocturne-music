@@ -634,14 +634,17 @@ export function initApp(mini = false): () => void {
 			}
 			if (a.signedIn) {
 				loadLibrary();
-				// Older databases predate `canSwitch`. Refresh just the safe display list so those
-				// users gain the switch action without signing in again; single-channel users lose
-				// the provisional action as soon as the one-row response arrives.
-				api.getAccountIdentities()
-					.then((identities) => {
-						if (auth.account?.signedIn) auth.account.canSwitch = identities.length > 1;
-					})
-					.catch(() => {});
+				// Only when the stored answer might be the provisional one: databases that predate
+				// `canSwitch` default it to true so the action stays discoverable, and this is what
+				// demotes single-channel users back to no switcher. A stored `false` is already
+				// authoritative, so most launches skip the request entirely.
+				if (a.canSwitch) {
+					api.getAccountIdentities()
+						.then((identities) => {
+							if (auth.account?.signedIn) auth.account.canSwitch = identities.length > 1;
+						})
+						.catch(() => {});
+				}
 			}
 		})
 		.catch(() => {});

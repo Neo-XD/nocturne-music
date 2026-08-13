@@ -216,12 +216,7 @@ fn identity_selection_key(data_sync_id: &str) -> String {
     format!("identity-{:016x}", hasher.finish())
 }
 
-fn identity_snapshot(
-    identity: &AccountIdentity,
-    selected_data_sync_id: Option<&str>,
-) -> serde_json::Value {
-    let selected =
-        selected_data_sync_id.map(|id| id == identity.data_sync_id).unwrap_or(identity.is_selected);
+fn identity_snapshot(identity: &AccountIdentity, selected: bool) -> serde_json::Value {
     serde_json::json!({
         "selectionKey": identity_selection_key(&identity.data_sync_id),
         "name": identity.name,
@@ -429,36 +424,43 @@ impl AppState {
             return Ok(SignInOutcome::Complete);
         }
 
-        // An incomplete/changed list response must not replace a previously selected channel with
-        // Google's current default. Revalidate the stored server-issued id directly;
-        // account_menu either confirms it and refreshes metadata, or the login fails closed.
-        if let Some(data_sync_id) = persisted_id.as_deref() {
-            let identity = persisted_identity
-                .as_ref()
-                .and_then(SelectedIdentity::as_account_identity)
-                .unwrap_or_else(|| AccountIdentity {
-                    name: String::new(),
-                    handle: None,
-                    email: None,
-                    thumbnail: None,
-                    channel_id: None,
-                    data_sync_id: data_sync_id.to_owned(),
-                    is_selected: false,
-                });
-            self.activate_identity(
-                &identity,
-                identities.len() > 1
-                    || persisted_identity
-                        .as_ref()
-                        .is_some_and(|saved| saved.has_multiple_identities),
-                client,
-            )
-            .await
-            .inspect_err(|_| {
-                self.restore_auth_transport(previous_cookie.clone(), previous_data_sync_id.clone());
-                self.restore_session_cookie_setting(previous_cookie.as_deref());
-            })?;
-            return Ok(SignInOutcome::Complete);
+        // A missing/unreadable list must not replace a previously selected channel with Google's
+        // current default. Revalidate the stored server-issued id directly; account_menu either
+        // confirms it and refreshes metadata, or the login fails closed.
+        //
+        // Only when the list is empty. A list that came back and does *not* contain the persisted
+        // id means these cookies belong to a different Google account, so the stored id is theirs
+        // to drop: forcing it here would delegate account A's channel onto account B's cookie and
+        // fail every sign-in until the user signs out first.
+        if identities.is_empty() {
+            if let Some(data_sync_id) = persisted_id.as_deref() {
+                let identity = persisted_identity
+                    .as_ref()
+                    .and_then(SelectedIdentity::as_account_identity)
+                    .unwrap_or_else(|| AccountIdentity {
+                        name: String::new(),
+                        handle: None,
+                        email: None,
+                        thumbnail: None,
+                        channel_id: None,
+                        data_sync_id: data_sync_id.to_owned(),
+                        is_selected: false,
+                    });
+                self.activate_identity(
+                    &identity,
+                    persisted_identity.as_ref().is_some_and(|saved| saved.has_multiple_identities),
+                    client,
+                )
+                .await
+                .inspect_err(|_| {
+                    self.restore_auth_transport(
+                        previous_cookie.clone(),
+                        previous_data_sync_id.clone(),
+                    );
+                    self.restore_session_cookie_setting(previous_cookie.as_deref());
+                })?;
+                return Ok(SignInOutcome::Complete);
+            }
         }
 
         if identities.len() == 1 {
@@ -517,9 +519,19 @@ impl AppState {
             self.clients.get(innertube::METADATA_CLIENT).ok_or("metadata client missing")?;
         let identities = self.it.account_identities(client).await.map_err(|e| e.to_string())?;
         let selected_id = self.it.data_sync_id();
+        // Nothing is selected yet during a forced first pick, so YouTube's own default marker
+        // would be a lie: the user hasn't chosen it, and picking it is still a required step.
+        let pending = auth_selection_pending(&self.db);
         Ok(identities
             .iter()
-            .map(|identity| identity_snapshot(identity, selected_id.as_deref()))
+            .map(|identity| {
+                let selected = !pending
+                    && selected_id
+                        .as_deref()
+                        .map(|id| id == identity.data_sync_id)
+                        .unwrap_or(identity.is_selected);
+                identity_snapshot(identity, selected)
+            })
             .collect())
     }
 

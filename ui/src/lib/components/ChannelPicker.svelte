@@ -70,16 +70,18 @@
 		}
 	}
 
-	function onOpenChange(open: boolean) {
-		// A new multi-channel login is intentionally unfinished until one usable identity is chosen.
-		if (!open && ui.channelPickerRequired) {
-			queueMicrotask(() => (ui.channelPickerOpen = true));
-		}
-	}
+	// A new multi-channel login is intentionally unfinished until one usable identity is chosen, so
+	// escape and click-outside are inert until then. Cancel sign-in is the way out.
+	let dismissable: 'ignore' | 'close' = $derived(ui.channelPickerRequired ? 'ignore' : 'close');
 </script>
 
-<Dialog.Root bind:open={ui.channelPickerOpen} {onOpenChange}>
-	<Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-md" showCloseButton={!ui.channelPickerRequired}>
+<Dialog.Root bind:open={ui.channelPickerOpen}>
+	<Dialog.Content
+		class="gap-0 overflow-hidden p-0 sm:max-w-md"
+		showCloseButton={!ui.channelPickerRequired}
+		escapeKeydownBehavior={dismissable}
+		interactOutsideBehavior={dismissable}
+	>
 		<div class="border-b px-5 py-4">
 			<Dialog.Title class="text-lg font-semibold">Choose a YouTube channel</Dialog.Title>
 			<Dialog.Description class="mt-1 text-xs text-muted-foreground">
