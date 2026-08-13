@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Cut a signed release: build the .rpm, publish it to GitHub Releases with an empty updater
-# manifest, and let CI fill in the rest.
+# Cut a signed release: publish the tag with an empty updater manifest, start both CI builds, build
+# the .rpm locally while they run, then wait and verify the whole thing landed.
+#
+# ORDER MATTERS. The release is created and both workflows are dispatched BEFORE the local rpm
+# build, not after: CI's ~13 minutes and this machine's ~5 minutes then overlap instead of queueing.
+# The rpm is uploaded to the already-published release afterwards. The cost of that ordering is that
+# a failed rpm build leaves a published release with no rpm on it — recoverable with one
+# `gh release upload`, and the script tells you the exact command if it happens.
 #
 # The AppImage is NOT built here. An AppImage inherits its build host's glibc floor, and this
 # machine is Fedora (newest glibc in existence) — one built here starts nowhere else. It is built by
@@ -11,10 +17,10 @@
 # previous, complete manifest instead of one with no platforms in it.
 #
 # Usage:  scripts/release.sh ["release notes"]
-# Bump "version" in src-tauri/tauri.conf.json BEFORE running (that's the app version the updater
-# compares against; it overrides the Cargo version when present).
+# Bump "version" in src-tauri/tauri.conf.json AND Cargo.toml BEFORE running (tauri.conf.json is the
+# app version the updater compares against; the preflight below refuses to run if they disagree).
 #
-# Requires: the private signing key at ~/.tauri/limusic.key, `gh` authed, jq.
+# Requires: the private signing key at ~/.tauri/limusic.key, `gh` authed, jq, curl.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,14 +28,54 @@ REPO="SimoHypers/limusic"
 KEY="${TAURI_SIGNING_PRIVATE_KEY_FILE:-$HOME/.tauri/limusic.key}"
 NOTES="${1:-See the commit history for changes.}"
 
+die() { echo "ERROR: $*" >&2; exit 1; }
+
 VERSION="$(jq -r .version src-tauri/tauri.conf.json)"
-[ "$VERSION" != "null" ] && [ -n "$VERSION" ] || { echo "no version in tauri.conf.json"; exit 1; }
+[ "$VERSION" != "null" ] && [ -n "$VERSION" ] || die "no version in tauri.conf.json"
 TAG="v$VERSION"
 echo "==> Releasing $TAG"
 
-[ -f "$KEY" ] || { echo "signing key not found at $KEY"; exit 1; }
-export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")"
-export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+# ---------------------------------------------------------------------------
+# Preflight. Every check here is a mistake that has already cost a release
+# number at least once, and each is far cheaper to fail now than after the
+# build, or worse, after the release is public.
+# ---------------------------------------------------------------------------
+echo "==> Preflight…"
+
+[ -f "$KEY" ] || die "signing key not found at $KEY"
+command -v gh >/dev/null || die "gh is not installed"
+gh auth status >/dev/null 2>&1 || die "gh is not authenticated — run: gh auth login"
+
+# The two version files must agree. tauri.conf.json is what the updater compares, but a Cargo.toml
+# left behind means the binary reports a different version than the release it shipped in.
+CARGO_VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
+[ "$CARGO_VERSION" = "$VERSION" ] \
+  || die "Cargo.toml says $CARGO_VERSION but src-tauri/tauri.conf.json says $VERSION — bump both"
+
+# The rpm is built from this working tree; the tag is cut from remote master. Anything uncommitted
+# means the shipped rpm and the source the tag names are different code.
+git diff --quiet && git diff --cached --quiet \
+  || die "uncommitted changes to tracked files — commit or stash them first"
+
+# THE rule. `gh release create` creates the tag from whatever the REMOTE master points at, so
+# releasing without pushing tags code the binaries were not built from.
+git fetch --quiet origin master
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ] \
+  || die "HEAD ($(git rev-parse --short HEAD)) is not origin/master ($(git rev-parse --short origin/master)) — run: git push origin master"
+
+! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
+  || die "$TAG is already published — bump the version"
+
+# Compare against what is actually PUBLISHED, not against local tags. `gh release create` makes the
+# tag on the remote, so a tag can be live without ever being fetched here: before v0.3.14
+# `git describe` said v0.3.12 while v0.3.13 was published and marked Latest. Releasing a version
+# that is not higher than the published one means no installed user is ever prompted.
+HIGHEST="$(gh release list --repo "$REPO" --limit 50 --json tagName --jq '.[].tagName' \
+  | sed 's/^v//' | sort -V | tail -1)"
+[ "$(printf '%s\n%s\n' "$VERSION" "$HIGHEST" | sort -V | head -1)" != "$VERSION" ] \
+  || die "$VERSION is not above the newest published release (${HIGHEST:-none}) — installed users would never be prompted"
+
+echo "    clean tree, pushed, $VERSION > ${HIGHEST:-none}"
 
 # Bake a snapshot of the community player-cipher registry into the binary, same as both CI
 # workflows do. src-tauri/cipher_configs.json is `include_str!`d and tracked-empty; the app
@@ -60,13 +106,8 @@ do
   echo "    WARNING: player-cipher registry unusable: $url"
 done
 
-echo "==> Building the rpm…"
-cargo tauri build --bundles rpm
-
-# Pin to $VERSION — a stale bundle from a previous build otherwise sorts first and gets shipped
-# (e.g. an old 0.1.1 rpm uploaded to the 0.1.2 release).
-RPM="$(ls target/release/bundle/rpm/limusic-${VERSION}-*.rpm 2>/dev/null | head -1)"
-[ -n "$RPM" ] || { echo "no rpm for $VERSION in target/release/bundle/rpm"; exit 1; }
+export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
 # latest.json: the manifest the updater reads. Published with no platforms — each CI workflow
 # merges its own entry in (jq, so they don't clobber each other) once its binary is attached.
@@ -87,18 +128,94 @@ gh release create "$TAG" \
   --title "$TAG" \
   --notes "$NOTES" \
   --latest=false \
-  "$RPM" target/release/bundle/latest.json
+  target/release/bundle/latest.json
+
+# Newest run id for a workflow, or 0 if it has never run. Used to tell the run we are about to
+# dispatch apart from whatever ran last — `gh workflow run` does not report the run it creates.
+latest_run() { gh run list --repo "$REPO" --workflow "$1" --limit 1 --json databaseId --jq '.[0].databaseId // 0'; }
+wait_for_run() { # $1 = workflow name, $2 = run id seen before the dispatch
+  local id
+  for _ in $(seq 1 30); do
+    id="$(latest_run "$1")"
+    if [ "$id" != "$2" ]; then echo "$id"; return 0; fi
+    sleep 2
+  done
+  return 1
+}
+
+BEFORE_LINUX="$(latest_run "Linux release binaries")"
+BEFORE_WIN="$(latest_run "Windows release binaries")"
 
 # Dispatched from master rather than fired by the `release: published` event, and that ref matters:
 # Actions caches are readable only from the ref that wrote them plus the default branch. A
 # release-triggered run executes on the tag ref, so it could never reuse the previous release's
 # cache — Windows recompiled all of Rust from scratch every time, 11m25s of a 15m run. Dispatching
 # from master shares one cache across releases. Both workflows check out $TAG regardless, so the
-# binaries still come from the tagged source. They also run in parallel now.
+# binaries still come from the tagged source. They also run in parallel with each other, and now
+# with the local rpm build below as well.
 echo "==> Dispatching the build workflows…"
 gh workflow run "Linux release binaries"   --repo "$REPO" --ref master -f tag="$TAG"
 gh workflow run "Windows release binaries" --repo "$REPO" --ref master -f tag="$TAG"
 
-echo "==> Published $TAG (not yet marked Latest). Both builds are running in parallel; when Linux"
-echo "    finishes it marks the release Latest and testers get prompted."
-echo "    Watch: gh run watch   |   Actions ▸ Linux / Windows release binaries"
+RUN_LINUX="$(wait_for_run "Linux release binaries" "$BEFORE_LINUX" || true)"
+RUN_WIN="$(wait_for_run "Windows release binaries" "$BEFORE_WIN" || true)"
+echo "    linux run ${RUN_LINUX:-?}, windows run ${RUN_WIN:-?}"
+
+echo "==> Building the rpm locally while CI runs…"
+if ! cargo tauri build --bundles rpm; then
+  echo >&2
+  echo "ERROR: the rpm build failed, but $TAG is already published and CI is building the rest." >&2
+  echo "       Fix it, then attach the rpm by hand:" >&2
+  echo "         cargo tauri build --bundles rpm" >&2
+  echo "         gh release upload $TAG target/release/bundle/rpm/limusic-$VERSION-*.rpm --clobber --repo $REPO" >&2
+  exit 1
+fi
+
+# Pin to $VERSION — a stale bundle from a previous build otherwise sorts first and gets shipped
+# (e.g. an old 0.1.1 rpm uploaded to the 0.1.2 release).
+RPM="$(ls target/release/bundle/rpm/limusic-${VERSION}-*.rpm 2>/dev/null | head -1)"
+[ -n "$RPM" ] || die "no rpm for $VERSION in target/release/bundle/rpm"
+gh release upload "$TAG" "$RPM" --clobber --repo "$REPO"
+echo "    attached $(basename "$RPM")"
+
+# ---------------------------------------------------------------------------
+# Wait for CI and check the release is actually complete. Without this the
+# script exits on a half-published release and the first sign of a failed job
+# is a user reporting they were never offered the update.
+# ---------------------------------------------------------------------------
+echo "==> Waiting for CI (Ctrl-C is safe — the builds keep running without this terminal)…"
+CI_OK=1
+for run in "$RUN_LINUX" "$RUN_WIN"; do
+  if [ -z "$run" ] || [ "$run" = "0" ]; then
+    echo "    could not resolve a run id — watch it at Actions instead"
+    CI_OK=0
+    continue
+  fi
+  gh run watch "$run" --repo "$REPO" --exit-status || CI_OK=0
+done
+
+echo "==> Verifying the published release…"
+MANIFEST="$(curl -sL "https://github.com/$REPO/releases/latest/download/latest.json" || true)"
+LATEST_TAG="$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null || true)"
+has_platform() { printf '%s' "$MANIFEST" | jq -e --arg k "$1" '.platforms[$k].url // empty' >/dev/null 2>&1; }
+
+OK=1
+[ "$LATEST_TAG" = "$TAG" ] || { echo "    NOT LATEST: /releases/latest still resolves to ${LATEST_TAG:-nothing}"; OK=0; }
+[ "$(printf '%s' "$MANIFEST" | jq -r .version 2>/dev/null)" = "$VERSION" ] \
+  || { echo "    WRONG MANIFEST: the live latest.json is not for $VERSION"; OK=0; }
+has_platform linux-x86_64   || { echo "    MISSING: latest.json has no linux-x86_64 entry (AppImage users get no update)"; OK=0; }
+has_platform windows-x86_64 || { echo "    MISSING: latest.json has no windows-x86_64 entry (Windows users get no update)"; OK=0; }
+
+if [ "$OK" = 1 ] && [ "$CI_OK" = 1 ]; then
+  echo "==> $TAG is live and complete: rpm + AppImage + Windows installers, both platforms in"
+  echo "    latest.json, marked Latest. Installed users will be prompted."
+else
+  echo >&2
+  echo "==> $TAG IS PUBLISHED BUT INCOMPLETE. Check what failed, then re-dispatch that workflow:" >&2
+  echo "      gh run list --repo $REPO --limit 5" >&2
+  echo "      gh workflow run \"Linux release binaries\"   --repo $REPO --ref master -f tag=$TAG" >&2
+  echo "      gh workflow run \"Windows release binaries\" --repo $REPO --ref master -f tag=$TAG" >&2
+  echo "    Only fixes to .github/workflows/ take effect on a re-dispatch — anything in scripts/," >&2
+  echo "    src/ or ui/ needs a new version, since the run checks out the tag." >&2
+  exit 1
+fi
