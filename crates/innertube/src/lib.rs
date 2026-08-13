@@ -20,7 +20,7 @@ pub use models::browse::{
 };
 pub use models::context::Locale;
 pub use models::lyrics::{PlainLyrics, TimedLyricLine};
-pub use models::metadata::{AccountInfo, NextResult, SearchResult, SongItem};
+pub use models::metadata::{AccountInfo, NextResult, Rating, SearchResult, SongItem};
 pub use models::player::{
     find_format, AudioQuality, Format, PlaybackTracking, PlayerResponse, StreamingData,
 };

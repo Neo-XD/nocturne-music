@@ -398,7 +398,7 @@ pub fn run() {
             commands::get_browse_grid,
             commands::play_playlist,
             commands::start_radio,
-            commands::like,
+            commands::rate,
             commands::set_album_saved,
             commands::add_to_playlist,
             commands::remove_from_playlist,

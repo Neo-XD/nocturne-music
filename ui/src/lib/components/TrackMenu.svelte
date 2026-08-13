@@ -13,7 +13,8 @@
 		ArrowUpNarrowWideIcon,
 		ArrowDownWideNarrowIcon,
 		Radio02Icon,
-		FavouriteIcon,
+		ThumbsUpIcon,
+		ThumbsDownIcon,
 		UserListIcon,
 		Vynil02Icon,
 		DashboardSquare02Icon
@@ -21,7 +22,7 @@
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
 	import { anchorMenu, toBody } from '$lib/menu';
-	import { addPick, enqueue, isLiked, startRadio, toggleLike } from '$lib/player.svelte';
+	import { addPick, enqueue, ratingOf, startRadio, toggleRating } from '$lib/player.svelte';
 
 	let {
 		song,
@@ -68,7 +69,7 @@
 		menuOpen = false;
 	}
 
-	const liked = $derived(isLiked(song));
+	const rated = $derived(ratingOf(song));
 	// A local file has no YouTube identity: liking it or putting it in a YTM playlist is not a
 	// thing, so those items don't show. Queue, shortcuts and go-to-album work normally.
 	const isLocal = $derived(api.isLocalId(song.video_id));
@@ -123,16 +124,30 @@
 			</button>
 		{/if}
 		<!-- In the player bar (`linksOnly`) like and add-to-playlist have their own buttons, but those
-		     drop below lg to leave the title room, so the menu carries them at that width instead. -->
+		     drop below lg to leave the title room, so the menu carries them at that width instead.
+		     Dislike has no button of its own anywhere, so it stays visible at every width. -->
 		{#if !isLocal}
 			<button
 				class="w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 {linksOnly
 					? 'flex lg:hidden'
 					: 'flex'}"
-				onclick={(e) => run(e, () => toggleLike(song))}
+				onclick={(e) => run(e, () => toggleRating(song, 'like'))}
 			>
-				<HugeiconsIcon icon={FavouriteIcon} class="h-4 w-4 {liked ? 'fill-current text-primary' : ''}" />
-				{liked ? 'Remove from Liked Songs' : 'Save to Liked Songs'}
+				<HugeiconsIcon
+					icon={ThumbsUpIcon}
+					class="h-4 w-4 {rated === 'like' ? 'fill-current text-primary' : ''}"
+				/>
+				{rated === 'like' ? 'Remove from Liked Songs' : 'Save to Liked Songs'}
+			</button>
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, () => toggleRating(song, 'dislike'))}
+			>
+				<HugeiconsIcon
+					icon={ThumbsDownIcon}
+					class="h-4 w-4 {rated === 'dislike' ? 'fill-current text-foreground' : ''}"
+				/>
+				{rated === 'dislike' ? 'Remove dislike' : 'Dislike'}
 			</button>
 		{/if}
 		{#if song.artist_id}

@@ -85,6 +85,11 @@ enum Fill {
 struct QueueState {
     items: Vec<SongItem>,
     current: usize,
+    /// Start of the previously-played run: `items[played_from..current]` is what has actually been
+    /// heard (or skipped past) in this queue, and what the panel's "Previously played" section
+    /// shows. Not simply `0..current`: starting a playlist at track 7 leaves six untouched tracks
+    /// sitting in front of the playing one.
+    played_from: usize,
     /// Pre-shuffle order snapshot. `Some(..)` ⇔ shuffle is ON; restored on shuffle-off.
     shuffle_orig: Option<Vec<SongItem>>,
     repeat: RepeatMode,
@@ -121,6 +126,16 @@ struct QueueState {
     /// Last videoId we re-resolved after a playback failure — guards the one-shot retry in
     /// `on_track_failed` against a retry loop when the retried stream dies too.
     retried: Option<String>,
+}
+
+impl QueueState {
+    /// Move the play pointer within the same queue. Jumping forward counts everything passed over
+    /// as played; going back drags the start of the played run with it, so nothing ever shows as
+    /// previously played while it sits ahead of the playing track.
+    fn seek_to(&mut self, index: usize) {
+        self.current = index;
+        self.played_from = self.played_from.min(index);
+    }
 }
 
 impl AppState {
@@ -324,6 +339,7 @@ impl AppState {
             q.items = vec![seed];
             q.items.append(&mut carried);
             q.current = 0;
+            q.played_from = 0; // new queue, nothing played in it yet
             q.lookahead_loaded = None;
             q.radio_seed = None; // single-song queue → autoplay re-seeds from the last track
             q.radio = false;
@@ -445,6 +461,9 @@ impl AppState {
                 let start = q.current;
                 q.current = shuffle_new_queue(&mut q.items, start);
             }
+            // Whatever the queue starts on is where the played run starts: the tracks in front of
+            // a playlist opened at track 7 were never heard.
+            q.played_from = q.current;
             let at = q.current + 1;
             for (k, item) in carried.into_iter().enumerate() {
                 q.items.insert(at + k, item);
@@ -708,7 +727,7 @@ impl AppState {
             if index >= q.items.len() {
                 return;
             }
-            q.current = index;
+            q.seek_to(index);
             q.lookahead_loaded = None;
         }
         if self.start_current(gen).await {
@@ -730,7 +749,7 @@ impl AppState {
             match next_index(q.items.len(), q.current, q.repeat) {
                 Some(next) => {
                     let primed = q.lookahead_loaded == Some(next);
-                    q.current = next;
+                    q.seek_to(next); // repeat-all wraps to 0, which starts the played run over
                     (true, primed)
                 }
                 None => (false, false),
@@ -902,7 +921,8 @@ impl AppState {
                         // transport pointing at nothing, and Play does nothing at all.
                         let exhausted = q.current >= q.items.len();
                         if exhausted {
-                            q.current = q.items.len().saturating_sub(1);
+                            let last = q.items.len().saturating_sub(1);
+                            q.seek_to(last);
                         }
                         exhausted
                     };
@@ -1118,7 +1138,7 @@ impl AppState {
             "thumbnail": item.thumbnail,
             "duration": item.duration,
             "streamClient": stream_client,
-            "liked": item.liked,
+            "rating": item.rating,
         })
     }
 
@@ -1229,6 +1249,7 @@ impl AppState {
             serde_json::json!({
                 "items": &q.items,
                 "currentIndex": q.current,
+                "playedFrom": q.played_from,
                 "shuffle": q.shuffle_orig.is_some(),
                 "repeat": q.repeat,
                 "sourceName": &q.source_name,
@@ -1272,6 +1293,7 @@ impl AppState {
         serde_json::json!({
             "items": &q.items,
             "currentIndex": q.current,
+            "playedFrom": q.played_from,
             "shuffle": q.shuffle_orig.is_some(),
             "repeat": q.repeat,
             "sourceName": &q.source_name,
@@ -1423,6 +1445,7 @@ impl AppState {
             serde_json::json!({
                 "items": &q.items,
                 "current": q.current,
+                "playedFrom": q.played_from,
                 "repeat": q.repeat,
                 "shuffleOrig": &q.shuffle_orig,
                 "radioSeed": &q.radio_seed,
@@ -1449,6 +1472,11 @@ impl AppState {
         }
         let current = (saved.get("current").and_then(|v| v.as_u64()).unwrap_or(0) as usize)
             .min(items.len() - 1);
+        // Absent in blobs written before "Previously played" existed: those restore with an empty
+        // played run rather than claiming the whole prefix was heard.
+        let played_from =
+            (saved.get("playedFrom").and_then(|v| v.as_u64()).unwrap_or(current as u64) as usize)
+                .min(current);
         // Shuffle/repeat ride the same blob; read tolerantly — old blobs lack them.
         let repeat: RepeatMode = saved
             .get("repeat")
@@ -1468,6 +1496,7 @@ impl AppState {
         {
             let mut q = self.queue.lock().await;
             q.current = current;
+            q.played_from = played_from;
             q.items = items;
             q.repeat = repeat;
             q.shuffle_orig = shuffle_orig;
@@ -1615,6 +1644,7 @@ impl AppState {
             items.extend(upcoming.iter().map(track_to_song));
             q.items = items;
             q.current = 0;
+            q.played_from = 0; // the host's queue starts at the track it sent; no local history
             q.lookahead_loaded = None;
             q.shuffle_orig = None; // host rebuilt the queue — local shuffle snapshot is stale
             q.radio_seed = None; // guests never autoplay — the host drives
@@ -1773,6 +1803,9 @@ impl AppState {
                 let (items, idx) = unshuffled(orig, &heard, &playing, fallback);
                 q.items = items;
                 q.current = idx;
+                // The restored prefix is the playlist's own order, not the order things were heard
+                // in, so the played run no longer describes anything real. Start it over.
+                q.played_from = idx;
             } else {
                 q.shuffle_orig = Some(q.items.clone());
                 let current = q.current;
@@ -1920,7 +1953,8 @@ impl AppState {
             // before the playing track doesn't push the insert one slot too far.
             let ids: HashSet<&str> = items.iter().map(|i| i.video_id.as_str()).collect();
             let qm = &mut *q; // the guard hands out one borrow; a struct ref splits per field
-            let removed = dedupe && drop_duplicates(&mut qm.items, &mut qm.current, &ids);
+            let removed = dedupe
+                && drop_duplicates(&mut qm.items, &mut qm.current, &mut qm.played_from, &ids);
             if removed {
                 if let Some(orig) = qm.shuffle_orig.as_mut() {
                     // Off the snapshot too, or turning shuffle off rebuilds the queue with them.
@@ -2006,6 +2040,11 @@ impl AppState {
             q.items.remove(index);
             if index < q.current {
                 q.current -= 1;
+                // Removing from in front of the played run shifts it; removing from inside it just
+                // makes it one shorter, which the decremented `current` already does.
+                if index < q.played_from {
+                    q.played_from -= 1;
+                }
             }
             match q.lookahead_loaded {
                 // mpv holds the removed song as the gapless next — drop it. (Compared against the
@@ -2123,7 +2162,7 @@ fn track_to_song(t: &Track) -> SongItem {
         play_count: None,
         thumbnail: t.thumbnail.clone(),
         set_video_id: None,
-        liked: None,
+        rating: None,
         queued_by: t.queued_by.clone(),
         queued: false,
         queued_end: false,
@@ -2152,13 +2191,23 @@ fn enqueue_at(q: &QueueState) -> usize {
 /// Drop every copy of `ids` already in the queue, so a manual add moves the track instead of
 /// duplicating it (the "prevent duplicates" setting). The playing track is never dropped, and
 /// `current` follows its own track down. Returns whether anything went.
-fn drop_duplicates(items: &mut Vec<SongItem>, current: &mut usize, ids: &HashSet<&str>) -> bool {
+fn drop_duplicates(
+    items: &mut Vec<SongItem>,
+    current: &mut usize,
+    played_from: &mut usize,
+    ids: &HashSet<&str>,
+) -> bool {
     let mut removed = false;
     for i in (0..items.len()).rev() {
         if i != *current && ids.contains(items[i].video_id.as_str()) {
             items.remove(i);
             if i < *current {
                 *current -= 1;
+                // A copy taken from in front of the played run shifts the run; one taken from
+                // inside it just makes it shorter, which the moved `current` already does.
+                if i < *played_from {
+                    *played_from -= 1;
+                }
             }
             removed = true;
         }
@@ -2494,7 +2543,7 @@ mod tests {
             play_count: None,
             thumbnail: None,
             set_video_id: None,
-            liked: None,
+            rating: None,
             queued: by.is_some(),
             queued_end: false,
             queued_from: None,
@@ -2732,6 +2781,22 @@ mod tests {
         assert_eq!(q.shuffle_orig.as_ref().unwrap().len(), 4);
     }
 
+    // The played run ("Previously played") is `played_from..current`, and only moving the pointer
+    // backwards may extend it: forward jumps mean those tracks really were passed over.
+    #[test]
+    fn the_played_run_follows_the_pointer_backwards_only() {
+        let mut q = QueueState {
+            items: vec![song("a", None), song("b", None), song("c", None), song("d", None)],
+            current: 1,
+            played_from: 1,
+            ..QueueState::default()
+        };
+        q.seek_to(3); // jumped over "c", so it counts: heard or not, it's behind the playing track
+        assert_eq!((q.played_from, q.current), (1, 3));
+        q.seek_to(0); // back to the top: nothing is behind it any more
+        assert_eq!((q.played_from, q.current), (0, 0));
+    }
+
     // The one that silently breaks: a duplicate sitting *before* the playing track. Removing it
     // renumbers the queue, so `current` has to follow its own song or the insert lands one slot off.
     #[test]
@@ -2739,18 +2804,26 @@ mod tests {
         let mut items =
             vec![song("dup", None), song("a", None), song("b", None), song("dup", None)];
         let mut current = 1; // playing "a"
+        let mut played_from = 0; // "dup" was heard, then "a" started
         let ids = HashSet::from(["dup"]);
-        assert!(drop_duplicates(&mut items, &mut current, &ids));
+        assert!(drop_duplicates(&mut items, &mut current, &mut played_from, &ids));
 
         let left: Vec<_> = items.iter().map(|i| i.video_id.as_str()).collect();
         assert_eq!(left, ["a", "b"]);
         assert_eq!(current, 0); // still playing "a"
+        assert_eq!(played_from, 0); // its one played track went with it; the run is empty, not stale
         assert_eq!(guest_insert_index(&items, current), 1); // the add lands right after it
 
         // The playing track is exempt: "play next" on the current song is a repeat gesture.
         let mut items = vec![song("a", None), song("b", None)];
         let mut current = 0;
-        assert!(!drop_duplicates(&mut items, &mut current, &HashSet::from(["a"])));
+        let mut played_from = 0;
+        assert!(!drop_duplicates(
+            &mut items,
+            &mut current,
+            &mut played_from,
+            &HashSet::from(["a"])
+        ));
         assert_eq!(items.len(), 2);
     }
 

@@ -1,15 +1,18 @@
 <script lang="ts">
-	import { HugeiconsIcon } from '@hugeicons/svelte';
+	import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/svelte';
 	import {
 		FavouriteIcon,
 		MusicNote01Icon,
 		PlayIcon,
-		PlayListAddIcon
+		PlayListAddIcon,
+		ThumbsDownIcon,
+		ThumbsUpIcon
 	} from '@hugeicons/core-free-icons';
+	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import { lt } from '$lib/lt.svelte';
-	import { isLiked, toggleLike } from '$lib/player.svelte';
+	import { isLiked, ratingOf, toggleRating } from '$lib/player.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 
@@ -48,6 +51,11 @@
 	// reflect that in the hover icon + label so the row doesn't lie.
 	const guestAdd = $derived(lt.role === 'guest');
 
+	const rated = $derived(ratingOf(song));
+	// A local file has no YouTube identity, so there is nothing to rate (the same guard the ⋯ menu
+	// applies to its like item). The compact variant has no room: it keeps its single heart.
+	const showRating = $derived(!compact && !api.isLocalId(song.video_id));
+
 	// The whole row is a play target (role="button"), so mirror native button keyboard activation.
 	// Only when the key lands on the row itself — keydowns bubble up from nested interactive
 	// elements (⋯ menu, artist link), and hijacking those would play the row instead.
@@ -59,6 +67,28 @@
 		}
 	}
 </script>
+
+<!-- Both rating buttons, so they can't drift apart. `icon` is a constant per call site, not a
+     reactive ternary, which is the only way HugeiconsIcon takes it (it freezes at mount). -->
+{#snippet rateButton(icon: IconSvgElement, want: 'like' | 'dislike', label: string)}
+	<button
+		class="cursor-pointer rounded-md p-1.5 text-muted-foreground transition hover:bg-accent/20 hover:text-foreground"
+		aria-label={rated === want ? 'Remove rating' : label}
+		aria-pressed={rated === want}
+		onclick={(e) => {
+			e.stopPropagation();
+			toggleRating(song, want);
+		}}
+	>
+		<!-- Liked wears the accent; disliked fills plain, since the accent reads as approval. -->
+		<HugeiconsIcon
+			{icon}
+			class="h-4 w-4 {rated === want
+				? `fill-current ${want === 'like' ? 'text-primary' : 'text-foreground'}`
+				: ''}"
+		/>
+	</button>
+{/snippet}
 
 <!-- content-visibility: a liked-songs playlist runs to thousands of rows and WebKit keeps every one
      in style, layout and paint. 3.5rem is a row (8px padding, 40px thumbnail, 8px); `auto` swaps in
@@ -137,6 +167,20 @@
 	{/if}
 
 	<div class="flex shrink-0 items-center {compact ? 'gap-0.5' : 'gap-2'}">
+		{#if showRating}
+			<!-- Hover-revealed, except on a row that carries a rating: at rest that filled thumb is the
+			     only place the state shows at all. Faded rather than removed, so the duration and the ⋯
+			     don't shift sideways when the pointer arrives. -->
+			<div
+				class="flex items-center gap-0.5 transition-opacity focus-within:opacity-100 group-hover:opacity-100 {rated ===
+				'indifferent'
+					? 'opacity-0'
+					: ''}"
+			>
+				{@render rateButton(ThumbsUpIcon, 'like', 'Like')}
+				{@render rateButton(ThumbsDownIcon, 'dislike', 'Dislike')}
+			</div>
+		{/if}
 		{#if song.duration && !compact}
 			<span class="text-xs text-muted-foreground">{song.duration}</span>
 		{/if}
@@ -148,7 +192,7 @@
 				aria-pressed={isLiked(song)}
 				onclick={(e) => {
 					e.stopPropagation();
-					toggleLike(song);
+					toggleRating(song, 'like');
 				}}
 			>
 				<HugeiconsIcon

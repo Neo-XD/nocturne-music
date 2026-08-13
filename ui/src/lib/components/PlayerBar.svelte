@@ -56,7 +56,7 @@
 	let justLiked = $state(false);
 
 	function toggleLike() {
-		if (!playback.liked) justLiked = true;
+		if (playback.rating !== 'like') justLiked = true;
 		toggleNowPlayingLike();
 	}
 
@@ -194,7 +194,7 @@
 						>
 							<HugeiconsIcon
 								icon={FavouriteIcon}
-								class="h-4 w-4 {playback.liked ? 'fill-current text-primary' : 'text-muted-foreground'}"
+								class="h-4 w-4 {playback.rating === 'like' ? 'fill-current text-primary' : 'text-muted-foreground'}"
 							/>
 						</span>
 					</Button>

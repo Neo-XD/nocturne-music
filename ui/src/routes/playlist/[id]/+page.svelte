@@ -310,7 +310,7 @@
 		pl = { ...pl, items: kept };
 		try {
 			if (isLiked) {
-				await api.like(track.video_id, false);
+				await api.rate(track.video_id, 'indifferent');
 				toast.success('Removed from Liked Music');
 			} else {
 				await api.removeFromPlaylist(id, track.video_id, track.set_video_id!);

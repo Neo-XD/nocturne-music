@@ -3,6 +3,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
+/** How the signed-in user rated a track (innertube `Rating`). The three states are mutually
+ *  exclusive: liking a disliked track clears the dislike, and vice versa. */
+export type Rating = 'like' | 'dislike' | 'indifferent';
+
 /** One run of an artist line: its text, plus a channel id when that run links an artist. */
 export interface ArtistRun {
 	text: string;
@@ -27,8 +31,8 @@ export interface SongItem {
 	thumbnail?: string;
 	/** Item id within a playlist — present only on playlist tracks; needed to remove them. */
 	set_video_id?: string;
-	/** Whether the signed-in user has liked this track (absent when the response didn't say). */
-	liked?: boolean;
+	/** The signed-in user's rating (absent when the response didn't say — same as 'indifferent'). */
+	rating?: Rating;
 	/** Listen Together: name of the guest who added this queue item (session adds only). */
 	queued_by?: string;
 	/** Queued to play next ("Play next", or a guest's session add) — the "Next in queue" block. */
@@ -51,8 +55,8 @@ export interface NowPlaying {
 	thumbnail?: string;
 	duration?: string;
 	streamClient: string;
-	/** Whether the track is in the user's Liked Music (null if unknown). */
-	liked?: boolean | null;
+	/** The user's rating of the track (null if unknown). */
+	rating?: Rating | null;
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -60,6 +64,9 @@ export type RepeatMode = 'off' | 'all' | 'one';
 export interface QueueState {
 	items: SongItem[];
 	currentIndex: number;
+	/** Start of the previously-played run: `items[playedFrom..currentIndex]` has actually been
+	 *  heard. Not `0..currentIndex`: a playlist opened at track 7 has six untouched tracks first. */
+	playedFrom?: number;
 	shuffle?: boolean;
 	repeat?: RepeatMode;
 	/** What seeded the queue (playlist/album title, "<song> Radio") — the "Next from" header. */
@@ -314,7 +321,9 @@ export const removeLocalFolder = (path: string) =>
 	invoke<LocalLibrary>('remove_local_folder', { path });
 
 // --- write actions (context/01 ✎) ----------------------------------------------------------
-export const like = (videoId: string, liked: boolean) => invoke<void>('like', { videoId, liked });
+/** Like, dislike, or clear the rating. YouTube's three states are mutually exclusive, so a dislike
+ *  un-likes in the same call. */
+export const rate = (videoId: string, rating: Rating) => invoke<void>('rate', { videoId, rating });
 export const addToPlaylist = (playlistId: string, videoId: string) =>
 	invoke<void>('add_to_playlist', { playlistId, videoId });
 export const removeFromPlaylist = (playlistId: string, videoId: string, setVideoId: string) =>

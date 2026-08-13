@@ -68,7 +68,7 @@
 	// Pop the heart once when favouriting (not when un-favouriting), same as the player bar.
 	let justLiked = $state(false);
 	function toggleLike() {
-		if (!playback.liked) justLiked = true;
+		if (playback.rating !== 'like') justLiked = true;
 		toggleNowPlayingLike();
 	}
 
@@ -179,7 +179,7 @@
 				<button
 					class={artBtn}
 					onclick={toggleLike}
-					aria-label={playback.liked ? 'Remove from liked songs' : 'Add to liked songs'}
+					aria-label={playback.rating === 'like' ? 'Remove from liked songs' : 'Add to liked songs'}
 				>
 					<span
 						class="flex"
@@ -189,7 +189,7 @@
 						<!-- fill-current + text-primary is the same "liked" treatment the player bar uses. -->
 						<HugeiconsIcon
 							icon={FavouriteIcon}
-							class="h-4 w-4 {playback.liked ? 'fill-current text-primary' : ''}"
+							class="h-4 w-4 {playback.rating === 'like' ? 'fill-current text-primary' : ''}"
 						/>
 					</span>
 				</button>

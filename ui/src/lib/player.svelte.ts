@@ -3,7 +3,7 @@
 // context/11 UI contract — this module only calls commands / subscribes to events.
 import { browser } from '$app/environment';
 import * as api from './api';
-import type { Account, BrowseItem, NowPlaying, QueueState, SongItem } from './api';
+import type { Account, BrowseItem, NowPlaying, QueueState, Rating, SongItem } from './api';
 import { applyLtState, lt } from './lt.svelte';
 import { clearCached } from './pagecache';
 import * as pl from './personal';
@@ -16,9 +16,10 @@ export const playback = $state({
 	position: 0,
 	duration: 0,
 	volume: 100,
-	// Like state for the current track — seeded from the track's real `likeStatus` on each change,
-	// then optimistic on toggle.
-	liked: false
+	// Rating of the current track — seeded from its real `likeStatus` on each change, then
+	// optimistic on toggle. Owned here rather than in `ratings` below because the mini player is a
+	// separate webview with its own module instance: the backend reseed is what keeps them agreeing.
+	rating: 'indifferent' as Rating
 });
 
 /**
@@ -269,23 +270,25 @@ export function togglePin(id: string) {
 	return result;
 }
 
-// Like state that outlives one row. A song's `liked` flag is a snapshot from whenever its page was
+// Rating state that outlives one row. A song's `rating` is a snapshot from whenever its page was
 // fetched, and the same song shows up in several places at once (a list row, its ⋯ menu, the player
 // bar). One override map keyed by videoId keeps them all telling the same story; the current track
-// stays owned by `playback.liked`, which the Rust side reseeds on every track change.
-const likedSongs = $state<Record<string, boolean>>({});
+// stays owned by `playback.rating`, which the Rust side reseeds on every track change.
+const ratings = $state<Record<string, Rating>>({});
 
-export function isLiked(song: SongItem): boolean {
-	if (playback.now?.videoId === song.video_id) return playback.liked;
-	return likedSongs[song.video_id] ?? song.liked ?? false;
+export function ratingOf(song: SongItem): Rating {
+	if (playback.now?.videoId === song.video_id) return playback.rating;
+	return ratings[song.video_id] ?? song.rating ?? 'indifferent';
 }
+
+export const isLiked = (song: SongItem): boolean => ratingOf(song) === 'like';
 
 /** Like/unlike whatever is playing. Thin wrapper so the player bar and the mini player share one
  *  implementation (and one optimistic path) with every list row. */
 export function toggleNowPlayingLike(): Promise<void> {
 	const n = playback.now;
 	if (!n) return Promise.resolve();
-	return toggleLike({ video_id: n.videoId, title: n.title, artists: n.artists });
+	return toggleRating({ video_id: n.videoId, title: n.title, artists: n.artists }, 'like');
 }
 
 // --- Volume ------------------------------------------------------------------------------------
@@ -346,20 +349,33 @@ export function cycleRepeat(): Promise<void> {
 	return api.setRepeat(r === 'off' ? 'all' : r === 'all' ? 'one' : 'off');
 }
 
-/** Optimistic like toggle, reverted if YouTube rejects it. */
-export async function toggleLike(song: SongItem) {
-	const next = !isLiked(song);
+const RATED: Record<Rating, string> = {
+	like: 'Added to liked songs',
+	dislike: 'Disliked',
+	indifferent: 'Rating removed'
+};
+
+/** Optimistic rating change, reverted if YouTube rejects it. */
+async function rate(song: SongItem, next: Rating) {
+	const prev = ratingOf(song);
+	if (prev === next) return;
 	const isNow = playback.now?.videoId === song.video_id;
-	likedSongs[song.video_id] = next;
-	if (isNow) playback.liked = next;
+	ratings[song.video_id] = next;
+	if (isNow) playback.rating = next;
 	try {
-		await api.like(song.video_id, next);
-		toast.success(next ? 'Added to liked songs' : 'Removed from liked songs');
+		await api.rate(song.video_id, next);
+		toast.success(RATED[next]);
 	} catch (e) {
-		likedSongs[song.video_id] = !next;
-		if (isNow) playback.liked = !next;
+		ratings[song.video_id] = prev;
+		if (isNow) playback.rating = prev;
 		toast.error(String(e));
 	}
+}
+
+/** Click the rating you already have to clear it, the way YouTube Music's own buttons work.
+ *  One call either way: YouTube's states are exclusive, so a dislike un-likes on its own. */
+export function toggleRating(song: SongItem, want: 'like' | 'dislike') {
+	return rate(song, ratingOf(song) === want ? 'indifferent' : want);
 }
 
 /**
@@ -510,7 +526,7 @@ export function initApp(mini = false): () => void {
 	const subs = [
 		api.onNowPlaying((n) => {
 			playback.now = n;
-			playback.liked = n.liked ?? false; // reflect the track's real like status when known
+			playback.rating = n.rating ?? 'indifferent'; // the track's real rating when known
 			// Feeds Shortcuts recency and the community shelf's artist seed. Every play lands here,
 			// gapless advances included, so it's the one hook that sees them all.
 			pl.touchPick(personal, n.videoId);
@@ -561,7 +577,7 @@ export function initApp(mini = false): () => void {
 			playback.volume = s.volume; // before the guard below: the slider is stale either way
 			if (playback.now) return; // a real now-playing event beat us to it
 			playback.now = s.now;
-			playback.liked = s.now?.liked ?? false;
+			playback.rating = s.now?.rating ?? 'indifferent';
 			playback.paused = s.paused;
 			playback.position = s.position;
 			playback.duration = s.duration;

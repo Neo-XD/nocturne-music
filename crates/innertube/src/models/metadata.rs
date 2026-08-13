@@ -42,10 +42,10 @@ pub struct SongItem {
     /// edit_playlist). Only present when the item came from a playlist page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub set_video_id: Option<String>,
-    /// Whether the signed-in user has liked this track (`likeStatus == "LIKE"`). `None` when the
-    /// response didn't carry a like status.
+    /// The signed-in user's rating of this track, from the row's `likeStatus`. `None` when the
+    /// response didn't carry one, which the UI treats the same as [`Rating::Indifferent`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub liked: Option<bool>,
+    pub rating: Option<Rating>,
     /// Listen Together: username of the guest who added this queue item (`None` for the user's own
     /// tracks). Never parsed from YouTube — pure queue metadata, carried for attribution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -72,6 +72,18 @@ pub struct SongItem {
     /// "hide music videos" setting; computed once here, never re-derived downstream.
     #[serde(default)]
     pub is_video: bool,
+}
+
+/// How the signed-in user rated a track. One type for both directions: it's what a row's
+/// `likeStatus` parses into, and what the write action ([`crate::InnerTube::rate`]) takes. The three
+/// values are mutually exclusive on YouTube's side, so rating a liked track "dislike" un-likes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Rating {
+    Like,
+    Dislike,
+    /// No rating: what `like/removelike` leaves behind, and what an unrated row reports.
+    Indifferent,
 }
 
 /// `MUSIC_VIDEO_TYPE_ATV` — the audio track YouTube Music generates for a release. Anything else
@@ -265,7 +277,7 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
         play_count: play_count(node),
         thumbnail: last_thumbnail(node),
         set_video_id,
-        liked: like_status(node),
+        rating: like_status(node),
         queued_by: None,
         queued: false,
         queued_end: false,
@@ -334,10 +346,15 @@ pub(crate) fn first_artist_id(runs: &[Value]) -> Option<String> {
     })
 }
 
-/// The track's like state from its menu's `likeStatus` (`LIKE` / `INDIFFERENT` / `DISLIKE`).
-/// Tolerant: grabs the first `likeStatus` anywhere in the node. context/08.
-fn like_status(node: &Value) -> Option<bool> {
-    find_first_str(node, "likeStatus").map(|s| s == "LIKE")
+/// The track's rating from its menu's `likeStatus` (`LIKE` / `INDIFFERENT` / `DISLIKE`).
+/// Tolerant: grabs the first `likeStatus` anywhere in the node, and reads anything it doesn't
+/// recognise as unrated rather than dropping the row. context/08.
+fn like_status(node: &Value) -> Option<Rating> {
+    find_first_str(node, "likeStatus").map(|s| match s.as_str() {
+        "LIKE" => Rating::Like,
+        "DISLIKE" => Rating::Dislike,
+        _ => Rating::Indifferent,
+    })
 }
 
 fn parse_panel_video(node: &Value) -> Option<SongItem> {
@@ -362,7 +379,7 @@ fn parse_panel_video(node: &Value) -> Option<SongItem> {
         play_count: None,
         thumbnail: last_thumbnail(node),
         set_video_id: None,
-        liked: like_status(node),
+        rating: like_status(node),
         queued_by: None,
         queued: false,
         queued_end: false,
@@ -640,6 +657,22 @@ mod tests {
             &json!({ "navigationEndpoint": { "watchEndpoint": { "videoId": "v" } } })
         ));
         assert!(!is_video_row(&json!({})));
+    }
+
+    // The rating drives both thumbs on every row, and the third state is new: `DISLIKE` used to
+    // collapse into "not liked". An unknown value must read as unrated rather than as a dislike.
+    #[test]
+    fn reads_all_three_rating_states() {
+        let row = |status: &str| {
+            json!({ "menu": { "menuRenderer": { "topLevelButtons": [
+                { "likeButtonRenderer": { "likeStatus": status } }
+            ] } } })
+        };
+        assert_eq!(like_status(&row("LIKE")), Some(Rating::Like));
+        assert_eq!(like_status(&row("DISLIKE")), Some(Rating::Dislike));
+        assert_eq!(like_status(&row("INDIFFERENT")), Some(Rating::Indifferent));
+        assert_eq!(like_status(&row("SOMETHING_NEW")), Some(Rating::Indifferent));
+        assert_eq!(like_status(&json!({})), None);
     }
 
     // A dead `RDAMVM` radio answers with the seed song plus this marker, which names the mix the
