@@ -26,10 +26,14 @@ export interface QueueBlock {
 }
 
 /**
- * The playing track, then the upcoming queue in play order, split wherever the tracks change
- * origin: a manual block ("Play next" / "Add to queue", headed by what it was added from), the
- * playing context ("Next from: …"), autoplay's continuation. Played tracks are hidden — Previous
- * still works, they stay in the backend queue.
+ * The tracks already played, then the playing track, then the upcoming queue in play order, split
+ * wherever the tracks change origin: a manual block ("Play next" / "Add to queue", headed by what it
+ * was added from), the playing context ("Next from: …"), autoplay's continuation.
+ *
+ * `prev` is what the panel shows behind "Load previous", oldest first, so the last thing heard sits
+ * directly above the playing track. It runs from `playedFrom`, not from 0: the backend queue holds
+ * the whole playlist even when playback started in the middle of it (`state.rs`), and those leading
+ * tracks were never heard.
  *
  * Play order, not kind order: grouping by kind would draw an "Add to queue" block that sits at the
  * tail under the playing playlist's heading, naming a playlist those tracks never came from.
@@ -40,8 +44,13 @@ export interface QueueBlock {
  * pinned "Play next" block ahead of it, autoplay's filler behind it. Turning shuffle off restores
  * the real order, and with it the blocks.
  */
-export function queueBlocks(q: QueueState): { now: QueueRow | null; blocks: QueueBlock[] } {
+export function queueBlocks(q: QueueState): {
+	prev: QueueRow[];
+	now: QueueRow | null;
+	blocks: QueueBlock[];
+} {
 	const { items, currentIndex, sourceName } = q;
+	const playedFrom = Math.min(q.playedFrom ?? currentIndex, currentIndex);
 	const seen = new Map<string, number>();
 	let n = 0;
 	const row = (i: number): QueueRow => {
@@ -50,9 +59,16 @@ export function queueBlocks(q: QueueState): { now: QueueRow | null; blocks: Queu
 		seen.set(item.video_id, occ + 1);
 		return { item, key: `${item.video_id}:${occ}`, i, n: ++n };
 	};
-	// Occurrence counting must walk the played prefix too, or a repeated track's key would collide
-	// with its hidden earlier copy.
-	for (let i = 0; i < currentIndex; i++) row(i);
+	// Occurrence counting must walk the whole prefix, not just the played part of it, or a repeated
+	// track's key would collide with an earlier copy that isn't on screen.
+	const prev: QueueRow[] = [];
+	for (let i = 0; i < currentIndex; i++) {
+		const r = row(i);
+		if (i >= playedFrom) prev.push(r);
+	}
+	// Each run numbers itself from 1: the previously-played rows, then the playing track and
+	// everything after it. Continuous numbering would renumber the playing row as history loads.
+	prev.forEach((r, k) => (r.n = k + 1));
 	n = 0;
 	const now = items[currentIndex] ? row(currentIndex) : null;
 
@@ -102,7 +118,7 @@ export function queueBlocks(q: QueueState): { now: QueueRow | null; blocks: Queu
 		block.clearable = manual && !cleared;
 		if (block.clearable) cleared = true;
 	}
-	return { now, blocks };
+	return { prev, now, blocks };
 }
 
 /** The name a block goes under: its one origin if its tracks share one, else a neutral label. */

@@ -23,8 +23,9 @@ const q = (
 	items: SongItem[],
 	currentIndex: number,
 	sourceName?: string,
-	shuffle = false
-): QueueState => ({ items, currentIndex, sourceName, shuffle });
+	shuffle = false,
+	playedFrom?: number
+): QueueState => ({ items, currentIndex, sourceName, shuffle, playedFrom });
 
 // Playing "Afro", an "Add to queue" of "Nightcore Bangers" behind it, autoplay filler behind that.
 const added = (id: string) => song(id, { queued_end: true, queued_from: 'Nightcore Bangers' });
@@ -76,10 +77,34 @@ ok(v.blocks[0].key !== v.blocks[1].key, 'block keys are distinct (keyed renderin
 v = queueBlocks(q([song('a'), song('b'), song('c')], 0));
 ok(v.blocks.length === 1 && v.blocks[0].heading === 'Next up', 'unnamed context is one block');
 
-// Played tracks are hidden, and a repeated track doesn't collide with its earlier copy's key.
+// Played tracks are out of the upcoming blocks, and a repeated track doesn't collide with its
+// earlier copy's key.
 v = queueBlocks(q([song('dup'), song('now'), song('dup')], 1));
 ok(v.blocks[0].rows.length === 1 && v.now?.item.video_id === 'now', 'history is not drawn');
 ok(v.blocks[0].rows[0].key === 'dup:1', 'the second copy of a track gets its own key');
+
+// --- previously played ------------------------------------------------------------------------
+// The prefix is not the history: opening a playlist at track 3 leaves two untouched tracks in front
+// of the playing one, and the backend says so with `playedFrom`.
+v = queueBlocks(q([song('a'), song('b'), song('now'), song('d')], 2, 'Afro', false, 2));
+ok(v.prev.length === 0, 'starting mid-playlist has played nothing');
+
+// Jumping forward counts everything passed over, oldest first, so the last thing heard sits
+// directly above the playing track.
+v = queueBlocks(q([song('a'), song('b'), song('c'), song('now')], 3, 'Afro', false, 1));
+ok(v.prev.map((r) => r.item.video_id).join() === 'b,c', 'skipped-over tracks count as played');
+ok(v.prev.map((r) => r.i).join() === '1,2', 'indices still point at the backend queue');
+ok(v.prev.map((r) => r.n).join() === '1,2', 'the played run numbers itself from 1');
+ok(v.now?.n === 1, 'the playing row keeps its number when history loads');
+
+// A blob saved before this existed (no `playedFrom`) restores with nothing played, rather than
+// claiming the whole prefix was heard.
+v = queueBlocks(q([song('a'), song('b'), song('now')], 2));
+ok(v.prev.length === 0, 'no playedFrom ⇒ empty history');
+
+// Keys stay unique when the same track shows up in the history and again ahead of the playing one.
+v = queueBlocks(q([song('dup'), song('now'), song('dup')], 1, undefined, false, 0));
+ok(v.prev[0].key === 'dup:0' && v.blocks[0].rows[0].key === 'dup:1', 'each copy keeps its own key');
 
 // An empty queue draws nothing rather than throwing.
 v = queueBlocks(q([], 0));

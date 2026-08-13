@@ -1,8 +1,9 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { InfinityIcon } from '@hugeicons/core-free-icons';
+	import { HistoryIcon, InfinityIcon } from '@hugeicons/core-free-icons';
 	import TrackRow from '$lib/components/TrackRow.svelte';
 	import * as api from '$lib/api';
 	import { queueBlocks, type QueueRow } from '$lib/queue';
@@ -18,6 +19,11 @@
 	// Blocks in play order, cut wherever the upcoming tracks change origin (`queue.ts`).
 	const view = $derived(queueBlocks(playback.queue));
 
+	// The tracks already heard, hidden until asked for: a queue played deep into has hundreds of
+	// them, and they sit above everything anyone opened the panel to look at.
+	let showPrev = $state(false);
+	let el: HTMLElement;
+
 	// Playing a playlist queues the whole playlist, so this panel can be handed five figures of
 	// rows the moment it opens, at roughly 165 KB of web-process memory each (`rows.ts`). Past a
 	// couple of hundred it renders only what is near the viewport.
@@ -27,13 +33,29 @@
 	// that is a bad trade for a queue you can see the end of.
 	const WINDOW_ABOVE = 200;
 	const sc = rowScroller();
-	const counts = $derived([view.now ? 1 : 0, ...view.blocks.map((b) => b.rows.length)]);
+	// One entry per block, previously-played first. Collapsed it is 0 rows but still charged a
+	// heading it doesn't draw, which shifts every window's *choice* of slice by 40px and none of
+	// their heights: the overscan swallows it (see HEADING_PX).
+	const counts = $derived([
+		showPrev ? view.prev.length : 0,
+		view.now ? 1 : 0,
+		...view.blocks.map((b) => b.rows.length)
+	]);
 	const windowed = $derived(counts.reduce((a, c) => a + c, 0) > WINDOW_ABOVE);
 	const wins = $derived(
 		windowed
 			? blockWindows(sc.scrollTop, sc.viewportPx, counts, sc.rowPx)
 			: counts.map(fullWindow)
 	);
+
+	async function togglePrev() {
+		const before = el.scrollHeight;
+		showPrev = !showPrev;
+		await tick();
+		// Rows appear (or vanish) above the viewport, and WebKit implements no scroll anchoring, so
+		// without this the panel jumps by the whole height of the history. Keeps Now playing still.
+		el.scrollTop += el.scrollHeight - before;
+	}
 </script>
 
 {#snippet rows(list: QueueRow[], w: RowWindow)}
@@ -61,10 +83,27 @@
 
 <!-- The list on its own, so the side panel and the now-playing view's Queue tab render the same
      one instead of drifting apart. -->
-<div class="min-h-0 flex-1 overflow-y-auto p-2" {@attach sc.attach}>
+<div class="min-h-0 flex-1 overflow-y-auto p-2" bind:this={el} {@attach sc.attach}>
 	{#if view.now}
-		<h3 class="px-2 pt-2 pb-1.5 text-sm font-semibold">Now playing</h3>
-		{@render rows([view.now], wins[0])}
+		{#if showPrev && view.prev.length}
+			<h3 class="px-2 pt-2 pb-1.5 text-sm font-semibold text-muted-foreground">
+				Previously played
+			</h3>
+			{@render rows(view.prev, wins[0])}
+		{/if}
+		<div class="flex items-center justify-between gap-2 px-2 pt-2 pb-1.5">
+			<h3 class="truncate text-sm font-semibold">Now playing</h3>
+			{#if view.prev.length}
+				<button
+					class="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+					onclick={togglePrev}
+				>
+					<HugeiconsIcon icon={HistoryIcon} class="h-3.5 w-3.5" />
+					{showPrev ? 'Hide previous' : 'Load previous'}
+				</button>
+			{/if}
+		</div>
+		{@render rows([view.now], wins[1])}
 
 		{#each view.blocks as block, b (block.key)}
 			{#if block.autoplay}
@@ -89,7 +128,7 @@
 					{/if}
 				</div>
 			{/if}
-			{@render rows(block.rows, wins[b + 1])}
+			{@render rows(block.rows, wins[b + 2])}
 		{/each}
 	{:else}
 		<p class="p-4 text-sm text-muted-foreground">The queue is empty.</p>
