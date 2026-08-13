@@ -34,12 +34,27 @@
 		if (!songs?.length) return;
 		try {
 			// Sequential — a whole album is a handful of requests; don't hammer the API in parallel.
-			for (const song of songs) await api.addToPlaylist(pl.id, song.video_id);
-			bumpLibraryTrackCount(pl.id, songs.length);
-			notePlaylistAdd(pl.id, songs);
-			toast.success(
-				songs.length > 1 ? `Added ${songs.length} songs to ${pl.title}` : `Added to ${pl.title}`
-			);
+			// YouTube refuses a track the playlist already holds, so only the ones it accepted get
+			// counted and drawn: an optimistic row for a refused add is a row that can never be
+			// removed (no setVideoId behind it) until the app restarts.
+			const added: typeof songs = [];
+			for (const song of songs) {
+				if (await api.addToPlaylist(pl.id, song.video_id)) added.push(song);
+			}
+			const dupes = songs.length - added.length;
+			if (added.length) {
+				bumpLibraryTrackCount(pl.id, added.length);
+				notePlaylistAdd(pl.id, added);
+			}
+			if (!added.length) {
+				toast(dupes > 1 ? `All ${dupes} are already in ${pl.title}` : `Already in ${pl.title}`);
+			} else if (dupes) {
+				toast.success(`Added ${added.length} to ${pl.title} (${dupes} already there)`);
+			} else {
+				toast.success(
+					added.length > 1 ? `Added ${added.length} songs to ${pl.title}` : `Added to ${pl.title}`
+				);
+			}
 		} catch (e) {
 			toast.error(String(e));
 		}

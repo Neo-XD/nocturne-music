@@ -465,18 +465,27 @@ impl InnerTube {
     }
 
     /// Add a video to a playlist. context/01 `browse/edit_playlist`.
+    ///
+    /// Returns `false` when the track is already in the playlist: YouTube refuses the add (see
+    /// `edit_rejection`) rather than storing a second copy.
     pub async fn playlist_add(
         &self,
         client: &YouTubeClient,
         playlist_id: &str,
         video_id: &str,
-    ) -> Result<(), Error> {
-        self.edit_playlist(
-            client,
-            playlist_id,
-            serde_json::json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": video_id }),
-        )
-        .await
+    ) -> Result<bool, Error> {
+        match self
+            .edit_playlist(
+                client,
+                playlist_id,
+                serde_json::json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": video_id }),
+            )
+            .await
+        {
+            Ok(()) => Ok(true),
+            Err(Error::AlreadyInPlaylist) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Remove a video from a playlist. Needs `set_video_id` (the item's playlistSetVideoId).
@@ -532,8 +541,10 @@ impl InnerTube {
             playlist_id: strip_vl(playlist_id).to_owned(),
             actions: vec![action],
         };
-        self.post("browse/edit_playlist", client, &body, true).await?;
-        Ok(())
+        match edit_rejection(&self.post("browse/edit_playlist", client, &body, true).await?) {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     /// Create a private playlist; returns the new playlistId. context/01 `playlist/create`.
@@ -605,6 +616,20 @@ fn strip_vl(id: &str) -> &str {
     id.strip_prefix("VL").unwrap_or(id)
 }
 
+/// `browse/edit_playlist` answers HTTP 200 even when it applies nothing: the refusal is
+/// `"status": "STATUS_FAILED"` in the body. Adding a track the playlist already holds is the
+/// common one, and YouTube marks it by offering an "Add anyway" button whose endpoint repeats the
+/// action with a `dedupeOption`. Left unread, the caller thinks the edit landed.
+fn edit_rejection(v: &serde_json::Value) -> Option<Error> {
+    if v.get("status").and_then(serde_json::Value::as_str) != Some("STATUS_FAILED") {
+        return None;
+    }
+    Some(match metadata::find_first_str(v, "dedupeOption") {
+        Some(_) => Error::AlreadyInPlaylist,
+        None => Error::Other("YouTube refused the playlist edit.".into()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -614,6 +639,29 @@ mod tests {
     fn strips_vl_prefix() {
         assert_eq!(strip_vl("VLPL123"), "PL123");
         assert_eq!(strip_vl("PL123"), "PL123");
+    }
+
+    // Both bodies are trimmed captures of the live responses.
+    #[test]
+    fn duplicate_add_is_rejected() {
+        let ok = json!({ "playlistEditResults": [{ "playlistEditVideoAddedResultData": {
+            "setVideoId": "56B44F6D10557CC6", "videoId": "dQw4w9WgXcQ" } }],
+            "status": "STATUS_SUCCEEDED" });
+        assert!(edit_rejection(&ok).is_none());
+
+        let dup = json!({ "actions": [{ "addToToastAction": { "item": {
+            "notificationActionRenderer": { "actionButton": { "buttonRenderer": {
+                "command": { "playlistEditEndpoint": { "actions": [{
+                    "action": "ACTION_ADD_VIDEO",
+                    "addedVideoId": "dQw4w9WgXcQ",
+                    "dedupeOption": "DEDUPE_OPTION_SKIP" }] } },
+                "text": { "runs": [{ "text": "Add anyway" }] } } },
+            "responseText": { "runs": [{ "text": "This track is already in the playlist" }] } } } } }],
+            "status": "STATUS_FAILED" });
+        assert!(matches!(edit_rejection(&dup), Some(Error::AlreadyInPlaylist)));
+
+        let failed = json!({ "status": "STATUS_FAILED" });
+        assert!(matches!(edit_rejection(&failed), Some(Error::Other(_))));
     }
 
     #[test]

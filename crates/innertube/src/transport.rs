@@ -26,6 +26,8 @@ pub enum Error {
     VisitorDataNotFound,
     #[error("Your YouTube Music session expired — open the account menu and sign in again.")]
     SessionExpired,
+    #[error("This track is already in the playlist.")]
+    AlreadyInPlaylist,
     #[error("{0}")]
     Other(String),
 }

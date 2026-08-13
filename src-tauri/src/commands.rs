@@ -579,12 +579,14 @@ fn editable_playlist<'a>(
     require_login(state)
 }
 
+/// `false` means the playlist already had the track and YouTube added nothing — not an error, but
+/// the UI must not draw an optimistic row for it (there is no real row to remove later).
 #[tauri::command]
 pub async fn add_to_playlist(
     state: St<'_>,
     playlist_id: String,
     video_id: String,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let client = editable_playlist(&state, &playlist_id)?;
     state.it.playlist_add(client, &playlist_id, &video_id).await.map_err(|e| e.to_string())
 }

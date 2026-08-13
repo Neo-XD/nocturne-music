@@ -328,8 +328,9 @@ export const removeLocalFolder = (path: string) =>
 /** Like, dislike, or clear the rating. YouTube's three states are mutually exclusive, so a dislike
  *  un-likes in the same call. */
 export const rate = (videoId: string, rating: Rating) => invoke<void>('rate', { videoId, rating });
+/** `false` = the playlist already had this track, so YouTube added nothing. */
 export const addToPlaylist = (playlistId: string, videoId: string) =>
-	invoke<void>('add_to_playlist', { playlistId, videoId });
+	invoke<boolean>('add_to_playlist', { playlistId, videoId });
 export const removeFromPlaylist = (playlistId: string, videoId: string, setVideoId: string) =>
 	invoke<void>('remove_from_playlist', { playlistId, videoId, setVideoId });
 export const createPlaylist = (title: string) => invoke<string>('create_playlist', { title });
