@@ -9,6 +9,15 @@ export default defineConfig({
 		strictPort: true
 	},
 	plugins: [
+		{
+			name: 'limusic-dev-referrer-policy',
+			configureServer(server) {
+				server.middlewares.use((_req, res, next) => {
+					res.setHeader('Referrer-Policy', 'no-referrer');
+					next();
+				});
+			}
+		},
 		tailwindcss(),
 		sveltekit({
 			compilerOptions: {
