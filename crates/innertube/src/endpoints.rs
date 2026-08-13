@@ -9,7 +9,9 @@ use crate::models::browse::{
 };
 use crate::models::context::Context;
 use crate::models::lyrics::{self, PlainLyrics, TimedLyricLine};
-use crate::models::metadata::{self, AccountInfo, NextResult, Rating, SearchResult, SongItem};
+use crate::models::metadata::{
+    self, AccountIdentity, AccountInfo, NextResult, Rating, SearchResult, SongItem,
+};
 use crate::models::player::{
     ContentPlaybackContext, PlaybackContext, PlayerBody, PlayerResponse, ServiceIntegrityDimensions,
 };
@@ -187,6 +189,40 @@ impl InnerTube {
         let body = AccountMenuBody { context: self.context_for(client) };
         let value = self.post("account/account_menu", client, &body, true).await?;
         Ok(metadata::parse_account_menu(&value))
+    }
+
+    /// Validate and refresh one delegated identity without mutating the transport's shared
+    /// selection. This keeps unrelated in-flight requests on the previously committed channel.
+    pub async fn account_menu_for_identity(
+        &self,
+        client: &YouTubeClient,
+        data_sync_id: &str,
+    ) -> Result<AccountInfo, Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AccountMenuBody {
+            context: Context,
+        }
+        let body = AccountMenuBody { context: self.context_for_identity(client, data_sync_id) };
+        let value = self.post("account/account_menu", client, &body, true).await?;
+        Ok(metadata::parse_account_menu(&value))
+    }
+
+    /// Every usable YouTube identity under the signed-in Google account. The official web client
+    /// opens this sibling endpoint from the account menu; `account/account_menu` itself only
+    /// carries the active header.
+    pub async fn account_identities(
+        &self,
+        client: &YouTubeClient,
+    ) -> Result<Vec<AccountIdentity>, Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AccountsListBody {
+            context: Context,
+        }
+        let body = AccountsListBody { context: self.context_for(client) };
+        let value = self.post("account/accounts_list", client, &body, true).await?;
+        Ok(metadata::parse_account_identities(&value))
     }
 
     /// Raw `browse` call (context/01, context/08). `browse_id`/`params` optional; response is the

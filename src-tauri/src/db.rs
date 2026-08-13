@@ -110,6 +110,48 @@ impl Db {
         let _ = conn.execute("DELETE FROM settings WHERE key = ?1", [key]);
     }
 
+    /// Persist the canonical selected identity and its two legacy projections atomically. Older
+    /// releases still read `data_sync_id` / `account_json`; keeping all three in one transaction
+    /// prevents a restart from pairing one channel's request delegation with another's display.
+    pub fn set_auth_identity(
+        &self,
+        selected_json: &str,
+        data_sync_id: Option<&str>,
+        account_json: &str,
+    ) -> rusqlite::Result<()> {
+        let mut conn = self.0.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO settings(key, value) VALUES('selected_identity_json', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [selected_json],
+        )?;
+        if let Some(id) = data_sync_id {
+            tx.execute(
+                "INSERT INTO settings(key, value) VALUES('data_sync_id', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [id],
+            )?;
+        } else {
+            tx.execute("DELETE FROM settings WHERE key = 'data_sync_id'", [])?;
+        }
+        tx.execute(
+            "INSERT INTO settings(key, value) VALUES('account_json', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [account_json],
+        )?;
+        tx.commit()
+    }
+
+    pub fn clear_auth_identity(&self) -> rusqlite::Result<()> {
+        let mut conn = self.0.lock().unwrap();
+        let tx = conn.transaction()?;
+        for key in ["selected_identity_json", "data_sync_id", "account_json"] {
+            tx.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        }
+        tx.commit()
+    }
+
     pub fn all_settings(&self) -> Vec<(String, String)> {
         let conn = self.0.lock().unwrap();
         let mut out = Vec::new();
@@ -451,6 +493,32 @@ mod tests {
         d.record_play("stale", "{}", 1_000, 60);
         d.record_play("fresh", "{}", 5_000, 60); // prunes anything before 4_940
         assert_eq!(d.top_plays(0, 20), vec![("{}".to_string(), 1)]);
+    }
+
+    #[test]
+    fn auth_identity_projections_are_updated_and_cleared_together() {
+        let d = db();
+        d.set_auth_identity(
+            r#"{"data_sync_id":"channel-a"}"#,
+            Some("channel-a"),
+            r#"{"name":"Channel A"}"#,
+        )
+        .unwrap();
+        assert_eq!(d.get_setting("data_sync_id").as_deref(), Some("channel-a"));
+        assert_eq!(
+            d.get_setting("selected_identity_json").as_deref(),
+            Some(r#"{"data_sync_id":"channel-a"}"#)
+        );
+        assert_eq!(d.get_setting("account_json").as_deref(), Some(r#"{"name":"Channel A"}"#));
+
+        d.set_auth_identity(r#"{"data_sync_id":null}"#, None, r#"{"name":"Single channel"}"#)
+            .unwrap();
+        assert_eq!(d.get_setting("data_sync_id"), None, "a stale delegated id must be deleted");
+
+        d.clear_auth_identity().unwrap();
+        assert_eq!(d.get_setting("selected_identity_json"), None);
+        assert_eq!(d.get_setting("data_sync_id"), None);
+        assert_eq!(d.get_setting("account_json"), None);
     }
 }
 

@@ -77,7 +77,21 @@ export interface Account {
 	signedIn: boolean;
 	name?: string | null;
 	handle?: string | null;
+	email?: string | null;
 	thumbnail?: string | null;
+	channelId?: string | null;
+	canSwitch?: boolean;
+}
+
+export interface AccountIdentity {
+	/** Opaque, process-local selector. Raw delegated/data-sync ids stay in Rust. */
+	selectionKey: string;
+	name: string;
+	handle?: string | null;
+	email?: string | null;
+	thumbnail?: string | null;
+	channelId?: string | null;
+	selected: boolean;
 }
 
 export interface BrowseItem {
@@ -263,6 +277,10 @@ export const allowFontFile = (path: string) => invoke<void>('allow_font_file', {
 
 // --- auth (context/15) ---------------------------------------------------------------------
 export const getAccount = () => invoke<Account>('get_account');
+export const getAccountIdentities = () =>
+	invoke<AccountIdentity[]>('get_account_identities');
+export const switchAccount = (selectionKey: string) =>
+	invoke<Account>('switch_account', { selectionKey });
 export const signOut = () => invoke<void>('sign_out');
 /** Open the in-app Google sign-in webview (context/15 Path A). Result arrives via onAuthChanged. */
 export const loginWebview = () => invoke<void>('login_webview');
@@ -359,6 +377,8 @@ export const onPlaybackNotice = (cb: (msg: string) => void): Promise<UnlistenFn>
 	listen<{ message: string }>('playback-notice', (e) => cb(e.payload.message));
 export const onAuthChanged = (cb: (a: Account) => void): Promise<UnlistenFn> =>
 	listen<Account>('auth-changed', (e) => cb(e.payload));
+export const onAccountSelectionRequired = (cb: () => void): Promise<UnlistenFn> =>
+	listen('account-selection-required', () => cb());
 /**
  * Local music disappeared from disk. Fired when a play attempt finds nothing there, carrying the
  * song (and album, if that emptied it) so every view holding those ids can drop them at once.

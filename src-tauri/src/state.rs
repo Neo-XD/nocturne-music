@@ -1,11 +1,15 @@
 //! App state: transport, player, db, and the queue/playback manager. context/11.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use std::sync::Arc;
 
-use innertube::{AudioQuality, Clients, InnerTube, SongItem, MAIN_CLIENT};
+use innertube::{
+    AccountIdentity, AccountInfo, AudioQuality, Clients, InnerTube, SongItem, MAIN_CLIENT,
+};
 use listen_protocol::{Playback, PlaybackKind, Track};
 use player::Player;
 use tauri::{AppHandle, Emitter};
@@ -79,6 +83,150 @@ pub enum RepeatMode {
 enum Fill {
     Playing,
     Queued(Option<String>),
+}
+
+/// Canonical persisted account selection. `data_sync_id` drives request delegation; every display
+/// field beside it belongs to that same identity. `account_json` and the legacy `data_sync_id`
+/// setting are written only as atomic projections of this model.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+struct SelectedIdentity {
+    #[serde(default)]
+    data_sync_id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    handle: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    thumbnail: Option<String>,
+    #[serde(default)]
+    channel_id: Option<String>,
+    #[serde(default)]
+    has_multiple_identities: bool,
+}
+
+pub enum SignInOutcome {
+    Complete,
+    SelectionRequired,
+}
+
+impl SelectedIdentity {
+    fn from_account_info(info: AccountInfo, has_multiple_identities: bool) -> Option<Self> {
+        Some(Self {
+            data_sync_id: info.data_sync_id,
+            name: Some(info.name?),
+            handle: info.handle,
+            email: info.email,
+            thumbnail: info.thumbnail,
+            channel_id: info.channel_id,
+            has_multiple_identities,
+        })
+    }
+
+    fn from_identity(
+        identity: &AccountIdentity,
+        refreshed: AccountInfo,
+        has_multiple_identities: bool,
+    ) -> Self {
+        Self {
+            data_sync_id: Some(identity.data_sync_id.clone()),
+            name: refreshed.name.or_else(|| Some(identity.name.clone())),
+            handle: refreshed.handle.or_else(|| identity.handle.clone()),
+            email: refreshed.email.or_else(|| identity.email.clone()),
+            thumbnail: refreshed.thumbnail.or_else(|| identity.thumbnail.clone()),
+            channel_id: refreshed.channel_id.or_else(|| identity.channel_id.clone()),
+            has_multiple_identities,
+        }
+    }
+
+    fn account_json(&self, signed_in: bool) -> serde_json::Value {
+        serde_json::json!({
+            "signedIn": signed_in,
+            "name": self.name,
+            "handle": self.handle,
+            "email": self.email,
+            "thumbnail": self.thumbnail,
+            "channelId": self.channel_id,
+            "canSwitch": self.has_multiple_identities,
+        })
+    }
+
+    fn as_account_identity(&self) -> Option<AccountIdentity> {
+        Some(AccountIdentity {
+            name: self.name.clone().unwrap_or_default(),
+            handle: self.handle.clone(),
+            email: self.email.clone(),
+            thumbnail: self.thumbnail.clone(),
+            channel_id: self.channel_id.clone(),
+            data_sync_id: self.data_sync_id.clone()?,
+            is_selected: false,
+        })
+    }
+}
+
+fn selected_identity_from_db(db: &Db) -> Option<SelectedIdentity> {
+    db.get_setting("selected_identity_json")
+        .and_then(|json| serde_json::from_str::<SelectedIdentity>(&json).ok())
+        .filter(|identity| identity.name.is_some() || identity.data_sync_id.is_some())
+        .or_else(|| {
+            let account = db
+                .get_setting("account_json")
+                .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())?;
+            let string = |key: &str| {
+                account
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+            };
+            Some(SelectedIdentity {
+                data_sync_id: db.get_setting("data_sync_id").filter(|id| !id.is_empty()),
+                name: string("name"),
+                handle: string("handle"),
+                email: string("email"),
+                thumbnail: string("thumbnail"),
+                channel_id: string("channelId"),
+                has_multiple_identities: account
+                    .get("canSwitch")
+                    .and_then(serde_json::Value::as_bool)
+                    // Pre-switcher account_json has no flag. Keep the action discoverable until
+                    // the startup identity refresh determines whether this legacy user has one
+                    // channel or several.
+                    .unwrap_or(true),
+            })
+        })
+}
+
+/// Startup compatibility: prefer the canonical model, then fall back to the pre-switcher setting.
+pub(crate) fn persisted_data_sync_id(db: &Db) -> Option<String> {
+    selected_identity_from_db(db)
+        .and_then(|identity| identity.data_sync_id)
+        .or_else(|| db.get_setting("data_sync_id").filter(|id| !id.is_empty()))
+}
+
+fn identity_selection_key(data_sync_id: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    "limusic-account-identity-v1".hash(&mut hasher);
+    data_sync_id.hash(&mut hasher);
+    format!("identity-{:016x}", hasher.finish())
+}
+
+fn identity_snapshot(
+    identity: &AccountIdentity,
+    selected_data_sync_id: Option<&str>,
+) -> serde_json::Value {
+    let selected =
+        selected_data_sync_id.map(|id| id == identity.data_sync_id).unwrap_or(identity.is_selected);
+    serde_json::json!({
+        "selectionKey": identity_selection_key(&identity.data_sync_id),
+        "name": identity.name,
+        "handle": identity.handle,
+        "email": identity.email,
+        "thumbnail": identity.thumbnail,
+        "channelId": identity.channel_id,
+        "selected": selected,
+    })
 }
 
 #[derive(Default)]
@@ -196,65 +344,277 @@ impl AppState {
     // --- auth (context/15) ------------------------------------------------------------------
 
     /// Sign in with the Cookie header captured from the login webview (context/15 Path A).
-    /// Validates SAPISID presence, sets the cookie on the transport, fetches `account_menu`
-    /// (→ dataSyncId + display info + a fresh visitorData), and persists it all to `settings`.
-    /// Returns the account JSON for the UI.
-    pub async fn sign_in(&self, cookie: String) -> Result<serde_json::Value, String> {
+    ///
+    /// `account_menu` validates the cookie and provides the active header. `accounts_list` then
+    /// discovers every server-selectable identity. A persisted matching identity wins over
+    /// Google's current default; a new multi-channel login pauses before finalization and asks the
+    /// UI to choose.
+    pub async fn sign_in(&self, cookie: String) -> Result<SignInOutcome, String> {
         let cookie = cookie.trim().to_owned();
         if innertube::cookie_sapisid(&cookie).is_none() {
             return Err("Sign-in didn't complete — try signing in again.".into());
         }
+        let previous_cookie = self.it.cookie();
+        let previous_data_sync_id = self.it.data_sync_id();
+        let persisted_identity = selected_identity_from_db(&self.db);
+        let persisted_id = persisted_identity
+            .as_ref()
+            .and_then(|identity| identity.data_sync_id.clone())
+            .or_else(|| self.db.get_setting("data_sync_id").filter(|id| !id.is_empty()));
+
         self.it.set_cookie(Some(cookie.clone()));
+        // Discovery must not inherit a stale/default identity. The persisted id is restored only
+        // after the fresh accounts list proves that this cookie can act as it.
+        self.it.set_data_sync_id(None);
         let client =
             self.clients.get(innertube::METADATA_CLIENT).ok_or("metadata client missing")?;
-        let info = match self.it.account_menu(client).await {
+        let active = match self.it.account_menu(client).await {
             // A valid, authenticating cookie returns the account header (name). No name means the
             // session didn't actually authenticate — reject it up front so we don't "succeed" into
             // a silently-empty library.
             Ok(i) if i.name.is_some() => i,
             Ok(_) => {
-                self.it.set_cookie(None);
+                self.restore_auth_transport(previous_cookie, previous_data_sync_id);
                 return Err("That session didn't authenticate — sign in again.".into());
             }
             // Auth didn't take (network) — roll back so we're not half-logged-in.
             Err(e) => {
-                self.it.set_cookie(None);
+                self.restore_auth_transport(previous_cookie, previous_data_sync_id);
                 return Err(format!("Sign-in failed: {e}"));
             }
         };
-        // Persist. Plaintext SQLite — acceptable for a single-user personal tool (context/15).
+
+        // Plaintext SQLite — acceptable for a single-user personal tool (context/15). Persist the
+        // cookie only after account_menu proved it authenticates.
         self.db.set_setting("session_cookie", &cookie);
-        if let Some(id) = &info.data_sync_id {
-            self.it.set_data_sync_id(Some(id.clone()));
-            self.db.set_setting("data_sync_id", id);
+        let active_visitor_data = active.visitor_data.clone();
+
+        // Losing the list endpoint must not regress ordinary one-channel sign-in. It only removes
+        // the optional switcher for this login attempt; account_menu still supplies a valid active
+        // identity exactly as older releases used it.
+        let identities = match self.it.account_identities(client).await {
+            Ok(identities) => identities,
+            Err(error) => {
+                tracing::warn!(%error, "could not discover alternate YouTube identities");
+                Vec::new()
+            }
+        };
+
+        let chosen = persisted_id
+            .as_deref()
+            .and_then(|id| identities.iter().find(|identity| identity.data_sync_id == id));
+        if let Some(identity) = chosen {
+            if identities.len() == 1 {
+                let selected = SelectedIdentity::from_identity(identity, active, false);
+                self.persist_selected_identity(selected, active_visitor_data.as_deref())
+                    .inspect_err(|_| {
+                        self.restore_auth_transport(
+                            previous_cookie.clone(),
+                            previous_data_sync_id.clone(),
+                        );
+                        self.restore_session_cookie_setting(previous_cookie.as_deref());
+                    })?;
+                return Ok(SignInOutcome::Complete);
+            }
+            self.activate_identity(identity, identities.len() > 1, client).await.inspect_err(
+                |_| {
+                    self.restore_auth_transport(
+                        previous_cookie.clone(),
+                        previous_data_sync_id.clone(),
+                    );
+                    self.restore_session_cookie_setting(previous_cookie.as_deref());
+                },
+            )?;
+            return Ok(SignInOutcome::Complete);
         }
-        if let Some(vd) = &info.visitor_data {
-            self.it.set_visitor_data(Some(vd.clone()));
-            self.db.set_setting("visitor_data", vd);
+
+        // An incomplete/changed list response must not replace a previously selected channel with
+        // Google's current default. Revalidate the stored server-issued id directly;
+        // account_menu either confirms it and refreshes metadata, or the login fails closed.
+        if let Some(data_sync_id) = persisted_id.as_deref() {
+            let identity = persisted_identity
+                .as_ref()
+                .and_then(SelectedIdentity::as_account_identity)
+                .unwrap_or_else(|| AccountIdentity {
+                    name: String::new(),
+                    handle: None,
+                    email: None,
+                    thumbnail: None,
+                    channel_id: None,
+                    data_sync_id: data_sync_id.to_owned(),
+                    is_selected: false,
+                });
+            self.activate_identity(
+                &identity,
+                identities.len() > 1
+                    || persisted_identity
+                        .as_ref()
+                        .is_some_and(|saved| saved.has_multiple_identities),
+                client,
+            )
+            .await
+            .inspect_err(|_| {
+                self.restore_auth_transport(previous_cookie.clone(), previous_data_sync_id.clone());
+                self.restore_session_cookie_setting(previous_cookie.as_deref());
+            })?;
+            return Ok(SignInOutcome::Complete);
         }
-        let account = serde_json::json!({
-            "signedIn": true,
-            "name": info.name,
-            "handle": info.handle,
-            "thumbnail": info.thumbnail,
-        });
-        self.db.set_setting("account_json", &account.to_string());
+
+        if identities.len() == 1 {
+            // One channel stays seamless. Reuse the already-fetched active header instead of
+            // introducing another network request or a new delegated id into the historical
+            // single-account path.
+            let selected = SelectedIdentity::from_account_info(active, false)
+                .ok_or("That session didn't return an account identity")?;
+            self.persist_selected_identity(selected, active_visitor_data.as_deref()).inspect_err(
+                |_| {
+                    self.restore_auth_transport(
+                        previous_cookie.clone(),
+                        previous_data_sync_id.clone(),
+                    );
+                    self.restore_session_cookie_setting(previous_cookie.as_deref());
+                },
+            )?;
+            return Ok(SignInOutcome::Complete);
+        }
+
+        if identities.len() > 1 {
+            // No persisted choice for these cookies: keep the authenticated cookie, but remove any
+            // stale legacy projection so a restart cannot silently act as the old channel.
+            self.it.set_data_sync_id(None);
+            self.db.clear_auth_identity().map_err(|error| {
+                self.restore_auth_transport(previous_cookie.clone(), previous_data_sync_id.clone());
+                self.restore_session_cookie_setting(previous_cookie.as_deref());
+                error.to_string()
+            })?;
+            self.persist_visitor_data(active_visitor_data.as_deref());
+            let _ = self.app.emit("account-selection-required", ());
+            return Ok(SignInOutcome::SelectionRequired);
+        }
+
+        // No selectable token was exposed (the normal historical single-channel response). Keep
+        // the seamless path and persist the active header + response-context dataSyncId together.
+        let selected = SelectedIdentity::from_account_info(active, false)
+            .ok_or("That session didn't return an account identity")?;
+        self.persist_selected_identity(selected, active_visitor_data.as_deref()).inspect_err(
+            |_| {
+                self.restore_auth_transport(previous_cookie.clone(), previous_data_sync_id.clone());
+                self.restore_session_cookie_setting(previous_cookie.as_deref());
+            },
+        )?;
+        Ok(SignInOutcome::Complete)
+    }
+
+    /// Fresh switcher rows for the account picker. Raw delegated ids never cross the Tauri
+    /// boundary; the UI receives a process-local opaque selector and display metadata only.
+    pub async fn account_identities(&self) -> Result<Vec<serde_json::Value>, String> {
+        if !self.it.is_logged_in() {
+            return Err("Sign in before switching channels.".into());
+        }
+        let client =
+            self.clients.get(innertube::METADATA_CLIENT).ok_or("metadata client missing")?;
+        let identities = self.it.account_identities(client).await.map_err(|e| e.to_string())?;
+        let selected_id = self.it.data_sync_id();
+        Ok(identities
+            .iter()
+            .map(|identity| identity_snapshot(identity, selected_id.as_deref()))
+            .collect())
+    }
+
+    /// Switch without a Google re-login. The selector is resolved against a fresh server list and
+    /// account_menu must succeed under a one-off context for that exact identity before the shared
+    /// transport, persistence, or UI is updated.
+    pub async fn switch_account(&self, selection_key: &str) -> Result<serde_json::Value, String> {
+        if !self.it.is_logged_in() {
+            return Err("Sign in before switching channels.".into());
+        }
+        let client =
+            self.clients.get(innertube::METADATA_CLIENT).ok_or("metadata client missing")?;
+        let identities = self.it.account_identities(client).await.map_err(|e| e.to_string())?;
+        let identity = identities
+            .iter()
+            .find(|identity| identity_selection_key(&identity.data_sync_id) == selection_key)
+            .ok_or(
+                "That YouTube channel is no longer available. Refresh the list and try again.",
+            )?;
+        self.activate_identity(identity, identities.len() > 1, client).await
+    }
+
+    async fn activate_identity(
+        &self,
+        identity: &AccountIdentity,
+        has_multiple_identities: bool,
+        client: &innertube::YouTubeClient,
+    ) -> Result<serde_json::Value, String> {
+        let refreshed =
+            match self.it.account_menu_for_identity(client, &identity.data_sync_id).await {
+                Ok(info) if info.name.is_some() => info,
+                Ok(_) => {
+                    return Err(
+                        "YouTube did not confirm that channel. Try signing in again.".into()
+                    );
+                }
+                Err(error) => {
+                    return Err(format!("Couldn't switch YouTube channel: {error}"));
+                }
+            };
+        let visitor_data = refreshed.visitor_data.clone();
+        let selected =
+            SelectedIdentity::from_identity(identity, refreshed, has_multiple_identities);
+        self.persist_selected_identity(selected, visitor_data.as_deref())
+    }
+
+    fn persist_selected_identity(
+        &self,
+        selected: SelectedIdentity,
+        visitor_data: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
+        let account = selected.account_json(true);
+        let selected_json = serde_json::to_string(&selected).map_err(|e| e.to_string())?;
+        let account_json = account.to_string();
+        self.db
+            .set_auth_identity(&selected_json, selected.data_sync_id.as_deref(), &account_json)
+            .map_err(|e| format!("Couldn't save the selected YouTube channel: {e}"))?;
+        self.persist_visitor_data(visitor_data);
+        self.it.set_data_sync_id(selected.data_sync_id.clone());
         let _ = self.app.emit("auth-changed", &account);
         Ok(account)
+    }
+
+    fn restore_auth_transport(&self, cookie: Option<String>, data_sync_id: Option<String>) {
+        self.it.set_cookie(cookie);
+        self.it.set_data_sync_id(data_sync_id);
+    }
+
+    fn restore_session_cookie_setting(&self, cookie: Option<&str>) {
+        if let Some(cookie) = cookie {
+            self.db.set_setting("session_cookie", cookie);
+        } else {
+            self.db.delete_setting("session_cookie");
+        }
+    }
+
+    fn persist_visitor_data(&self, visitor_data: Option<&str>) {
+        if let Some(visitor_data) = visitor_data {
+            self.it.set_visitor_data(Some(visitor_data.to_owned()));
+            self.db.set_setting("visitor_data", visitor_data);
+        }
     }
 
     pub async fn sign_out(&self) {
         self.it.set_cookie(None);
         self.it.set_data_sync_id(None);
         self.db.delete_setting("session_cookie");
-        self.db.delete_setting("data_sync_id");
-        self.db.delete_setting("account_json");
+        let _ = self.db.clear_auth_identity();
         let _ = self.app.emit("auth-changed", serde_json::json!({ "signedIn": false }));
     }
 
-    /// Current account for the UI. `signedIn` reflects the live cookie; the rest is the last
-    /// persisted display info.
+    /// Current account for the UI. New installs derive it from the canonical selected identity;
+    /// legacy `account_json` remains a read fallback so existing databases migrate without a wipe.
     pub fn account_snapshot(&self) -> serde_json::Value {
+        if let Some(selected) = selected_identity_from_db(&self.db) {
+            return selected.account_json(self.it.is_logged_in());
+        }
         let mut v = self
             .db
             .get_setting("account_json")

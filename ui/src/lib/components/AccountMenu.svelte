@@ -6,7 +6,7 @@
 	import { UserCircleIcon, Logout01Icon, ArrowDown01Icon } from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
-	import { auth } from '$lib/player.svelte';
+	import { auth, openChannelPicker } from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 
 	let menuOpen = $state(false);
@@ -31,6 +31,11 @@
 	function signInGoogle() {
 		api.loginWebview(); // native sign-in window takes over; result arrives via auth-changed
 		menuOpen = false;
+	}
+
+	function switchChannel() {
+		menuOpen = false;
+		openChannelPicker();
 	}
 </script>
 
@@ -77,10 +82,18 @@
 		{#if auth.account?.signedIn}
 			<div class="mb-3">
 				<div class="truncate text-sm font-medium">{auth.account.name ?? 'Account'}</div>
-				{#if auth.account.handle}
-					<div class="truncate text-xs text-muted-foreground">{auth.account.handle}</div>
+				{#if auth.account.handle || auth.account.email}
+					<div class="truncate text-xs text-muted-foreground">
+						{auth.account.handle ?? auth.account.email}
+					</div>
 				{/if}
 			</div>
+			{#if auth.account.canSwitch}
+				<Button variant="outline" size="sm" class="mb-2 w-full gap-2" onclick={switchChannel}>
+					<HugeiconsIcon icon={UserCircleIcon} class="h-4 w-4" />
+					Switch channel
+				</Button>
+			{/if}
 			<Button variant="outline" size="sm" class="w-full gap-2" onclick={doSignOut}>
 				<HugeiconsIcon icon={Logout01Icon} class="h-4 w-4" />
 				Sign out

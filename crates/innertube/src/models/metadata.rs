@@ -159,13 +159,32 @@ pub struct NextResult {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AccountInfo {
     pub name: Option<String>,
-    /// Channel handle or email (whichever the header carries).
     pub handle: Option<String>,
+    pub email: Option<String>,
     pub thumbnail: Option<String>,
+    /// The channel browse id (`UC…`) when the response links one. Never used for delegation.
+    pub channel_id: Option<String>,
     /// `onBehalfOfUser` id, `||`-split (context/04A). None when absent / single-account.
     pub data_sync_id: Option<String>,
     /// A login-bound visitorData, if the response carried one (context/15).
     pub visitor_data: Option<String>,
+}
+
+/// One usable YouTube identity returned by `account/accounts_list`.
+///
+/// `data_sync_id` is server-issued identity material from `datasyncIdToken` or `pageIdToken`, not
+/// something inferred from the channel browse id. Rows without such a token are intentionally not
+/// returned: displaying an identity that requests cannot actually select is worse than omitting it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountIdentity {
+    pub name: String,
+    pub handle: Option<String>,
+    pub email: Option<String>,
+    pub thumbnail: Option<String>,
+    pub channel_id: Option<String>,
+    pub data_sync_id: String,
+    /// YouTube's current/default marker. The app's persisted choice may deliberately differ.
+    pub is_selected: bool,
 }
 
 /// Parse a `search` response into song items. context/08.
@@ -214,26 +233,154 @@ fn lyrics_browse_id(root: &Value) -> Option<String> {
 /// Parse an `account/account_menu` response into an account summary. context/01, context/15.
 pub fn parse_account_menu(root: &Value) -> AccountInfo {
     let header = find_all(root, "activeAccountHeaderRenderer").into_iter().next();
-    let name = header.and_then(|h| runs_text(h.get("accountName")));
-    // YTM labels the second line `channelHandle` on newer accounts, `email` on older ones.
-    let handle = header
-        .and_then(|h| runs_text(h.get("channelHandle")).or_else(|| runs_text(h.get("email"))));
+    let name = header.and_then(|h| account_text(h.get("accountName")));
+    let handle = header.and_then(|h| account_text(h.get("channelHandle")));
+    let email = header.and_then(|h| account_text(h.get("email")));
     let thumbnail = header.and_then(last_thumbnail);
+    let channel_id = header.and_then(channel_browse_id);
 
     let rc = root.get("responseContext");
     // dataSyncId lives in the response context, not the menu header. context/04A.
-    let data_sync_id = rc
-        .and_then(|r| r.get("mainAppWebResponseContext"))
-        .and_then(|m| m.get("datasyncId"))
-        .and_then(Value::as_str)
-        .map(split_datasync_id);
+    let data_sync_id = response_data_sync_id(root);
     let visitor_data = rc
         .and_then(|r| r.get("visitorData"))
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_owned);
 
-    AccountInfo { name, handle, thumbnail, data_sync_id, visitor_data }
+    AccountInfo { name, handle, email, thumbnail, channel_id, data_sync_id, visitor_data }
+}
+
+/// Parse every selectable channel from `account/accounts_list`.
+///
+/// The action envelope differs between YouTube clients, so this deliberately anchors on
+/// `accountSectionListRenderer` / `accountItem` rather than one absolute JSON path. Section headers
+/// provide the Google-account email; each row provides its channel metadata and supported identity
+/// tokens.
+pub fn parse_account_identities(root: &Value) -> Vec<AccountIdentity> {
+    let response_id = response_data_sync_id(root);
+    let mut identities = Vec::new();
+    let sections = find_all(root, "accountSectionListRenderer");
+
+    if sections.is_empty() {
+        for item in find_all(root, "accountItem") {
+            push_account_identity(&mut identities, item, None, response_id.as_deref());
+        }
+        return identities;
+    }
+
+    for section in sections {
+        let email = find_all(section, "googleAccountHeaderRenderer")
+            .into_iter()
+            .find_map(|h| account_text(h.get("email")))
+            .or_else(|| {
+                find_all(section, "accountItemSectionHeaderRenderer")
+                    .into_iter()
+                    .find_map(|h| account_text(h.get("title")))
+            });
+        for item in find_all(section, "accountItem") {
+            push_account_identity(&mut identities, item, email.as_deref(), response_id.as_deref());
+        }
+    }
+    identities
+}
+
+fn push_account_identity(
+    identities: &mut Vec<AccountIdentity>,
+    item: &Value,
+    email: Option<&str>,
+    response_id: Option<&str>,
+) {
+    let Some(identity) = parse_account_identity(item, email, response_id) else { return };
+    if identities.iter().all(|i| i.data_sync_id != identity.data_sync_id) {
+        identities.push(identity);
+    }
+}
+
+fn parse_account_identity(
+    item: &Value,
+    email: Option<&str>,
+    response_id: Option<&str>,
+) -> Option<AccountIdentity> {
+    if item.get("isDisabled").and_then(Value::as_bool) == Some(true)
+        || item.get("hasChannel").and_then(Value::as_bool) == Some(false)
+    {
+        return None;
+    }
+    let name = account_text(item.get("accountName"))?;
+    let endpoint = item.get("serviceEndpoint")?.get("selectActiveIdentityEndpoint")?;
+    let tokens = endpoint
+        .get("supportedTokens")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+
+    // Prefer the purpose-built data-sync token. Some WEB responses only provide pageIdToken;
+    // that is still an explicit server-issued identity token and is the value YouTube's web
+    // switcher uses for onBehalfOfUser. A `UC…` browse id is never substituted here.
+    let token_data_sync_id = tokens.iter().find_map(|token| {
+        let value = token.get("datasyncIdToken").or_else(|| token.get("dataSyncIdToken"))?;
+        value
+            .get("datasyncIdToken")
+            .or_else(|| value.get("datasyncId"))
+            .or_else(|| value.get("dataSyncId"))
+            .and_then(Value::as_str)
+            .and_then(normalize_data_sync_id)
+    });
+    let page_id = tokens.iter().find_map(|token| {
+        token
+            .get("pageIdToken")
+            .and_then(|value| value.get("pageId"))
+            .and_then(Value::as_str)
+            .and_then(nonempty_string)
+    });
+    let is_selected = item.get("isSelected").and_then(Value::as_bool).unwrap_or(false);
+    let selected_response_id = is_selected.then_some(response_id).flatten().map(str::to_owned);
+    let data_sync_id = token_data_sync_id.or(page_id).or(selected_response_id)?;
+
+    Some(AccountIdentity {
+        name,
+        handle: account_text(item.get("channelHandle")),
+        email: email.and_then(nonempty_string),
+        thumbnail: last_thumbnail(item),
+        channel_id: channel_browse_id(item),
+        data_sync_id,
+        is_selected,
+    })
+}
+
+fn account_text(value: Option<&Value>) -> Option<String> {
+    value.and_then(|v| {
+        runs_text_opt(v)
+            .or_else(|| v.get("simpleText").and_then(Value::as_str).and_then(nonempty_string))
+            .or_else(|| v.as_str().and_then(nonempty_string))
+    })
+}
+
+fn channel_browse_id(node: &Value) -> Option<String> {
+    find_all(node, "browseEndpoint").into_iter().find_map(|endpoint| {
+        endpoint
+            .get("browseId")
+            .and_then(Value::as_str)
+            .filter(|id| id.starts_with("UC"))
+            .map(str::to_owned)
+    })
+}
+
+fn response_data_sync_id(root: &Value) -> Option<String> {
+    root.get("responseContext")
+        .and_then(|r| r.get("mainAppWebResponseContext"))
+        .and_then(|m| m.get("datasyncId").or_else(|| m.get("dataSyncId")))
+        .and_then(Value::as_str)
+        .and_then(normalize_data_sync_id)
+}
+
+fn normalize_data_sync_id(raw: &str) -> Option<String> {
+    nonempty_string(&split_datasync_id(raw))
+}
+
+fn nonempty_string(raw: &str) -> Option<String> {
+    (!raw.trim().is_empty()).then(|| raw.trim().to_owned())
 }
 
 /// Split a `dataSyncId` (`"<id>||<other>"`): prefer the part before `||`, else after. context/04A.
@@ -854,24 +1001,90 @@ mod tests {
 
     #[test]
     fn parses_account_menu() {
-        let root = json!({
-            "responseContext": {
-                "visitorData": "CgtNEWVISITOR",
-                "mainAppWebResponseContext": { "datasyncId": "1234||5678" }
-            },
-            "actions": [{ "openPopupAction": { "popup": { "multiPageMenuRenderer": { "sections": [{
-                "activeAccountHeaderRenderer": {
-                    "accountName": { "runs": [{ "text": "Jane Doe" }] },
-                    "channelHandle": { "runs": [{ "text": "@janedoe" }] },
-                    "accountPhoto": { "thumbnails": [{ "url": "small.jpg" }, { "url": "big.jpg" }] }
-                }
-            }] } } } }]
-        });
+        let root: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/account_menu_single.json"))
+                .unwrap();
         let a = parse_account_menu(&root);
-        assert_eq!(a.name.as_deref(), Some("Jane Doe"));
-        assert_eq!(a.handle.as_deref(), Some("@janedoe"));
-        assert_eq!(a.thumbnail.as_deref(), Some("big.jpg"));
-        assert_eq!(a.data_sync_id.as_deref(), Some("1234"));
-        assert_eq!(a.visitor_data.as_deref(), Some("CgtNEWVISITOR"));
+        assert_eq!(a.name.as_deref(), Some("Personal channel"));
+        assert_eq!(a.handle.as_deref(), Some("@personal"));
+        assert_eq!(a.email.as_deref(), Some("listener@example.invalid"));
+        assert_eq!(a.thumbnail.as_deref(), Some("https://example.invalid/avatar-large.jpg"));
+        assert_eq!(a.channel_id.as_deref(), Some("UCSANITIZEDPERSONAL"));
+        assert_eq!(a.data_sync_id.as_deref(), Some("personal-sync"));
+        assert_eq!(a.visitor_data.as_deref(), Some("CgtSANITIZEDVISITOR"));
+    }
+
+    #[test]
+    fn parses_one_selectable_identity() {
+        let root: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/accounts_list_one.json"))
+                .unwrap();
+        let identities = parse_account_identities(&root);
+        assert_eq!(identities.len(), 1);
+        let identity = &identities[0];
+        assert_eq!(identity.name, "Personal channel");
+        assert_eq!(identity.handle.as_deref(), Some("@personal"));
+        assert_eq!(identity.email.as_deref(), Some("listener@example.invalid"));
+        assert_eq!(identity.channel_id.as_deref(), Some("UCSANITIZEDPERSONAL"));
+        assert_eq!(identity.data_sync_id, "personal-sync");
+        assert!(identity.is_selected);
+    }
+
+    #[test]
+    fn parses_multiple_identities_and_keeps_a_persisted_non_default_choice() {
+        let root: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/accounts_list_multiple.json"))
+                .unwrap();
+        let identities = parse_account_identities(&root);
+        assert_eq!(identities.len(), 2);
+        assert!(identities[0].is_selected);
+
+        // The app restores by server-issued id, not YouTube's current/default marker.
+        let persisted = identities.iter().find(|i| i.data_sync_id == "brand-page-id").unwrap();
+        assert_eq!(persisted.name, "Brand channel");
+        assert_eq!(persisted.channel_id.as_deref(), Some("UCSANITIZEDBRAND"));
+        assert!(!persisted.is_selected);
+    }
+
+    #[test]
+    fn missing_identity_metadata_stays_optional() {
+        let root: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/accounts_list_missing_optional.json"
+        ))
+        .unwrap();
+        let identities = parse_account_identities(&root);
+        assert_eq!(identities.len(), 1);
+        let identity = &identities[0];
+        assert_eq!(identity.name, "No optional metadata");
+        assert_eq!(identity.handle, None);
+        assert_eq!(identity.email, None);
+        assert_eq!(identity.thumbnail, None);
+        assert_eq!(identity.channel_id, None);
+    }
+
+    #[test]
+    fn malformed_or_unusable_identity_tokens_are_not_selectable() {
+        let root: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/accounts_list_malformed_ids.json"
+        ))
+        .unwrap();
+        let identities = parse_account_identities(&root);
+        assert_eq!(identities.len(), 2);
+        assert_eq!(identities[0].name, "Missing token");
+        assert_eq!(identities[0].data_sync_id, "active-response-sync");
+        assert_eq!(identities[1].name, "Fallback token");
+        assert_eq!(identities[1].data_sync_id, "fallback-sync");
+    }
+
+    #[test]
+    fn absent_or_empty_response_datasync_id_is_none() {
+        assert_eq!(parse_account_menu(&json!({})).data_sync_id, None);
+        assert_eq!(
+            parse_account_menu(&json!({
+                "responseContext": { "mainAppWebResponseContext": { "datasyncId": "||" } }
+            }))
+            .data_sync_id,
+            None
+        );
     }
 }
