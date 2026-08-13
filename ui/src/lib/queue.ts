@@ -82,13 +82,14 @@ export function queueBlocks(q: QueueState): {
 		const it = r.item;
 		const manual = !!(it.queued || it.queued_end);
 		// `queued_from` splits two albums added back to back, and keeps a continuation walked in
-		// later with the block it belongs to.
+		// later with the block it belongs to. "Play next" and "Add to queue" do *not* split: they
+		// fill the two ends of one block, and splitting drew "Next in queue" twice in a row.
 		const kind = it.autoplay
 			? 'auto'
 			: i >= shuffledFrom
 				? 'shuffled'
 				: manual
-					? `manual:${it.queued ? 'next' : 'end'}:${it.queued_from ?? ''}`
+					? `manual:${it.queued_from ?? ''}`
 					: 'context';
 		const last = blocks.at(-1);
 		if (last?.kind === kind) {
@@ -114,6 +115,17 @@ export function queueBlocks(q: QueueState): {
 		if (block.clearable) cleared = true;
 	}
 	return { prev, now, blocks };
+}
+
+/**
+ * Drag-to-reorder: the backend index a row dragged from `from` must end up at, given it was dropped
+ * *in front of* the row at `dropAt`. Dropping in front of a row below yourself lands one slot
+ * earlier once you're out of the way, which is the off-by-one every hand-rolled DnD ships with.
+ * `null` when the drop is a no-op (onto itself, or immediately after itself).
+ */
+export function moveTarget(from: number, dropAt: number): number | null {
+	const to = dropAt > from ? dropAt - 1 : dropAt;
+	return to === from ? null : to;
 }
 
 /** The name a block goes under: its one origin if its tracks share one, else a neutral label. */

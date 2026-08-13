@@ -7,7 +7,7 @@
 // added with "Add to queue" sits at the tail of a playlist queue, and grouping the panel by kind
 // instead of by play order drew it under the *playing* playlist's "Next from" heading.
 import type { QueueState, SongItem } from './api.ts';
-import { queueBlocks } from './queue.ts';
+import { moveTarget, queueBlocks } from './queue.ts';
 
 function ok(cond: boolean, what: string): void {
 	if (!cond) throw new Error(`FAIL: ${what}`);
@@ -57,6 +57,14 @@ ok(v.now?.i === 0 && v.blocks[0].rows[0].i === 1 && v.blocks[2].rows[0].i === 4,
 v = queueBlocks(q([song('a1'), song('p1', { queued: true }), song('a2')], 0, 'Afro'));
 ok(v.blocks[0].heading === 'Next in queue', 'a single-song add has no source to name');
 ok(v.blocks[1].heading === 'Next from: Afro', 'the context follows it');
+
+// Both kinds of manual add fill one block (#26: they used to split, drawing "Next in queue" twice
+// in a row with one track under each).
+v = queueBlocks(
+	q([song('a1'), song('p1', { queued: true }), song('p2', { queued_end: true })], 0, 'Afro')
+);
+ok(v.blocks.length === 1, '"Play next" and "Add to queue" are one block');
+ok(v.blocks[0].heading === 'Next in queue', 'headed once');
 
 // Two albums added back to back are two blocks, in the order they were added.
 v = queueBlocks(
@@ -152,5 +160,13 @@ v = queueBlocks(
 	q([song('now'), added('n1'), song('x1', { queued_end: true, queued_from: 'X' })], 0, 'Afro', true)
 );
 ok(v.blocks[0].heading === 'Next in queue', 'all manual, two origins ⇒ "Next in queue"');
+
+// --- drag to reorder ---------------------------------------------------------------------------
+// Dropping in front of a row *below* you lands one slot earlier once you're out of the way.
+ok(moveTarget(2, 6) === 5, 'dragging down: the target shifts up by the hole left behind');
+ok(moveTarget(6, 2) === 2, 'dragging up: the target is where the bar is');
+ok(moveTarget(2, 9) === 8, 'dropping past the last row appends');
+ok(moveTarget(2, 2) === null, 'in front of yourself is a no-op');
+ok(moveTarget(2, 3) === null, 'and so is just behind yourself');
 
 console.log('ok');

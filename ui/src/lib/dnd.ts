@@ -4,6 +4,8 @@
 import type { BrowseItem } from './api';
 
 export const ITEM_MIME = 'application/x-limusic-item';
+/** A queue row being dragged to a new position (`QueueList`), carrying its queue index. */
+export const QUEUE_ROW_MIME = 'application/x-limusic-queue-row';
 
 export function setDragItem(e: DragEvent, item: BrowseItem): void {
 	e.dataTransfer?.setData(ITEM_MIME, JSON.stringify(item));
@@ -48,9 +50,10 @@ export function edgeVelocity(y: number, top: number, bottom: number): number {
 }
 
 /**
- * Svelte attachment for a scroll container: while one of our item drags is in flight, aiming at the
- * container's top or bottom edge scrolls it. The drop target (home's Shortcuts grid) lives at the
- * top of the page, so without this you can only ever drag something already on screen with it.
+ * Svelte attachment for a scroll container: while a drag carrying `mime` is in flight, aiming at
+ * the container's top or bottom edge scrolls it. The drop target (home's Shortcuts grid) lives at
+ * the top of the page, so without this you can only ever drag something already on screen with it.
+ * Per-mime, so a queue reorder doesn't also scroll the page behind the panel, and vice versa.
  *
  * Listens on the document, not the node — a drag over a *different* element still has to move this
  * container, and `dragover` bubbles all the way up. The dragover events can't drive the scroll
@@ -62,7 +65,7 @@ export function edgeVelocity(y: number, top: number, bottom: number): number {
  * drag inside its own nested event loop, which starves the animation frame callback badly enough
  * that a per-frame step crawls. Distance per *second* is what has to stay constant here.
  */
-export function dragScroll(el: HTMLElement) {
+export function dragScroll(el: HTMLElement, mime: string = ITEM_MIME) {
 	let y: number | null = null;
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let last = 0;
@@ -78,7 +81,7 @@ export function dragScroll(el: HTMLElement) {
 	}
 
 	function over(e: DragEvent) {
-		if (!isDragItem(e)) return; // a file or a link — not ours to scroll for
+		if (!e.dataTransfer?.types.includes(mime)) return; // a file, a link, or someone else's drag
 		y = e.clientY;
 		if (timer === undefined) {
 			last = performance.now();

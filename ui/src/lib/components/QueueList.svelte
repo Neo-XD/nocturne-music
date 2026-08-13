@@ -6,18 +6,51 @@
 	import { HistoryIcon, InfinityIcon } from '@hugeicons/core-free-icons';
 	import TrackRow from '$lib/components/TrackRow.svelte';
 	import * as api from '$lib/api';
-	import { queueBlocks, type QueueRow } from '$lib/queue';
+	import { queueBlocks, moveTarget, type QueueRow } from '$lib/queue';
 	import { blockWindows, fullWindow, type RowWindow } from '$lib/rows';
 	import { rowScroller } from '$lib/rows.svelte';
+	import { dragScroll, QUEUE_ROW_MIME } from '$lib/dnd';
 	import { playback, openAddToPlaylist } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
 
-	// Guests are add-only in a session — no removing (theirs or anyone's). The playing row can't
-	// be removed either (backend guards it too).
+	// Guests are add-only in a session — no removing (theirs or anyone's) and no reordering. The
+	// playing row can't be removed either (backend guards it too).
 	const canRemove = $derived(lt.role !== 'guest');
+
+	// --- drag to reorder ---------------------------------------------------------------------
+	// Upcoming rows only: the playing track and the history stay put (the backend clamps to the
+	// same range). `dropAt` is the queue index the dragged row goes *in front of*.
+	let dragFrom = $state<number | null>(null);
+	let dropAt = $state<number | null>(null);
+	const canDrag = (i: number) => canRemove && i > playback.queue.currentIndex;
+
+	function onDragStart(e: DragEvent, i: number) {
+		if (!e.dataTransfer) return;
+		// Our own type, so a card dragged in from a page (`ITEM_MIME`) can't be read as a row index.
+		e.dataTransfer.setData(QUEUE_ROW_MIME, String(i));
+		e.dataTransfer.effectAllowed = 'move';
+		dragFrom = i;
+	}
+
+	function onDragOver(e: DragEvent, i: number) {
+		if (dragFrom === null || !e.dataTransfer?.types.includes(QUEUE_ROW_MIME)) return;
+		e.preventDefault(); // without this the drop never fires
+		e.dataTransfer.dropEffect = 'move';
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		dropAt = e.clientY < r.top + r.height / 2 ? i : i + 1;
+	}
+
+	function onDrop() {
+		const to = dragFrom !== null && dropAt !== null ? moveTarget(dragFrom, dropAt) : null;
+		if (to !== null) api.moveInQueue(dragFrom!, to);
+		dragFrom = null;
+		dropAt = null;
+	}
 
 	// Blocks in play order, cut wherever the upcoming tracks change origin (`queue.ts`).
 	const view = $derived(queueBlocks(playback.queue));
+	// The tail of the queue, for the one drop position no row can mark from its own top edge.
+	const lastIndex = $derived(view.blocks.at(-1)?.rows.at(-1)?.i ?? -1);
 
 	// The tracks already heard, hidden until asked for: a queue played deep into has hundreds of
 	// them, and they sit above everything anyone opened the panel to look at.
@@ -61,10 +94,30 @@
 {#snippet rows(list: QueueRow[], w: RowWindow)}
 	<!-- The padding stands in for the rows outside the window, so this block is exactly as tall as
 	     all of its rows and every heading below it stays where it was. -->
-	<div style="padding-top:{w.padTop}px;padding-bottom:{w.padBottom}px">
+	<div role="list" style="padding-top:{w.padTop}px;padding-bottom:{w.padBottom}px">
 		{#each list.slice(w.start, w.end) as { item, key, i } (key)}
 			<!-- data-row: what the scroller measures a row's real height from. -->
-			<div data-row animate:flip={{ duration: windowed ? 0 : 200, easing: cubicOut }}>
+			<div
+				data-row
+				role="listitem"
+				class="relative"
+				animate:flip={{ duration: windowed ? 0 : 200, easing: cubicOut }}
+				draggable={canDrag(i)}
+				ondragstart={(e) => onDragStart(e, i)}
+				ondragover={(e) => onDragOver(e, i)}
+				ondrop={onDrop}
+			>
+				<!-- Where the drop lands: a bar across the edge of the row it goes in front of. The
+				     last row also draws one below itself — nothing else can show a drop at the end. -->
+				{#if dropAt === i}
+					<div
+						class="pointer-events-none absolute inset-x-2 top-0 z-10 h-0.5 rounded-full bg-primary"
+					></div>
+				{:else if dropAt === i + 1 && i === lastIndex}
+					<div
+						class="pointer-events-none absolute inset-x-2 bottom-0 z-10 h-0.5 rounded-full bg-primary"
+					></div>
+				{/if}
 				<TrackRow
 					song={item}
 					index={i}
@@ -82,9 +135,24 @@
 	</div>
 {/snippet}
 
+<!-- A drag cancelled with Esc, or dropped outside the list, never reaches `drop` — without this the
+     bar stays painted and the next dragover thinks a drag is still in flight. -->
+<svelte:window
+	ondragend={() => {
+		dragFrom = null;
+		dropAt = null;
+	}}
+/>
+
 <!-- The list on its own, so the side panel and the now-playing view's Queue tab render the same
-     one instead of drifting apart. -->
-<div class="min-h-0 flex-1 overflow-y-auto p-2" bind:this={el} {@attach sc.attach}>
+     one instead of drifting apart. dragScroll: reordering across a queue taller than the panel
+     needs the edges to pull. -->
+<div
+	class="min-h-0 flex-1 overflow-y-auto p-2"
+	bind:this={el}
+	{@attach sc.attach}
+	{@attach (node) => dragScroll(node, QUEUE_ROW_MIME)}
+>
 	{#if view.now}
 		{#if showPrev && view.prev.length}
 			<h3 class="px-2 pt-2 pb-1.5 text-sm font-semibold text-muted-foreground">

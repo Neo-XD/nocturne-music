@@ -75,10 +75,18 @@ pub async fn play_next(
     Ok(())
 }
 
-/// "Add to queue": the tracks go after everything the user picked, and ahead of anything the app
-/// generated behind it (autoplay filler, or a radio's endless feed). `from` heads the block in the
-/// queue panel; `continuation` is the source page's next-page token — the rest of a long playlist
-/// is walked in in the background.
+/// Drag-to-reorder in the queue panel: move the upcoming track at `from` to `to`. Out-of-range or
+/// already-played indices are ignored.
+#[tauri::command]
+pub async fn move_in_queue(state: St<'_>, from: usize, to: usize) -> Result<(), String> {
+    state.inner().clone().move_in_queue(from, to).await;
+    Ok(())
+}
+
+/// "Add to queue": the tracks go at the back of the "Next in queue" block, so they play after
+/// everything already queued by hand and ahead of the playing context (and its radio/filler).
+/// `from` heads the block in the queue panel; `continuation` is the source page's next-page token —
+/// the rest of a long playlist is walked in in the background.
 #[tauri::command]
 pub async fn add_to_queue(
     state: St<'_>,

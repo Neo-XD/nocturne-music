@@ -363,6 +363,7 @@ pub fn run() {
             commands::remove_from_queue,
             commands::clear_queued,
             commands::add_to_queue,
+            commands::move_in_queue,
             commands::play_next,
             commands::next_track,
             commands::prev_track,

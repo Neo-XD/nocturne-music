@@ -214,15 +214,19 @@ export const play = (item: SongItem) => invoke<void>('play', { item });
 export const playIndex = (index: number) => invoke<void>('play_index', { index });
 /** Remove an upcoming track from the queue (host/local only — guests are add-only). */
 export const removeFromQueue = (index: number) => invoke<void>('remove_from_queue', { index });
+/** Drag-to-reorder: move the upcoming queue item at `from` to index `to` (both past the playing
+ * track — the history and the playing row don't move). */
+export const moveInQueue = (from: number, to: number) =>
+	invoke<void>('move_in_queue', { from, to });
 /**
- * "Play next": insert tracks right after the current song, behind any earlier manual adds.
- * `from` is the album/playlist they came from — it heads the block in the queue panel.
+ * "Play next": insert tracks at the front of the "Next in queue" block, behind any earlier
+ * "Play next" adds. `from` is the album/playlist they came from — it heads the block in the panel.
  */
 export const playNext = (items: SongItem[], from?: string) =>
 	invoke<void>('play_next', { items, from });
 /**
- * "Add to queue": the tracks go after everything the user picked, and ahead of anything the app
- * generated behind it (autoplay filler; a radio's endless feed makes way entirely).
+ * "Add to queue": the tracks go at the *back* of the same block — after everything already queued
+ * by hand, ahead of the playing context and anything the app generated behind it.
  * `continuation` is the source page's next-page token — the backend walks the rest of a long
  * playlist into the queue in the background.
  */
