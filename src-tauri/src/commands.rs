@@ -158,6 +158,16 @@ pub async fn set_volume(state: St<'_>, volume: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Tempo (0.25–2.0) and pitch (−12..=12 semitones), the "Advanced" dialog. Volatile by design:
+/// both reset to 1.0 / 0 on restart, so nobody wonders next week why everything sounds wrong.
+#[tauri::command]
+pub async fn set_playback_params(state: St<'_>, speed: f64, semitones: i32) -> Result<(), String> {
+    // Pitch first: it's the one that can fail (no librubberband), and it rolls itself back, so a
+    // failure leaves nothing applied and the UI can revert both steppers together.
+    state.player.set_pitch(semitones).map_err(|e| e.to_string())?;
+    state.player.set_speed(speed).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
     Ok(state.queue_snapshot().await)

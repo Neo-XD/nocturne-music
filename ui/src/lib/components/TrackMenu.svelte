@@ -17,12 +17,14 @@
 		ThumbsDownIcon,
 		UserListIcon,
 		Vynil02Icon,
-		DashboardSquare02Icon
+		DashboardSquare02Icon,
+		PreferenceVerticalIcon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
 	import { anchorMenu, toBody } from '$lib/menu';
 	import { addPick, enqueue, ratingOf, startRadio, toggleRating } from '$lib/player.svelte';
+	import TempoPitchDialog from './TempoPitchDialog.svelte';
 
 	let {
 		song,
@@ -46,6 +48,8 @@
 	} = $props();
 
 	let menuOpen = $state(false);
+	// Player-bar only: tempo/pitch belong to playback, not to a row you happen to be pointing at.
+	let advancedOpen = $state(false);
 	let mx = $state(0);
 	let my = $state(0);
 	let openUp = $state(false);
@@ -183,6 +187,14 @@
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Add to shortcuts
 		</button>
+		{#if linksOnly}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, () => (advancedOpen = true))}
+			>
+				<HugeiconsIcon icon={PreferenceVerticalIcon} class="h-4 w-4" /> Advanced
+			</button>
+		{/if}
 		{#if onAdd && !isLocal}
 			<button
 				class="w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 {linksOnly
@@ -202,4 +214,8 @@
 			</button>
 		{/if}
 	</div>
+{/if}
+
+{#if linksOnly}
+	<TempoPitchDialog bind:open={advancedOpen} />
 {/if}
