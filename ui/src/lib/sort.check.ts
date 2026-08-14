@@ -62,7 +62,9 @@ ok(ids(sortSongs(items, 'artist', false)) === 'cbad', 'artist groups, title orde
 const tied = [song('x', 'Same', 'Alpha'), song('y', 'Same', 'Alpha')];
 ok(ids(sortSongs(tied, 'artist', false)) === 'xy', 'a total tie keeps playlist order');
 
-// --- album: the albumless track goes last, not first -------------------------------------------
-ok(ids(sortSongs(items, 'album', false)) === 'dbac', 'album sorts First, Second, then no album');
+// --- album: groups, keeps playlist order inside a group, albumless last -----------------------
+// b and d are both on "First"; b is first in the playlist, so it stays first (no title tiebreak
+// here, or an album added in one go would come back alphabetised instead of in track order).
+ok(ids(sortSongs(items, 'album', false)) === 'bdac', 'album groups First, Second, then no album');
 
 console.log('ok');

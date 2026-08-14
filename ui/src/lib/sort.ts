@@ -34,11 +34,13 @@ export function sortSongs(
 	if (sort === 'default' || items.length < 2) return items;
 	if (sort === 'newest' || sort === 'oldest')
 		return (sort === 'newest') === baseNewestFirst ? items : items.slice().reverse();
-	// '￿' parks albumless tracks at the end rather than the top.
-	const key = (t: SongItem) =>
-		sort === 'title' ? t.title : sort === 'artist' ? t.artists : t.album || '￿';
-	// Array#sort is stable, so ties keep playlist order; the title tiebreak only decides the order
-	// inside one artist's or album's block.
+	// Album is a grouping, so inside one album the playlist's own order stands (Array#sort is
+	// stable): an album added in one go keeps its track order, which alphabetising would destroy.
+	// '￿' parks the albumless tracks at the end rather than the top.
+	if (sort === 'album')
+		return items.slice().sort((a, b) => collator.compare(a.album || '￿', b.album || '￿'));
+	// Title orders an artist's block; on a title sort the tiebreak is a no-op.
+	const key = (t: SongItem) => (sort === 'title' ? t.title : t.artists);
 	return items
 		.slice()
 		.sort((a, b) => collator.compare(key(a), key(b)) || collator.compare(a.title, b.title));

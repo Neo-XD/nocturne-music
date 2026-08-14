@@ -419,6 +419,8 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
     let (artists, album, duration) = split_subtitle(subtitle_runs);
     // Playlist/album rows keep the length in a fixed column instead of the subtitle. context/08.
     let duration = duration.or_else(|| fixed_column_text(node));
+    // …and the album in a column of its own rather than in the subtitle runs.
+    let album = album.or_else(|| album_column(node));
     let artist_id = subtitle_runs.and_then(|r| first_artist_id(r));
     let set_video_id = node
         .get("playlistItemData")
@@ -455,6 +457,16 @@ fn play_count(node: &Value) -> Option<String> {
     let text = flex_column_text(node, 2)?;
     let (count, unit) = text.trim().rsplit_once(' ')?;
     unit.eq_ignore_ascii_case("plays").then(|| count.to_owned())
+}
+
+/// The album name from that same third flex column — the other thing it can hold. A playlist row's
+/// subtitle is the artist alone ("Artist"), not the search/next form ("Artist • Album • 3:02"), so
+/// without this every playlist track comes back album-less. Same discriminator as [`play_count`],
+/// read the other way round. context/08.
+fn album_column(node: &Value) -> Option<String> {
+    let text = flex_column_text(node, 2)?;
+    let text = text.trim();
+    (!text.is_empty() && play_count(node).is_none()).then(|| text.to_owned())
 }
 
 /// The album's browseId (`MPRE…`): either the linked album run or the row menu's "Go to album"
@@ -948,6 +960,12 @@ mod tests {
         assert_eq!(plays(json!("1,234 plays")).unwrap().play_count.as_deref(), Some("1,234"));
         assert_eq!(plays(json!("The Album")).unwrap().play_count, None);
         assert_eq!(plays(json!("")).unwrap().play_count, None);
+        // The other half of the same discriminator: what isn't a play count is the album, which is
+        // the only place a playlist row carries one (its subtitle is the artist alone). Without it
+        // every playlist track parses album-less and grouping a playlist by album does nothing.
+        assert_eq!(plays(json!("The Album")).unwrap().album.as_deref(), Some("The Album"));
+        assert_eq!(plays(json!("53M plays")).unwrap().album, None);
+        assert_eq!(plays(json!("")).unwrap().album, None);
     }
 
     // An artist or album with a colon in its name ("Cast of EPIC: The Musical") used to read as the
