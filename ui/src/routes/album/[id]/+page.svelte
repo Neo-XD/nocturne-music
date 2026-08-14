@@ -119,6 +119,9 @@
         title: album?.title ?? "Album",
         subtitle: album?.artist,
         thumbnail: album?.thumbnail,
+        // Recently played keeps this object as the card it draws, so without the flag an album
+        // played from its own page would lose the mark it has everywhere else.
+        explicit: album?.explicit,
     });
 
     function playAll(start: number | null) {
