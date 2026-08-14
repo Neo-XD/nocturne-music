@@ -31,13 +31,15 @@ ok(sortSongs(items.slice(0, 1), 'title', false).length === 1, 'a one-track list 
 
 // --- nothing is lost or duplicated ------------------------------------------------------------
 // The queue is built from this list, so a comparator that drops a track silently shortens it.
-for (const key of ['newest', 'oldest', 'title', 'artist', 'album'] as const) {
-	const out = sortSongs(items, key, false);
-	ok(out.length === items.length, `${key} keeps every track`);
-	ok(
-		[...out].map((t) => t.video_id).sort().join('') === 'abcd',
-		`${key} is a permutation, no dupes`
-	);
+for (const key of ['default', 'newest', 'oldest', 'title', 'artist', 'album'] as const) {
+	for (const desc of [false, true]) {
+		const out = sortSongs(items, key, false, desc);
+		ok(out.length === items.length, `${key} desc=${desc} keeps every track`);
+		ok(
+			[...out].map((t) => t.video_id).sort().join('') === 'abcd',
+			`${key} desc=${desc} is a permutation, no dupes`
+		);
+	}
 }
 // Sorting in place would reorder `pl.items` itself, and the page relies on that staying YouTube's
 // order (it is what Default and the setVideoId backfill both read).
@@ -66,5 +68,17 @@ ok(ids(sortSongs(tied, 'artist', false)) === 'xy', 'a total tie keeps playlist o
 // b and d are both on "First"; b is first in the playlist, so it stays first (no title tiebreak
 // here, or an album added in one go would come back alphabetised instead of in track order).
 ok(ids(sortSongs(items, 'album', false)) === 'bdac', 'album groups First, Second, then no album');
+
+// --- descending reverses the key, and only the key ---------------------------------------------
+ok(ids(sortSongs(items, 'default', false, true)) === 'dcba', 'default descending reverses the list');
+ok(ids(sortSongs(items, 'newest', false, true)) === 'abcd', 'newest descending is oldest first');
+ok(ids(sortSongs(items, 'oldest', true, true)) === 'abcd', 'oldest descending on Liked Music');
+ok(ids(sortSongs(items, 'title', false, true)) === 'abcd', 'title descending is Z to A');
+// The Alpha pair flips with everything else, tiebreak included: "track 10" then "track 9".
+ok(ids(sortSongs(items, 'artist', false, true)) === 'dabc', 'artist descending flips the tiebreak');
+// The album groups reverse, but "First" keeps b before d — a descending sort is still not a
+// reason to play an album backwards. And an albumless track stays last, it does not lead.
+ok(ids(sortSongs(items, 'album', false, true)) === 'abdc', 'album descending, albumless still last');
+ok(ids(sortSongs(tied, 'artist', false, true)) === 'xy', 'a total tie keeps playlist order either way');
 
 console.log('ok');

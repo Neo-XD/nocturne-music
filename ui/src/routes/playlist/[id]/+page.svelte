@@ -15,7 +15,8 @@
 		ArrowDownWideNarrowIcon,
 		DashboardSquare02Icon,
 		ListRestartIcon,
-		Sorting01Icon
+		Sorting01Icon,
+		ArrowUpDownIcon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -81,6 +82,7 @@
 
 	// --- sorting (`$lib/sort`) ---------------------------------------------------------------
 	let sort = $state<SortKey>('default');
+	let desc = $state(false);
 	let sortOpen = $state(false);
 	let sx = $state(0);
 	let sy = $state(0);
@@ -91,7 +93,7 @@
 		sort === 'default' ? 'Sort' : (SORTS.find((s) => s.key === sort)?.label ?? 'Sort')
 	);
 	// Liked Music is the one playlist YouTube hands back newest-addition-first.
-	const sortedItems = $derived(sortSongs(pl?.items ?? [], sort, isLiked));
+	const sortedItems = $derived(sortSongs(pl?.items ?? [], sort, isLiked, desc));
 
 	// A sort has to cover the whole playlist, not the pages scrolled so far, so pull the rest in.
 	// Stops on a failed page (`moreError`), on navigation, and on any pass that made no progress.
@@ -105,10 +107,13 @@
 		}
 	}
 
+	// Reversing the default order is a reorder like any other, so it needs the whole playlist too.
+	const sorting = $derived(sort !== 'default' || desc);
+
 	// Everything that hands tracks to the queue goes through here first: a sorted queue is only
 	// honest once every page is in.
 	async function ready() {
-		if (sort === 'default' || !pl?.continuation) return;
+		if (!sorting || !pl?.continuation) return;
 		preparing = true;
 		try {
 			await loadAll();
@@ -121,7 +126,12 @@
 		sortOpen = false;
 		if (key === sort) return;
 		sort = key;
-		if (key !== 'default') loadAll(); // start the walk now so Play rarely has to wait
+		if (sorting) loadAll(); // start the walk now so Play rarely has to wait
+	}
+
+	function toggleDesc() {
+		desc = !desc;
+		if (sorting) loadAll();
 	}
 
 	// Right-anchored, unlike the ⋯ menu: this button sits at the far end of the header, so a menu
@@ -137,6 +147,7 @@
 		confirmingDelete = false;
 		editingName = false;
 		sort = 'default';
+		desc = false;
 		sortOpen = false;
 		if (hit) {
 			pl = hit;
@@ -302,7 +313,7 @@
 			at >= 0 ? at : start,
 			isOnRepeat ? undefined : id,
 			undefined,
-			sort === 'default' ? pl.continuation : undefined
+			sorting ? undefined : pl.continuation
 		);
 	}
 
@@ -329,7 +340,7 @@
 		if (!pl?.items.length) return;
 		if (!next) await ready();
 		if (!pl) return;
-		enqueue(sortedItems, next, pl.title, sort === 'default' ? pl.continuation : undefined);
+		enqueue(sortedItems, next, pl.title, sorting ? undefined : pl.continuation);
 	}
 
 	// Untouched by the sort: the backend shuffles the whole playlist (continuation pages included),
@@ -535,16 +546,28 @@
 						{/if}
 					</div>
 					<!-- Pushed to the far end of the header, away from the play controls. -->
-					<Button
-						variant="ghost"
-						size="sm"
-						class="gap-2 {sort === 'default' ? 'text-muted-foreground' : ''}"
-						onclick={openSort}
-						disabled={!pl.items.length}
-					>
-						<HugeiconsIcon icon={Sorting01Icon} class="h-4 w-4" />
-						{sortLabel}
-					</Button>
+					<div class="flex items-center gap-1">
+						<Button
+							variant="ghost"
+							size="sm"
+							class="gap-2 {sort === 'default' ? 'text-muted-foreground' : ''}"
+							onclick={openSort}
+							disabled={!pl.items.length}
+						>
+							<HugeiconsIcon icon={Sorting01Icon} class="h-4 w-4" />
+							{sortLabel}
+						</Button>
+						<Button
+							variant="ghost"
+							size="icon"
+							class={desc ? '' : 'text-muted-foreground'}
+							aria-label="Sort direction: {desc ? 'descending' : 'ascending'}"
+							onclick={toggleDesc}
+							disabled={!pl.items.length}
+						>
+							<HugeiconsIcon icon={ArrowUpDownIcon} class="h-4 w-4" />
+						</Button>
+					</div>
 				</div>
 			</div>
 		</div>
