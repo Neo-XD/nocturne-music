@@ -4,9 +4,9 @@
 	// launch, so `playback` holding them is the whole state.
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
-		DashboardSpeed02Icon,
+		AudioWave02Icon,
+		FastForwardIcon,
 		MinusSignIcon,
-		MusicNote01Icon,
 		PlusSignIcon
 	} from '@hugeicons/core-free-icons';
 	import type { IconSvgElement } from '@hugeicons/svelte';
@@ -73,7 +73,7 @@
 			     alone: it changes nothing about when the next track starts. -->
 			{#if !inRoom()}
 				{@render stepper(
-					DashboardSpeed02Icon,
+					FastForwardIcon,
 					'Tempo',
 					`${playback.speed.toFixed(2)}x`,
 					(d) => apply(SPEEDS[speedIndex + d], playback.semitones),
@@ -82,7 +82,7 @@
 				)}
 			{/if}
 			{@render stepper(
-				MusicNote01Icon,
+				AudioWave02Icon,
 				'Pitch',
 				playback.semitones > 0 ? `+${playback.semitones}` : String(playback.semitones),
 				(d) => apply(playback.speed, playback.semitones + d),
