@@ -12,8 +12,9 @@ use serde_json::Value;
 
 use super::metadata::{
     artist_runs, artists_from_runs, duration_from_runs, find_all, find_all_shallow, find_first_str,
-    first_artist_id, flex_column_text, flex_runs, is_video_endpoint, is_video_row, last_thumbnail,
-    list_item_video_id, parse_list_item, runs_text, runs_text_opt, ArtistRun, SongItem,
+    first_artist_id, flex_column_text, flex_runs, is_explicit, is_video_endpoint, is_video_row,
+    last_thumbnail, list_item_video_id, parse_list_item, runs_text, runs_text_opt, ArtistRun,
+    SongItem,
 };
 
 /// One clickable card in a home carousel or library grid. Flat + `kind`-tagged so the UI can
@@ -44,6 +45,9 @@ pub struct BrowseItem {
     /// "hide music videos" setting.
     #[serde(default)]
     pub is_video: bool,
+    /// YouTube marks this card explicit ([`is_explicit`]) — a track, or an album whose tracks are.
+    #[serde(default)]
+    pub explicit: bool,
 }
 
 /// A titled row of cards on the home feed.
@@ -160,6 +164,8 @@ pub struct AlbumPage {
     pub thumbnail: Option<String>,
     pub items: Vec<SongItem>,
     pub continuation: Option<String>,
+    /// The album itself is flagged explicit (its header wears the badge, not just some tracks).
+    pub explicit: bool,
     /// The album's audio playlist id (`OLAK5uy_…`) — the radio seed for autoplay continuation and
     /// the target of the library save (an album in your library is a "like" on this playlist).
     pub playlist_id: Option<String>,
@@ -350,6 +356,7 @@ fn list_item_to_browse_item(node: &Value) -> Option<BrowseItem> {
             duration: None,
             artist_runs: Vec::new(),
             is_video: false,
+            explicit: is_explicit(node),
         });
     }
     let vid = list_item_video_id(node)?;
@@ -366,6 +373,7 @@ fn list_item_to_browse_item(node: &Value) -> Option<BrowseItem> {
         duration: duration_from_runs(runs),
         artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
         is_video: is_video_row(node),
+        explicit: is_explicit(node),
     })
 }
 
@@ -399,6 +407,7 @@ fn card_shelf_main(card: &Value) -> Option<BrowseItem> {
             duration: duration_from_runs(runs),
             artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
             is_video: nav.is_some_and(is_video_endpoint),
+            explicit: is_explicit(card),
         });
     }
     let bid = nav
@@ -415,6 +424,7 @@ fn card_shelf_main(card: &Value) -> Option<BrowseItem> {
         duration: None,
         artist_runs: Vec::new(),
         is_video: false,
+        explicit: is_explicit(card),
     })
 }
 
@@ -477,6 +487,7 @@ pub fn parse_album(root: &Value) -> AlbumPage {
         thumbnail,
         items,
         continuation: shelf_continuation(root),
+        explicit: header.is_some_and(is_explicit),
         // Track rows carry the OLAK id; an album with no playable rows still has it on the
         // header's save-to-library button.
         playlist_id: album_playlist_id(root).or_else(|| library_toggle_playlist_id(header)),
@@ -681,6 +692,7 @@ fn parse_carousel_item(node: &Value) -> Option<BrowseItem> {
             duration: song.duration,
             artist_runs: song.artist_runs,
             is_video: song.is_video,
+            explicit: song.explicit,
         });
     }
     None
@@ -714,6 +726,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
             duration: duration_from_runs(runs),
             artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
             is_video: is_video_row(node),
+            explicit: is_explicit(node),
         });
     }
     // Playlist via watchPlaylistEndpoint (some carousels expose the raw playlistId).
@@ -731,6 +744,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
             duration: None,
             artist_runs: Vec::new(),
             is_video: false,
+            explicit: is_explicit(node),
         });
     }
     // Otherwise a browseEndpoint → playlist/album/artist by browseId prefix.
@@ -748,6 +762,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
         duration: None,
         artist_runs: Vec::new(),
         is_video: false,
+        explicit: is_explicit(node),
     })
 }
 

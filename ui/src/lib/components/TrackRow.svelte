@@ -15,6 +15,7 @@
 	import { isLiked, ratingOf, toggleRating } from '$lib/player.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import ArtistLine from './ArtistLine.svelte';
+	import ExplicitIcon from './ExplicitIcon.svelte';
 
 	let {
 		song,
@@ -47,8 +48,9 @@
 		 */
 		showPlayCount?: boolean;
 		/**
-		 * Drop the inline thumbs (the queue panel): two buttons plus the duration leave nothing for
-		 * the title and artists at that width. The ⋯ menu carries like and dislike either way.
+		 * The narrow queue-panel variant: drops the inline thumbs and the explicit mark. Two buttons
+		 * plus the duration leave nothing for the title and artists at that width, and the queue is
+		 * not where you decide what to listen to. The ⋯ menu carries like and dislike either way.
 		 */
 		hideRating?: boolean;
 		onplay: () => void;
@@ -183,6 +185,11 @@
 	{/if}
 
 	<div class="flex shrink-0 items-center {compact ? 'gap-0.5' : 'gap-2'}">
+		<!-- Always on, unlike the thumbs beside it: this is a property of the song, not an action,
+		     so hiding it until the pointer arrives would be hiding half of what it's for. -->
+		{#if song.explicit && !hideRating}
+			<ExplicitIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+		{/if}
 		{#if showRating}
 			<!-- Hover-revealed, except on a row that carries a rating: at rest that filled thumb is the
 			     only place the state shows at all. Faded rather than removed, so the duration and the ⋯

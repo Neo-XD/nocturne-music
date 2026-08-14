@@ -2597,6 +2597,8 @@ fn track_to_song(t: &Track) -> SongItem {
         queued_from: None,
         autoplay: false,
         is_video: false,
+        // The Listen Together wire shape carries no badge, so a mirrored guest queue shows none.
+        explicit: false,
     }
 }
 

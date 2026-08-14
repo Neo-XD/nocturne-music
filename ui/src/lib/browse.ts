@@ -21,7 +21,8 @@ export const asSong = (i: BrowseItem): SongItem => ({
 	artist_runs: i.artistRuns,
 	artist_id: i.artistRuns?.find((r) => r.id)?.id,
 	duration: i.duration,
-	thumbnail: i.thumbnail
+	thumbnail: i.thumbnail,
+	explicit: i.explicit
 });
 
 /** Where a non-song item lives. Songs have no page — they play. */

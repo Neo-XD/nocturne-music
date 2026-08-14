@@ -14,6 +14,7 @@
 	import { openAddToPlaylist } from '$lib/player.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import PlaylistMenu from './PlaylistMenu.svelte';
+	import ExplicitIcon from './ExplicitIcon.svelte';
 
 	let { item, compact = false }: { item: BrowseItem; compact?: boolean } = $props();
 
@@ -155,9 +156,16 @@
 		</div>
 		<div class="min-w-0 {round ? 'text-center' : ''}">
 			<div class="truncate font-medium {compact ? 'text-xs' : 'text-sm'}">{item.title}</div>
-			{#if item.subtitle}
-				<div class="truncate text-muted-foreground {compact ? 'text-[0.6875rem]' : 'text-xs'}">
-					{item.subtitle}
+			{#if item.subtitle || item.explicit}
+				<div
+					class="flex items-center gap-1 text-muted-foreground {round
+						? 'justify-center'
+						: ''} {compact ? 'text-[0.6875rem]' : 'text-xs'}"
+				>
+					{#if item.explicit}
+						<ExplicitIcon class="h-3 w-3 shrink-0" />
+					{/if}
+					<span class="truncate">{item.subtitle}</span>
 				</div>
 			{/if}
 		</div>

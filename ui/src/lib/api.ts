@@ -43,6 +43,9 @@ export interface SongItem {
 	queued_from?: string;
 	/** Appended by autoplay radio continuation — drives the queue's "Autoplay" divider + badge. */
 	autoplay?: boolean;
+	/** YouTube flags the track explicit. Browse/search rows only: `/next` carries no badge, so a
+	 *  radio- or autoplay-appended track arrives without it. */
+	explicit?: boolean;
 }
 
 export interface NowPlaying {
@@ -107,6 +110,8 @@ export interface BrowseItem {
 	duration?: string;
 	/** Song cards only: the artist line run by run, so a card that gets played keeps its links. */
 	artistRuns?: ArtistRun[];
+	/** YouTube flags this track/album explicit. */
+	explicit?: boolean;
 }
 
 export interface HomeSection {
@@ -199,6 +204,8 @@ export interface AlbumPage {
 	thumbnail?: string;
 	items: SongItem[];
 	continuation?: string;
+	/** The album itself is flagged explicit (the header wears the badge, not just some tracks). */
+	explicit?: boolean;
 	/** The album's audio playlist id (`OLAK5uy_…`) — autoplay's radio seed, and the save target. */
 	playlistId?: string;
 	/** Already saved to the signed-in user's library. */
