@@ -19,6 +19,7 @@
 		ArrowUpDownIcon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
+	import * as RadioGroup from '$lib/components/ui/radio-group';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import TrackRow from '$lib/components/TrackRow.svelte';
 	import TrackRowSkeleton from '$lib/components/TrackRowSkeleton.svelte';
@@ -664,18 +665,20 @@
 			: 'origin-top-right'}"
 		style="right:{sx}px; {sortUp ? 'bottom' : 'top'}:{sy}px;"
 	>
-		{#each SORTS as s (s.key)}
-			<button
-				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
-				onclick={() => chooseSort(s.key)}
-			>
-				<HugeiconsIcon
-					icon={Tick02Icon}
-					class="h-4 w-4 shrink-0 {sort === s.key ? '' : 'opacity-0'}"
-				/>
-				{s.label}
-			</button>
-		{/each}
+		<RadioGroup.Root
+			value={sort}
+			onValueChange={(v) => chooseSort(v as SortKey)}
+			class="gap-0"
+		>
+			{#each SORTS as s (s.key)}
+				<label
+					class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				>
+					<RadioGroup.Item value={s.key} />
+					{s.label}
+				</label>
+			{/each}
+		</RadioGroup.Root>
 	</div>
 {/if}
 
