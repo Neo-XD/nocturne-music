@@ -12,6 +12,11 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 pub enum Error {
     #[error("mpv: {0}")]
     Mpv(#[from] libmpv2::Error),
+    /// mpv refused a chain carrying the pitch filter, which means this libmpv was built without
+    /// librubberband. Its own answer is `Raw(-9)`, so it needs saying in words: this one reaches
+    /// the user as a toast.
+    #[error("Pitch shifting isn't available in this build")]
+    NoPitchFilter,
 }
 
 /// Events pumped from mpv's event thread. context/14 §player surface.
@@ -226,13 +231,15 @@ impl Player {
     // command surfaces that to the user; wire the `lavfi=[rubberband=pitch=...]` fallback if a
     // Windows/macOS build ever turns up without it.
     pub fn set_pitch(&self, semitones: i32) -> Result<(), Error> {
-        let previous = std::mem::replace(&mut self.af.lock().unwrap().1, semitones.clamp(-12, 12));
+        let wanted = semitones.clamp(-12, 12);
+        let previous = std::mem::replace(&mut self.af.lock().unwrap().1, wanted);
         if let Err(e) = self.apply_af() {
             // No librubberband in this build: mpv rejects the *whole* chain, loudness gain
             // included, so put the old value back rather than leave every later set_gain failing.
+            // (mpv never applied the bad chain, so this restores what is already playing.)
             self.af.lock().unwrap().1 = previous;
             let _ = self.apply_af();
-            return Err(e);
+            return Err(if wanted == 0 { e } else { Error::NoPitchFilter });
         }
         Ok(())
     }
@@ -253,9 +260,27 @@ fn af_chain(gain_db: Option<f64>, semitones: i32) -> String {
     }
     if semitones != 0 {
         // Semitones → frequency multiplier (equal temperament).
-        chain.push(format!("rubberband=pitch-scale={}", 2f64.powf(semitones as f64 / 12.0)));
+        chain.push(format!(
+            "{}=pitch-scale={}",
+            pitch_filter(),
+            2f64.powf(semitones as f64 / 12.0)
+        ));
     }
     chain.join(",")
+}
+
+/// Test seam. Set it to reproduce a libmpv built without librubberband: mpv then rejects the whole
+/// `af` chain, loudness gain included, which is the failure [`Player::set_pitch`] rolls back from.
+/// A machine that has the filter can't reach that path any other way. Not compiled into the app.
+#[cfg(test)]
+static NO_RUBBERBAND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn pitch_filter() -> &'static str {
+    #[cfg(test)]
+    if NO_RUBBERBAND.load(std::sync::atomic::Ordering::Relaxed) {
+        return "rubberband_this_build_does_not_have";
+    }
+    "rubberband"
 }
 
 fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<PlayerEvent>) {
@@ -371,6 +396,59 @@ mod tests {
         assert_eq!(af_chain(Some(-6.0), -12), "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5");
         // One semitone up is the twelfth root of two.
         assert!(af_chain(None, 1).ends_with("1.0594630943592953"));
+    }
+
+    /// Everything above is string-building; this drives a real libmpv and reads `af` back out of
+    /// it, because the questions that matter ("is the gain still in the chain", "what does mpv keep
+    /// when it rejects a chain") are answered by mpv, not by us. Nothing is played, so no audio
+    /// device is opened. One test rather than four: `NO_RUBBERBAND` is process-global and cargo
+    /// runs tests in parallel.
+    #[test]
+    fn mpv_keeps_the_gain_through_pitch_changes_and_failures() {
+        use super::{Error, Player, NO_RUBBERBAND};
+        use std::sync::atomic::Ordering;
+
+        let dir = std::env::temp_dir().join("limusic-af-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = Player::new(dir.to_str().unwrap()).expect("libmpv");
+        let af = || p.mpv.get_property::<String>("af").unwrap();
+
+        // 1. Loudness normalization, then a pitch round trip. The gain has to survive both steps.
+        p.set_gain(Some(-7.7)).unwrap();
+        assert!(af().contains("volume=-7.7dB"), "gain missing: {}", af());
+        p.set_pitch(2).unwrap();
+        assert!(af().contains("volume=-7.7dB"), "pitch dropped the gain: {}", af());
+        assert!(af().contains("rubberband"), "pitch missing: {}", af());
+        p.set_pitch(0).unwrap();
+        assert!(af().contains("volume=-7.7dB"), "reset dropped the gain: {}", af());
+        assert!(!af().contains("rubberband"), "pitch 0 left a filter behind: {}", af());
+
+        // 2. Gapless advance: the orchestrator retunes the gain for the next track (state.rs, the
+        // `lookahead_gain` take). A pitch the user set must not fall out of the chain when it does.
+        p.set_pitch(-5).unwrap();
+        p.set_gain(Some(-2.5)).unwrap();
+        assert!(af().contains("volume=-2.5dB"), "retune missed: {}", af());
+        assert!(af().contains("rubberband"), "retune dropped the pitch: {}", af());
+        p.set_pitch(0).unwrap();
+
+        // 3. A libmpv without librubberband. mpv rejects the chain wholesale, so this is also the
+        // case where loudness normalization could silently disappear.
+        let before = af();
+        NO_RUBBERBAND.store(true, Ordering::Relaxed);
+        let err = p.set_pitch(3).unwrap_err();
+        NO_RUBBERBAND.store(false, Ordering::Relaxed);
+        // The user is told, in words. mpv's own answer is `Raw(-9)`, which says nothing.
+        assert!(matches!(err, Error::NoPitchFilter), "rejection must surface: {err}");
+        assert_eq!(err.to_string(), "Pitch shifting isn't available in this build");
+        // mpv never applied the bad chain, and the rollback re-applied the good one either way.
+        assert_eq!(af(), before, "a rejected pitch changed the live chain");
+        assert!(af().contains("volume=-2.5dB"), "normalization lost: {}", af());
+        // And the rolled-back state is clean: the next per-track retune is gain-only, not a
+        // permanently poisoned chain that fails from here on.
+        p.set_gain(Some(-4.0)).unwrap();
+        let after = af(); // mpv hands the chain back in its own escaped form, hence `contains`
+        assert!(after.contains("volume=-4dB"), "retune after a rejection failed: {after}");
+        assert!(!after.contains("rubberband"), "stored pitch survived the rollback: {after}");
     }
 
     #[test]
