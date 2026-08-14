@@ -26,6 +26,7 @@
 	import { ON_REPEAT_ID } from '$lib/api';
 	import type { BrowseItem, PlaylistPage, SongItem } from '$lib/api';
 	import { getCached, putCached, invalidateCached } from '$lib/pagecache';
+	import { anchorMenu } from '$lib/menu';
 	import { rowWindow } from '$lib/rows';
 	import { rowScroller } from '$lib/rows.svelte';
 	import { SORTS, sortSongs, type SortKey } from '$lib/sort';
@@ -81,6 +82,9 @@
 	// --- sorting (`$lib/sort`) ---------------------------------------------------------------
 	let sort = $state<SortKey>('default');
 	let sortOpen = $state(false);
+	let sx = $state(0);
+	let sy = $state(0);
+	let sortUp = $state(false);
 	let preparing = $state(false);
 
 	const sortLabel = $derived(
@@ -120,10 +124,10 @@
 		if (key !== 'default') loadAll(); // start the walk now so Play rarely has to wait
 	}
 
+	// Right-anchored, unlike the ⋯ menu: this button sits at the far end of the header, so a menu
+	// wider than it would run off the page opening leftwards from its left edge.
 	function openSort(e: MouseEvent) {
-		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		mx = r.left;
-		my = r.bottom + 4;
+		({ right: sx, y: sy, openUp: sortUp } = anchorMenu(e.currentTarget as HTMLElement, 240));
 		sortOpen = true;
 	}
 
@@ -501,33 +505,36 @@
 				</h1>
 				{/if}
 				{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
-				<div class="mt-4 flex items-center gap-2">
-					<Button
-						class="gap-2"
-						onclick={() => playAll(null)}
-						disabled={!pl.items.length || preparing}
-					>
-						<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
-						{preparing ? 'Sorting…' : 'Play'}
-					</Button>
-					{#if confirmingDelete}
-						<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
-							<span class="text-xs text-muted-foreground">Delete this playlist?</span>
-							<Button variant="destructive" size="sm" onclick={deleteThisPlaylist}>Delete</Button>
-							<Button variant="ghost" size="sm" onclick={() => (confirmingDelete = false)}>
-								Cancel
-							</Button>
-						</div>
-					{:else}
+				<div class="mt-4 flex items-center justify-between gap-2">
+					<div class="flex items-center gap-2">
 						<Button
-							variant="ghost"
-							size="icon"
-							aria-label="Playlist options"
-							onclick={openMenu}
+							class="gap-2"
+							onclick={() => playAll(null)}
+							disabled={!pl.items.length || preparing}
 						>
-							<HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5 text-muted-foreground" />
+							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
+							{preparing ? 'Sorting…' : 'Play'}
 						</Button>
-					{/if}
+						{#if confirmingDelete}
+							<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
+								<span class="text-xs text-muted-foreground">Delete this playlist?</span>
+								<Button variant="destructive" size="sm" onclick={deleteThisPlaylist}>Delete</Button>
+								<Button variant="ghost" size="sm" onclick={() => (confirmingDelete = false)}>
+									Cancel
+								</Button>
+							</div>
+						{:else}
+							<Button
+								variant="ghost"
+								size="icon"
+								aria-label="Playlist options"
+								onclick={openMenu}
+							>
+								<HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5 text-muted-foreground" />
+							</Button>
+						{/if}
+					</div>
+					<!-- Pushed to the far end of the header, away from the play controls. -->
 					<Button
 						variant="ghost"
 						size="sm"
@@ -597,8 +604,10 @@
 		aria-label="Close menu"
 	></button>
 	<div
-		class="fixed z-50 min-w-44 origin-top-left animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
-		style="left:{mx}px; top:{my}px;"
+		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {sortUp
+			? 'origin-bottom-right'
+			: 'origin-top-right'}"
+		style="right:{sx}px; {sortUp ? 'bottom' : 'top'}:{sy}px;"
 	>
 		{#each SORTS as s (s.key)}
 			<button
