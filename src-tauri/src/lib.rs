@@ -372,6 +372,7 @@ pub fn run() {
             commands::toggle_pause,
             commands::seek,
             commands::set_volume,
+            commands::set_playback_params,
             commands::get_queue,
             commands::get_playback,
             commands::get_settings,

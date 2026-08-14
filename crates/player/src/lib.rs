@@ -61,6 +61,10 @@ fn friendly_error(e: &libmpv2::Error) -> String {
 pub struct Player {
     mpv: Arc<Mpv>,
     events: Option<UnboundedReceiver<PlayerEvent>>,
+    /// `(loudness gain dB, pitch semitones)`. mpv's `af` is one global chain, so the two things
+    /// that write to it have to be re-applied together: a bare `set_property("af", ...)` from
+    /// either one would drop the other's filter.
+    af: std::sync::Mutex<(Option<f64>, i32)>,
 }
 
 impl Player {
@@ -97,7 +101,7 @@ impl Player {
             .spawn(move || event_loop(ev, tx))
             .expect("spawn mpv event thread");
 
-        Ok(Player { mpv, events: Some(rx) })
+        Ok(Player { mpv, events: Some(rx), af: std::sync::Mutex::new((None, 0)) })
     }
 
     /// Take the event receiver (once).
@@ -204,12 +208,54 @@ impl Player {
     // round-trip (a few ms) and the filter chain reinits mid-stream. If that ever clicks audibly,
     // keep one labelled filter (`af=@gain:lavfi=[volume=0dB]`) and retune it with `af-command`.
     pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
-        match gain_db {
-            Some(g) => self.mpv.set_property("af", format!("lavfi=[volume={g}dB]").as_str())?,
-            None => self.mpv.set_property("af", "")?,
+        self.af.lock().unwrap().0 = gain_db;
+        self.apply_af()
+    }
+
+    /// Tempo, 0.25–2.0. Pitch is unaffected: `audio-pitch-correction` (mpv's default) time-stretches
+    /// rather than resamples, so this is Metrolist's `PlaybackParameters.speed` exactly.
+    pub fn set_speed(&self, speed: f64) -> Result<(), Error> {
+        self.mpv.set_property("speed", speed.clamp(0.25, 2.0))?;
+        Ok(())
+    }
+
+    /// Pitch shift in semitones, −12..=12 (one octave either way), via the rubberband filter.
+    /// Independent of [`Self::set_speed`]: rubberband takes over the time-stretch mpv would
+    /// otherwise do with scaletempo2, and shifts pitch on top of it.
+    // ponytail: native `rubberband` only. A libmpv built without librubberband errors out and the
+    // command surfaces that to the user; wire the `lavfi=[rubberband=pitch=...]` fallback if a
+    // Windows/macOS build ever turns up without it.
+    pub fn set_pitch(&self, semitones: i32) -> Result<(), Error> {
+        let previous = std::mem::replace(&mut self.af.lock().unwrap().1, semitones.clamp(-12, 12));
+        if let Err(e) = self.apply_af() {
+            // No librubberband in this build: mpv rejects the *whole* chain, loudness gain
+            // included, so put the old value back rather than leave every later set_gain failing.
+            self.af.lock().unwrap().1 = previous;
+            let _ = self.apply_af();
+            return Err(e);
         }
         Ok(())
     }
+
+    fn apply_af(&self) -> Result<(), Error> {
+        let (gain_db, semitones) = *self.af.lock().unwrap();
+        self.mpv.set_property("af", af_chain(gain_db, semitones).as_str())?;
+        Ok(())
+    }
+}
+
+/// The whole `af` chain: loudness gain, then pitch. Empty when neither is in play, so the default
+/// path stays exactly the filterless one it was before pitch existed.
+fn af_chain(gain_db: Option<f64>, semitones: i32) -> String {
+    let mut chain = Vec::new();
+    if let Some(g) = gain_db {
+        chain.push(format!("lavfi=[volume={g}dB]"));
+    }
+    if semitones != 0 {
+        // Semitones → frequency multiplier (equal temperament).
+        chain.push(format!("rubberband=pitch-scale={}", 2f64.powf(semitones as f64 / 12.0)));
+    }
+    chain.join(",")
 }
 
 fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<PlayerEvent>) {
@@ -314,7 +360,18 @@ fn perceptual_to_mpv(percent: i64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{perceptual_to_mpv, quoted};
+    use super::{af_chain, perceptual_to_mpv, quoted};
+
+    #[test]
+    fn gain_and_pitch_share_one_chain() {
+        // The bug this exists for: either setter clobbering the other's filter.
+        assert_eq!(af_chain(None, 0), "");
+        assert_eq!(af_chain(Some(-3.5), 0), "lavfi=[volume=-3.5dB]");
+        assert_eq!(af_chain(None, 12), "rubberband=pitch-scale=2");
+        assert_eq!(af_chain(Some(-6.0), -12), "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5");
+        // One semitone up is the twelfth root of two.
+        assert!(af_chain(None, 1).ends_with("1.0594630943592953"));
+    }
 
     #[test]
     fn paths_survive_mpvs_command_parser() {
