@@ -92,8 +92,21 @@
 	const sortLabel = $derived(
 		sort === 'default' ? 'Sort' : (SORTS.find((s) => s.key === sort)?.label ?? 'Sort')
 	);
+	// The local listening history, fetched once and only if "Most played" is ever picked — it is a
+	// SQLite read the other five sorts have no use for.
+	let plays = $state<Record<string, number>>({});
+	let playsInflight: Promise<void> | null = null;
+	function loadPlays(): Promise<void> {
+		playsInflight ??= api
+			.getPlayCounts()
+			.then((c) => void (plays = c))
+			// An empty map just sorts everything as unplayed, which beats blocking the sort.
+			.catch(() => {});
+		return playsInflight;
+	}
+
 	// Liked Music is the one playlist YouTube hands back newest-addition-first.
-	const sortedItems = $derived(sortSongs(pl?.items ?? [], sort, isLiked, desc));
+	const sortedItems = $derived(sortSongs(pl?.items ?? [], sort, isLiked, desc, plays));
 
 	// A sort has to cover the whole playlist, not the pages scrolled so far, so pull the rest in.
 	// Stops on a failed page (`moreError`), on navigation, and on any pass that made no progress.
@@ -113,7 +126,9 @@
 	// Everything that hands tracks to the queue goes through here first: a sorted queue is only
 	// honest once every page is in.
 	async function ready() {
-		if (!sorting || !pl?.continuation) return;
+		if (!sorting) return;
+		if (sort === 'plays') await loadPlays(); // queueing before they land would sort by nothing
+		if (!pl?.continuation) return;
 		preparing = true;
 		try {
 			await loadAll();
@@ -126,6 +141,7 @@
 		sortOpen = false;
 		if (key === sort) return;
 		sort = key;
+		if (key === 'plays') loadPlays(); // the list re-sorts itself when the counts land
 		if (sorting) loadAll(); // start the walk now so Play rarely has to wait
 	}
 

@@ -318,6 +318,12 @@ export const getPlaylist = (id: string) => invoke<PlaylistPage>('get_playlist', 
 export const getPlaylistMore = (token: string) =>
 	invoke<PlaylistContinuation>('get_playlist_more', { token });
 /**
+ * videoId → times played, from the local listening history. Same trailing window On Repeat uses
+ * (a month): the history table is pruned to it, so there is no older data. A videoId that isn't in
+ * the map has not been played inside the window.
+ */
+export const getPlayCounts = () => invoke<Record<string, number>>('play_counts');
+/**
  * `start`: the clicked track index, or `null` for "just play it" (random opener under shuffle).
  * `sourceId`: the page's playlist/album playlist id — makes autoplay continue with that
  * context's radio (omit to fall back to song radio seeded from the queue's last track).

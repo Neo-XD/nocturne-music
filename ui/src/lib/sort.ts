@@ -5,7 +5,7 @@
 // list and switching back to Default costs nothing.
 import type { SongItem } from './api';
 
-export type SortKey = 'default' | 'newest' | 'oldest' | 'title' | 'artist' | 'album';
+export type SortKey = 'default' | 'newest' | 'oldest' | 'title' | 'artist' | 'album' | 'plays';
 
 export const SORTS: { key: SortKey; label: string }[] = [
 	{ key: 'default', label: 'Default' },
@@ -13,7 +13,8 @@ export const SORTS: { key: SortKey; label: string }[] = [
 	{ key: 'oldest', label: 'Oldest first' },
 	{ key: 'title', label: 'Title' },
 	{ key: 'artist', label: 'Artist' },
-	{ key: 'album', label: 'Album' }
+	{ key: 'album', label: 'Album' },
+	{ key: 'plays', label: 'Most played' }
 ];
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -28,18 +29,28 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
  *
  * `desc` reverses whatever the key ordered, and nothing else: ties still fall back to playlist
  * order, and a track with no album still sorts last rather than jumping to the top.
+ *
+ * `plays` is the local listening history (videoId → count, see `api.getPlayCounts`); a track it
+ * doesn't mention counts as zero. It orders most-played first, so descending means least-played
+ * first, the same way "Newest first" reads.
  */
 export function sortSongs(
 	items: SongItem[],
 	sort: SortKey,
 	baseNewestFirst: boolean,
-	desc = false
+	desc = false,
+	plays: Record<string, number> = {}
 ): SongItem[] {
 	if (items.length < 2) return items;
 	if (sort === 'default') return desc ? items.slice().reverse() : items;
 	if (sort === 'newest' || sort === 'oldest')
 		return ((sort === 'newest') !== desc) === baseNewestFirst ? items : items.slice().reverse();
 	const dir = desc ? -1 : 1;
+	// Ties (everything unplayed, most of a big playlist) keep playlist order.
+	if (sort === 'plays')
+		return items
+			.slice()
+			.sort((a, b) => dir * ((plays[b.video_id] ?? 0) - (plays[a.video_id] ?? 0)));
 	// Album is a grouping, so inside one album the playlist's own order stands (Array#sort is
 	// stable): an album added in one go keeps its track order, which alphabetising would destroy.
 	// Descending reverses the albums, not the tracks within one.

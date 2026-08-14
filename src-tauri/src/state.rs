@@ -2983,6 +2983,7 @@ mod tests {
             queued_by: by.map(Into::into),
             autoplay: false,
             is_video: false,
+            explicit: false,
         }
     }
 

@@ -440,6 +440,14 @@ pub async fn get_playlist(state: St<'_>, id: String) -> Result<PlaylistPage, Str
     state.it.playlist(client, &id).await.map_err(|e| e.to_string())
 }
 
+/// videoId → how many times it was played, over the same trailing window On Repeat is built from
+/// (the history table is pruned to it, so there is no older data to offer). Feeds the playlist
+/// page's "Most played" sort; a track the map doesn't mention has not been played this month.
+#[tauri::command]
+pub fn play_counts(state: St<'_>) -> std::collections::HashMap<String, i64> {
+    state.db.play_counts(now_secs() - ON_REPEAT_WINDOW_SECS).into_iter().collect()
+}
+
 /// The On Repeat track list: most-played first, over the trailing window. Rows whose stored JSON
 /// no longer parses (a `SongItem` shape change) are dropped rather than failing the whole page.
 fn on_repeat_songs(state: &Arc<AppState>) -> Vec<SongItem> {

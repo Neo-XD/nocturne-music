@@ -31,9 +31,9 @@ ok(sortSongs(items.slice(0, 1), 'title', false).length === 1, 'a one-track list 
 
 // --- nothing is lost or duplicated ------------------------------------------------------------
 // The queue is built from this list, so a comparator that drops a track silently shortens it.
-for (const key of ['default', 'newest', 'oldest', 'title', 'artist', 'album'] as const) {
+for (const key of ['default', 'newest', 'oldest', 'title', 'artist', 'album', 'plays'] as const) {
 	for (const desc of [false, true]) {
-		const out = sortSongs(items, key, false, desc);
+		const out = sortSongs(items, key, false, desc, { b: 4, d: 1 });
 		ok(out.length === items.length, `${key} desc=${desc} keeps every track`);
 		ok(
 			[...out].map((t) => t.video_id).sort().join('') === 'abcd',
@@ -80,5 +80,14 @@ ok(ids(sortSongs(items, 'artist', false, true)) === 'dabc', 'artist descending f
 // reason to play an album backwards. And an albumless track stays last, it does not lead.
 ok(ids(sortSongs(items, 'album', false, true)) === 'abdc', 'album descending, albumless still last');
 ok(ids(sortSongs(tied, 'artist', false, true)) === 'xy', 'a total tie keeps playlist order either way');
+
+// --- most played: local history, missing means zero --------------------------------------------
+// b played 4 times, d once, a and c never — and the two unplayed keep playlist order between them.
+const counts = { b: 4, d: 1 };
+ok(ids(sortSongs(items, 'plays', false, false, counts)) === 'bdac', 'most played leads');
+ok(ids(sortSongs(items, 'plays', false, true, counts)) === 'acdb', 'descending is least played');
+ok(ids(sortSongs(items, 'plays', false, false, {})) === 'abcd', 'no history at all changes nothing');
+// A count for a track that is not in this playlist must not disturb the ones that are.
+ok(ids(sortSongs(items, 'plays', false, false, { zzz: 99, b: 4, d: 1 })) === 'bdac', 'stray ids ignored');
 
 console.log('ok');
