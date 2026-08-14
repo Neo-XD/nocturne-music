@@ -455,6 +455,8 @@ fn albums_of(tracks: &[LocalTrack]) -> Vec<BrowseItem> {
                 duration: None,
                 artist_runs: Vec::new(),
                 is_video: false,
+                // Nothing on disk says explicit: no tag carries it and there is no row to badge.
+                explicit: false,
             }
         })
         .collect();
@@ -503,6 +505,7 @@ fn artists_of(tracks: &[LocalTrack]) -> Vec<BrowseItem> {
                 duration: None,
                 artist_runs: Vec::new(),
                 is_video: false,
+                explicit: false,
             }
         })
         .collect();
@@ -559,6 +562,7 @@ fn page_of(title: Option<String>, artist: Option<String>, tracks: &[LocalTrack])
         thumbnail: tracks.iter().find_map(|t| t.cover.clone()),
         items: songs_of(&tracks),
         continuation: None,
+        explicit: false,
         // No YouTube playlist behind it: no radio to seed, nothing to save to the library.
         playlist_id: None,
         in_library: false,

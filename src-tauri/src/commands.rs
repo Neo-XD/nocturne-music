@@ -402,6 +402,7 @@ pub async fn get_library(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
                 duration: None,
                 artist_runs: Vec::new(),
                 is_video: false,
+                explicit: false,
             },
         );
     }

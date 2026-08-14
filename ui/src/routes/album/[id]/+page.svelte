@@ -18,6 +18,7 @@
     import TrackRowSkeleton from "$lib/components/TrackRowSkeleton.svelte";
     import ErrorState from "$lib/components/ErrorState.svelte";
     import ArtistLine from "$lib/components/ArtistLine.svelte";
+    import ExplicitIcon from "$lib/components/ExplicitIcon.svelte";
     import { Skeleton } from "$lib/components/ui/skeleton";
     import * as api from "$lib/api";
     import type { AlbumPage, BrowseItem } from "$lib/api";
@@ -243,6 +244,9 @@
                     <div
                         class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground"
                     >
+                        {#if album.explicit}
+                            <ExplicitIcon class="h-4 w-4 shrink-0" />
+                        {/if}
                         {#if album.artist}
                             <span
                                 class="flex items-center gap-1.5 font-medium text-foreground"

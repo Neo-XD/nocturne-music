@@ -72,6 +72,11 @@ pub struct SongItem {
     /// "hide music videos" setting; computed once here, never re-derived downstream.
     #[serde(default)]
     pub is_video: bool,
+    /// YouTube marks this track explicit ([`is_explicit`]). Only browse/search rows carry the
+    /// badge: `/next` panel rows and `/player` don't, so a radio- or autoplay-appended track
+    /// reads false even when the same song shows the badge on an album page.
+    #[serde(default)]
+    pub explicit: bool,
 }
 
 /// How the signed-in user rated a track. One type for both directions: it's what a row's
@@ -124,6 +129,17 @@ pub(crate) fn is_video_row(node: &Value) -> bool {
         Some(ep) if endpoint_video_type(ep).is_some() => is_video_endpoint(ep),
         _ => node.get("navigationEndpoint").is_some_and(is_video_endpoint),
     }
+}
+
+/// True when a renderer node wears YouTube's explicit badge. The badge is the same
+/// `musicInlineBadgeRenderer` everywhere, under one of three keys depending on the node: `badges`
+/// on a list row, `subtitleBadges` on a two-row card, `subtitleBadge` (singular) on a
+/// playlist/album header. Scoped to those keys rather than swept from the whole node, so a card's
+/// badge can't leak onto the row that contains it. Live-verified 2026-08.
+pub(crate) fn is_explicit(node: &Value) -> bool {
+    ["badges", "subtitleBadges", "subtitleBadge"].into_iter().filter_map(|key| node.get(key)).any(
+        |b| find_all(b, "iconType").into_iter().any(|t| t.as_str() == Some("MUSIC_EXPLICIT_BADGE")),
+    )
 }
 
 /// One run of an artist line: the literal text plus its channel browseId when it links one
@@ -428,6 +444,7 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
         queued_from: None,
         autoplay: false,
         is_video: is_video_row(node),
+        explicit: is_explicit(node),
     })
 }
 
@@ -530,6 +547,9 @@ fn parse_panel_video(node: &Value) -> Option<SongItem> {
         queued_from: None,
         autoplay: false,
         is_video: is_video_row(node),
+        // Queue-panel rows carry no badges today; asking anyway costs a map lookup and picks the
+        // flag up for free if YouTube ever adds one.
+        explicit: is_explicit(node),
     })
 }
 
@@ -1110,6 +1130,31 @@ mod tests {
         assert_eq!(identities[0].data_sync_id, "active-response-sync");
         assert_eq!(identities[1].name, "Fallback token");
         assert_eq!(identities[1].data_sync_id, "fallback-sync");
+    }
+
+    // Three keys, one badge shape, and a badge array that can hold other badges alongside it.
+    // Getting the key wrong reads false everywhere and the flag silently never shows.
+    #[test]
+    fn explicit_badge_is_read_from_every_key_it_arrives_under() {
+        let badge = json!([{ "musicInlineBadgeRenderer": {
+            "icon": { "iconType": "MUSIC_EXPLICIT_BADGE" },
+            "accessibilityData": { "accessibilityData": { "label": "Explicit" } }
+        } }]);
+        // List row (search / playlist / album tracks), two-row card, playlist+album header.
+        assert!(is_explicit(&json!({ "badges": badge })));
+        assert!(is_explicit(&json!({ "subtitleBadges": badge })));
+        assert!(is_explicit(&json!({ "subtitleBadge": badge })));
+        // Alongside another badge, and with no badge at all.
+        assert!(is_explicit(&json!({ "badges": [
+            { "musicInlineBadgeRenderer": { "icon": { "iconType": "MUSIC_NEW_RELEASE_BADGE" } } },
+            badge[0]
+        ] })));
+        assert!(!is_explicit(&json!({ "badges": [
+            { "musicInlineBadgeRenderer": { "icon": { "iconType": "MUSIC_NEW_RELEASE_BADGE" } } }
+        ] })));
+        assert!(!is_explicit(&json!({})));
+        // Never from a nested row: an album card inside a shelf must not badge the shelf's row.
+        assert!(!is_explicit(&json!({ "contents": [{ "subtitleBadges": badge }] })));
     }
 
     #[test]
