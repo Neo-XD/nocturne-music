@@ -110,14 +110,18 @@
 
 	// A sort has to cover the whole playlist, not the pages scrolled so far, so pull the rest in.
 	// Stops on a failed page (`moreError`), on navigation, and on any pass that made no progress.
-	async function loadAll() {
+	// Answers whether it got the lot: a queue built from a short list is missing tracks for good,
+	// so the caller has to be able to say so rather than quietly handing over half a playlist.
+	async function loadAll(): Promise<boolean> {
 		const pid = id;
+		moreError = false; // a page that failed earlier gets another go on an explicit action
 		while (pl?.continuation && !moreError) {
 			const token = pl.continuation;
 			await loadMore();
-			if (pid !== id) return;
-			if (pl?.continuation === token) return;
+			if (pid !== id) return false;
+			if (pl?.continuation === token) break; // no progress, and nothing left to try
 		}
+		return !pl?.continuation;
 	}
 
 	// Reversing the default order is a reorder like any other, so it needs the whole playlist too.
@@ -125,16 +129,23 @@
 
 	// Everything that hands tracks to the queue goes through here first: a sorted queue is only
 	// honest once every page is in.
-	async function ready() {
-		if (!sorting) return;
+	async function ready(): Promise<boolean> {
+		if (!sorting) return true;
 		if (sort === 'plays') await loadPlays(); // queueing before they land would sort by nothing
-		if (!pl?.continuation) return;
+		if (!pl?.continuation) return true;
 		preparing = true;
 		try {
-			await loadAll();
+			return await loadAll();
 		} finally {
 			preparing = false;
 		}
+	}
+
+	// Sorted, but a page never arrived. The queue is a snapshot, so the tracks that did not load
+	// are gone from it for good — play them anyway and say so, rather than refusing to play at all
+	// over one failed request. The list's own "Try again" sits at the bottom of the page.
+	function warnPartial(what: string) {
+		toast.error(`Couldn't load all of this playlist, so only what loaded was ${what}.`);
 	}
 
 	function chooseSort(key: SortKey) {
@@ -316,11 +327,14 @@
 	// later sort change never touches a queue that is already playing.
 	async function playAll(start: number | null) {
 		if (!pl) return;
+		const pid = id;
 		// Resolve the clicked row to a track first: awaiting the walk can grow and re-sort the list
 		// under it, which would leave the index pointing at a different song.
 		const pick = start === null ? null : sortedItems[start];
-		await ready();
-		if (!pl) return;
+		const whole = await ready();
+		// Navigating while that walk ran would otherwise play the playlist you left for.
+		if (!pl || pid !== id) return;
+		if (!whole) warnPartial('queued');
 		const items = sortedItems;
 		const at = pick ? items.indexOf(pick) : -1;
 		playFrom(
@@ -354,8 +368,10 @@
 	// "Add to queue" is worth waiting on the rest of the playlist for.
 	async function queue(next: boolean) {
 		if (!pl?.items.length) return;
-		if (!next) await ready();
-		if (!pl) return;
+		const pid = id;
+		const whole = next || (await ready());
+		if (!pl || pid !== id) return;
+		if (!whole) warnPartial('added');
 		enqueue(sortedItems, next, pl.title, sorting ? undefined : pl.continuation);
 	}
 
