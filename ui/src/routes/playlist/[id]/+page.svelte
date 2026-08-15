@@ -22,6 +22,7 @@
 	import * as RadioGroup from '$lib/components/ui/radio-group';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import TrackRow from '$lib/components/TrackRow.svelte';
+	import TrackFilter, { filterTracks } from '$lib/components/TrackFilter.svelte';
 	import TrackRowSkeleton from '$lib/components/TrackRowSkeleton.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import * as api from '$lib/api';
@@ -63,6 +64,9 @@
 	let editingName = $state(false);
 	let nameDraft = $state('');
 
+	// Header filter box: matches title / artist / album over the rows loaded so far.
+	let query = $state('');
+
 	const id = $derived(page.params.id ?? '');
 	const nowId = $derived(playback.now?.videoId);
 	// The liked-music auto-playlist isn't a user playlist — no rename/delete, but shuffle is fine.
@@ -80,7 +84,6 @@
 			? (pl.subtitle ?? '').replace(/^[\d,.]+ songs?/i, `${pl.items.length} songs`)
 			: pl?.subtitle
 	);
-
 	// --- sorting (`$lib/sort`) ---------------------------------------------------------------
 	let sort = $state<SortKey>('default');
 	let desc = $state(false);
@@ -108,6 +111,11 @@
 
 	// Liked Music is the one playlist YouTube hands back newest-addition-first.
 	const sortedItems = $derived(sortSongs(pl?.items ?? [], sort, isLiked, desc, plays));
+
+	// The rows actually on screen: the sorted list, narrowed by the header's filter box. Identical
+	// to `sortedItems` with no query typed.
+	const shown = $derived(filterTracks(sortedItems, query));
+	const filtering = $derived(!!query.trim());
 
 	// A sort has to cover the whole playlist, not the pages scrolled so far, so pull the rest in.
 	// Stops on a failed page (`moreError`), on navigation, and on any pass that made no progress.
@@ -177,6 +185,10 @@
 		sort = 'default';
 		desc = false;
 		sortOpen = false;
+		query = '';
+		// A page that failed on the last playlist would otherwise keep this one's retry state
+		// showing, and block the filter's own walk (`loadAll` bails while it's set).
+		moreError = false;
 		if (hit) {
 			pl = hit;
 			bgImage = pickCover(hit.items);
@@ -292,7 +304,7 @@
 	// A Liked Songs list runs to five figures, and `content-visibility` spares the layout and the
 	// paint but not the DOM node, the style or the component.
 	const sc = rowScroller();
-	const win = $derived(rowWindow(sc.scrollTop, sc.viewportPx, sortedItems.length, sc.rowPx));
+	const win = $derived(rowWindow(sc.scrollTop, sc.viewportPx, shown.length, sc.rowPx));
 
 	// One page per approach to the bottom: the observer only fires when the sentinel *enters* view,
 	// so an appended page that pushes it back out is required before the next fetch. rootMargin
@@ -304,6 +316,17 @@
 		io.observe(node);
 		return () => io.disconnect();
 	}
+
+	// A filter can only match rows that have arrived, and a narrowed list never pushes the sentinel
+	// back out of view, so the observer fires once and stops. Same walk a sort needs, for the same
+	// reason: the search has to cover the whole playlist, not the pages scrolled so far. The flag
+	// keeps one walk running rather than starting a fresh one on every page it lands.
+	let walking = false;
+	$effect(() => {
+		if (!filtering || !pl?.continuation || walking) return;
+		walking = true;
+		loadAll().finally(() => (walking = false));
+	});
 
 	// This playlist as a card, for the sidebar's last-played sort and the Shortcuts grid.
 	const asItem = (): BrowseItem => ({
@@ -326,12 +349,16 @@
 	// backend a token would have it walk YouTube's order in behind a sorted queue. `ready()` has
 	// already walked those pages into `pl.items` instead. The queue is a snapshot either way, so a
 	// later sort change never touches a queue that is already playing.
+	//
+	// A filter narrows which rows are on screen but never what gets queued: it finds a track, it
+	// doesn't decide what plays after it, so playing a match leaves the same queue behind as
+	// scrolling to that row would.
 	async function playAll(start: number | null) {
 		if (!pl) return;
 		const pid = id;
 		// Resolve the clicked row to a track first: awaiting the walk can grow and re-sort the list
 		// under it, which would leave the index pointing at a different song.
-		const pick = start === null ? null : sortedItems[start];
+		const pick = start === null ? null : shown[start];
 		const whole = await ready();
 		// Navigating while that walk ran would otherwise play the playlist you left for.
 		if (!pl || pid !== id) return;
@@ -341,7 +368,7 @@
 		playFrom(
 			asItem(),
 			items,
-			at >= 0 ? at : start,
+			at >= 0 ? at : null,
 			isOnRepeat ? undefined : id,
 			undefined,
 			sorting ? undefined : pl.continuation
@@ -603,13 +630,16 @@
 					</div>
 				</div>
 			</div>
+			<div class="absolute right-6 top-6">
+				<TrackFilter bind:value={query} placeholder="Search this playlist" />
+			</div>
 		</div>
 		<div class="content-in min-h-0 flex-1 overflow-y-auto p-4" {@attach sc.attach}>
-			{#if pl.items.length}
+			{#if shown.length}
 				<!-- The padding stands in for the rows outside the window, so the scrollbar is the
 				     length of the whole playlist even though only ~30 rows exist. -->
 				<div style="padding-top:{win.padTop}px;padding-bottom:{win.padBottom}px">
-					{#each sortedItems.slice(win.start, win.end) as item, i (item.video_id + (win.start + i))}
+					{#each shown.slice(win.start, win.end) as item, i (item.video_id + (win.start + i))}
 						{@const n = win.start + i}
 						<!-- data-row: what the scroller measures a row's real height from. -->
 						<div data-row>
@@ -626,6 +656,12 @@
 						</div>
 					{/each}
 				</div>
+			{:else if filtering}
+				<p class="p-4 text-sm text-muted-foreground">
+					No tracks match “{query.trim()}”{pl.continuation && !moreError
+						? ' yet, still loading'
+						: ''}.
+				</p>
 			{:else}
 				<p class="p-4 text-sm text-muted-foreground">This playlist is empty.</p>
 			{/if}

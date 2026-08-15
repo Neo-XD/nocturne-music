@@ -15,6 +15,9 @@
         BookmarkCheck02Icon,
     } from "@hugeicons/core-free-icons";
     import TrackRow from "$lib/components/TrackRow.svelte";
+    import TrackFilter, {
+        filterTracks,
+    } from "$lib/components/TrackFilter.svelte";
     import TrackRowSkeleton from "$lib/components/TrackRowSkeleton.svelte";
     import ErrorState from "$lib/components/ErrorState.svelte";
     import ArtistLine from "$lib/components/ArtistLine.svelte";
@@ -41,8 +44,12 @@
     let error = $state<string | null>(null);
     let expanded = $state(false);
     let menuOpen = $state(false);
+    // Header filter box: matches title / artist / album.
+    let query = $state("");
 
     const id = $derived(page.params.id ?? "");
+    // The rows actually on screen. Identical to `album.items` with no query typed.
+    const shown = $derived(filterTracks(album?.items ?? [], query));
     // A local album has no YouTube playlist behind it: nothing to save, add to a playlist, or
     // fetch an artist hero for. Playing, shuffling and Shortcuts all work exactly the same.
     const isLocal = $derived(api.isLocalId(id));
@@ -62,6 +69,7 @@
         }
         error = null;
         expanded = false;
+        query = "";
         try {
             const fresh = await api.getAlbum(aid);
             if (aid !== id) return; // superseded by navigation — drop the stale response
@@ -124,8 +132,13 @@
         explicit: album?.explicit,
     });
 
+    // `start` indexes the rows on screen, which a filter narrows. The queue is always the whole
+    // album: the search box finds a track, it doesn't decide what plays after it, so playing a
+    // match has to leave the same queue behind as scrolling to that row would.
     function playAll(start: number | null) {
-        if (album) playFrom(asItem(), album.items, start, album.playlistId);
+        if (!album) return;
+        const at = start === null ? null : album.items.indexOf(shown[start]);
+        playFrom(asItem(), album.items, at === -1 ? null : at, album.playlistId);
     }
     function radio() {
         if (!album?.playlistId) return;
@@ -215,6 +228,10 @@
         <div
             class="absolute inset-0 bg-gradient-to-t from-background via-background/75 to-background/40"
         ></div>
+
+        <div class="absolute right-6 top-6 z-10">
+            <TrackFilter bind:value={query} placeholder="Search this album" />
+        </div>
 
         <div class="relative flex flex-col gap-5 p-6 pt-10">
             <div class="flex items-end gap-5">
@@ -406,7 +423,7 @@
 
     <!-- Numbered track list -->
     <div class="content-in p-6 pt-2">
-        {#each album.items as item, i (item.video_id + i)}
+        {#each shown as item, i (item.video_id + i)}
             <TrackRow
                 song={item}
                 index={i}
@@ -418,7 +435,9 @@
             />
         {:else}
             <p class="p-4 text-sm text-muted-foreground">
-                This album is empty.
+                {query.trim()
+                    ? `No tracks match “${query.trim()}”.`
+                    : "This album is empty."}
             </p>
         {/each}
     </div>
