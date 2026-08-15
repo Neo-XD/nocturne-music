@@ -14,6 +14,8 @@
 		ArrowUpNarrowWideIcon,
 		ArrowDownWideNarrowIcon,
 		DashboardSquare02Icon,
+		BookmarkAdd02Icon,
+		BookmarkMinus02Icon,
 		ListRestartIcon,
 		Sorting01Icon,
 		ArrowUpDownIcon
@@ -36,11 +38,13 @@
 	import {
 		addPick,
 		enqueue,
+		isSaved,
 		playback,
 		openAddToPlaylist,
 		playFrom,
 		startRadio,
 		toast,
+		toggleSaved,
 		bumpLibraryTrackCount,
 		lastPlaylistAdd
 	} from '$lib/player.svelte';
@@ -76,6 +80,11 @@
 	// Only offer rename/delete on playlists the signed-in user actually owns (backend `owned` flag).
 	// Liked Music reports owned but can't be renamed/deleted, so exclude it explicitly.
 	const editable = $derived((pl?.owned ?? false) && !isLiked);
+	// Saving someone else's playlist keeps it on this machine, signed in or not: YouTube has no
+	// "save" for a playlist that doesn't cost an account, and the local one works offline. Your own
+	// playlists, Liked Music and On Repeat are in the library already by definition.
+	const savable = $derived(!isOnRepeat && !isLiked && !editable);
+	const savedHere = $derived(isSaved(id));
 	// YouTube's header count includes rows that never make it into the list (unavailable or
 	// region-blocked tracks), so it reads high. Once every page is in, we know the real number, so
 	// swap it in. Until then the header's own count is the only estimate of the total there is.
@@ -765,6 +774,26 @@
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Add to shortcuts
 		</button>
+		{#if savable}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={() =>
+					run(() =>
+						toast.success(
+							toggleSaved(asItem()) ? 'Saved to library' : 'Removed from library'
+						)
+					)}
+			>
+				<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
+				<HugeiconsIcon
+					icon={BookmarkAdd02Icon}
+					altIcon={BookmarkMinus02Icon}
+					showAlt={savedHere}
+					class="h-4 w-4"
+				/>
+				{savedHere ? 'Remove from library' : 'Save to library'}
+			</button>
+		{/if}
 		{#if editable}
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"

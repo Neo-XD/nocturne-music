@@ -27,6 +27,12 @@ export type RecentEntry = BrowseItem & { at: number };
 
 export type Personal = {
 	picks: Pick[];
+	/**
+	 * Playlists, albums and artists saved to the library from this machine, newest first. This is
+	 * the whole library for a signed-out user, and it sits alongside YouTube's own for a signed-in
+	 * one: nothing here is account-scoped, so saves made before signing in stay put afterwards.
+	 */
+	saved: BrowseItem[];
 	/** Pinned sidebar playlists, at most MAX_PINS; array order is display order. */
 	pins: string[];
 	/** Last time each playlist/album/artist was played from, keyed by browseId. */
@@ -45,6 +51,7 @@ export type Personal = {
 export function empty(): Personal {
 	return {
 		picks: [],
+		saved: [],
 		pins: [],
 		recent: {},
 		artists: {},
@@ -65,6 +72,9 @@ export function hydrate(raw: unknown): Personal {
 		base.picks = o.picks.filter(
 			(p) => p && typeof p.id === 'string' && (p as { manual?: boolean }).manual !== false
 		);
+	}
+	if (Array.isArray(o.saved)) {
+		base.saved = o.saved.filter((s) => s && typeof s.id === 'string' && typeof s.kind === 'string');
 	}
 	if (Array.isArray(o.pins)) {
 		base.pins = o.pins.filter((p) => typeof p === 'string').slice(0, MAX_PINS);
@@ -179,6 +189,38 @@ export function touchPick(p: Personal, id: string, now = Date.now()): boolean {
 	if (!hit) return false;
 	hit.lastUsedAt = now;
 	return true;
+}
+
+// --- Saved library ------------------------------------------------------------------------------
+
+/** Save or unsave a playlist/album/artist. Returns whether it is saved now. */
+export function toggleSaved(p: Personal, item: BrowseItem): boolean {
+	if (p.saved.some((s) => s.id === item.id)) {
+		p.saved = p.saved.filter((s) => s.id !== item.id);
+		return false;
+	}
+	// The card as it was on screen: opening it refetches everything anyway, so a stale subtitle is
+	// the worst this can go wrong, and storing it is what makes the grid render offline.
+	p.saved = [{ ...item }, ...p.saved];
+	return true;
+}
+
+export const isSaved = (p: Personal, id: string): boolean => p.saved.some((s) => s.id === id);
+
+/**
+ * One kind's saved cards followed by YouTube's own, minus anything in both. Deduped by id, which
+ * matches across the two: a library grid and a search card come out of the same parser, so an album
+ * saved here and liked on YouTube is one `MPRE…` either way.
+ */
+export function mergeSaved(
+	p: Personal,
+	items: BrowseItem[],
+	kind: BrowseItem['kind']
+): BrowseItem[] {
+	const local = p.saved.filter((s) => s.kind === kind);
+	if (!local.length) return items;
+	const have = new Set(items.map((i) => i.id));
+	return [...local.filter((s) => !have.has(s.id)), ...items];
 }
 
 // --- Sidebar pins + ordering -------------------------------------------------------------------

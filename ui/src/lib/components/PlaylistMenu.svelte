@@ -10,13 +10,22 @@
 		Radio02Icon,
 		ArrowUpNarrowWideIcon,
 		ArrowDownWideNarrowIcon,
+		BookmarkMinus02Icon,
 		DashboardSquare02Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import { enqueueItem } from '$lib/browse';
 	import { anchorMenu, toBody } from '$lib/menu';
-	import { addPick, personal, startRadio, togglePin } from '$lib/player.svelte';
+	import {
+		addPick,
+		isSaved,
+		personal,
+		startRadio,
+		toast,
+		togglePin,
+		toggleSaved
+	} from '$lib/player.svelte';
 
 	let {
 		item,
@@ -35,6 +44,7 @@
 	} = $props();
 
 	const pinned = $derived(personal.pins.includes(item.id));
+	const savedHere = $derived(isSaved(item.id));
 	// Radio needs a YouTube item behind it: local folders and the locally-built On Repeat have none.
 	const hasRadio = $derived(!api.isLocalId(item.id) && item.id !== api.ON_REPEAT_ID);
 	// An artist isn't a track list — there's nothing unambiguous to queue. Songs, albums and
@@ -152,5 +162,19 @@
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Add to shortcuts
 		</button>
+		<!-- Only for cards saved on this machine: YouTube's own library rows are unsaved from their
+		     page, where the button knows which write action to send. -->
+		{#if savedHere}
+			<button
+				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) =>
+					run(e, () => {
+						toggleSaved(item);
+						toast.success('Removed from library');
+					})}
+			>
+				<HugeiconsIcon icon={BookmarkMinus02Icon} class="h-4 w-4" /> Remove from library
+			</button>
+		{/if}
 	</div>
 {/if}
