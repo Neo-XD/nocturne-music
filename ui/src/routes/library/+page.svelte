@@ -130,14 +130,10 @@
 						aria-label="Sync {personal.saved.length} saved items to YouTube Music"
 					>
 						<span class="relative">
-							<HugeiconsIcon
-								icon={CloudSyncIcon}
-								strokeWidth={2.2}
-								class="h-4 w-4 {syncing ? 'animate-pulse' : ''}"
-							/>
+							<HugeiconsIcon icon={CloudSyncIcon} class="h-4 w-4 {syncing ? 'animate-pulse' : ''}" />
 							<!-- ring-background so the count reads over the icon's stroke (as in Titlebar). -->
 							<span
-								class="absolute -right-2.5 -top-2 min-w-4 rounded-full bg-accent px-1 text-[10px] font-semibold leading-4 text-accent-foreground ring-2 ring-background"
+								class="absolute -right-2 -top-1.5 min-w-3.5 rounded-full bg-accent px-[3px] text-[9px] font-semibold leading-[0.875rem] text-accent-foreground ring-[1.5px] ring-background"
 							>
 								{personal.saved.length}
 							</span>
