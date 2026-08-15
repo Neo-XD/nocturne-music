@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The search field plus its typeahead preview: type, wait 300ms, get a handful of real results
+	// The search field plus its typeahead preview: type, wait 500ms, get a handful of real results
 	// under the input. Runs the same `search_all` the search page runs and writes the same page-cache
 	// key, so submitting a previewed query paints from cache instead of searching twice.
 	//
@@ -97,7 +97,7 @@
 		}
 		open = true;
 		if (q !== loadedFor) items = [];
-		debounce = setTimeout(() => load(q), 300);
+		debounce = setTimeout(() => load(q), 500);
 	}
 
 	function close() {
