@@ -123,15 +123,25 @@
 				{#if personal.saved.length}
 					<Button
 						variant="outline"
-						size="sm"
-						class="gap-2"
+						size="icon-sm"
 						onclick={sync}
 						disabled={syncing}
-						title="Add everything saved on this device to YouTube Music"
-						aria-label="Sync saved items to YouTube Music"
+						title="Add the {personal.saved.length} saved on this device to YouTube Music"
+						aria-label="Sync {personal.saved.length} saved items to YouTube Music"
 					>
-						<HugeiconsIcon icon={CloudSyncIcon} class="h-4 w-4" />
-						{syncing ? 'Syncing…' : `Sync ${personal.saved.length} to YT Music`}
+						<span class="relative">
+							<HugeiconsIcon
+								icon={CloudSyncIcon}
+								strokeWidth={2.2}
+								class="h-4 w-4 {syncing ? 'animate-pulse' : ''}"
+							/>
+							<!-- ring-background so the count reads over the icon's stroke (as in Titlebar). -->
+							<span
+								class="absolute -right-2.5 -top-2 min-w-4 rounded-full bg-accent px-1 text-[10px] font-semibold leading-4 text-accent-foreground ring-2 ring-background"
+							>
+								{personal.saved.length}
+							</span>
+						</span>
 					</Button>
 				{/if}
 				<Button variant="outline" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
