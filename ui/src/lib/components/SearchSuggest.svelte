@@ -96,7 +96,12 @@
 			return;
 		}
 		open = true;
-		if (q !== loadedFor) items = [];
+		if (q !== loadedFor) {
+			// Loading starts now, not when the timer fires: otherwise the empty panel reads as
+			// "no results" for the whole debounce, on every query.
+			items = [];
+			loading = true;
+		}
 		debounce = setTimeout(() => load(q), 500);
 	}
 
