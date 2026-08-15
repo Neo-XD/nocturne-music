@@ -10,6 +10,7 @@
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
 		Add01Icon,
+		CloudSyncIcon,
 		DriveIcon,
 		MusicNoteSquare02Icon,
 		Playlist02Icon,
@@ -32,7 +33,8 @@
 		library,
 		loadLibrary,
 		loadLibraryExtras,
-		createLibraryPlaylist
+		createLibraryPlaylist,
+		syncSavedToYouTube
 	} from '$lib/player.svelte';
 	import { mergeSaved } from '$lib/personal';
 
@@ -63,6 +65,23 @@
 	function load() {
 		loadLibrary(true);
 		loadLibraryExtras(true);
+	}
+
+	let syncing = $state(false);
+	async function sync() {
+		if (syncing) return;
+		syncing = true;
+		const n = personal.saved.length;
+		try {
+			const { synced, failed } = await syncSavedToYouTube();
+			if (failed && synced) toast(`Synced ${synced} of ${n}. ${failed} failed, still saved here.`);
+			else if (failed) toast.error(`Nothing synced. ${failed} failed, still saved here.`);
+			else toast.success(`Synced ${synced} to YouTube Music`);
+		} catch (e) {
+			toast.error(String(e));
+		} finally {
+			syncing = false;
+		}
 	}
 
 	async function createNew() {
@@ -98,9 +117,27 @@
 	<div class="mb-6 flex items-center justify-between">
 		<h1 class="font-heading text-2xl font-bold">Library</h1>
 		{#if auth.account?.signedIn}
-			<Button variant="outline" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
-				<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
-			</Button>
+			<div class="flex items-center gap-2">
+				<!-- Only with something to push: saves made before signing in, which live on this
+				     machine until this button puts them on the account. -->
+				{#if personal.saved.length}
+					<Button
+						variant="outline"
+						size="sm"
+						class="gap-2"
+						onclick={sync}
+						disabled={syncing}
+						title="Add everything saved on this device to YouTube Music"
+						aria-label="Sync saved items to YouTube Music"
+					>
+						<HugeiconsIcon icon={CloudSyncIcon} class="h-4 w-4" />
+						{syncing ? 'Syncing…' : `Sync ${personal.saved.length} to YT Music`}
+					</Button>
+				{/if}
+				<Button variant="outline" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
+					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
+				</Button>
+			</div>
 		{/if}
 	</div>
 

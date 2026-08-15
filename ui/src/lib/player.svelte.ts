@@ -312,6 +312,60 @@ export function toggleSaved(item: BrowseItem): boolean {
 
 export const isSaved = (id: string): boolean => pl.isSaved(personal, id);
 
+/**
+ * Push everything saved on this machine into the signed-in account, then drop the local rows: the
+ * same cards come back through `loadLibrary`, so keeping both copies is what would duplicate them.
+ * Sequential, like every other bulk write here (a library is a handful of requests, don't hammer).
+ * Anything that fails stays local, so pressing the button again retries exactly what's left.
+ */
+export async function syncSavedToYouTube(): Promise<{ synced: number; failed: number }> {
+	// Fresh: "is this already in the account" is the whole duplicate check.
+	await loadLibrary(true);
+	const known = new Set(library.items.map((i) => i.id));
+	const done: string[] = [];
+	let failed = 0;
+	for (const item of personal.saved) {
+		try {
+			if (item.kind === 'album') {
+				// YouTube's own answer, so it can't be liked twice. The album's audio playlist is the
+				// like target and only its page carries it, which is what this fetch is for.
+				const album = await api.getAlbum(item.id);
+				if (!album.inLibrary) {
+					if (!album.playlistId) throw new Error('no album playlist');
+					await api.setAlbumSaved(album.playlistId, true);
+				}
+			} else if (item.kind === 'artist') {
+				// Subscribing twice is the same subscription. No pre-check: the library's artist grid
+				// is built from the songs in your library, not from subscriptions, so it can't answer.
+				await api.subscribe(item.id, true);
+			} else if (item.kind === 'playlist') {
+				// A playlist is liked by its browseId (Rust strips the `VL`), and it lands in the same
+				// grid `known` was built from, so a hit there means it is already saved.
+				if (!known.has(item.id)) await api.setAlbumSaved(item.id, true);
+			} else {
+				continue; // ponytail: songs can't be saved today, so there is nothing to push
+			}
+			done.push(item.id);
+		} catch {
+			failed++;
+		}
+	}
+	if (done.length) {
+		// Moved across rather than refetched: YouTube's library browse is eventually consistent and
+		// won't list a just-liked album for a few seconds, so a refresh here would blank the tiles
+		// that were on screen a moment ago (same reason `createLibraryPlaylist` prepends). The next
+		// forced refresh replaces these with YouTube's own rows. `mergeSaved` is the same dedupe the
+		// grids already use, so nothing lands twice; only what actually synced comes across.
+		const moved = { ...pl.empty(), saved: personal.saved.filter((s) => done.includes(s.id)) };
+		personal.saved = personal.saved.filter((s) => !done.includes(s.id));
+		savePersonal();
+		library.items = pl.mergeSaved(moved, library.items, 'playlist');
+		library.albums = pl.mergeSaved(moved, library.albums, 'album');
+		library.artists = pl.mergeSaved(moved, library.artists, 'artist');
+	}
+	return { synced: done.length, failed };
+}
+
 export function togglePin(id: string) {
 	const result = pl.togglePin(personal, id);
 	if (result === 'full') toast.error(`Unpin one first — ${pl.MAX_PINS} pins max`);
