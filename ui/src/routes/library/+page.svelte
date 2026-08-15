@@ -37,7 +37,7 @@
 		createLibraryPlaylist,
 		syncSavedToYouTube
 	} from '$lib/player.svelte';
-	import { mergeSaved } from '$lib/personal';
+	import { mergeSaved, unsynced } from '$lib/personal';
 
 	let dialogOpen = $state(false);
 	let newTitle = $state('');
@@ -60,6 +60,9 @@
 	const error = $derived(library.error ?? library.extrasError);
 	// Only the empty states differ: signed out there is no account library to be missing yet.
 	const signedOut = $derived(!auth.account?.signedIn);
+	// What the sync button has left to push. Synced rows stay in the local library (they are what
+	// the user still has after signing out), so counting all of `personal.saved` would nag forever.
+	const toSync = $derived(unsynced(personal));
 
 	onMount(load);
 
@@ -72,7 +75,7 @@
 	async function sync() {
 		if (syncing) return;
 		syncing = true;
-		const n = personal.saved.length;
+		const n = toSync.length;
 		try {
 			const { synced, failed } = await syncSavedToYouTube();
 			if (failed && synced) toast(`Synced ${synced} of ${n}. ${failed} failed, still saved here.`);
@@ -121,7 +124,7 @@
 			<div class="flex items-center gap-2">
 				<!-- Only with something to push: saves made before signing in, which live on this
 				     machine until this button puts them on the account. -->
-				{#if personal.saved.length}
+				{#if toSync.length}
 					<!-- A cloud glyph with a number on it says nothing about what pressing it does, and
 					     that's a write to someone's YouTube account. Hence a real tooltip rather than the
 					     `title` this app uses elsewhere: it has to be read before the click, not after a
@@ -136,7 +139,7 @@
 										size="icon-sm"
 										onclick={sync}
 										disabled={syncing}
-										aria-label="Sync {personal.saved.length} saved items to YouTube Music"
+										aria-label="Sync {toSync.length} saved items to YouTube Music"
 									>
 										<span class="relative">
 											<HugeiconsIcon
@@ -148,7 +151,7 @@
 											<span
 												class="absolute -right-2 -top-1.5 min-w-3.5 rounded-full bg-accent px-[3px] text-[9px] font-semibold leading-[0.875rem] text-accent-foreground ring-[1.5px] ring-background"
 											>
-												{personal.saved.length}
+												{toSync.length}
 											</span>
 										</span>
 									</Button>
@@ -157,7 +160,7 @@
 							<Tooltip.Content side="bottom">
 								{syncing
 									? 'Adding them to YouTube Music…'
-									: `Add the ${personal.saved.length} saved on this device to your YouTube Music library`}
+									: `Add the ${toSync.length} saved on this device to your YouTube Music library`}
 							</Tooltip.Content>
 						</Tooltip.Root>
 					</Tooltip.Provider>

@@ -17,6 +17,8 @@ import {
 	hydrate,
 	interleave,
 	isSaved,
+	isSynced,
+	markSynced,
 	mergeSaved,
 	noteRecent,
 	orderLibrary,
@@ -27,7 +29,8 @@ import {
 	togglePin,
 	toggleSaved,
 	topArtistIds,
-	touchPick
+	touchPick,
+	unsynced
 } from './personal.ts';
 
 function ok(cond: boolean, what: string): void {
@@ -314,9 +317,25 @@ const range = (n: number, prefix: string) => Array.from({ length: n }, (_, i) =>
 	ok(ids(mergeSaved(p, remote, 'album')).join() === 'MPRE2,MPRE1,MPRE9', 'deduped by id');
 	ok(mergeSaved(empty(), remote, 'album') === remote, 'no local saves returns the input untouched');
 
+	// Syncing to an account flags the rows, it does not take them out of the local library: dropping
+	// them is what left a signed-out user with nothing after they had signed in once.
+	markSynced(p, ['MPRE1', 'VL1']);
+	ok(ids(p.saved).join() === 'MPRE2,MPRE1,VL1', 'a synced save is still saved here');
+	ok(isSynced(p, 'MPRE1') && !isSynced(p, 'MPRE2'), 'only what synced is flagged');
+	ok(ids(unsynced(p)).join() === 'MPRE2', 'the sync button only offers what is left');
+	// The account has its own copy now, so the two must still read as one card.
+	ok(ids(mergeSaved(p, [album('MPRE1')], 'album')).join() === 'MPRE2,MPRE1', 'no duplicate tile');
+	// Re-saving a card that was removed starts over: it has to be pushed again.
+	toggleSaved(p, album('MPRE1'));
+	toggleSaved(p, album('MPRE1'));
+	ok(!isSynced(p, 'MPRE1'), 're-saving clears the synced flag');
+	markSynced(p, ['MPRE1']);
+
 	// Saves are not account-scoped, so signing in later must not drop them (hydrate is the only
 	// thing that ever rebuilds this list).
-	ok(ids(hydrate(JSON.parse(JSON.stringify(p))).saved).join() === 'MPRE2,MPRE1,VL1', 'saves persist');
+	const back = hydrate(JSON.parse(JSON.stringify(p)));
+	ok(ids(back.saved).join() === 'MPRE1,MPRE2,VL1', 'saves persist');
+	ok(isSynced(back, 'MPRE1'), 'and so does the synced flag');
 	ok(hydrate({}).saved.length === 0, 'a blob from before the feature reads as nothing saved');
 	ok(hydrate({ saved: [{ id: 'x' }, 'junk'] }).saved.length === 0, 'junk rows are dropped');
 }

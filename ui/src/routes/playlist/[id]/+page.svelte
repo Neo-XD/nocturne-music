@@ -37,8 +37,10 @@
 	import { SORTS, sortSongs, type SortKey } from '$lib/sort';
 	import {
 		addPick,
+		auth,
 		enqueue,
 		isSaved,
+		isSynced,
 		playback,
 		openAddToPlaylist,
 		playFrom,
@@ -83,7 +85,11 @@
 	// Saving someone else's playlist keeps it on this machine, signed in or not: YouTube has no
 	// "save" for a playlist that doesn't cost an account, and the local one works offline. Your own
 	// playlists, Liked Music and On Repeat are in the library already by definition.
-	const savable = $derived(!isOnRepeat && !isLiked && !editable);
+	// Once the sync button has put it on the account, the account owns the save: removing only the
+	// local copy would leave it in the library grid, so the entry hides until the user signs out.
+	const savable = $derived(
+		!isOnRepeat && !isLiked && !editable && !(auth.account?.signedIn && isSynced(id))
+	);
 	const savedHere = $derived(isSaved(id));
 	// YouTube's header count includes rows that never make it into the list (unavailable or
 	// region-blocked tracks), so it reads high. Once every page is in, we know the real number, so

@@ -25,6 +25,13 @@ export type Pick = BrowseItem & {
 
 export type RecentEntry = BrowseItem & { at: number };
 
+/**
+ * A row in the local library. `synced` means the Library page's sync button has since put it on the
+ * signed-in account too; the row stays here either way, because an account can be signed out of and
+ * this machine's library is not the account's.
+ */
+export type Saved = BrowseItem & { synced?: boolean };
+
 export type Personal = {
 	picks: Pick[];
 	/**
@@ -32,7 +39,7 @@ export type Personal = {
 	 * the whole library for a signed-out user, and it sits alongside YouTube's own for a signed-in
 	 * one: nothing here is account-scoped, so saves made before signing in stay put afterwards.
 	 */
-	saved: BrowseItem[];
+	saved: Saved[];
 	/** Pinned sidebar playlists, at most MAX_PINS; array order is display order. */
 	pins: string[];
 	/** Last time each playlist/album/artist was played from, keyed by browseId. */
@@ -206,6 +213,23 @@ export function toggleSaved(p: Personal, item: BrowseItem): boolean {
 }
 
 export const isSaved = (p: Personal, id: string): boolean => p.saved.some((s) => s.id === id);
+
+/** Saved here and also on the account, so the account's copy is the one to unsave while signed in. */
+export const isSynced = (p: Personal, id: string): boolean =>
+	p.saved.some((s) => s.id === id && s.synced === true);
+
+/** What the Library's sync button still has to push. */
+export const unsynced = (p: Personal): Saved[] => p.saved.filter((s) => !s.synced);
+
+/**
+ * Flag the rows that made it onto the account. They are kept, not dropped: deleting them is what
+ * emptied the library the moment the user signed out again, and `mergeSaved` already collapses the
+ * local row and YouTube's own into one card while signed in.
+ */
+export function markSynced(p: Personal, ids: string[]) {
+	const done = new Set(ids);
+	p.saved = p.saved.map((s) => (done.has(s.id) ? { ...s, synced: true } : s));
+}
 
 /**
  * One kind's saved cards followed by YouTube's own, minus anything in both. Deduped by id, which

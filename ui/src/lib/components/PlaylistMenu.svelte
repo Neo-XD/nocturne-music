@@ -19,7 +19,9 @@
 	import { anchorMenu, toBody } from '$lib/menu';
 	import {
 		addPick,
+		auth,
 		isSaved,
+		isSynced,
 		personal,
 		startRadio,
 		toast,
@@ -44,7 +46,11 @@
 	} = $props();
 
 	const pinned = $derived(personal.pins.includes(item.id));
-	const savedHere = $derived(isSaved(item.id));
+	// A synced row is on the account too, and dropping only the local copy would leave the card on
+	// screen with a "removed" toast under it. Signed out, the local copy is the whole library again.
+	const savedHere = $derived(
+		isSaved(item.id) && !(auth.account?.signedIn && isSynced(item.id))
+	);
 	// Radio needs a YouTube item behind it: local folders and the locally-built On Repeat have none.
 	const hasRadio = $derived(!api.isLocalId(item.id) && item.id !== api.ON_REPEAT_ID);
 	// An artist isn't a track list — there's nothing unambiguous to queue. Songs, albums and

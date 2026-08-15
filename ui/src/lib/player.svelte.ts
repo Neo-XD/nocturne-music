@@ -312,11 +312,16 @@ export function toggleSaved(item: BrowseItem): boolean {
 
 export const isSaved = (id: string): boolean => pl.isSaved(personal, id);
 
+/** Saved here and pushed to the account: while signed in, unsaving it belongs on the item's page,
+ *  where the button knows which write to send. Signed out, this row is the only library there is. */
+export const isSynced = (id: string): boolean => pl.isSynced(personal, id);
+
 /**
- * Push everything saved on this machine into the signed-in account, then drop the local rows: the
- * same cards come back through `loadLibrary`, so keeping both copies is what would duplicate them.
- * Sequential, like every other bulk write here (a library is a handful of requests, don't hammer).
- * Anything that fails stays local, so pressing the button again retries exactly what's left.
+ * Push everything saved on this machine into the signed-in account. The local rows stay put and are
+ * only flagged `synced`: they are the whole library again the moment the user signs out, and
+ * `mergeSaved` dedupes the two copies into one card while signed in. Sequential, like every other
+ * bulk write here (a library is a handful of requests, don't hammer). Anything that fails keeps its
+ * flag off, so pressing the button again retries exactly what's left.
  */
 export async function syncSavedToYouTube(): Promise<{ synced: number; failed: number }> {
 	// Fresh: "is this already in the account" is the whole duplicate check.
@@ -324,7 +329,7 @@ export async function syncSavedToYouTube(): Promise<{ synced: number; failed: nu
 	const known = new Set(library.items.map((i) => i.id));
 	const done: string[] = [];
 	let failed = 0;
-	for (const item of personal.saved) {
+	for (const item of pl.unsynced(personal)) {
 		try {
 			if (item.kind === 'album') {
 				// YouTube's own answer, so it can't be liked twice. The album's audio playlist is the
@@ -351,17 +356,11 @@ export async function syncSavedToYouTube(): Promise<{ synced: number; failed: nu
 		}
 	}
 	if (done.length) {
-		// Moved across rather than refetched: YouTube's library browse is eventually consistent and
-		// won't list a just-liked album for a few seconds, so a refresh here would blank the tiles
-		// that were on screen a moment ago (same reason `createLibraryPlaylist` prepends). The next
-		// forced refresh replaces these with YouTube's own rows. `mergeSaved` is the same dedupe the
-		// grids already use, so nothing lands twice; only what actually synced comes across.
-		const moved = { ...pl.empty(), saved: personal.saved.filter((s) => done.includes(s.id)) };
-		personal.saved = personal.saved.filter((s) => !done.includes(s.id));
+		pl.markSynced(personal, done);
 		savePersonal();
-		library.items = pl.mergeSaved(moved, library.items, 'playlist');
-		library.albums = pl.mergeSaved(moved, library.albums, 'album');
-		library.artists = pl.mergeSaved(moved, library.artists, 'artist');
+		// No refetch: YouTube's library browse is eventually consistent and won't list a just-liked
+		// album for a few seconds (same reason `createLibraryPlaylist` prepends). The local rows are
+		// still on screen through `mergeSaved`, so there is nothing to bridge.
 	}
 	return { synced: done.length, failed };
 }
