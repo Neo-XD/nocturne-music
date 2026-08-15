@@ -21,6 +21,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tabs from '$lib/components/ui/tabs';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import LocalMusic from '$lib/components/LocalMusic.svelte';
 	import MediaCard from '$lib/components/MediaCard.svelte';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
@@ -121,24 +122,45 @@
 				<!-- Only with something to push: saves made before signing in, which live on this
 				     machine until this button puts them on the account. -->
 				{#if personal.saved.length}
-					<Button
-						variant="outline"
-						size="icon-sm"
-						onclick={sync}
-						disabled={syncing}
-						title="Add the {personal.saved.length} saved on this device to YouTube Music"
-						aria-label="Sync {personal.saved.length} saved items to YouTube Music"
-					>
-						<span class="relative">
-							<HugeiconsIcon icon={CloudSyncIcon} class="h-4 w-4 {syncing ? 'animate-pulse' : ''}" />
-							<!-- ring-background so the count reads over the icon's stroke (as in Titlebar). -->
-							<span
-								class="absolute -right-2 -top-1.5 min-w-3.5 rounded-full bg-accent px-[3px] text-[9px] font-semibold leading-[0.875rem] text-accent-foreground ring-[1.5px] ring-background"
-							>
-								{personal.saved.length}
-							</span>
-						</span>
-					</Button>
+					<!-- A cloud glyph with a number on it says nothing about what pressing it does, and
+					     that's a write to someone's YouTube account. Hence a real tooltip rather than the
+					     `title` this app uses elsewhere: it has to be read before the click, not after a
+					     second of hovering. `child` keeps our own Button as the trigger element. -->
+					<Tooltip.Provider delayDuration={150}>
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								{#snippet child({ props })}
+									<Button
+										{...props}
+										variant="outline"
+										size="icon-sm"
+										onclick={sync}
+										disabled={syncing}
+										aria-label="Sync {personal.saved.length} saved items to YouTube Music"
+									>
+										<span class="relative">
+											<HugeiconsIcon
+												icon={CloudSyncIcon}
+												class="h-4 w-4 {syncing ? 'animate-pulse' : ''}"
+											/>
+											<!-- ring-background so the count reads over the icon's stroke (as in
+											     Titlebar). -->
+											<span
+												class="absolute -right-2 -top-1.5 min-w-3.5 rounded-full bg-accent px-[3px] text-[9px] font-semibold leading-[0.875rem] text-accent-foreground ring-[1.5px] ring-background"
+											>
+												{personal.saved.length}
+											</span>
+										</span>
+									</Button>
+								{/snippet}
+							</Tooltip.Trigger>
+							<Tooltip.Content side="bottom">
+								{syncing
+									? 'Adding them to YouTube Music…'
+									: `Add the ${personal.saved.length} saved on this device to your YouTube Music library`}
+							</Tooltip.Content>
+						</Tooltip.Root>
+					</Tooltip.Provider>
 				{/if}
 				<Button variant="outline" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
 					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
