@@ -9,6 +9,8 @@
 		Tick02Icon,
 		MoreVerticalIcon,
 		DashboardSquare02Icon,
+		BookmarkAdd02Icon,
+		BookmarkCheck02Icon,
 		ArrowRight01Icon
 	} from '@hugeicons/core-free-icons';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
@@ -21,11 +23,14 @@
 	import type { ArtistPage, BrowseItem, PlaylistPage } from '$lib/api';
 	import {
 		addPick,
+		auth,
+		isSaved,
 		playback,
 		openAddToPlaylist,
 		playFrom,
 		startRadio,
-		toast
+		toast,
+		toggleSaved
 	} from '$lib/player.svelte';
 	import { getCached, putCached } from '$lib/pagecache';
 
@@ -39,6 +44,8 @@
 
 	const id = $derived(page.params.id ?? '');
 	const nowId = $derived(playback.now?.videoId);
+	// Saved to the library on this machine (the signed-out counterpart of subscribing).
+	const savedHere = $derived(isSaved(id));
 
 	async function load(cid: string) {
 		const key = `artist:${cid}`;
@@ -219,16 +226,38 @@
 				>
 					<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> Radio
 				</button>
-				<button
-					class="flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 disabled:opacity-60 {subscribed
-						? 'border-primary text-primary'
-						: ''}"
-					onclick={toggleSub}
-					disabled={subBusy}
-				>
-					<HugeiconsIcon icon={Add01Icon} altIcon={Tick02Icon} showAlt={subscribed} class="h-4 w-4" />
-					{subscribed ? 'Subscribed' : 'Subscribe'}
-				</button>
+				<!-- Subscribing is a YouTube write action. Signed out, the same slot saves the artist to
+				     the local library instead of offering a button that can only fail. -->
+				{#if auth.account?.signedIn}
+					<button
+						class="flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 disabled:opacity-60 {subscribed
+							? 'border-primary text-primary'
+							: ''}"
+						onclick={toggleSub}
+						disabled={subBusy}
+					>
+						<HugeiconsIcon icon={Add01Icon} altIcon={Tick02Icon} showAlt={subscribed} class="h-4 w-4" />
+						{subscribed ? 'Subscribed' : 'Subscribe'}
+					</button>
+				{:else}
+					<button
+						class="flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 {savedHere
+							? 'border-primary text-primary'
+							: ''}"
+						onclick={() =>
+							toast.success(
+								toggleSaved(asItem()) ? 'Saved to library' : 'Removed from library'
+							)}
+					>
+						<HugeiconsIcon
+							icon={BookmarkAdd02Icon}
+							altIcon={BookmarkCheck02Icon}
+							showAlt={savedHere}
+							class="h-4 w-4"
+						/>
+						{savedHere ? 'In library' : 'Save to library'}
+					</button>
+				{/if}
 				<button
 					class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border text-muted-foreground transition hover:bg-accent/10 hover:text-foreground"
 					onclick={openMenu}

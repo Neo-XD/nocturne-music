@@ -29,11 +29,13 @@
         addPick,
         auth,
         enqueue,
+        isSaved,
         playback,
         openAddManyToPlaylist,
         playFrom,
         startRadio,
         toast,
+        toggleSaved,
     } from "$lib/player.svelte";
     import { getCached, putCached } from "$lib/pagecache";
     import { thumb } from "$lib/thumb";
@@ -151,14 +153,31 @@
         // Real order + shuffle flag — the backend shuffles (fresh each time, restorable).
         playFrom(asItem(), album.items, null, album.playlistId, true);
     }
-    // Saving an album to the library is a "like" on its audio playlist. Optimistic: the button
-    // flips now and reverts if YouTube rejects it. Mutating `album` also updates the page cache,
-    // which holds this same object.
+    // Saved on YouTube (signed in) or on this machine (signed out, and anything saved before the
+    // user ever signed in). The button reads both, so a local save can't show as "Save to library"
+    // while its tile sits in the library.
+    const savedHere = $derived(isSaved(id));
+    const inLibrary = $derived((album?.inLibrary ?? false) || savedHere);
+
+    // Signed in, saving an album is a "like" on its audio playlist: optimistic, the button flips now
+    // and reverts if YouTube rejects it (mutating `album` updates the page cache, which holds this
+    // same object). Signed out there is nobody to tell, so it goes in the local library instead.
     let savingLibrary = $state(false);
     async function toggleLibrary() {
         const a = album;
-        if (!a?.playlistId || savingLibrary) return;
-        const next = !a.inLibrary;
+        if (!a || savingLibrary) return;
+        const next = !inLibrary;
+        if (!auth.account?.signedIn || !a.playlistId) {
+            toggleSaved(asItem());
+            toast.success(next ? "Saved to library" : "Removed from library");
+            return;
+        }
+        // Signed in: YouTube owns it from here, so drop any local row left from before signing in.
+        if (savedHere) toggleSaved(asItem());
+        if (a.inLibrary === next) {
+            toast.success(next ? "Saved to library" : "Removed from library");
+            return; // YouTube already agrees; only the local row had to go
+        }
         a.inLibrary = next;
         savingLibrary = true;
         try {
@@ -326,11 +345,13 @@
                 >
                     <HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> Shuffle
                 </button>
-                {#if auth.account?.signedIn && album.playlistId}
+                <!-- Local albums are already in the Local tab; everything else is savable, signed
+                     in or not. -->
+                {#if !isLocal}
                     <button
                         class="flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 disabled:opacity-50"
-                        class:border-primary={album.inLibrary}
-                        class:text-primary={album.inLibrary}
+                        class:border-primary={inLibrary}
+                        class:text-primary={inLibrary}
                         onclick={toggleLibrary}
                         disabled={savingLibrary}
                     >
@@ -338,10 +359,10 @@
                         <HugeiconsIcon
                             icon={BookmarkAdd02Icon}
                             altIcon={BookmarkCheck02Icon}
-                            showAlt={album.inLibrary}
+                            showAlt={inLibrary}
                             class="h-4 w-4"
                         />
-                        {album.inLibrary ? "In library" : "Save to library"}
+                        {inLibrary ? "In library" : "Save to library"}
                     </button>
                 {/if}
                 <button

@@ -386,7 +386,13 @@ pub async fn get_home_more(state: St<'_>, token: String) -> Result<HomePage, Str
 #[tauri::command]
 pub async fn get_library(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
     let client = metadata_client(&state)?;
-    let mut items = state.it.library_playlists(client).await.map_err(|e| e.to_string())?;
+    // Signed out there is no YouTube library to ask for (the browse would come back as a sign-in
+    // shell), but On Repeat is built from this machine's play history and is still real.
+    let mut items = if state.it.is_logged_in() {
+        state.it.library_playlists(client).await.map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
     // On Repeat leads the library once there's anything in it. Hidden while empty rather than
     // shown as a dead tile on a fresh install.
     let songs = on_repeat_songs(&state);
@@ -409,14 +415,22 @@ pub async fn get_library(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
     Ok(items)
 }
 
+/// Empty rather than an error when signed out: the Library page merges the user's local saves into
+/// these grids, so "nothing of yours on YouTube" is an answer, not a failure.
 #[tauri::command]
 pub async fn get_library_albums(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
+    if !state.it.is_logged_in() {
+        return Ok(Vec::new());
+    }
     let client = metadata_client(&state)?;
     state.it.library_albums(client).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_library_artists(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
+    if !state.it.is_logged_in() {
+        return Ok(Vec::new());
+    }
     let client = metadata_client(&state)?;
     state.it.library_artists(client).await.map_err(|e| e.to_string())
 }

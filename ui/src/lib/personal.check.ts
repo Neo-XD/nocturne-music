@@ -16,6 +16,8 @@ import {
 	hiddenSections,
 	hydrate,
 	interleave,
+	isSaved,
+	mergeSaved,
 	noteRecent,
 	orderLibrary,
 	placePick,
@@ -23,6 +25,7 @@ import {
 	removePick,
 	seedPick,
 	togglePin,
+	toggleSaved,
 	topArtistIds,
 	touchPick
 } from './personal.ts';
@@ -286,6 +289,36 @@ const range = (n: number, prefix: string) => Array.from({ length: n }, (_, i) =>
 	);
 	ok(hydrate({}).home.order.length === 0, 'a blob from before the feature reads as unarranged');
 	ok(hydrate({ home: { order: [1, 'a'], hidden: 'nope' } }).home.order.join() === 'a,@familiar', 'junk is dropped');
+}
+
+// --- the saved library: local saves merge with YouTube's without duplicating anything ------------
+{
+	const p = empty();
+	const album = (id: string): BrowseItem => ({ kind: 'album', id, title: id });
+
+	ok(toggleSaved(p, item('VL1')), 'saving reports it saved');
+	ok(isSaved(p, 'VL1'), 'and it reads back as saved');
+	ok(!toggleSaved(p, item('VL1')), 'saving the same card again unsaves it');
+	ok(!isSaved(p, 'VL1'), 'and it is gone');
+
+	toggleSaved(p, item('VL1'));
+	toggleSaved(p, album('MPRE1'));
+	toggleSaved(p, album('MPRE2'));
+	// Newest first, and only the asked-for kind: the Library page's tabs are built from these.
+	ok(ids(mergeSaved(p, [], 'album')).join() === 'MPRE2,MPRE1', 'newest saved first, albums only');
+	ok(ids(mergeSaved(p, [], 'playlist')).join() === 'VL1', 'playlists are their own tab');
+	ok(mergeSaved(p, [], 'artist').length === 0, 'nothing saved of that kind is empty, not an error');
+
+	// An album saved here and also in the YouTube library is one tile, not two.
+	const remote = [album('MPRE1'), album('MPRE9')];
+	ok(ids(mergeSaved(p, remote, 'album')).join() === 'MPRE2,MPRE1,MPRE9', 'deduped by id');
+	ok(mergeSaved(empty(), remote, 'album') === remote, 'no local saves returns the input untouched');
+
+	// Saves are not account-scoped, so signing in later must not drop them (hydrate is the only
+	// thing that ever rebuilds this list).
+	ok(ids(hydrate(JSON.parse(JSON.stringify(p))).saved).join() === 'MPRE2,MPRE1,VL1', 'saves persist');
+	ok(hydrate({}).saved.length === 0, 'a blob from before the feature reads as nothing saved');
+	ok(hydrate({ saved: [{ id: 'x' }, 'junk'] }).saved.length === 0, 'junk rows are dropped');
 }
 
 // --- familiar artists: play counts, but only the ones with a channel to open --------------------

@@ -9,12 +9,16 @@
 	import { Cancel01Icon, Tick02Icon, Add01Icon } from '@hugeicons/core-free-icons';
 	import { thumb } from '$lib/thumb';
 	import { addPick, library, loadLibrary, personal } from '$lib/player.svelte';
+	import { mergeSaved } from '$lib/personal';
 
 	let { onclose }: { onclose: () => void } = $props();
 
 	let filter = $state('');
+	// Playlists saved on this machine count as library too: signed out they're all there is.
 	const matches = $derived(
-		library.items.filter((i) => i.title.toLowerCase().includes(filter.trim().toLowerCase()))
+		mergeSaved(personal, library.items, 'playlist').filter((i) =>
+			i.title.toLowerCase().includes(filter.trim().toLowerCase())
+		)
 	);
 	const already = (id: string) => personal.picks.some((p) => p.id === id);
 
@@ -86,7 +90,9 @@
 			</div>
 		{:else}
 			<p class="p-2 text-sm text-muted-foreground">
-				{library.items.length ? 'Nothing matches that.' : 'No playlists yet — create one in your Library.'}
+				{filter.trim()
+					? 'Nothing matches that.'
+					: 'No playlists yet. Save one from its page, or create one in your Library.'}
 			</p>
 		{/if}
 	</div>
