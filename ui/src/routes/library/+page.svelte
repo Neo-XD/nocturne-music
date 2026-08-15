@@ -27,12 +27,14 @@
 	import type { BrowseItem } from '$lib/api';
 	import {
 		auth,
+		personal,
 		toast,
 		library,
 		loadLibrary,
 		loadLibraryExtras,
 		createLibraryPlaylist
 	} from '$lib/player.svelte';
+	import { mergeSaved } from '$lib/personal';
 
 	let dialogOpen = $state(false);
 	let newTitle = $state('');
@@ -45,14 +47,18 @@
 	});
 
 	// Everything here lives in the shared `library` store, so a revisit renders the cached grid
-	// immediately and the forced refresh below swaps in fresh data behind it.
-	const all = $derived([...library.items, ...library.albums, ...library.artists]);
+	// immediately and the forced refresh below swaps in fresh data behind it. What was saved on this
+	// machine merges in per tab (`mergeSaved`), which is the whole library when signed out.
+	const playlists = $derived(mergeSaved(personal, library.items, 'playlist'));
+	const albums = $derived(mergeSaved(personal, library.albums, 'album'));
+	const artists = $derived(mergeSaved(personal, library.artists, 'artist'));
+	const all = $derived([...playlists, ...albums, ...artists]);
 	const loading = $derived((library.loading || library.extrasLoading) && !all.length);
 	const error = $derived(library.error ?? library.extrasError);
+	// Only the empty states differ: signed out there is no account library to be missing yet.
+	const signedOut = $derived(!auth.account?.signedIn);
 
-	onMount(() => {
-		if (auth.account?.signedIn) load();
-	});
+	onMount(load);
 
 	function load() {
 		loadLibrary(true);
@@ -151,11 +157,6 @@
 		<Tabs.Content value="local">{#if tab === 'local'}<LocalMusic />{/if}</Tabs.Content>
 		{#if tab === 'local'}
 			<!-- nothing else: the YouTube states below have no bearing on files on this disk -->
-		{:else if !auth.account?.signedIn}
-			<p class="text-sm text-muted-foreground">
-				Sign in to see your playlists and liked songs, or open the Local tab for music on this
-				device.
-			</p>
 		{:else if loading}
 			<div class="card-grid">
 				{#each Array(12) as _, i (i)}
@@ -168,24 +169,35 @@
 			<ErrorState message={error} onRetry={load} />
 		{:else}
 			<Tabs.Content value="all">
-				{#if tab === 'all'}{@render grid(all, 'Your library is empty.')}{/if}
+				{#if tab === 'all'}
+					{@render grid(
+						all,
+						signedOut
+							? 'Nothing saved yet. Open a playlist or album and hit Save to library, or sign in for the one on your account.'
+							: 'Your library is empty.'
+					)}
+				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="playlists">
-				{#if tab === 'playlists'}{@render grid(library.items, 'No playlists yet.')}{/if}
+				{#if tab === 'playlists'}
+					{@render grid(
+						playlists,
+						'No playlists yet. Open one and hit Save to library to keep it here.'
+					)}
+				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="albums">
 				{#if tab === 'albums'}
-					{@render grid(
-						library.albums,
-						'No saved albums yet. Open an album and hit Save to library.'
-					)}
+					{@render grid(albums, 'No saved albums yet. Open an album and hit Save to library.')}
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="artists">
 				{#if tab === 'artists'}
 					{@render grid(
-						library.artists,
-						'No artists yet. They show up once you save their songs or albums.'
+						artists,
+						signedOut
+							? 'No artists yet. Save one from its page to keep it here.'
+							: 'No artists yet. They show up once you save their songs or albums.'
 					)}
 				{/if}
 			</Tabs.Content>

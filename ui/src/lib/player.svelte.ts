@@ -299,6 +299,19 @@ export function touchPick(id: string) {
 	if (pl.touchPick(personal, id)) savePersonal();
 }
 
+/**
+ * Save a playlist/album/artist to the library from this machine, or take it back out. Returns the
+ * new state. Not account-scoped and never cleared on sign-in: what a signed-out user saved is still
+ * theirs afterwards, sitting next to whatever YouTube says their library holds.
+ */
+export function toggleSaved(item: BrowseItem): boolean {
+	const saved = pl.toggleSaved(personal, item);
+	savePersonal();
+	return saved;
+}
+
+export const isSaved = (id: string): boolean => pl.isSaved(personal, id);
+
 export function togglePin(id: string) {
 	const result = pl.togglePin(personal, id);
 	if (result === 'full') toast.error(`Unpin one first — ${pl.MAX_PINS} pins max`);
@@ -608,9 +621,10 @@ export function initApp(mini = false): () => void {
 		api.onAuthChanged((a) => {
 			auth.account = a;
 			resetLibraryForAccount();
-			if (a.signedIn) {
-				if (!mini) loadLibrary(true);
-			} else {
+			// Signing out doesn't empty the library: On Repeat and anything saved on this machine
+			// are still there, and the backend answers both without touching YouTube.
+			if (!mini) loadLibrary(true);
+			if (!a.signedIn) {
 				ui.channelPickerOpen = false;
 				ui.channelPickerRequired = false;
 				ui.channelIdentities = [];
@@ -657,8 +671,8 @@ export function initApp(mini = false): () => void {
 				openChannelPicker(true);
 				return;
 			}
+			loadLibrary();
 			if (a.signedIn) {
-				loadLibrary();
 				// Only when the stored answer might be the provisional one: databases that predate
 				// `canSwitch` default it to true so the action stays discoverable, and this is what
 				// demotes single-channel users back to no switcher. A stored `false` is already

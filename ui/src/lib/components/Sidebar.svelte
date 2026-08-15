@@ -32,7 +32,7 @@
 		toggleSidebar,
 		toast
 	} from '$lib/player.svelte';
-	import { orderLibrary } from '$lib/personal';
+	import { mergeSaved, orderLibrary } from '$lib/personal';
 
 	const nav = [
 		{ href: '/', label: 'Home', icon: Home01Icon },
@@ -43,8 +43,11 @@
 		href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
 
 	// Pinned first (in pin order), then everything else by last played. Derived here rather than in
-	// the shared `library` store so the Library page keeps YouTube's own ordering.
-	const playlists = $derived(orderLibrary(library.items, personal));
+	// the shared `library` store so the Library page keeps YouTube's own ordering. Playlists saved
+	// on this machine sit in the same list: signed out they are the only ones there.
+	const playlists = $derived(
+		orderLibrary(mergeSaved(personal, library.items, 'playlist'), personal)
+	);
 	// How many of the leading rows are pinned — a rule under the last one explains the split.
 	const pinnedCount = $derived(playlists.filter((p) => personal.pins.includes(p.id)).length);
 
@@ -171,18 +174,22 @@
 		</button>
 	</nav>
 
-	<!-- Playlists (signed in). Hidden on the icon rail — needs labels; matches YTM's collapsed rail.
-	     flex-1 lets the list fill the space and scroll. -->
-	{#if auth.account?.signedIn}
+	<!-- Playlists. Hidden on the icon rail (needs labels; matches YTM's collapsed rail). flex-1 lets
+	     the list fill the space and scroll. Signed out the section still appears once there is
+	     something in it: On Repeat, or a playlist saved on this machine. -->
+	{#if auth.account?.signedIn || playlists.length}
 		<div class="mt-3 hidden min-h-0 flex-1 flex-col border-t pt-3 {wide('lg:flex')}">
-			<Button
-				variant="outline"
-				size="sm"
-				class="mb-2 w-full gap-2"
-				onclick={() => (dialogOpen = true)}
-			>
-				<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
-			</Button>
+			<!-- Creating one is a YouTube write action, so it needs an account. -->
+			{#if auth.account?.signedIn}
+				<Button
+					variant="outline"
+					size="sm"
+					class="mb-2 w-full gap-2"
+					onclick={() => (dialogOpen = true)}
+				>
+					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
+				</Button>
+			{/if}
 			<div class="min-h-0 flex-1 overflow-y-auto">
 				{#each playlists as pl, i (pl.id)}
 					<!-- The ⋯ is a sibling of the link, not a child: a <button> inside an <a> is invalid
