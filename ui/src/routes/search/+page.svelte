@@ -11,10 +11,10 @@
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { Search01Icon } from '@hugeicons/core-free-icons';
-	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
+	import SearchSuggest from '$lib/components/SearchSuggest.svelte';
 	import TrackRow from '$lib/components/TrackRow.svelte';
 	import TrackRowSkeleton from '$lib/components/TrackRowSkeleton.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
@@ -110,7 +110,11 @@
 				runSearch();
 			}}
 		>
-			<Input bind:value={query} placeholder="Search songs, albums, artists, playlists…" />
+			<SearchSuggest
+				bind:value={query}
+				placeholder="Search songs, albums, artists, playlists…"
+				onpick={() => (lastQuery = query)}
+			/>
 			<Button type="submit" class="gap-2" disabled={searching}>
 				<HugeiconsIcon icon={Search01Icon} class="h-4 w-4" />
 				{searching ? 'Searching…' : 'Search'}
