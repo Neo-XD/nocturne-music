@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { Search01Icon, UserGroup02Icon } from '@hugeicons/core-free-icons';
-	import { Input } from '$lib/components/ui/input';
+	import SearchSuggest from '$lib/components/SearchSuggest.svelte';
 	import { auth, playback, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { thumb } from '$lib/thumb';
@@ -28,32 +28,36 @@
 	});
 </script>
 
-<div class="relative overflow-hidden border-b">
-	{#if playback.now?.thumbnail && !artFailed}
-		<!-- 96px, not display size: blur-2xl is a 40px blur, so every detail above a handful of
-		     pixels is thrown away anyway. The old 1200px source decoded to 5.7 MiB for this, and
-		     re-decoded on every track change. -->
-		<img
-			src={thumb(playback.now.thumbnail, 96)}
-			alt=""
-			class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-60 blur-2xl"
-			onerror={() => (artFailed = true)}
-		/>
-	{:else}
-		<!-- Nothing playing: without this the header is a bare strip with a greeting in it. An accent
-		     wash keeps it a header. Inline style so it can't be lost to a stale dev stylesheet, and it
-		     rides --primary so every preset theme gets its own. -->
+<!-- overflow-hidden lives on the backdrop wrapper, not the hero: the scaled blur has to be clipped,
+     but the search preview below has to hang out past the bottom edge. -->
+<div class="relative border-b">
+	<div class="pointer-events-none absolute inset-0 overflow-hidden">
+		{#if playback.now?.thumbnail && !artFailed}
+			<!-- 96px, not display size: blur-2xl is a 40px blur, so every detail above a handful of
+			     pixels is thrown away anyway. The old 1200px source decoded to 5.7 MiB for this, and
+			     re-decoded on every track change. -->
+			<img
+				src={thumb(playback.now.thumbnail, 96)}
+				alt=""
+				class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-60 blur-2xl"
+				onerror={() => (artFailed = true)}
+			/>
+		{:else}
+			<!-- Nothing playing: without this the header is a bare strip with a greeting in it. An accent
+			     wash keeps it a header. Inline style so it can't be lost to a stale dev stylesheet, and it
+			     rides --primary so every preset theme gets its own. -->
+			<div
+				class="pointer-events-none absolute inset-0 opacity-[0.18]"
+				style="background:radial-gradient(120% 130% at 12% 0%, var(--primary) 0%, transparent 58%)"
+			></div>
+		{/if}
 		<div
-			class="pointer-events-none absolute inset-0 opacity-[0.18]"
-			style="background:radial-gradient(120% 130% at 12% 0%, var(--primary) 0%, transparent 58%)"
+			class="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/40"
 		></div>
-	{/if}
-	<div
-		class="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/40"
-	></div>
-	<div
-		class="absolute inset-0 bg-gradient-to-r from-background/80 via-background/30 to-transparent"
-	></div>
+		<div
+			class="absolute inset-0 bg-gradient-to-r from-background/80 via-background/30 to-transparent"
+		></div>
+	</div>
 	<div class="relative p-6 pt-8">
 		<div class="flex items-start justify-between gap-4">
 			<div class="flex min-w-0 items-center gap-3">
@@ -92,9 +96,16 @@
 				<form class="relative w-full max-w-xs" onsubmit={(e) => { e.preventDefault(); goSearch(); }}>
 					<HugeiconsIcon
 						icon={Search01Icon}
-						class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+						class="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
 					/>
-					<Input bind:value={searchQuery} placeholder="Search" class="rounded-full pl-9" />
+					<!-- The panel is wider than this field and hangs off its right edge: the rows carry
+					     artwork and two lines of text, which 20rem can't hold. -->
+					<SearchSuggest
+						bind:value={searchQuery}
+						placeholder="Search"
+						inputClass="rounded-full pl-9"
+						panelClass="right-0 w-[26rem]"
+					/>
 				</form>
 			</div>
 		</div>
