@@ -229,8 +229,14 @@ jobs:
         run: |
           set -euo pipefail
           APP=target/release/bundle/macos/limusic.app
+          # The executable inside the bundle is NOT named after the bundle: productName names the
+          # .app, the cargo package names the binary (limusic-app). Ask the bundle rather than
+          # guessing, so a rename of either can't quietly break this.
+          BIN="$APP/Contents/MacOS/$(plutil -extract CFBundleExecutable raw "$APP/Contents/Info.plist")"
+          [ -x "$BIN" ] || { echo "::error::no executable at $BIN"; ls -l "$APP/Contents/MacOS"; exit 1; }
+          echo "EXECUTABLE=$(basename "$BIN")" >> "$GITHUB_ENV"
           dylibbundler -cd -of -b \
-            -x "$APP/Contents/MacOS/limusic" \
+            -x "$BIN" \
             -d "$APP/Contents/Frameworks" \
             -p "@executable_path/../Frameworks" \
             -s "$BREW_PREFIX/lib" < /dev/null
@@ -308,7 +314,7 @@ jobs:
           rm -rf /tmp/roundtrip && mkdir -p /tmp/roundtrip
           tar -xzf "$TAR" -C /tmp/roundtrip
           codesign --verify --deep --strict --verbose=2 /tmp/roundtrip/limusic.app
-          test -x /tmp/roundtrip/limusic.app/Contents/MacOS/limusic
+          test -x "/tmp/roundtrip/limusic.app/Contents/MacOS/$EXECUTABLE"
           echo "the extracted bundle verifies and its binary is executable"
 
       # hdiutil rather than tauri's dmg bundler: that one drives AppleScript to lay the window out
