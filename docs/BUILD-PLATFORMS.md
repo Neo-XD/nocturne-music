@@ -85,6 +85,10 @@ cargo tauri build            # → target/release/bundle/rpm/limusic-*.rpm
 
 ## macOS
 
+> **You normally don't need to do any of this.** The `.dmg` and the updater bundle are built in CI,
+> `.github/workflows/macos-release.yml`, on a pinned `macos-14` (Apple Silicon) runner, dispatched
+> by `scripts/release.sh`. This section is for debugging a macOS problem locally.
+
 1. **Toolchain:** Rust, Xcode Command Line Tools (`xcode-select --install`), Node/pnpm.
 2. **libmpv:** `brew install mpv` (installs `libmpv.2.dylib` under `$(brew --prefix)/lib`).
 3. **Point the linker at it** (Homebrew's lib dir isn't on the default search path, especially on
@@ -98,18 +102,33 @@ cargo tauri build            # → target/release/bundle/rpm/limusic-*.rpm
    cd ui && pnpm build && cd ..
    cargo tauri build          # → target/release/bundle/{macos,dmg}/limusic.{app,dmg}
    ```
-5. **Bundle the dylib + fix the load path.** `tauri.macos.conf.json` lists
-   `bundle.macOS.frameworks: ["libmpv.2.dylib"]`, which copies the dylib into
-   `Limusic.app/Contents/Frameworks/`. Because the binary was linked against Homebrew's absolute
-   install name, rewrite it to load the bundled copy (if the app fails to launch with a
-   "dyld: libmpv.2.dylib not found" error):
+5. **Bundle the dylibs, all of them, then re-sign.** What comes out of step 4 runs on *your* machine
+   only: the binary links `libmpv.2.dylib` by its absolute Homebrew path, and libmpv in turn links
+   about forty more Homebrew dylibs (all of ffmpeg, libass, libplacebo, uchardet) the same way.
+   `install_name_tool` on libmpv alone fixes one edge of that graph and leaves the rest, so use
+   `dylibbundler`, which walks the whole thing:
    ```bash
+   brew install dylibbundler
    APP=target/release/bundle/macos/limusic.app
-   install_name_tool -change "$(brew --prefix)/lib/libmpv.2.dylib" \
-     "@executable_path/../Frameworks/libmpv.2.dylib" "$APP/Contents/MacOS/limusic"
+   dylibbundler -cd -of -b -x "$APP/Contents/MacOS/limusic" \
+     -d "$APP/Contents/Frameworks" -p "@executable_path/../Frameworks" -s "$(brew --prefix)/lib"
+   codesign --force --deep --sign - "$APP"     # NOT optional, see below
    ```
+   Check the result with `find "$APP" -type f -exec otool -L {} + | grep /opt/homebrew`. Anything
+   it prints is a library the app will fail to find on someone else's Mac; CI runs exactly that as
+   a build guard.
+6. **The re-sign is mandatory on Apple Silicon.** arm64 macOS refuses to execute a Mach-O with no
+   valid signature, the linker's ad-hoc one is invalidated by every install-name rewrite above, and
+   the symptom is the app dying instantly with `Killed: 9`. Ad-hoc (`--sign -`) is enough to run;
+   it is not enough to satisfy Gatekeeper on a downloaded app (see `RELEASING.md` §6).
+- `bundle.macOS.minimumSystemVersion` is **14.0** because Homebrew bottles are built per macOS
+  version, so whatever the CI runner ships is the floor. It tracks `runs-on` in the workflow.
 - Media keys use **MPNowPlayingInfoCenter / MPRemoteCommandCenter** (Control Center + the Now
   Playing widget). Works from the `.app` bundle; a bare binary run won't register.
+- **Login is currently broken on macOS.** `session.rs::read_login_cookies` uses `cookies_for_url`,
+  which on WKWebView matches the cookie's host exactly, so YouTube's `.youtube.com` cookies never
+  match `music.youtube.com` and the jar comes back empty. WebKitGTK does real domain matching, which
+  is why Linux is unaffected.
 
 ---
 

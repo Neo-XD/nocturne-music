@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Cut a signed release: publish the tag with an empty updater manifest, start both CI builds, build
-# the .rpm locally while they run, then wait and verify the whole thing landed.
+# Cut a signed release: publish the tag with an empty updater manifest, start the three CI builds,
+# build the .rpm locally while they run, then wait and verify the whole thing landed.
 #
-# ORDER MATTERS. The release is created and both workflows are dispatched BEFORE the local rpm
-# build, not after: CI's ~13 minutes and this machine's ~5 minutes then overlap instead of queueing.
+# ORDER MATTERS. The release is created and every workflow is dispatched BEFORE the local rpm
+# build, not after: CI's ~15 minutes and this machine's ~5 minutes then overlap instead of queueing.
 # The rpm is uploaded to the already-published release afterwards. The cost of that ordering is that
 # a failed rpm build leaves a published release with no rpm on it, recoverable with one
 # `gh release upload`, and the script tells you the exact command if it happens.
@@ -11,10 +11,10 @@
 # The AppImage is NOT built here. An AppImage inherits its build host's glibc floor, and this
 # machine is Fedora (newest glibc in existence) — one built here starts nowhere else. It is built by
 # .github/workflows/linux-release.yml on a pinned older runner, which also attaches it, adds the
-# linux-x86_64 entry to latest.json and marks the release "Latest". Windows does the same for its
-# own entry. So this script publishes the release NOT-latest on purpose: until CI has attached the
-# binaries, the updater endpoint (.../releases/latest/download/latest.json) keeps resolving to the
-# previous, complete manifest instead of one with no platforms in it.
+# linux-x86_64 entry to latest.json and marks the release "Latest". Windows and macOS do the same
+# for their own entries. So this script publishes the release NOT-latest on purpose: until CI has
+# attached the binaries, the updater endpoint (.../releases/latest/download/latest.json) keeps
+# resolving to the previous, complete manifest instead of one with no platforms in it.
 #
 # Usage:  scripts/release.sh ["release notes"]
 # Bump "version" in src-tauri/tauri.conf.json AND Cargo.toml BEFORE running (tauri.conf.json is the
@@ -145,21 +145,24 @@ wait_for_run() { # $1 = workflow name, $2 = run id seen before the dispatch
 
 BEFORE_LINUX="$(latest_run "Linux release binaries")"
 BEFORE_WIN="$(latest_run "Windows release binaries")"
+BEFORE_MAC="$(latest_run "macOS release binaries")"
 
 # Dispatched from master rather than fired by the `release: published` event, and that ref matters:
 # Actions caches are readable only from the ref that wrote them plus the default branch. A
 # release-triggered run executes on the tag ref, so it could never reuse the previous release's
 # cache — Windows recompiled all of Rust from scratch every time, 11m25s of a 15m run. Dispatching
-# from master shares one cache across releases. Both workflows check out $TAG regardless, so the
-# binaries still come from the tagged source. They also run in parallel with each other, and now
+# from master shares one cache across releases. All three workflows check out $TAG regardless, so
+# the binaries still come from the tagged source. They also run in parallel with each other, and now
 # with the local rpm build below as well.
 echo "==> Dispatching the build workflows…"
 gh workflow run "Linux release binaries"   --repo "$REPO" --ref master -f tag="$TAG"
 gh workflow run "Windows release binaries" --repo "$REPO" --ref master -f tag="$TAG"
+gh workflow run "macOS release binaries"   --repo "$REPO" --ref master -f tag="$TAG"
 
 RUN_LINUX="$(wait_for_run "Linux release binaries" "$BEFORE_LINUX" || true)"
 RUN_WIN="$(wait_for_run "Windows release binaries" "$BEFORE_WIN" || true)"
-echo "    linux run ${RUN_LINUX:-?}, windows run ${RUN_WIN:-?}"
+RUN_MAC="$(wait_for_run "macOS release binaries" "$BEFORE_MAC" || true)"
+echo "    linux run ${RUN_LINUX:-?}, windows run ${RUN_WIN:-?}, macos run ${RUN_MAC:-?}"
 
 echo "==> Building the rpm locally while CI runs…"
 if ! cargo tauri build --bundles rpm; then
@@ -185,7 +188,7 @@ echo "    attached $(basename "$RPM")"
 # ---------------------------------------------------------------------------
 echo "==> Waiting for CI (Ctrl-C is safe, the builds keep running without this terminal)…"
 CI_OK=1
-for run in "$RUN_LINUX" "$RUN_WIN"; do
+for run in "$RUN_LINUX" "$RUN_WIN" "$RUN_MAC"; do
   if [ -z "$run" ] || [ "$run" = "0" ]; then
     echo "    could not resolve a run id, watch it at Actions instead"
     CI_OK=0
@@ -205,16 +208,18 @@ OK=1
   || { echo "    WRONG MANIFEST: the live latest.json is not for $VERSION"; OK=0; }
 has_platform linux-x86_64   || { echo "    MISSING: latest.json has no linux-x86_64 entry (AppImage users get no update)"; OK=0; }
 has_platform windows-x86_64 || { echo "    MISSING: latest.json has no windows-x86_64 entry (Windows users get no update)"; OK=0; }
+has_platform darwin-aarch64 || { echo "    MISSING: latest.json has no darwin-aarch64 entry (Mac users get no update)"; OK=0; }
 
 if [ "$OK" = 1 ] && [ "$CI_OK" = 1 ]; then
-  echo "==> $TAG is live and complete: rpm + AppImage + Windows installers, both platforms in"
-  echo "    latest.json, marked Latest. Installed users will be prompted."
+  echo "==> $TAG is live and complete: rpm + AppImage + Windows installers + macOS dmg, all three"
+  echo "    platforms in latest.json, marked Latest. Installed users will be prompted."
 else
   echo >&2
   echo "==> $TAG IS PUBLISHED BUT INCOMPLETE. Check what failed, then re-dispatch that workflow:" >&2
   echo "      gh run list --repo $REPO --limit 5" >&2
   echo "      gh workflow run \"Linux release binaries\"   --repo $REPO --ref master -f tag=$TAG" >&2
   echo "      gh workflow run \"Windows release binaries\" --repo $REPO --ref master -f tag=$TAG" >&2
+  echo "      gh workflow run \"macOS release binaries\"   --repo $REPO --ref master -f tag=$TAG" >&2
   echo "    Only fixes to .github/workflows/ take effect on a re-dispatch; anything in scripts/," >&2
   echo "    src/ or ui/ needs a new version, since the run checks out the tag." >&2
   exit 1

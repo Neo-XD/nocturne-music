@@ -3,8 +3,7 @@
   "bundle": {
     "targets": ["app", "dmg"],
     "macOS": {
-      "minimumSystemVersion": "10.15",
-      "frameworks": ["libmpv.2.dylib"]
+      "minimumSystemVersion": "14.0"
     }
   }
 }
