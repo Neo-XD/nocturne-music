@@ -243,8 +243,13 @@ jobs:
         run: |
           set -euo pipefail
           APP=target/release/bundle/macos/limusic.app
-          LEAKS="$(find "$APP" -type f -exec otool -L {} + 2>/dev/null \
-            | grep -E '^\s+/(opt/homebrew|usr/local)/' | sort -u || true)"
+          # [[:space:]], not \s: this runs under BSD grep, whose POSIX regex has no \s, and a
+          # pattern that quietly matches nothing is worse than no guard at all.
+          LEAKS="$(find "$APP" -type f -print0 | while IFS= read -r -d '' f; do
+            otool -L "$f" 2>/dev/null | tail -n +2 \
+              | grep -E '^[[:space:]]+/(opt/homebrew|usr/local)/' \
+              | sed "s|^|${f#$APP/} <- |"
+          done)"
           if [ -n "$LEAKS" ]; then
             echo "::error::the bundle still links libraries from Homebrew, so it only runs on a machine that has them:"
             echo "$LEAKS"
@@ -268,7 +273,11 @@ jobs:
             exit 1
           fi
           TAR="target/release/bundle/macos/limusic_${VERSION}_aarch64.app.tar.gz"
-          COPYFILE_DISABLE=1 tar -czf "$TAR" -C target/release/bundle/macos limusic.app
+          # cd into the bundle dir rather than `tar -C`, so there is no question about whether the
+          # archive path is resolved before or after the chdir. The archive must contain the .app
+          # at its root: that is what the updater extracts over the installed one.
+          (cd target/release/bundle/macos \
+            && COPYFILE_DISABLE=1 tar -czf "limusic_${VERSION}_aarch64.app.tar.gz" limusic.app)
           tauri signer sign "$TAR"
           [ -f "$TAR.sig" ] || { echo "::error::tauri signer produced no .sig for $TAR"; exit 1; }
           echo "TAR=$TAR" >> "$GITHUB_ENV"
