@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -53,9 +53,29 @@
 	const lastIndex = $derived(view.blocks.at(-1)?.rows.at(-1)?.i ?? -1);
 
 	// The tracks already heard, hidden until asked for: a queue played deep into has hundreds of
-	// them, and they sit above everything anyone opened the panel to look at.
+	// them, and they sit above everything anyone opened the panel to look at. The untouched prefix
+	// above them (`view.earlier`) is not hidden: it is bounded by the playlist and shrinks every
+	// time you press previous, where history only grows.
 	let showPrev = $state(false);
 	let el: HTMLElement;
+	let nowEl: HTMLElement | undefined = $state();
+
+	// Open on the playing track. Everything in front of it is drawn above, so a queue opened three
+	// thousand tracks into Liked Songs would otherwise open on track 1.
+	//
+	// Measured off the heading rather than computed from row heights, because the run above reserves
+	// `rows × rowPx` and `rowPx` starts at the assumed 56 before settling to the panel's real 72 a
+	// frame later (`rows.svelte.ts`), which moves the heading down by a quarter of the run. So land,
+	// then land again once it has settled.
+	onMount(() => {
+		const land = () => {
+			if (!nowEl) return;
+			el.scrollTop += nowEl.getBoundingClientRect().top - el.getBoundingClientRect().top;
+		};
+		land();
+		let frame = requestAnimationFrame(() => (frame = requestAnimationFrame(land)));
+		return () => cancelAnimationFrame(frame);
+	});
 
 	// Playing a playlist queues the whole playlist, so this panel can be handed five figures of
 	// rows the moment it opens, at roughly 165 KB of web-process memory each (`rows.ts`). Past a
@@ -66,10 +86,11 @@
 	// that is a bad trade for a queue you can see the end of.
 	const WINDOW_ABOVE = 200;
 	const sc = rowScroller();
-	// One entry per block, previously-played first. Collapsed it is 0 rows but still charged a
+	// One entry per block, in render order. A collapsed history is 0 rows but still charged a
 	// heading it doesn't draw, which shifts every window's *choice* of slice by 40px and none of
 	// their heights: the overscan swallows it (see HEADING_PX).
 	const counts = $derived([
+		view.earlier.length,
 		showPrev ? view.prev.length : 0,
 		view.now ? 1 : 0,
 		...view.blocks.map((b) => b.rows.length)
@@ -154,13 +175,21 @@
 	{@attach (node) => dragScroll(node, QUEUE_ROW_MIME)}
 >
 	{#if view.now}
+		<!-- The queue in front of the playing track that was never reached: start an album at track
+		     4 and the backend still queues 1-3. Always drawn: they are not history. -->
+		{#if view.earlier.length}
+			<h3 class="truncate px-2 pt-2 pb-1.5 text-sm font-semibold text-muted-foreground">
+				{view.earlierHeading}
+			</h3>
+			{@render rows(view.earlier, wins[0])}
+		{/if}
 		{#if showPrev && view.prev.length}
 			<h3 class="px-2 pt-2 pb-1.5 text-sm font-semibold text-muted-foreground">
 				Previously played
 			</h3>
-			{@render rows(view.prev, wins[0])}
+			{@render rows(view.prev, wins[1])}
 		{/if}
-		<div class="flex items-center justify-between gap-2 px-2 pt-2 pb-1.5">
+		<div bind:this={nowEl} class="flex items-center justify-between gap-2 px-2 pt-2 pb-1.5">
 			<h3 class="truncate text-sm font-semibold">Now playing</h3>
 			{#if view.prev.length}
 				<button
@@ -172,7 +201,7 @@
 				</button>
 			{/if}
 		</div>
-		{@render rows([view.now], wins[1])}
+		{@render rows([view.now], wins[2])}
 
 		{#each view.blocks as block, b (block.key)}
 			{#if block.autoplay}
@@ -197,7 +226,7 @@
 					{/if}
 				</div>
 			{/if}
-			{@render rows(block.rows, wins[b + 2])}
+			{@render rows(block.rows, wins[b + 3])}
 		{/each}
 	{:else}
 		<p class="p-4 text-sm text-muted-foreground">The queue is empty.</p>

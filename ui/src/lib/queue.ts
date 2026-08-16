@@ -24,14 +24,17 @@ export interface QueueBlock {
 }
 
 /**
- * The tracks already played, then the playing track, then the upcoming queue in play order, split
- * wherever the tracks change origin: a manual block ("Play next" / "Add to queue", headed by what it
- * was added from), the playing context ("Next from: …"), autoplay's continuation.
+ * Everything in front of the playing track, then the playing track, then the upcoming queue in play
+ * order, split wherever the tracks change origin: a manual block ("Play next" / "Add to queue",
+ * headed by what it was added from), the playing context ("Next from: …"), autoplay's continuation.
  *
- * `prev` is what the panel shows behind "Load previous", oldest first, so the last thing heard sits
- * directly above the playing track. It runs from `playedFrom`, not from 0: the backend queue holds
- * the whole playlist even when playback started in the middle of it (`state.rs`), and those leading
- * tracks were never heard.
+ * What sits in front of the playing track is two different things, and `playedFrom` is the border
+ * (`state.rs`). `prev` is the history: what was actually heard or skipped past, oldest first, so the
+ * last thing heard sits directly above the playing track. `earlier` is the rest of the queue in
+ * front of it, which playback never reached: start an album at track 4 and the backend still queues
+ * tracks 1-3, untouched. The panel draws `earlier` and hides `prev` behind a toggle, because the
+ * prefix is bounded by the playlist and shrinks every time you press previous, while history is
+ * unbounded and grows all session.
  *
  * Play order, not kind order: grouping by kind would draw an "Add to queue" block that sits at the
  * tail under the playing playlist's heading, naming a playlist those tracks never came from.
@@ -43,6 +46,8 @@ export interface QueueBlock {
  * the real order, and with it the blocks.
  */
 export function queueBlocks(q: QueueState): {
+	earlier: QueueRow[];
+	earlierHeading: string;
 	prev: QueueRow[];
 	now: QueueRow | null;
 	blocks: QueueBlock[];
@@ -58,10 +63,11 @@ export function queueBlocks(q: QueueState): {
 	};
 	// Occurrence counting must walk the whole prefix, not just the played part of it, or a repeated
 	// track's key would collide with an earlier copy that isn't on screen.
+	const earlier: QueueRow[] = [];
 	const prev: QueueRow[] = [];
 	for (let i = 0; i < currentIndex; i++) {
 		const r = row(i);
-		if (i >= playedFrom) prev.push(r);
+		(i >= playedFrom ? prev : earlier).push(r);
 	}
 	// Rows are drawn in queue order throughout, so the number is the queue index and nothing else:
 	// counting per run restarted the playing track at 1 under the two tracks already heard (#25).
@@ -114,7 +120,14 @@ export function queueBlocks(q: QueueState): {
 		block.clearable = manual && !cleared;
 		if (block.clearable) cleared = true;
 	}
-	return { prev, now, blocks };
+	const earlierName = sharedOrigin(earlier, sourceName);
+	return {
+		earlier,
+		earlierHeading: earlierName ? `Earlier from: ${earlierName}` : 'Earlier',
+		prev,
+		now,
+		blocks
+	};
 }
 
 /**
@@ -128,17 +141,26 @@ export function moveTarget(from: number, dropAt: number): number | null {
 	return to === from ? null : to;
 }
 
-/** The name a block goes under: its one origin if its tracks share one, else a neutral label. */
-function headingFor(block: QueueBlock, sourceName?: string | null): string {
-	if (block.autoplay) return 'Autoplay';
-	// What each row would put on the heading: what it was added from, the queue's own source for a
-	// plain context track, nothing for a single-song add.
+/**
+ * The one origin a run of rows shares, or null when they disagree (or have none to give).
+ *
+ * What a single row offers: what it was added from, the queue's own source for a plain context
+ * track, nothing for a single-song add.
+ */
+function sharedOrigin(rows: QueueRow[], sourceName?: string | null): string | null {
 	const names = new Set(
-		block.rows.map(
+		rows.map(
 			(r) => r.item.queued_from ?? (r.item.queued || r.item.queued_end ? '' : (sourceName ?? ''))
 		)
 	);
 	const [name] = names;
-	if (names.size === 1 && name) return `Next from: ${name}`;
+	return names.size === 1 && name ? name : null;
+}
+
+/** The name a block goes under: its one origin if its tracks share one, else a neutral label. */
+function headingFor(block: QueueBlock, sourceName?: string | null): string {
+	if (block.autoplay) return 'Autoplay';
+	const name = sharedOrigin(block.rows, sourceName);
+	if (name) return `Next from: ${name}`;
 	return block.rows.every((r) => r.item.queued || r.item.queued_end) ? 'Next in queue' : 'Next up';
 }

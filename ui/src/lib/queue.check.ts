@@ -90,17 +90,28 @@ v = queueBlocks(q([song('dup'), song('now'), song('dup')], 1));
 ok(v.blocks[0].rows.length === 1 && v.now?.item.video_id === 'now', 'history is not drawn');
 ok(v.blocks[0].rows[0].key === 'dup:1', 'the second copy of a track gets its own key');
 
-// --- previously played ------------------------------------------------------------------------
+// --- previously played, and the prefix that was never played ------------------------------------
 // The prefix is not the history: opening a playlist at track 3 leaves two untouched tracks in front
-// of the playing one, and the backend says so with `playedFrom`.
+// of the playing one, and the backend says so with `playedFrom`. They are their own run, named
+// after where they came from, and drawn without a toggle.
 v = queueBlocks(q([song('a'), song('b'), song('now'), song('d')], 2, 'Afro', false, 2));
 ok(v.prev.length === 0, 'starting mid-playlist has played nothing');
+ok(v.earlier.map((r) => r.item.video_id).join() === 'a,b', 'the untouched prefix is its own run');
+ok(v.earlier.map((r) => r.i).join() === '0,1', 'its indices point at the backend queue');
+ok(v.earlierHeading === 'Earlier from: Afro', 'named after the playlist it was started inside');
+
+// Two origins in front of the playing track and no one name is the truth (same rule as the
+// upcoming blocks, which is why both go through `sharedOrigin`).
+v = queueBlocks(q([song('a'), added('n1'), song('now')], 2, 'Afro', false, 2));
+ok(v.earlierHeading === 'Earlier', 'mixed origins in the prefix go unnamed');
 
 // Jumping forward counts everything passed over, oldest first, so the last thing heard sits
-// directly above the playing track.
+// directly above the playing track. It moves the border, not the rows: what playback still never
+// reached stays in the prefix.
 v = queueBlocks(q([song('a'), song('b'), song('c'), song('now')], 3, 'Afro', false, 1));
 ok(v.prev.map((r) => r.item.video_id).join() === 'b,c', 'skipped-over tracks count as played');
 ok(v.prev.map((r) => r.i).join() === '1,2', 'indices still point at the backend queue');
+ok(v.earlier.map((r) => r.item.video_id).join() === 'a', 'only what playback never reached');
 // #25: the played rows and the playing row share one run of numbers, so the third track of an
 // album reads 3 rather than restarting at 1 under the two above it.
 ok(v.now?.i === 3, 'the playing row follows the history it was played after');
@@ -109,6 +120,7 @@ ok(v.now?.i === 3, 'the playing row follows the history it was played after');
 // claiming the whole prefix was heard.
 v = queueBlocks(q([song('a'), song('b'), song('now')], 2));
 ok(v.prev.length === 0, 'no playedFrom ⇒ empty history');
+ok(v.earlier.length === 2, '...and the whole prefix reads as never played');
 
 // Keys stay unique when the same track shows up in the history and again ahead of the playing one.
 v = queueBlocks(q([song('dup'), song('now'), song('dup')], 1, undefined, false, 0));
