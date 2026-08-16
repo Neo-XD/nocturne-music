@@ -412,6 +412,23 @@ export const onNowPlaying = (cb: (n: NowPlaying) => void): Promise<UnlistenFn> =
 	listen<NowPlaying>('now-playing', (e) => cb(e.payload));
 export const onQueueChanged = (cb: (q: QueueState) => void): Promise<UnlistenFn> =>
 	listen<QueueState>('queue-changed', (e) => cb(e.payload));
+/**
+ * The queue moved but its track list did not: only the play pointer and the flags changed.
+ * Emitted instead of `queue-changed` on every advance and skip, because the full item list is
+ * megabytes on a big playlist and a Tauri event delivers its payload as JavaScript *source*.
+ * `current` carries the playing row so a metadata backfill (duration, artists) still lands.
+ */
+export interface QueueIndex {
+	currentIndex: number;
+	playedFrom?: number;
+	shuffle?: boolean;
+	repeat?: RepeatMode;
+	sourceName?: string | null;
+	current: SongItem | null;
+}
+
+export const onQueueIndex = (cb: (q: QueueIndex) => void): Promise<UnlistenFn> =>
+	listen<QueueIndex>('queue-index', (e) => cb(e.payload));
 export const onPosition = (cb: (p: number) => void): Promise<UnlistenFn> =>
 	listen<{ position: number }>('position', (e) => cb(e.payload.position));
 export const onDuration = (cb: (d: number) => void): Promise<UnlistenFn> =>

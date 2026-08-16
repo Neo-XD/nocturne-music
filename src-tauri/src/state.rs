@@ -66,6 +66,15 @@ pub struct AppState {
     last_pos_persist: AtomicU64,
     /// Wall-clock secs of the last position push to the OS media controls (throttled ~1s).
     last_media_push: AtomicU64,
+    /// Fingerprint of the item list the UI was last sent (see `queue_fingerprint`). When it is
+    /// unchanged, `emit_queue` sends the small `queue-index` event instead of megabytes of JSON:
+    /// a Tauri event inlines its payload into a JavaScript source string, so a 5,000-track queue
+    /// costs ~26 ms of parse in the webview every time it crosses.
+    last_queue_fingerprint: AtomicU64,
+    /// Fingerprint of the item list last written to `queue_json`. Same trick as
+    /// `last_queue_fingerprint`, for the persistence side: an advance rewrites 40 bytes rather
+    /// than the whole blob.
+    last_persisted_fingerprint: AtomicU64,
 }
 
 /// Repeat mode for the queue. Serialized lowercase for the UI + `queue_json`.
@@ -319,6 +328,8 @@ impl AppState {
             latest_position: AtomicU64::new(0),
             last_pos_persist: AtomicU64::new(0),
             last_media_push: AtomicU64::new(0),
+            last_queue_fingerprint: AtomicU64::new(0),
+            last_persisted_fingerprint: AtomicU64::new(0),
         }
     }
 
@@ -1031,6 +1042,11 @@ impl AppState {
         const MAX_PAGES: usize = 50;
         let Some(client) = self.clients.get(innertube::METADATA_CLIENT) else { return };
         let mut pages = 0;
+        // The first page goes out at once so the panel visibly starts filling; after that the
+        // walk emits at most once a second. Every page is a *full* payload (the rows changed),
+        // and a 50-page walk of a 5,000-track playlist sends ~67 MB of JSON through
+        // `webview.eval` if each one is announced. The final state is emitted after the loop.
+        let mut last_emit: Option<std::time::Instant> = None;
         for _ in 0..MAX_PAGES {
             let page = match self.it.playlist_continuation(client, &token).await {
                 Ok(page) => page,
@@ -1069,7 +1085,10 @@ impl AppState {
                 }
             }
             pages += 1;
-            self.emit_queue().await;
+            if last_emit.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+                last_emit = Some(std::time::Instant::now());
+                self.emit_queue().await;
+            }
             self.prime_lookahead(gen).await;
             match page.continuation {
                 Some(next) => token = next,
@@ -1080,6 +1099,7 @@ impl AppState {
         // nothing else reads it mid-walk.
         if pages > 0 {
             tracing::info!(pages, "playlist fill appended pages");
+            self.emit_queue().await; // whatever the throttle above held back
             self.persist_queue().await;
             self.lt_broadcast_queue().await;
         }
@@ -1632,10 +1652,31 @@ impl AppState {
         self.play_index(i).await;
     }
 
+    /// Tell the UI the queue changed.
+    ///
+    /// A Tauri event is delivered by inlining its JSON into a JavaScript source string and
+    /// `eval`ing it in every listening webview, so the payload is *parsed as source*: 2.6 MB and
+    /// ~26 ms for a 5,000-track queue, twice over with the mini player open. The play pointer
+    /// moving is by far the most common reason this is called and it does not need the rows at
+    /// all, so when the track list is unchanged this sends a few hundred bytes instead. The UI
+    /// keeps the array it already holds (`player.svelte.ts`, `onQueueIndex`).
     async fn emit_queue(&self) {
         let q = self.queue.lock().await;
-        let _ = self.app.emit(
-            "queue-changed",
+        let fingerprint = queue_fingerprint(&q.items);
+        let unchanged =
+            self.last_queue_fingerprint.swap(fingerprint, Ordering::Relaxed) == fingerprint;
+        let payload = if unchanged {
+            serde_json::json!({
+                "currentIndex": q.current,
+                "playedFrom": q.played_from,
+                "shuffle": q.shuffle_orig.is_some(),
+                "repeat": q.repeat,
+                "sourceName": &q.source_name,
+                // The playing row, so `start_current`'s duration/artists backfill still reaches
+                // the panel without shipping the other 4,999 rows to carry it.
+                "current": q.items.get(q.current),
+            })
+        } else {
             serde_json::json!({
                 "items": &q.items,
                 "currentIndex": q.current,
@@ -1643,8 +1684,9 @@ impl AppState {
                 "shuffle": q.shuffle_orig.is_some(),
                 "repeat": q.repeat,
                 "sourceName": &q.source_name,
-            }),
-        );
+            })
+        };
+        let _ = self.app.emit(if unchanged { "queue-index" } else { "queue-changed" }, payload);
     }
 
     fn emit_error(&self, video_id: &str, message: &str) {
@@ -1827,24 +1869,51 @@ impl AppState {
         added
     }
 
-    /// Persist the queue (items + current index) as a JSON blob so a restart can restore it
-    /// losslessly (context/11 §state). Called whenever the queue changes or advances.
+    /// Persist the queue so a restart can restore it losslessly (context/11 §state). Called
+    /// whenever the queue changes or advances.
+    ///
+    /// The blob is 526 bytes per track (measured), so a 5,000-track queue is a ~2.6 MB
+    /// synchronous write, and the advance path calls this on every single track. On an advance
+    /// the rows are identical and only the pointer moved, so that case writes ~40 bytes to
+    /// `queue_index` instead. `queue_index` is written every time, blob or not, and carries the
+    /// fingerprint of the rows it was true for, so `restore_queue` can tell a fresher pointer from
+    /// one left over from a different item list.
     async fn persist_queue(&self) {
-        let json = {
+        let (index_json, blob) = {
             let q = self.queue.lock().await;
-            serde_json::json!({
-                "items": &q.items,
+            let fingerprint = queue_fingerprint(&q.items);
+            let index_json = serde_json::json!({
                 "current": q.current,
                 "playedFrom": q.played_from,
                 "repeat": q.repeat,
-                "shuffleOrig": &q.shuffle_orig,
-                "radioSeed": &q.radio_seed,
-                "sourceName": &q.source_name,
-                "radio": q.radio,
+                // Which item list these numbers were true for. `queue_json` and `queue_index` are
+                // two separate writes, so a kill between them, or two `persist_queue` calls
+                // landing out of order, can pair a pointer with rows it was never valid for.
+                // `restore_queue` checks this before trusting any of it.
+                "fp": fingerprint.to_string(),
             })
-            .to_string()
+            .to_string();
+            let changed =
+                self.last_persisted_fingerprint.swap(fingerprint, Ordering::Relaxed) != fingerprint;
+            let blob = changed.then(|| {
+                serde_json::json!({
+                    "items": &q.items,
+                    "current": q.current,
+                    "playedFrom": q.played_from,
+                    "repeat": q.repeat,
+                    "shuffleOrig": &q.shuffle_orig,
+                    "radioSeed": &q.radio_seed,
+                    "sourceName": &q.source_name,
+                    "radio": q.radio,
+                })
+                .to_string()
+            });
+            (index_json, blob)
         };
-        self.db.set_setting("queue_json", &json);
+        if let Some(blob) = blob {
+            self.db.set_setting("queue_json", &blob);
+        }
+        self.db.set_setting("queue_index", &index_json);
     }
 
     /// Restore the last session's queue on startup — paused, not autoplaying (context/11). The
@@ -1860,15 +1929,15 @@ impl AppState {
         if items.is_empty() {
             return;
         }
-        let current = (saved.get("current").and_then(|v| v.as_u64()).unwrap_or(0) as usize)
+        let mut current = (saved.get("current").and_then(|v| v.as_u64()).unwrap_or(0) as usize)
             .min(items.len() - 1);
         // Absent in blobs written before "Previously played" existed: those restore with an empty
         // played run rather than claiming the whole prefix was heard.
-        let played_from =
+        let mut played_from =
             (saved.get("playedFrom").and_then(|v| v.as_u64()).unwrap_or(current as u64) as usize)
                 .min(current);
         // Shuffle/repeat ride the same blob; read tolerantly — old blobs lack them.
-        let repeat: RepeatMode = saved
+        let mut repeat: RepeatMode = saved
             .get("repeat")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
@@ -1879,6 +1948,34 @@ impl AppState {
         let source_name: Option<String> =
             saved.get("sourceName").and_then(|v| v.as_str()).map(str::to_owned);
         let radio = saved.get("radio").and_then(|v| v.as_bool()).unwrap_or(false);
+        // `queue_index` is rewritten on every persist while `queue_json` is only rewritten when
+        // the rows change, so on an advance it is the fresher of the two. But the two are separate
+        // writes: a kill between them, or two `persist_queue` calls landing out of order (a
+        // background playlist fill racing a track advance), can leave a `queue_index` on disk that
+        // was computed against a different item list than the one in `queue_json` now. Trusting it
+        // blindly would pair a pointer with rows it was never valid for and `.min(items.len() - 1)`
+        // would turn that into a plausible-looking wrong track instead of anything visible. The
+        // `fp` stamp is what the index was true for; only apply it when it still matches what we
+        // just parsed. A mismatch (or a database written before the stamp existed) falls back to
+        // the blob's own current/playedFrom/repeat, which is exactly today's behaviour.
+        let items_fp = queue_fingerprint(&items).to_string();
+        if let Some(idx) = self
+            .db
+            .get_setting("queue_index")
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .filter(|idx| idx.get("fp").and_then(|v| v.as_str()) == Some(items_fp.as_str()))
+        {
+            if let Some(c) = idx.get("current").and_then(|v| v.as_u64()) {
+                current = (c as usize).min(items.len() - 1);
+            }
+            if let Some(p) = idx.get("playedFrom").and_then(|v| v.as_u64()) {
+                played_from = (p as usize).min(current);
+            }
+            if let Some(r) = idx.get("repeat").and_then(|v| serde_json::from_value(v.clone()).ok())
+            {
+                repeat = r;
+            }
+        }
         let pos = self.db.get_setting("queue_position").and_then(|s| s.parse::<f64>().ok());
         if let Some(p) = pos.filter(|p| *p > 0.0) {
             *self.pending_seek.lock().unwrap() = Some((items[current].video_id.clone(), p));
@@ -2942,14 +3039,54 @@ fn loudness_gain(loudness_db: Option<f64>) -> Option<f64> {
 /// Loudness target, matching YouTube Music's own player rather than the video site's -14.
 const TARGET_LUFS: f64 = -7.0;
 
+/// Fingerprint of a queue's track list: what `emit_queue` compares to decide whether the UI
+/// already has these rows. Video ids and length only, which is exactly what identifies a row for
+/// the panel (`queue.ts` keys on videoId plus occurrence). A metadata backfill on an existing row
+/// deliberately does not change it: the row it repairs is the playing one, and that one rides
+/// along on the index event.
+fn queue_fingerprint(items: &[SongItem]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    items.len().hash(&mut hasher);
+    for item in items {
+        item.video_id.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration,
         guest_insert_index, is_mix, loudness_gain, merge_radio, next_index, parse_duration_ms,
-        radio_seed_for, shuffle_new_queue, shuffle_upcoming, splice_radio_into, unshuffled,
-        upcoming_queued, QueueState, RepeatMode,
+        queue_fingerprint, radio_seed_for, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
+        unshuffled, upcoming_queued, QueueState, RepeatMode,
     };
+
+    #[test]
+    fn queue_fingerprint_tracks_the_rows_not_their_metadata() {
+        let row = |id: &str| innertube::SongItem { video_id: id.into(), ..Default::default() };
+        let a = vec![row("a"), row("b"), row("c")];
+        // Same rows in the same order: the UI already has them.
+        assert_eq!(queue_fingerprint(&a), queue_fingerprint(&[row("a"), row("b"), row("c")]));
+        // A reorder, an append and a removal all have to be visible.
+        assert_ne!(queue_fingerprint(&a), queue_fingerprint(&[row("a"), row("c"), row("b")]));
+        assert_ne!(queue_fingerprint(&a), queue_fingerprint(&[row("a"), row("b")]));
+        assert_ne!(
+            queue_fingerprint(&a),
+            queue_fingerprint(&[row("a"), row("b"), row("c"), row("d")])
+        );
+        // A metadata repair on an existing row does not: it rides on the index event instead.
+        let mut patched = a.clone();
+        patched[0].duration = Some("3:11".into());
+        assert_eq!(queue_fingerprint(&a), queue_fingerprint(&patched));
+        // `restore_queue` compares these as strings off disk, not as numbers, so the string form
+        // has to discriminate as well as the hash does: a stamp that matched everything would
+        // silently re-open the wrong-track gap the stamp exists to close.
+        assert_ne!(
+            queue_fingerprint(&a).to_string(),
+            queue_fingerprint(&[row("a"), row("b")]).to_string()
+        );
+    }
 
     #[test]
     fn durations_round_trip_past_an_hour() {
