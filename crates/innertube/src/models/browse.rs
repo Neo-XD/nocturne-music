@@ -7,7 +7,7 @@
 //! - `musicTwoRowItemRenderer`     → a card (playlist / album / artist / song).
 //! - `musicResponsiveListItemRenderer` → a track row (shared with search; via `parse_list_item`).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::metadata::{
@@ -80,6 +80,106 @@ pub struct HomePage {
     pub continuation: Option<String>,
 }
 
+/// The orders YouTube can put a playlist in. context/08.
+///
+/// YouTube stores this choice itself, which is why Limusic asks for a sorted page instead of
+/// sorting one in the UI: the list then reads the same way here, in YouTube Music, and in every
+/// other client on the account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlaylistSort {
+    /// The playlist's own order — what dragging rows around in YouTube Music produces.
+    Default,
+    Newest,
+    Oldest,
+    Title,
+    Artist,
+    Album,
+    /// YouTube's "Top voted". Limusic's own menu does not offer it, but a list can already be in
+    /// it, so it still has to round-trip.
+    Top,
+}
+
+impl PlaylistSort {
+    const ALL: [Self; 7] = [
+        Self::Default,
+        Self::Newest,
+        Self::Oldest,
+        Self::Title,
+        Self::Artist,
+        Self::Album,
+        Self::Top,
+    ];
+
+    /// The `browse` `params` that returns the list in this order. Every list that has a sort menu
+    /// honours these, in both directions, and asking for one writes nothing to the account (Liked
+    /// Music is the exception: YouTube remembers whatever it was last asked for).
+    ///
+    /// The values are a protobuf literal — field 139 wrapping `{1: order, 2: kind}`, order 1
+    /// ascending / 2 descending, kind 3 date / 4 top-voted / 5 title / 6 artist / 7 album, and an
+    /// empty submessage for the stored order. Copied from YouTube's own menu rather than encoded,
+    /// because these eleven are all of them.
+    pub fn params(self, desc: bool) -> &'static str {
+        match (self, desc) {
+            (Self::Default, _) => "2ggA", // da 08 00 — empty, i.e. leave the order alone
+            // "Newest" is already a descending sort on date, so reversing it *is* "Oldest".
+            (Self::Newest, false) | (Self::Oldest, true) => "2ggECAIQAw==",
+            (Self::Oldest, false) | (Self::Newest, true) => "2ggECAEQAw==",
+            (Self::Top, false) => "2ggECAIQBA==",
+            (Self::Top, true) => "2ggECAEQBA==",
+            (Self::Title, false) => "2ggECAEQBQ==",
+            (Self::Title, true) => "2ggECAIQBQ==",
+            (Self::Artist, false) => "2ggECAEQBg==",
+            (Self::Artist, true) => "2ggECAIQBg==",
+            (Self::Album, false) => "2ggECAEQBw==",
+            (Self::Album, true) => "2ggECAIQBw==",
+        }
+    }
+
+    /// The `browse/edit_playlist` action that stores this order on a playlist you own.
+    ///
+    /// There is deliberately no descending Title/Artist/Album here: YouTube's
+    /// `playlistDynamicSortPreference` accepts 1..3 and nothing else. Values outside that answer
+    /// HTTP 500 *and* leave the playlist serving an order its own menu then reports as manual, so
+    /// never widen this match to express a reversed sort.
+    pub fn edit_action(self) -> Value {
+        let (field, n) = match self {
+            Self::Default => ("playlistVideoOrder", 0),
+            Self::Newest => ("playlistVideoOrder", 1),
+            Self::Oldest => ("playlistVideoOrder", 2),
+            Self::Top => ("playlistVideoOrder", 6),
+            Self::Title => ("playlistDynamicSortPreference", 1),
+            Self::Artist => ("playlistDynamicSortPreference", 2),
+            Self::Album => ("playlistDynamicSortPreference", 3),
+        };
+        let action = match field {
+            "playlistVideoOrder" => "ACTION_SET_PLAYLIST_VIDEO_ORDER",
+            _ => "ACTION_SET_PLAYLIST_DYNAMIC_SORT_PREFERENCE",
+        };
+        serde_json::json!({ "action": action, field: n })
+    }
+
+    fn from_params(params: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.params(false) == params || s.params(true) == params)
+    }
+
+    fn from_edit_action(action: &Value) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.edit_action() == *action)
+    }
+}
+
+/// The sort menu in a playlist header, when YouTube offers one. context/08.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SortMenu {
+    /// The order the list is in right now, when it is one we have a name for.
+    pub selected: Option<PlaylistSort>,
+    /// The options are `playlistEditEndpoint`s, so the choice can be written back and every other
+    /// client will follow it. Playlists you own only. Everywhere else the menu is a view-only
+    /// `browseEndpoint`: Liked Music remembers the choice anyway, someone else's playlist does not.
+    pub editable: bool,
+}
+
 /// A playlist or album detail page: header + tracks + a paging token.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,6 +192,8 @@ pub struct PlaylistPage {
     /// True only when the signed-in user owns this playlist (rename/delete allowed). YouTube wraps
     /// the header in `musicEditablePlaylistDetailHeaderRenderer` exactly for owned playlists.
     pub owned: bool,
+    /// Absent on lists YouTube will not reorder at all: albums and its own radio mixes.
+    pub sort_menu: Option<SortMenu>,
 }
 
 /// A page of extra tracks fetched via a continuation token.
@@ -251,7 +353,40 @@ pub fn parse_playlist(root: &Value) -> PlaylistPage {
         items,
         continuation: shelf_continuation(root),
         owned,
+        sort_menu: sort_menu(root),
     }
+}
+
+/// The track shelf's sort menu. Scoped to that shelf for the same reason `shelf_continuation` is:
+/// an owned playlist's page carries a suggestions section of its own, and the library grids this
+/// parser never sees have a sort menu with an unrelated vocabulary.
+fn sort_menu(root: &Value) -> Option<SortMenu> {
+    let items = find_all(track_shelf(root)?, "sortFilterSubMenuRenderer")
+        .into_iter()
+        .next()?
+        .get("subMenuItems")?
+        .as_array()?;
+    Some(SortMenu {
+        selected: items
+            .iter()
+            .find(|i| i.get("selected").and_then(Value::as_bool).unwrap_or(false))
+            .and_then(selected_sort),
+        editable: items
+            .iter()
+            .any(|i| i.pointer("/serviceEndpoint/playlistEditEndpoint").is_some()),
+    })
+}
+
+/// Read a sort out of a menu entry, from whichever endpoint flavour the list uses. Both are keyed
+/// on the payload rather than the label, which YouTube localises.
+fn selected_sort(item: &Value) -> Option<PlaylistSort> {
+    let endpoint = item.get("serviceEndpoint")?;
+    if let Some(action) = endpoint.pointer("/playlistEditEndpoint/actions/0") {
+        return PlaylistSort::from_edit_action(action);
+    }
+    // The browse flavour hands its params back percent-encoded ("2ggECAEQBQ%3D%3D").
+    let params = endpoint.pointer("/browseEndpoint/params")?.as_str()?;
+    PlaylistSort::from_params(&urlencoding::decode(params).ok()?)
 }
 
 /// Parse a browse continuation response (more playlist tracks). context/08.
@@ -1532,5 +1667,94 @@ mod tests {
             } }
         });
         assert_eq!(continuation_token(&root).as_deref(), Some("MODERN"));
+    }
+
+    /// The exact params YouTube's own menu hands out, so a typo in the table cannot pass. Only the
+    /// ascending side of title/artist/album is ever sent by YouTube; the descending ones are the
+    /// same message with the order byte flipped, which the server accepts (verified live).
+    #[test]
+    fn sort_params_match_the_menu_youtube_sends() {
+        use PlaylistSort::*;
+        assert_eq!(Default.params(false), "2ggA");
+        assert_eq!(Default.params(true), "2ggA"); // no reversed manual order exists server-side
+        assert_eq!(Newest.params(false), "2ggECAIQAw==");
+        assert_eq!(Oldest.params(false), "2ggECAEQAw==");
+        assert_eq!(Top.params(false), "2ggECAIQBA==");
+        assert_eq!(Title.params(false), "2ggECAEQBQ==");
+        assert_eq!(Artist.params(false), "2ggECAEQBg==");
+        assert_eq!(Album.params(false), "2ggECAEQBw==");
+        // Date is already directional, so reversing one date sort has to land on the other.
+        assert_eq!(Newest.params(true), Oldest.params(false));
+        assert_eq!(Oldest.params(true), Newest.params(false));
+        // Everything else keeps its kind and only flips the order byte.
+        for s in [Title, Artist, Album, Top] {
+            assert_ne!(s.params(true), s.params(false), "{s:?} must have a reversed form");
+            assert_eq!(PlaylistSort::from_params(s.params(true)), Some(s));
+        }
+    }
+
+    /// 4/5/6 answer HTTP 500 *and* wedge the playlist into an order its own menu then reports as
+    /// manual, so `playlistDynamicSortPreference` must never leave 1..3.
+    #[test]
+    fn edit_actions_stay_inside_the_enums_youtube_accepts() {
+        for s in PlaylistSort::ALL {
+            let a = s.edit_action();
+            if let Some(n) = a.get("playlistDynamicSortPreference").and_then(Value::as_i64) {
+                assert!((1..=3).contains(&n), "{s:?} would 500 with pref {n}");
+            } else {
+                let n = a.get("playlistVideoOrder").and_then(Value::as_i64).unwrap();
+                assert!([0, 1, 2, 6].contains(&n), "{s:?} sends an unknown video order {n}");
+            }
+            assert_eq!(PlaylistSort::from_edit_action(&a), Some(s));
+        }
+    }
+
+    fn shelf(menu: Value) -> Value {
+        json!({ "musicPlaylistShelfRenderer": { "contents": [], "header": {
+            "musicSideAlignedItemRenderer": { "startItems": [{ "sortFilterSubMenuRenderer": menu }] }
+        } } })
+    }
+
+    /// A playlist you own: the options are writes, so the choice carries to every other client.
+    #[test]
+    fn reads_the_selected_sort_off_an_owned_playlists_menu() {
+        let root = shelf(json!({ "subMenuItems": [
+            { "title": "Manual ordering", "selected": false, "serviceEndpoint": {
+                "playlistEditEndpoint": { "playlistId": "PLx", "actions": [
+                    { "action": "ACTION_SET_PLAYLIST_VIDEO_ORDER", "playlistVideoOrder": 0 }
+                ] } } },
+            { "title": "Artist", "selected": true, "serviceEndpoint": {
+                "playlistEditEndpoint": { "playlistId": "PLx", "actions": [
+                    { "action": "ACTION_SET_PLAYLIST_DYNAMIC_SORT_PREFERENCE",
+                      "playlistDynamicSortPreference": 2 }
+                ] } } }
+        ] }));
+        let m = sort_menu(&root).expect("menu");
+        assert_eq!(m.selected, Some(PlaylistSort::Artist));
+        assert!(m.editable);
+    }
+
+    /// Liked Music and other people's playlists: view-only endpoints, and the params come back
+    /// percent-encoded, which the plain table lookup would miss.
+    #[test]
+    fn reads_the_selected_sort_off_a_view_only_menu() {
+        let root = shelf(json!({ "subMenuItems": [
+            { "title": "Default ordering", "selected": false, "serviceEndpoint": {
+                "browseEndpoint": { "browseId": "VLLM", "params": "2ggA" } } },
+            { "title": "Title", "selected": true, "serviceEndpoint": {
+                "browseEndpoint": { "browseId": "VLLM", "params": "2ggECAEQBQ%3D%3D" } } }
+        ] }));
+        let m = sort_menu(&root).expect("menu");
+        assert_eq!(m.selected, Some(PlaylistSort::Title));
+        assert!(!m.editable, "a browseEndpoint menu cannot be written back");
+    }
+
+    /// Albums and YouTube's radio mixes carry no menu at all — the UI falls back to sorting the
+    /// rows it has rather than asking for an order the server will not give.
+    #[test]
+    fn no_menu_on_a_list_youtube_will_not_reorder() {
+        let root = json!({ "musicPlaylistShelfRenderer": { "contents": [] } });
+        assert!(sort_menu(&root).is_none());
+        assert!(parse_playlist(&root).sort_menu.is_none());
     }
 }

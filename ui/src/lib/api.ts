@@ -163,6 +163,20 @@ export interface LocalLibrary {
 	removed: string[];
 }
 
+/** The orders YouTube itself can put a playlist in — everything in `SortKey` but our own `plays`. */
+export type ServerSort = 'default' | 'newest' | 'oldest' | 'title' | 'artist' | 'album' | 'top';
+
+export interface SortMenu {
+	/** The order YouTube has this list in right now, when it is one we have a name for. */
+	selected?: ServerSort;
+	/**
+	 * The choice is a write, so storing it makes YouTube Music and every other client follow.
+	 * Playlists you own only: elsewhere the menu is view-only (Liked Music remembers the last order
+	 * asked for anyway, someone else's playlist does not).
+	 */
+	editable: boolean;
+}
+
 export interface PlaylistPage {
 	title?: string;
 	subtitle?: string;
@@ -171,6 +185,8 @@ export interface PlaylistPage {
 	continuation?: string;
 	/** True only when the signed-in user owns this playlist (rename/delete allowed). */
 	owned: boolean;
+	/** Absent on lists YouTube will not reorder: albums, its own radio mixes, On Repeat. */
+	sortMenu?: SortMenu;
 }
 export interface PlaylistContinuation {
 	items: SongItem[];
@@ -314,7 +330,18 @@ export const getHomeMore = (token: string) => invoke<HomePage>('get_home_more', 
 export const getLibrary = () => invoke<BrowseItem[]>('get_library');
 export const getLibraryAlbums = () => invoke<BrowseItem[]>('get_library_albums');
 export const getLibraryArtists = () => invoke<BrowseItem[]>('get_library_artists');
-export const getPlaylist = (id: string) => invoke<PlaylistPage>('get_playlist', { id });
+/**
+ * `sort` asks YouTube to order the tracks; omit it to get whatever order the account already has
+ * the list in, which is the one a fresh visit wants (it is what YouTube Music would show).
+ */
+export const getPlaylist = (id: string, sort?: ServerSort, desc?: boolean) =>
+	invoke<PlaylistPage>('get_playlist', { id, sort, desc });
+/**
+ * Store a sort order on a playlist, so YouTube Music and every other client show it the same way.
+ * Only for a list whose `sortMenu.editable` is true.
+ */
+export const setPlaylistSort = (playlistId: string, sort: ServerSort) =>
+	invoke<void>('set_playlist_sort', { playlistId, sort });
 export const getPlaylistMore = (token: string) =>
 	invoke<PlaylistContinuation>('get_playlist_more', { token });
 /**

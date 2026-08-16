@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::clients::YouTubeClient;
 use crate::models::browse::{
     self, AlbumPage, ArtistPage, BrowseItem, HomePage, PlaylistContinuation, PlaylistPage,
-    SearchResults,
+    PlaylistSort, SearchResults,
 };
 use crate::models::context::Context;
 use crate::models::lyrics::{self, PlainLyrics, TimedLyricLine};
@@ -322,12 +322,18 @@ impl InnerTube {
     }
 
     /// A playlist or album page by browseId (`VL…` / `MPRE…`). context/08.
+    ///
+    /// `sort` asks YouTube to order the tracks — see `PlaylistSort::params`. Passing `None` gets
+    /// whatever order the account already has the list in, which is the one thing a fresh visit
+    /// wants: it is what YouTube Music would show.
     pub async fn playlist(
         &self,
         client: &YouTubeClient,
         browse_id: &str,
+        sort: Option<(PlaylistSort, bool)>,
     ) -> Result<PlaylistPage, Error> {
-        let value = self.browse(client, Some(browse_id), None).await?;
+        let params = sort.map(|(s, desc)| s.params(desc));
+        let value = self.browse(client, Some(browse_id), params).await?;
         Ok(browse::parse_playlist(&value))
     }
 
@@ -343,7 +349,7 @@ impl InnerTube {
         let video = browse::album_video_flags(&value);
         if video.contains(&true) {
             if let Some(pl) = &page.playlist_id {
-                match self.playlist(client, &format!("VL{pl}")).await {
+                match self.playlist(client, &format!("VL{pl}"), None).await {
                     // ponytail: positional match, guarded on equal track counts — the OLAK
                     // playlist is the same album in the same order. Mismatch → keep the MV ids.
                     Ok(audio) if audio.items.len() == page.items.len() => {
@@ -542,6 +548,21 @@ impl InnerTube {
             }),
         )
         .await
+    }
+
+    /// Store a sort order on a playlist you own, so every other client on the account shows the
+    /// list the same way. context/01 `browse/edit_playlist`.
+    ///
+    /// Only meaningful where `SortMenu::editable` said so. A `browseEndpoint`-flavoured list has
+    /// no equivalent write: Liked Music persists whatever page was last asked for, and someone
+    /// else's playlist keeps nothing at all.
+    pub async fn playlist_set_sort(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+        sort: PlaylistSort,
+    ) -> Result<(), Error> {
+        self.edit_playlist(client, playlist_id, sort.edit_action()).await
     }
 
     /// Rename a playlist you own. context/01 `browse/edit_playlist`.

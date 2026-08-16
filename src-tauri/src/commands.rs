@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use innertube::{
-    AlbumPage, ArtistPage, BrowseItem, HomePage, PlaylistContinuation, PlaylistPage, Rating,
-    SearchResults, SongItem,
+    AlbumPage, ArtistPage, BrowseItem, HomePage, PlaylistContinuation, PlaylistPage, PlaylistSort,
+    Rating, SearchResults, SongItem,
 };
 use tauri::{Emitter, State};
 
@@ -437,8 +437,16 @@ pub async fn get_library_artists(state: St<'_>) -> Result<Vec<BrowseItem>, Strin
 
 /// A playlist or album page. `id` is the browseId (`VL…` / `MPRE…`); Liked Songs is `VLLM`, and
 /// `LIMUSIC_ON_REPEAT` is the local auto-playlist rather than anything YouTube knows about.
+///
+/// `sort` asks YouTube for the tracks in a given order; `None` gets whatever order the account
+/// already has the list in, which is what a fresh visit wants (it matches YouTube Music).
 #[tauri::command]
-pub async fn get_playlist(state: St<'_>, id: String) -> Result<PlaylistPage, String> {
+pub async fn get_playlist(
+    state: St<'_>,
+    id: String,
+    sort: Option<PlaylistSort>,
+    desc: Option<bool>,
+) -> Result<PlaylistPage, String> {
     if id == ON_REPEAT_ID {
         let items = on_repeat_songs(&state);
         return Ok(PlaylistPage {
@@ -448,10 +456,26 @@ pub async fn get_playlist(state: St<'_>, id: String) -> Result<PlaylistPage, Str
             items,
             continuation: None,
             owned: false, // nothing to rename or delete; it rebuilds itself from what you play
+            sort_menu: None, // built from local history, so YouTube has no order to give
         });
     }
     let client = metadata_client(&state)?;
-    state.it.playlist(client, &id).await.map_err(|e| e.to_string())
+    let sort = sort.map(|s| (s, desc.unwrap_or(false)));
+    state.it.playlist(client, &id, sort).await.map_err(|e| e.to_string())
+}
+
+/// Store a sort order on a playlist, so YouTube Music and every other client show it the same way.
+///
+/// Only for a playlist whose `sortMenu.editable` said the options are writes. Everywhere else the
+/// order is view-only and this would 400.
+#[tauri::command]
+pub async fn set_playlist_sort(
+    state: St<'_>,
+    playlist_id: String,
+    sort: PlaylistSort,
+) -> Result<(), String> {
+    let client = editable_playlist(&state, &playlist_id)?;
+    state.it.playlist_set_sort(client, &playlist_id, sort).await.map_err(|e| e.to_string())
 }
 
 /// videoId → how many times it was played, over the same trailing window On Repeat is built from

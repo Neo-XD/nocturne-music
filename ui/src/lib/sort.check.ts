@@ -7,7 +7,7 @@
 // the queue depends on: the sorted list has to hold exactly the same tracks as the input (never
 // dropping or duplicating one), and `default` has to hand back the original array untouched.
 import type { SongItem } from './api.ts';
-import { sortSongs } from './sort.ts';
+import { fetchSort, persistedSort, sortSongs, storedExactly } from './sort.ts';
 
 function ok(cond: boolean, what: string): void {
 	if (!cond) throw new Error(`FAIL: ${what}`);
@@ -31,7 +31,7 @@ ok(sortSongs(items.slice(0, 1), 'title', false).length === 1, 'a one-track list 
 
 // --- nothing is lost or duplicated ------------------------------------------------------------
 // The queue is built from this list, so a comparator that drops a track silently shortens it.
-for (const key of ['default', 'newest', 'oldest', 'title', 'artist', 'album', 'plays'] as const) {
+for (const key of ['default', 'newest', 'oldest', 'title', 'artist', 'album', 'plays', 'top'] as const) {
 	for (const desc of [false, true]) {
 		const out = sortSongs(items, key, false, desc, { b: 4, d: 1 });
 		ok(out.length === items.length, `${key} desc=${desc} keeps every track`);
@@ -89,5 +89,42 @@ ok(ids(sortSongs(items, 'plays', false, true, counts)) === 'acdb', 'descending i
 ok(ids(sortSongs(items, 'plays', false, false, {})) === 'abcd', 'no history at all changes nothing');
 // A count for a track that is not in this playlist must not disturb the ones that are.
 ok(ids(sortSongs(items, 'plays', false, false, { zzz: 99, b: 4, d: 1 })) === 'bdac', 'stray ids ignored');
+
+// --- top voted has no local form ---------------------------------------------------------------
+// It only ever arrives from YouTube. Sorting rows by it here would have to invent a ranking, so it
+// falls back to leaving them alone rather than ordering by whatever the last branch happened to be.
+ok(sortSongs(items, 'top', false) === items, 'top voted is a no-op off the server');
+ok(ids(sortSongs(items, 'top', false, true)) === 'dcba', 'top voted still reverses');
+
+// --- what YouTube will store -------------------------------------------------------------------
+// A `null` where YouTube could have kept the sort means it silently stops carrying to YouTube
+// Music, which is the whole point of storing it.
+ok(persistedSort('plays', false) === null, 'play counts mean nothing to YouTube');
+ok(persistedSort('default', false) === 'default', 'manual order is storable');
+// Date is already directional, so reversing one date sort simply is the other one.
+ok(persistedSort('newest', false) === 'newest', 'newest stores as newest');
+ok(persistedSort('newest', true) === 'oldest', 'reversed newest stores as oldest');
+ok(persistedSort('oldest', true) === 'newest', 'reversed oldest stores as newest');
+// playlistDynamicSortPreference takes 1..3 and nothing else, so a reversed one stores the
+// ascending sort: YouTube Music shows the same sort the right way up rather than an unrelated one.
+for (const key of ['default', 'title', 'artist', 'album'] as const) {
+	ok(persistedSort(key, false) === key, `${key} ascending is storable`);
+	ok(persistedSort(key, true) === key, `${key} descending stores the ascending sort`);
+}
+
+// --- and what it will reproduce exactly ---------------------------------------------------------
+// Anything false here has to be remembered on this machine, or revisiting the page loses it.
+ok(!storedExactly('plays', false), 'most played is never YouTube-held');
+ok(storedExactly('default', false) && storedExactly('title', false), 'ascending sorts are exact');
+ok(storedExactly('newest', true) && storedExactly('oldest', true), 'a reversed date sort is exact');
+for (const key of ['default', 'title', 'artist', 'album'] as const) {
+	ok(!storedExactly(key, true), `${key} descending has to be remembered here`);
+}
+
+// --- what to ask YouTube for -------------------------------------------------------------------
+ok(fetchSort('plays') === 'default', 'most played ranks the playlist order, not the account sort');
+for (const key of ['default', 'newest', 'oldest', 'title', 'artist', 'album', 'top'] as const) {
+	ok(fetchSort(key) === key, `${key} is asked for as itself`);
+}
 
 console.log('ok');

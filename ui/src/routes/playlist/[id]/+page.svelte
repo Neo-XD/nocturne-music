@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -34,7 +35,14 @@
 	import { anchorMenu } from '$lib/menu';
 	import { rowWindow } from '$lib/rows';
 	import { rowScroller } from '$lib/rows.svelte';
-	import { SORTS, sortSongs, type SortKey } from '$lib/sort';
+	import {
+		SORTS,
+		fetchSort,
+		persistedSort,
+		sortSongs,
+		storedExactly,
+		type SortKey
+	} from '$lib/sort';
 	import {
 		addPick,
 		auth,
@@ -107,6 +115,9 @@
 	let sy = $state(0);
 	let sortUp = $state(false);
 	let preparing = $state(false);
+	// A YouTube sort is a round trip, so the rows on screen are the previous order until it lands.
+	// Dim them meanwhile, or picking a sort looks like it did nothing.
+	let resorting = $state(false);
 
 	const sortLabel = $derived(
 		sort === 'default' ? 'Sort' : (SORTS.find((s) => s.key === sort)?.label ?? 'Sort')
@@ -124,8 +135,23 @@
 		return playsInflight;
 	}
 
-	// Liked Music is the one playlist YouTube hands back newest-addition-first.
-	const sortedItems = $derived(sortSongs(pl?.items ?? [], sort, isLiked, desc, plays));
+	// YouTube offers a sort menu for this list, so it does the ordering — all of it except "Most
+	// played", which is our own listening history and means nothing to YouTube.
+	const serverSorted = $derived(!!pl?.sortMenu && sort !== 'plays');
+	// …and on a playlist we own the choice is a write, so every other client follows it.
+	const storable = $derived(pl?.sortMenu?.editable ?? false);
+	// Liked Music has no editable menu, but YouTube remembers whichever order it was last asked
+	// for anyway. Someone else's playlist remembers nothing, so that one falls to localStorage.
+	const keepsSort = $derived(!!pl?.sortMenu && (storable || isLiked));
+
+	const sortedItems = $derived.by(() => {
+		const items = pl?.items ?? [];
+		// The rows already arrived in order, reversed ones included. The single order YouTube has
+		// no params for is a reversed *manual* order, so that one reverse stays here.
+		if (serverSorted) return sort === 'default' && desc ? items.slice().reverse() : items;
+		// Liked Music is the one playlist YouTube hands back newest-addition-first.
+		return sortSongs(items, sort, isLiked, desc, plays);
+	});
 
 	// The rows actually on screen: the sorted list, narrowed by the header's filter box. Identical
 	// to `sortedItems` with no query typed.
@@ -148,8 +174,12 @@
 		return !pl?.continuation;
 	}
 
-	// Reversing the default order is a reorder like any other, so it needs the whole playlist too.
-	const sorting = $derived(sort !== 'default' || desc);
+	// Sorting rows here is only honest once every page is in. A YouTube sort already covers the
+	// whole list (and its continuation token pages on in that same order), so the walk is down to
+	// the two orders it cannot produce: our play counts, and a reversed manual order.
+	const sorting = $derived(
+		serverSorted ? sort === 'default' && desc : sort !== 'default' || desc
+	);
 
 	// Everything that hands tracks to the queue goes through here first: a sorted queue is only
 	// honest once every page is in.
@@ -172,17 +202,104 @@
 		toast.error(`Couldn't load all of this playlist, so only what loaded was ${what}.`);
 	}
 
+	// One cache entry per order asked for. "No order asked for" keeps the bare key, because the
+	// artist page and the community cards cache a playlist under that one too.
+	const cacheKey = (pid: string, s: SortKey | null, d: boolean) =>
+		!s || (s === 'default' && !d) ? `playlist:${pid}` : `playlist:${pid}:${s}${d ? ':desc' : ''}`;
+	// The key the rows on screen came from, so an optimistic mutation writes back to the entry it
+	// actually read and never overwrites a different order's. Set by every load.
+	let loadedKey = '';
+
+	// Only what YouTube will not hold for us goes in here: "Most played", a reversed
+	// Title/Artist/Album, and any sort on a list it stores none for (someone else's playlist, a
+	// radio mix). Everything else is read back off the browse response instead, so a sort changed
+	// in YouTube Music turns up here too.
+	const SORT_STORE = 'playlist_sort';
+	type SavedSort = { sort: SortKey; desc: boolean };
+
+	function readSort(pid: string): SavedSort | null {
+		try {
+			return JSON.parse(localStorage.getItem(SORT_STORE) ?? '{}')[pid] ?? null;
+		} catch {
+			return null;
+		}
+	}
+
+	function rememberSort(pid: string, keptByYouTube: boolean) {
+		try {
+			const all = JSON.parse(localStorage.getItem(SORT_STORE) ?? '{}');
+			if (keptByYouTube) delete all[pid];
+			else all[pid] = { sort, desc } satisfies SavedSort;
+			localStorage.setItem(SORT_STORE, JSON.stringify(all));
+		} catch {
+			/* a disabled or full store just means this one sort isn't remembered */
+		}
+	}
+
 	function chooseSort(key: SortKey) {
 		sortOpen = false;
 		if (key === sort) return;
 		sort = key;
 		if (key === 'plays') loadPlays(); // the list re-sorts itself when the counts land
-		if (sorting) loadAll(); // start the walk now so Play rarely has to wait
+		applySort();
 	}
 
 	function toggleDesc() {
 		desc = !desc;
-		if (sorting) loadAll();
+		applySort();
+	}
+
+	// A sort change is a different request, not a different view of the same one: YouTube owns the
+	// order, so the rows have to come back from it. Storing the choice first is what makes the sort
+	// outlive the visit and show up in YouTube Music.
+	async function applySort() {
+		const pid = id;
+		rememberSort(pid, keepsSort && storedExactly(sort, desc));
+		if (!pl?.sortMenu) {
+			// Nothing to ask YouTube for. Sort the rows here instead, once they are all here.
+			if (sorting) loadAll();
+			return;
+		}
+		// Store it before re-reading, so the page that comes back is the one other clients see too.
+		const store = storable ? persistedSort(sort, desc) : null;
+		if (store) {
+			try {
+				await api.setPlaylistSort(pid, store);
+			} catch (e) {
+				// The order still applies here; only the carry-over to other clients is lost.
+				toast.error(`Sorted, but couldn't save it to YouTube: ${e}`);
+			}
+			if (pid !== id) return;
+		}
+		await fetchSorted(pid);
+		// "Most played" and a reversed manual order are still ours to do, over the whole list.
+		if (pid === id && sorting) loadAll();
+	}
+
+	// Ask YouTube for the list in the current order. `key` doubles as the identity of this request:
+	// picking a second sort while the first is in the air must not let the first one land on top.
+	async function fetchSorted(pid: string) {
+		const key = cacheKey(pid, sort, desc);
+		const current = () => pid === id && key === cacheKey(id, sort, desc);
+		const hit = getCached<PlaylistPage>(key);
+		if (hit) {
+			loadedKey = key;
+			pl = hit;
+			return;
+		}
+		resorting = true;
+		try {
+			const fresh = await api.getPlaylist(pid, fetchSort(sort), desc);
+			putCached(key, fresh); // still the right rows for that order, superseded or not
+			if (!current()) return;
+			loadedKey = key;
+			pl = fresh;
+		} catch (e) {
+			if (current()) toast.error(`Couldn't sort this playlist: ${e}`);
+		} finally {
+			// Only the newest pick clears it; an older one finishing late must not un-dim the list.
+			if (current()) resorting = false;
+		}
 	}
 
 	// Right-anchored, unlike the ⋯ menu: this button sits at the far end of the header, so a menu
@@ -193,12 +310,16 @@
 	}
 
 	async function load(pid: string) {
-		const key = `playlist:${pid}`;
+		// A sort YouTube keeps is read back off the response below; this store only holds the ones
+		// it cannot (see `rememberSort`), so an entry here means "ask for exactly this".
+		const saved = readSort(pid);
+		sort = saved?.sort ?? 'default';
+		desc = saved?.desc ?? false;
+		const key = cacheKey(pid, saved && sort, desc);
+		loadedKey = key;
 		const hit = getCached<PlaylistPage>(key);
 		confirmingDelete = false;
 		editingName = false;
-		sort = 'default';
-		desc = false;
 		sortOpen = false;
 		query = '';
 		// A page that failed on the last playlist would otherwise keep this one's retry state
@@ -206,6 +327,7 @@
 		moreError = false;
 		if (hit) {
 			pl = hit;
+			if (!saved) sort = hit.sortMenu?.selected ?? 'default';
 			bgImage = pickCover(hit.items);
 			loading = false;
 		} else {
@@ -214,10 +336,16 @@
 			bgImage = null;
 		}
 		error = null;
+		const [askedSort, askedDesc] = [sort, desc];
 		try {
-			const fresh = await api.getPlaylist(pid);
-			if (pid !== id) return; // superseded by navigation — drop the stale response
+			// Nothing saved means asking for no order at all: what comes back is the order the
+			// account already has this list in, which is the one YouTube Music would show.
+			const fresh = await api.getPlaylist(pid, saved ? fetchSort(sort) : undefined, desc);
+			// Superseded by navigation, or by a sort picked off the cached rows while this was in
+			// the air — either way `fetchSorted` owns the page now, so drop this response.
+			if (pid !== id || sort !== askedSort || desc !== askedDesc) return;
 			pl = fresh;
+			if (!saved) sort = fresh.sortMenu?.selected ?? 'default';
 			bgImage = pickCover(fresh.items);
 			putCached(key, fresh);
 		} catch (e) {
@@ -228,9 +356,13 @@
 		}
 	}
 
-	// Reload whenever the route param changes (playlist → playlist navigation).
+	// Reload whenever the route param changes (playlist → playlist navigation), and *only* then.
+	// untrack: `load` both reads and writes `sort`/`desc` — it adopts the order YouTube has the list
+	// in — so tracking them would make every finished load re-run this effect and fetch the playlist
+	// again, forever, on any list not sitting on Default.
 	$effect(() => {
-		if (id) load(id);
+		const pid = id;
+		if (pid) untrack(() => load(pid));
 	});
 
 	// Songs added to THIS playlist via the picker (e.g. from the queue) appear immediately.
@@ -255,7 +387,8 @@
 			if (delay) await new Promise((r) => setTimeout(r, delay));
 			if (pid !== id || !pl) return;
 			try {
-				const fresh = await api.getPlaylist(pid);
+				// Same order the rows on screen are in, so the two lists line up row for row.
+				const fresh = await api.getPlaylist(pid, fetchSort(sort), desc);
 				if (pid !== id || !pl) return;
 				const used = new Set(pl.items.map((t) => t.set_video_id).filter(Boolean));
 				pl = {
@@ -282,7 +415,7 @@
 	// Keep the page cache in step with optimistic mutations so a revisit within the TTL never
 	// resurrects pre-mutation data (the optimistic-UI contract). context: plans/007.
 	function cacheCurrent() {
-		if (pl) putCached(`playlist:${id}`, pl);
+		if (pl && loadedKey) putCached(loadedKey, pl);
 	}
 
 	// One page at a time, shared: the scroll sentinel and the "load the rest before playing" walk
@@ -360,10 +493,11 @@
 	// to start: YouTube hands out tracks 100 at a time and the tokens are chained, so the backend
 	// takes the token and walks the rest into the queue while page 1 is already playing.
 	//
-	// Under a sort the queue is the sorted list and the continuation token is dropped: handing the
-	// backend a token would have it walk YouTube's order in behind a sorted queue. `ready()` has
-	// already walked those pages into `pl.items` instead. The queue is a snapshot either way, so a
-	// later sort change never touches a queue that is already playing.
+	// A YouTube sort keeps the token: the pages behind it continue that same order, so the backend
+	// walking them is exactly right. The two orders it cannot produce (our play counts, a reversed
+	// manual order) do drop it, because there the token would walk YouTube's order in behind a
+	// queue sorted here; `ready()` has walked those pages into `pl.items` instead. The queue is a
+	// snapshot either way, so a later sort change never touches one that is already playing.
 	//
 	// A filter narrows which rows are on screen but never what gets queued: it finds a track, it
 	// doesn't decide what plays after it, so playing a match leaves the same queue behind as
@@ -596,10 +730,10 @@
 						<Button
 							class="gap-2"
 							onclick={() => playAll(null)}
-							disabled={!pl.items.length || preparing}
+							disabled={!pl.items.length || preparing || resorting}
 						>
 							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
-							{preparing ? 'Sorting…' : 'Play'}
+							{preparing || resorting ? 'Sorting…' : 'Play'}
 						</Button>
 						{#if confirmingDelete}
 							<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
@@ -649,7 +783,13 @@
 				<TrackFilter bind:value={query} placeholder="Search this playlist" />
 			</div>
 		</div>
-		<div class="content-in min-h-0 flex-1 overflow-y-auto p-4" {@attach sc.attach}>
+		<div
+			class="content-in min-h-0 flex-1 overflow-y-auto p-4 transition-opacity {resorting
+				? 'opacity-50'
+				: ''}"
+			aria-busy={resorting}
+			{@attach sc.attach}
+		>
 			{#if shown.length}
 				<!-- The padding stands in for the rows outside the window, so the scrollbar is the
 				     length of the whole playlist even though only ~30 rows exist. -->

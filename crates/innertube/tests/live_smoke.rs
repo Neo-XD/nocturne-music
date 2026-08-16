@@ -2,7 +2,9 @@
 //!   cargo test -p innertube --features integration-tests -- --nocapture
 #![cfg(feature = "integration-tests")]
 
-use innertube::{find_format, AudioQuality, Clients, InnerTube, Session, STREAM_FALLBACK_ORDER};
+use innertube::{
+    find_format, AudioQuality, Clients, InnerTube, PlaylistSort, Session, STREAM_FALLBACK_ORDER,
+};
 
 const VIDEO_ID: &str = "xl9cFAOKg_Y"; // the id from the user's failing run
 
@@ -78,7 +80,7 @@ async fn owned_continuation_not_doubled() {
     let libs = it.library_playlists(client).await.expect("library playlists");
     let mut checked = 0;
     for c in &libs {
-        let Ok(page) = it.playlist(client, &c.id).await else { continue };
+        let Ok(page) = it.playlist(client, &c.id, None).await else { continue };
         let Some(tok) = page.continuation.clone() else { continue };
         let cont = it.playlist_continuation(client, &tok).await.expect("continuation");
         if cont.items.is_empty() {
@@ -98,6 +100,56 @@ async fn owned_continuation_not_doubled() {
     }
     assert!(checked > 0, "no playlist with a track continuation found to verify");
     eprintln!("verified {checked} track continuations, no doubling");
+}
+
+/// The playlist sort is YouTube's, not ours: the app asks for an order and renders what comes back
+/// (`PlaylistSort::params`). Those params are a protobuf literal copied out of YouTube's own menu,
+/// so this pins the half that moves under us — that they still sort, and that the menu still says
+/// which order the list is in and whether the choice can be written back.
+///
+/// Read-only on purpose. The write side (`playlist_set_sort`) changes a real playlist for every
+/// client on the account, so it is not something a test suite should do behind your back.
+///   LIMUSIC_COOKIE=… LIMUSIC_VISITOR=… cargo test -p innertube --features integration-tests playlist_sort -- --ignored --nocapture
+#[tokio::test]
+#[ignore]
+async fn playlist_sort_params_still_order_the_server_side_list() {
+    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
+        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
+        return;
+    };
+    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
+    let it = InnerTube::new(
+        Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
+        None,
+    )
+    .unwrap();
+    let clients = Clients::bundled();
+    let client = clients.get("WEB_REMIX").expect("WEB_REMIX client");
+
+    // Liked Music is the one list every account has, and YouTube sorts it without being asked to
+    // store anything on a playlist.
+    let plain = it.playlist(client, "VLLM", None).await.expect("liked music");
+    let menu = plain.sort_menu.clone().expect("Liked Music still offers a sort menu");
+    assert!(!menu.editable, "Liked Music sorts through browse params, not a playlist edit");
+    assert!(plain.items.len() > 1, "need more than one track to tell an order from another");
+
+    let titles = |p: &innertube::PlaylistPage| -> Vec<String> {
+        p.items.iter().map(|i| i.title.clone()).collect()
+    };
+    let asc = it.playlist(client, "VLLM", Some((PlaylistSort::Title, false))).await.expect("A-Z");
+    let desc = it.playlist(client, "VLLM", Some((PlaylistSort::Title, true))).await.expect("Z-A");
+    assert_eq!(
+        asc.sort_menu.as_ref().and_then(|m| m.selected),
+        Some(PlaylistSort::Title),
+        "the menu has to report back the order we asked for"
+    );
+    assert_ne!(titles(&asc), titles(&desc), "descending params must not return the same page");
+    assert_ne!(titles(&asc), titles(&plain), "a title sort must not return the stored order");
+
+    // Put Liked Music back: asking for an order is what persists it on this one list.
+    let restored = it.playlist(client, "VLLM", Some((PlaylistSort::Default, false))).await;
+    assert!(restored.is_ok(), "failed to restore Liked Music to its stored order");
+    eprintln!("title sort verified against {} tracks, Liked Music restored", plain.items.len());
 }
 
 /// Every surface has to hand the queue an artist that is a *name*. That string is the player bar,

@@ -16,7 +16,7 @@ pub use clients::{
 };
 pub use models::browse::{
     AlbumPage, ArtistCarousel, ArtistPage, BrowseItem, HomePage, PlaylistContinuation,
-    PlaylistPage, SearchResults, Section,
+    PlaylistPage, PlaylistSort, SearchResults, Section, SortMenu,
 };
 pub use models::context::Locale;
 pub use models::lyrics::{PlainLyrics, TimedLyricLine};

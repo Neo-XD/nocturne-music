@@ -409,6 +409,7 @@ pub fn run() {
             commands::remove_from_playlist,
             commands::create_playlist,
             commands::rename_playlist,
+            commands::set_playlist_sort,
             commands::delete_playlist,
             commands::subscribe,
             commands::lt_get_state,
