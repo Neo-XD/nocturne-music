@@ -660,6 +660,22 @@ export function initApp(mini = false): () => void {
 			savePersonal();
 		}),
 		api.onQueueChanged((q) => (playback.queue = q)),
+		// The items did not change, so keep the array we already hold and patch the rest. Splice
+		// the playing row back in: `start_current` backfills its duration and artists after the
+		// stream resolves, and that repair rides on this event rather than a whole new queue.
+		api.onQueueIndex((q) => {
+			const items = playback.queue.items;
+			if (q.current && items[q.currentIndex]) items[q.currentIndex] = q.current;
+			playback.queue = {
+				...playback.queue,
+				items,
+				currentIndex: q.currentIndex,
+				playedFrom: q.playedFrom,
+				shuffle: q.shuffle,
+				repeat: q.repeat,
+				sourceName: q.sourceName
+			};
+		}),
 		api.onPosition((p) => (playback.position = p)),
 		api.onDuration((d) => (playback.duration = d)),
 		api.onPlaybackState((s) => (playback.paused = s === 'paused')),
