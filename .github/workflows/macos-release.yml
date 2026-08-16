@@ -214,6 +214,9 @@ jobs:
       #   -p  install-name prefix to write -of overwrite existing   -cd create the dir
       #   -s  extra search path, for the handful of Homebrew dylibs that use @rpath
       - name: Bundle libmpv and its dependency graph
+        # dylibbundler ASKS, on stdin, when it cannot find a library, and on EOF it spins on the
+        # prompt forever. Without a step timeout that is a 45-minute hang instead of a failure.
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           APP=target/release/bundle/macos/limusic.app
@@ -221,7 +224,7 @@ jobs:
             -x "$APP/Contents/MacOS/limusic" \
             -d "$APP/Contents/Frameworks" \
             -p "@executable_path/../Frameworks" \
-            -s "$BREW_PREFIX/lib"
+            -s "$BREW_PREFIX/lib" < /dev/null
           echo "bundled $(ls "$APP/Contents/Frameworks" | wc -l | tr -d ' ') libraries"
 
       # Ad-hoc signature. Not an Apple Developer identity (see the header), but arm64 macOS will not
@@ -245,10 +248,14 @@ jobs:
           APP=target/release/bundle/macos/limusic.app
           # [[:space:]], not \s: this runs under BSD grep, whose POSIX regex has no \s, and a
           # pattern that quietly matches nothing is worse than no guard at all.
+          #
+          # `|| true` on the inner pipeline is load-bearing: grep exits 1 on every clean file, and
+          # under `set -e` + pipefail that would abort the command substitution, failing the step
+          # on exactly the builds that are fine.
           LEAKS="$(find "$APP" -type f -print0 | while IFS= read -r -d '' f; do
             otool -L "$f" 2>/dev/null | tail -n +2 \
               | grep -E '^[[:space:]]+/(opt/homebrew|usr/local)/' \
-              | sed "s|^|${f#$APP/} <- |"
+              | sed "s|^|${f#$APP/} <- |" || true
           done)"
           if [ -n "$LEAKS" ]; then
             echo "::error::the bundle still links libraries from Homebrew, so it only runs on a machine that has them:"
