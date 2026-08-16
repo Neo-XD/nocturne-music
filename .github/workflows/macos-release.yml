@@ -171,6 +171,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: . -> target
+          # Nobody here owns a Mac, so this job is the only place a macOS problem can be reproduced,
+          # and every fix costs a full run. Without this, a run that fails anywhere after the
+          # compile throws away six minutes of build and the next attempt starts cold again.
+          cache-on-failure: true
 
       - name: Tauri CLI
         # The npm CLI ships a prebuilt binary; `cargo install tauri-cli` would compile it from
@@ -194,6 +198,10 @@ jobs:
 
       # Only the .app. The .dmg and the updater tarball are built further down, from the *fixed and
       # re-signed* bundle: anything tauri packaged here would contain the pre-dylibbundler app.
+      #
+      # createUpdaterArtifacts is turned off for the same reason. Left on, the bundler tars the
+      # unfixed .app and then fails the build asking for the signing key, which is deliberately not
+      # in scope here: the tarball that ships is made and signed further down, after dylibbundler.
       - name: Build the app bundle
         run: |
           set -euo pipefail
@@ -201,7 +209,8 @@ jobs:
           # beforeBuildCommand emptied because we just ran it. Left on, tauri runs `pnpm build` from
           # the repo root, which has no package.json, so which frontend package pnpm picks is down
           # to the filesystem.
-          tauri build --bundles app --config '{"build":{"beforeBuildCommand":""}}'
+          tauri build --bundles app --config \
+            '{"build":{"beforeBuildCommand":""},"bundle":{"createUpdaterArtifacts":false}}'
           [ -d "target/release/bundle/macos/limusic.app" ] \
             || { echo "::error::no .app at target/release/bundle/macos/limusic.app"; find target/release/bundle -maxdepth 2; exit 1; }
 
