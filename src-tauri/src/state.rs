@@ -71,7 +71,7 @@ pub struct AppState {
     /// a Tauri event inlines its payload into a JavaScript source string, so a 5,000-track queue
     /// costs ~26 ms of parse in the webview every time it crosses.
     last_queue_fingerprint: AtomicU64,
-    /// Fingerprint of the item list last written to `queue_json`. Same trick as
+    /// Dirty key (`persist_fingerprint`) last written to `queue_json`. Same trick as
     /// `last_queue_fingerprint`, for the persistence side: an advance rewrites 40 bytes rather
     /// than the whole blob.
     last_persisted_fingerprint: AtomicU64,
@@ -1893,8 +1893,9 @@ impl AppState {
                 "fp": fingerprint.to_string(),
             })
             .to_string();
+            let persist_fp = persist_fingerprint(&q);
             let changed =
-                self.last_persisted_fingerprint.swap(fingerprint, Ordering::Relaxed) != fingerprint;
+                self.last_persisted_fingerprint.swap(persist_fp, Ordering::Relaxed) != persist_fp;
             let blob = changed.then(|| {
                 serde_json::json!({
                     "items": &q.items,
@@ -3040,16 +3041,41 @@ fn loudness_gain(loudness_db: Option<f64>) -> Option<f64> {
 const TARGET_LUFS: f64 = -7.0;
 
 /// Fingerprint of a queue's track list: what `emit_queue` compares to decide whether the UI
-/// already has these rows. Video ids and length only, which is exactly what identifies a row for
-/// the panel (`queue.ts` keys on videoId plus occurrence). A metadata backfill on an existing row
-/// deliberately does not change it: the row it repairs is the playing one, and that one rides
-/// along on the index event.
+/// already has these rows. Hashes length, `video_id`, and every field the panel renders
+/// differently per row (`set_video_id`, `queued`, `queued_end`, `queued_from`, `queued_by`,
+/// `autoplay`): two rows identical in all of those are interchangeable in the panel, so staying
+/// quiet about a swap between them is correct. Deliberately excludes `duration`, `artists`,
+/// `title`, `thumbnail` and `rating`: those are exactly the fields `backfill_metadata` repairs on
+/// the playing row, and that repair rides along on the `queue-index` event's `current` field on
+/// purpose. Hashing them would send the whole queue on every track start and undo the point of
+/// that split.
 fn queue_fingerprint(items: &[SongItem]) -> u64 {
     let mut hasher = DefaultHasher::new();
     items.len().hash(&mut hasher);
     for item in items {
         item.video_id.hash(&mut hasher);
+        item.set_video_id.hash(&mut hasher);
+        item.queued.hash(&mut hasher);
+        item.queued_end.hash(&mut hasher);
+        item.queued_from.hash(&mut hasher);
+        item.queued_by.hash(&mut hasher);
+        item.autoplay.hash(&mut hasher);
     }
+    hasher.finish()
+}
+
+/// Dirty key for `queue_json`, which stores more than the rows. `queue_index` carries
+/// current/playedFrom/repeat, so anything else the blob holds has to force a blob rewrite by
+/// itself. `shuffle_upcoming` only touches rows after `current`, so toggling shuffle while the
+/// last track plays leaves `items` byte-identical and the row fingerprint alone would skip the
+/// write, losing the shuffle state across a restart.
+fn persist_fingerprint(q: &QueueState) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    queue_fingerprint(&q.items).hash(&mut hasher);
+    q.shuffle_orig.is_some().hash(&mut hasher);
+    q.radio_seed.hash(&mut hasher);
+    q.source_name.hash(&mut hasher);
+    q.radio.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -3058,8 +3084,8 @@ mod tests {
     use super::{
         append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration,
         guest_insert_index, is_mix, loudness_gain, merge_radio, next_index, parse_duration_ms,
-        queue_fingerprint, radio_seed_for, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
-        unshuffled, upcoming_queued, QueueState, RepeatMode,
+        persist_fingerprint, queue_fingerprint, radio_seed_for, shuffle_new_queue,
+        shuffle_upcoming, splice_radio_into, unshuffled, upcoming_queued, QueueState, RepeatMode,
     };
 
     #[test]
@@ -3086,6 +3112,51 @@ mod tests {
             queue_fingerprint(&a).to_string(),
             queue_fingerprint(&[row("a"), row("b")]).to_string()
         );
+    }
+
+    // `move_in_queue` can drag one occurrence of a repeated videoId past the other (a track queued
+    // twice from two different playlists, say). The panel tells the two rows apart by the fields
+    // that differ between them, not by videoId alone, so the fingerprint has to as well: otherwise
+    // the swap is invisible, `emit_queue` stays on the small `queue-index` event, and the drag
+    // looks like it did nothing.
+    #[test]
+    fn queue_fingerprint_distinguishes_same_video_id_rows_by_queue_metadata() {
+        let row = |queued_from: Option<&str>| innertube::SongItem {
+            video_id: "x".into(),
+            queued_from: queued_from.map(Into::into),
+            ..Default::default()
+        };
+        let a = vec![row(Some("Chill Mix")), row(None)];
+        let b = vec![row(None), row(Some("Chill Mix"))];
+        assert_ne!(queue_fingerprint(&a), queue_fingerprint(&b));
+
+        // Same story for `set_video_id`, the other field that tells apart two occurrences of the
+        // same videoId (one came from a playlist page, so it carries a playlistSetVideoId; a
+        // second copy queued manually doesn't).
+        let row2 = |set_video_id: Option<&str>| innertube::SongItem {
+            video_id: "x".into(),
+            set_video_id: set_video_id.map(Into::into),
+            ..Default::default()
+        };
+        let c = vec![row2(Some("1")), row2(Some("2"))];
+        let d = vec![row2(Some("2")), row2(Some("1"))];
+        assert_ne!(queue_fingerprint(&c), queue_fingerprint(&d));
+    }
+
+    // `shuffle_upcoming` only reorders rows after `current`, so toggling shuffle while the last
+    // track is playing leaves `items` byte-identical: the rows-only `queue_fingerprint` can't see
+    // it, and `persist_queue`'s dirty check has to cover the rest of what `queue_json` stores or
+    // the toggle is lost across a restart.
+    #[test]
+    fn persist_fingerprint_changes_when_shuffle_toggles_with_identical_items() {
+        let mut q = QueueState {
+            items: vec![innertube::SongItem { video_id: "a".into(), ..Default::default() }],
+            ..QueueState::default()
+        };
+        let off = persist_fingerprint(&q);
+        q.shuffle_orig = Some(q.items.clone());
+        let on = persist_fingerprint(&q);
+        assert_ne!(off, on);
     }
 
     #[test]

@@ -498,11 +498,25 @@
 	// back out of view, so the observer fires once and stops. Same walk a sort needs, for the same
 	// reason: the search has to cover the whole playlist, not the pages scrolled so far. The flag
 	// keeps one walk running rather than starting a fresh one on every page it lands.
-	let walking = false;
+	//
+	// Keyed on the playlist id rather than a bare boolean because this component is reused across
+	// playlist-to-playlist navigation (that's why `load` above is itself driven by an `$effect` on
+	// `id`, not a fresh mount). A walk started on playlist A can still be in flight when you
+	// navigate to B and filter there; a plain `walking` flag would still read true from A, block
+	// B's walk from ever starting, and then A's `finally` would clear a flag B never got to set,
+	// so B's filter would search only whatever it happened to have loaded and could wrongly show
+	// "No tracks match" with real matches still unfetched. Comparing against the current `id`
+	// means a different playlist is never blocked by someone else's walk, and capturing the id a
+	// walk started for (`pid`) into its own `finally` means a stale walk can only ever clear its
+	// own marker, never a fresher walk's.
+	let walkingFor: string | null = null;
 	$effect(() => {
-		if (!filtering || !pl?.continuation || walking) return;
-		walking = true;
-		loadAll().finally(() => (walking = false));
+		if (!filtering || !pl?.continuation || walkingFor === id) return;
+		const pid = id;
+		walkingFor = pid;
+		loadAll().finally(() => {
+			if (walkingFor === pid) walkingFor = null;
+		});
 	});
 
 	// This playlist as a card, for the sidebar's last-played sort and the Shortcuts grid.
