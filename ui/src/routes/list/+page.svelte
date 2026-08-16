@@ -6,10 +6,14 @@
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import { getCached, putCached } from '$lib/pagecache';
+	import { reveal } from '$lib/reveal.svelte';
 
 	let items = $state<BrowseItem[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	// A browse grid is however many things YouTube sends; reveal it in chunks past a couple of
+	// hundred rather than mounting the lot when the page opens.
+	const rv = reveal();
 
 	const id = $derived(page.url.searchParams.get('id') ?? '');
 	const params = $derived(page.url.searchParams.get('params') ?? undefined);
@@ -20,16 +24,19 @@
 		const hit = getCached<BrowseItem[]>(key);
 		if (hit) {
 			items = hit;
+			rv.reset();
 			loading = false;
 		} else {
 			loading = true;
 			items = [];
+			rv.reset();
 		}
 		error = null;
 		try {
 			const fresh = await api.getBrowseGrid(browseId, p);
 			if (browseId !== id || p !== params) return; // superseded by navigation
 			items = fresh;
+			rv.reset();
 			putCached(key, fresh);
 		} catch (e) {
 			if (browseId !== id || p !== params) return;
@@ -56,10 +63,12 @@
 		<ErrorState message={error} onRetry={() => load(id, params)} />
 	{:else if items.length}
 		<div class="card-grid content-in">
-			{#each items as item (item.id + item.title)}
+			{#each items.slice(0, rv.count(items.length)) as item (item.id + item.title)}
 				<MediaCard {item} />
 			{/each}
 		</div>
+		<!-- Outside the grid, or it would be laid out as a cell. -->
+		{#if rv.more(items.length)}<div {@attach rv.sentinel}></div>{/if}
 	{:else}
 		<p class="text-sm text-muted-foreground">Nothing here.</p>
 	{/if}

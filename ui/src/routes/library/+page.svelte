@@ -38,6 +38,7 @@
 		syncSavedToYouTube
 	} from '$lib/player.svelte';
 	import { mergeSaved, unsynced } from '$lib/personal';
+	import { reveal } from '$lib/reveal.svelte';
 
 	let dialogOpen = $state(false);
 	let newTitle = $state('');
@@ -56,6 +57,14 @@
 	const albums = $derived(mergeSaved(personal, library.albums, 'album'));
 	const artists = $derived(mergeSaved(personal, library.artists, 'artist'));
 	const all = $derived([...playlists, ...albums, ...artists]);
+	// One per tab rather than one shared instance reset on switch: an `$effect` reset lands
+	// after the render it is meant to govern, so switching tabs would build the new tab's grid
+	// against the old tab's count and immediately tear the excess back down. A tab keeping its
+	// own depth also means coming back to one lands where you left it.
+	const rvAll = reveal();
+	const rvPlaylists = reveal();
+	const rvAlbums = reveal();
+	const rvArtists = reveal();
 	const loading = $derived((library.loading || library.extrasLoading) && !all.length);
 	const error = $derived(library.error ?? library.extrasError);
 	// Only the empty states differ: signed out there is no account library to be missing yet.
@@ -105,13 +114,15 @@
 	}
 </script>
 
-{#snippet grid(items: BrowseItem[], empty: string)}
+{#snippet grid(items: BrowseItem[], empty: string, rv: ReturnType<typeof reveal>)}
 	{#if items.length}
 		<div class="card-grid content-in">
-			{#each items as item (item.kind + item.id)}
+			{#each items.slice(0, rv.count(items.length)) as item (item.kind + item.id)}
 				<MediaCard {item} />
 			{/each}
 		</div>
+		<!-- Outside the grid, or it would be laid out as a cell. -->
+		{#if rv.more(items.length)}<div {@attach rv.sentinel}></div>{/if}
 	{:else}
 		<p class="text-sm text-muted-foreground">{empty}</p>
 	{/if}
@@ -242,7 +253,8 @@
 						all,
 						signedOut
 							? 'Nothing saved yet. Open a playlist or album and hit Save to library, or sign in for the one on your account.'
-							: 'Your library is empty.'
+							: 'Your library is empty.',
+						rvAll
 					)}
 				{/if}
 			</Tabs.Content>
@@ -250,13 +262,18 @@
 				{#if tab === 'playlists'}
 					{@render grid(
 						playlists,
-						'No playlists yet. Open one and hit Save to library to keep it here.'
+						'No playlists yet. Open one and hit Save to library to keep it here.',
+						rvPlaylists
 					)}
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="albums">
 				{#if tab === 'albums'}
-					{@render grid(albums, 'No saved albums yet. Open an album and hit Save to library.')}
+					{@render grid(
+						albums,
+						'No saved albums yet. Open an album and hit Save to library.',
+						rvAlbums
+					)}
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="artists">
@@ -265,7 +282,8 @@
 						artists,
 						signedOut
 							? 'No artists yet. Save one from its page to keep it here.'
-							: 'No artists yet. They show up once you save their songs or albums.'
+							: 'No artists yet. They show up once you save their songs or albums.',
+						rvArtists
 					)}
 				{/if}
 			</Tabs.Content>
