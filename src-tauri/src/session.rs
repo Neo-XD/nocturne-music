@@ -10,6 +10,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tauri::webview::cookie::Cookie;
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -34,7 +35,8 @@ pub fn open_login(app: AppHandle, state: Arc<AppState>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
     // When the webview lands on music.youtube.com, capture cookies + sign in. Runs off the
-    // event-handler thread because `cookies_for_url` can deadlock when called synchronously there.
+    // event-handler thread because reading the cookie store can deadlock when called synchronously
+    // from inside a page-load callback.
     {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -42,7 +44,7 @@ pub fn open_login(app: AppHandle, state: Arc<AppState>) {
                 // The redirect that lands us here sets the youtube cookies; they may appear a beat
                 // after the page finishes, so poll briefly.
                 for _ in 0..6 {
-                    let cookie = read_login_cookies(&app);
+                    let cookie = read_login_cookies(&app).await;
                     if innertube::cookie_sapisid(&cookie).is_some() {
                         match state.sign_in(cookie).await {
                             Ok(SignInOutcome::Complete) => {
@@ -97,19 +99,83 @@ pub fn open_login(app: AppHandle, state: Arc<AppState>) {
 
 /// Merge the youtube-domain cookies into a `Cookie` header string. Reads the platform cookie store
 /// (HttpOnly + secure included), matching what a browser sends to music.youtube.com.
-fn read_login_cookies(app: &AppHandle) -> String {
+///
+/// Hops to the main thread: both backends drive their platform event loop while they wait for the
+/// store (`gtk::main_iteration` on WebKitGTK, `NSRunLoop::mainRunLoop` on WKWebView), so they are
+/// written to be called from the thread that owns it.
+async fn read_login_cookies(app: &AppHandle) -> String {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let app2 = app.clone();
+    if app
+        .run_on_main_thread(move || {
+            let _ = tx.send(youtube_cookies(&app2));
+        })
+        .is_err()
+    {
+        return String::new();
+    }
+    rx.await.unwrap_or_default()
+}
+
+fn youtube_cookies(app: &AppHandle) -> String {
     let Some(wv) = app.get_webview_window(LOGIN_LABEL) else { return String::new() };
+    let Ok(cookies) = wv.cookies() else { return String::new() };
+    youtube_cookie_header(cookies)
+}
+
+/// Domain-match by hand rather than with `cookies_for_url`: WKWebView's implementation compares the
+/// cookie's domain to the URL's host with `==`, so YouTube's `.youtube.com` cookies never match
+/// music.youtube.com and macOS got an empty jar (no SAPISID, so sign-in gave up silently).
+/// WebKitGTK matches domains properly, which is why Linux never saw it.
+///
+/// Anything outside youtube.com is dropped, google.com cookies included: this becomes a `Cookie`
+/// header sent to YouTube, and a cookie without a domain we recognise doesn't belong in it.
+fn youtube_cookie_header(mut cookies: Vec<Cookie<'static>>) -> String {
+    // `Cookie::domain()` has already stripped the leading dot. Sorting means the most specific
+    // domain is inserted last and so wins a name collision, the way a browser resolves one.
+    cookies.sort_by_key(|c| c.domain().unwrap_or_default().len());
     let mut jar = std::collections::BTreeMap::new();
-    for base in ["https://music.youtube.com", "https://www.youtube.com"] {
-        if let Ok(url) = tauri::Url::parse(base) {
-            if let Ok(cookies) = wv.cookies_for_url(url) {
-                for c in cookies {
-                    jar.insert(c.name().to_string(), c.value().to_string());
-                }
-            }
+    for c in cookies {
+        let domain = c.domain().unwrap_or_default();
+        if domain == "youtube.com" || domain.ends_with(".youtube.com") {
+            jar.insert(c.name().to_string(), c.value().to_string());
         }
     }
     jar.into_iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cookie(s: &str) -> Cookie<'static> {
+        Cookie::parse(s.to_string()).unwrap()
+    }
+
+    #[test]
+    fn keeps_the_youtube_jar_and_drops_everything_else() {
+        // `.youtube.com` is where the auth cookies actually live, and the domain WKWebView refuses
+        // to match against music.youtube.com.
+        let header = youtube_cookie_header(vec![
+            cookie("SAPISID=abc; Domain=.youtube.com"),
+            cookie("SID=def; Domain=.youtube.com"),
+            cookie("VISITOR_INFO1_LIVE=xyz; Domain=music.youtube.com"),
+            cookie("SAPISID=notthisone; Domain=.google.com"),
+            cookie("nodomain=1"),
+        ]);
+        assert_eq!(header, "SAPISID=abc; SID=def; VISITOR_INFO1_LIVE=xyz");
+        // The check open_login gates on: no SAPISID means sign-in silently gives up.
+        assert_eq!(innertube::cookie_sapisid(&header), Some("abc"));
+    }
+
+    #[test]
+    fn the_most_specific_domain_wins_a_name_collision() {
+        let header = youtube_cookie_header(vec![
+            cookie("PREF=broad; Domain=.youtube.com"),
+            cookie("PREF=specific; Domain=music.youtube.com"),
+        ]);
+        assert_eq!(header, "PREF=specific");
+    }
 }
 
 fn close_login(app: &AppHandle) {
