@@ -749,9 +749,29 @@ pub async fn set_playlist_cover(
     let key = cover_key(&playlist_id);
     let stored = state.db.get_setting(&key);
     let Some(src) = path else {
-        // Order matters: YouTube first, and the local copy stays on screen until it answers. A
-        // refusal leaves both sides as they were rather than half-removed.
-        let thumbnail = clear_cover_on_youtube(&state, &playlist_id).await?;
+        // YouTube first, so the local copy is still on screen while it answers. Its refusal is
+        // never fatal though: dropping the cover from this machine is what the user clicked, and
+        // an account that was not allowed to set one up there has nothing to clear anyway.
+        let thumbnail = match clear_cover_on_youtube(&state, &playlist_id).await {
+            Ok(t) => {
+                state.db.delete_setting(&synced_key(&playlist_id));
+                t
+            }
+            Err(e) => {
+                tracing::warn!(playlist_id, error = %e, "custom cover not cleared on YouTube Music");
+                // Only worth saying when a cover of ours actually reached the account: otherwise
+                // there was nothing up there to keep, and the warning would be a lie.
+                if state.db.get_setting(&synced_key(&playlist_id)).is_some() {
+                    let _ = state.app.emit(
+                        "cover-error",
+                        serde_json::json!({
+                            "message": "Removed here, but YouTube Music kept its copy.",
+                        }),
+                    );
+                }
+                None
+            }
+        };
         state.db.delete_setting(&key);
         if let Some(old) = stored {
             let _ = std::fs::remove_file(old);
@@ -824,14 +844,19 @@ fn sync_cover(state: &Arc<AppState>, playlist_id: &str, path: String) {
             Ok(image) => state.it.playlist_set_cover(client, &playlist_id, image).await,
             Err(e) => Err(innertube::Error::Other(e.to_string())),
         };
-        if let Err(e) = result {
-            tracing::warn!(playlist_id, error = %e, "playlist cover didn't reach YouTube Music");
-            let _ = state.app.emit(
-                "cover-error",
-                serde_json::json!({
-                    "message": format!("Artwork saved here, but YouTube Music wouldn't take it: {e}"),
-                }),
-            );
+        match result {
+            // Remembered so a later removal knows whether YouTube has anything of ours to drop.
+            Ok(()) => state.db.set_setting(&synced_key(&playlist_id), "1"),
+            Err(e) => {
+                tracing::warn!(playlist_id, error = %e, "playlist cover didn't reach YouTube Music");
+                let message = match e {
+                    // The one refusal with a known cause and no fix inside this app. Say it once,
+                    // plainly, and leave the cover where it already is: on this machine.
+                    innertube::Error::CoverRefused => format!("Artwork saved on this device. {e}"),
+                    e => format!("Artwork saved here, but the upload to YouTube Music failed: {e}"),
+                };
+                let _ = state.app.emit("cover-error", serde_json::json!({ "message": message }));
+            }
         }
     });
 }
@@ -852,6 +877,12 @@ async fn clear_cover_on_youtube(
 fn cover_key(playlist_id: &str) -> String {
     // Browse ids arrive `VL`-prefixed and playlist ids don't; one playlist, one key either way.
     format!("playlist_cover:{}", playlist_id.strip_prefix("VL").unwrap_or(playlist_id))
+}
+
+/// Set once a cover of ours has actually landed on the account, so a removal knows whether there
+/// is anything up there to warn about failing to clear.
+fn synced_key(playlist_id: &str) -> String {
+    format!("{}:synced", cover_key(playlist_id))
 }
 
 /// The custom artwork stored for a playlist, if the file is still there. The user owns that

@@ -28,6 +28,10 @@ pub enum Error {
     SessionExpired,
     #[error("This track is already in the playlist.")]
     AlreadyInPlaylist,
+    #[error(
+        "YouTube Music only allows custom playlist art on accounts with a verified phone number."
+    )]
+    CoverRefused,
     #[error("{0}")]
     Other(String),
 }

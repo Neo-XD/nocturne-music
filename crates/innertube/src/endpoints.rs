@@ -669,6 +669,7 @@ impl InnerTube {
             }),
         )
         .await
+        .map_err(cover_refusal)
     }
 
     /// Drop the custom cover again, so YouTube goes back to building one out of the tracks.
@@ -688,7 +689,8 @@ impl InnerTube {
                     "deletedCustomThumbnail": custom_thumbnail_key(),
                 })],
             )
-            .await?;
+            .await
+            .map_err(cover_refusal)?;
         Ok(edited_thumbnail(&value))
     }
 
@@ -803,6 +805,21 @@ impl InnerTube {
 /// resumable uploader, sitting on `music.youtube.com` under its own path. context/01.
 const PLAYLIST_IMAGE_UPLOAD: &str = "playlist_image_upload/playlist_custom_thumbnail";
 
+/// YouTube saying no to a custom playlist image, as opposed to the network saying nothing at all.
+///
+/// The gate is phone verification, and it is invisible: the account uploads the bytes fine (the
+/// credential is clearly good, the uploader took it), and then the attach comes back 4xx with
+/// nothing in the body naming a reason. A 403 in particular must not reach the user as our
+/// "session expired, sign in again", which is what the transport makes of one everywhere else.
+/// Timeouts and connect failures are left alone: those really are try-again.
+fn cover_refusal(e: Error) -> Error {
+    match &e {
+        Error::SessionExpired | Error::Other(_) => Error::CoverRefused,
+        Error::Http(h) if h.status().is_some() => Error::CoverRefused,
+        _ => e,
+    }
+}
+
 /// The playlist's thumbnail as the edit left it, off the header YouTube echoes back. Both cover
 /// actions answer with one, and after a removal it is the only way to learn the collage YouTube
 /// rebuilt out of the tracks. Scoped to `newHeader` so an unrelated avatar can't stand in for it.
@@ -846,6 +863,21 @@ mod tests {
     fn strips_vl_prefix() {
         assert_eq!(strip_vl("VLPL123"), "PL123");
         assert_eq!(strip_vl("PL123"), "PL123");
+    }
+
+    /// The image bytes were accepted moments earlier, so the credential is good: a refusal on the
+    /// attach is the account not being allowed a custom playlist image. Above all it must not come
+    /// out as "your session expired", which is what a 403 means anywhere else in this crate.
+    #[test]
+    fn a_refused_cover_never_reads_as_a_dead_session() {
+        assert!(matches!(cover_refusal(Error::SessionExpired), Error::CoverRefused));
+        // `edit_playlist`'s STATUS_FAILED rejection, which is how a 200 says no.
+        assert!(matches!(
+            cover_refusal(Error::Other("YouTube refused the playlist edit.".into())),
+            Error::CoverRefused
+        ));
+        // Nothing reached YouTube at all: still worth a retry, so leave it be.
+        assert!(matches!(cover_refusal(Error::VisitorDataNotFound), Error::VisitorDataNotFound));
     }
 
     // Both bodies are trimmed captures of the live responses.
