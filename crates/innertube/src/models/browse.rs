@@ -187,6 +187,13 @@ pub struct PlaylistPage {
     pub title: Option<String>,
     pub subtitle: Option<String>,
     pub thumbnail: Option<String>,
+    /// The playlist's own blurb, as the edit dialog needs it back to leave it alone.
+    pub description: Option<String>,
+    /// `PUBLIC` / `PRIVATE` / `UNLISTED`. Only owned playlists carry the edit header it comes from.
+    pub privacy: Option<String>,
+    /// Custom artwork the user picked on this machine, filled in by the app (YouTube has no
+    /// playlist-thumbnail API). `thumbnail` stays YouTube's, so dropping the custom one is free.
+    pub cover: Option<String>,
     pub items: Vec<SongItem>,
     pub continuation: Option<String>,
     /// True only when the signed-in user owns this playlist (rename/delete allowed). YouTube wraps
@@ -350,6 +357,9 @@ pub fn parse_playlist(root: &Value) -> PlaylistPage {
         title,
         subtitle,
         thumbnail,
+        description: header_description(root, header),
+        privacy: playlist_privacy(root),
+        cover: None, // the app fills this in from its own store
         items,
         continuation: shelf_continuation(root),
         owned,
@@ -581,7 +591,7 @@ pub fn parse_album(root: &Value) -> AlbumPage {
 
     // Target the header's own thumbnail subtree so we get the cover, not the artist avatar.
     let thumbnail = header.and_then(|h| h.get("thumbnail")).and_then(last_thumbnail);
-    let description = album_description(root, header);
+    let description = header_description(root, header);
 
     // Album track rows carry no per-track thumbnail (every track shares the cover shown once in
     // the header), so parse_list_item leaves them None. Fill missing ones with the album cover so
@@ -674,7 +684,17 @@ fn album_playlist_id(root: &Value) -> Option<String> {
     })
 }
 
-fn album_description(root: &Value, header: Option<&Value>) -> Option<String> {
+/// The visibility of an owned playlist, off the header that wraps the edit form. Absent everywhere
+/// else: someone else's playlist never says whether it is public.
+fn playlist_privacy(root: &Value) -> Option<String> {
+    find_all(root, "musicPlaylistEditHeaderRenderer")
+        .into_iter()
+        .find_map(|h| h.get("privacy").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
+/// The blurb under an album's or playlist's title, wherever this response happens to keep it.
+fn header_description(root: &Value, header: Option<&Value>) -> Option<String> {
     if let Some(d) = header.and_then(|h| runs_text(h.get("description"))) {
         return Some(d);
     }
@@ -1275,6 +1295,36 @@ mod tests {
         let p = parse_playlist(&root);
         assert_eq!(p.items.len(), 1);
         assert_eq!(p.continuation, None, "the suggestions token is not a track continuation");
+    }
+
+    /// What the "Edit playlist" dialog prefills from. Both fields have to survive the round trip:
+    /// a description read back as `None` is one the dialog would offer to overwrite with nothing.
+    #[test]
+    fn an_owned_playlist_reports_its_description_and_privacy() {
+        let root = json!({
+            "header": { "musicEditablePlaylistDetailHeaderRenderer": {
+                "header": { "musicResponsiveHeaderRenderer": {
+                    "title": { "runs": [{ "text": "Late night" }] },
+                    "description": { "runs": [{ "text": "for the drive home" }] }
+                } },
+                "editHeader": { "musicPlaylistEditHeaderRenderer": {
+                    "title": { "runs": [{ "text": "Late night" }] },
+                    "privacy": "PUBLIC"
+                } }
+            } }
+        });
+        let p = parse_playlist(&root);
+        assert!(p.owned);
+        assert_eq!(p.description.as_deref(), Some("for the drive home"));
+        assert_eq!(p.privacy.as_deref(), Some("PUBLIC"));
+
+        // Someone else's playlist has no edit header, so there is no visibility to report.
+        let theirs = json!({
+            "header": { "musicResponsiveHeaderRenderer": {
+                "title": { "runs": [{ "text": "Late night" }] }
+            } }
+        });
+        assert_eq!(parse_playlist(&theirs).privacy, None);
     }
 
     #[test]

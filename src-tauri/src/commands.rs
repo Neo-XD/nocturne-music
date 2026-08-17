@@ -412,6 +412,12 @@ pub async fn get_library(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
             },
         );
     }
+    // A card has nowhere to put two images, so a custom cover simply is the artwork here.
+    for item in &mut items {
+        if let Some(cover) = custom_cover(&state, &item.id) {
+            item.thumbnail = Some(cover);
+        }
+    }
     Ok(items)
 }
 
@@ -453,6 +459,9 @@ pub async fn get_playlist(
             title: Some("On Repeat".into()),
             subtitle: Some(format!("{} songs you've played most this month", items.len())),
             thumbnail: None,
+            description: None,
+            privacy: None,
+            cover: None,
             items,
             continuation: None,
             owned: false, // nothing to rename or delete; it rebuilds itself from what you play
@@ -461,7 +470,10 @@ pub async fn get_playlist(
     }
     let client = metadata_client(&state)?;
     let sort = sort.map(|s| (s, desc.unwrap_or(false)));
-    state.it.playlist(client, &id, sort).await.map_err(|e| e.to_string())
+    let mut page = state.it.playlist(client, &id, sort).await.map_err(|e| e.to_string())?;
+    // Alongside YouTube's own thumbnail, not over it: the dialog offers to drop the custom one.
+    page.cover = custom_cover(&state, &id);
+    Ok(page)
 }
 
 /// Store a sort order on a playlist, so YouTube Music and every other client show it the same way.
@@ -683,14 +695,91 @@ pub async fn create_playlist(state: St<'_>, title: String) -> Result<String, Str
     state.it.create_playlist(client, &title).await.map_err(|e| e.to_string())
 }
 
+/// Edit a playlist you own, from the "Edit playlist" dialog: name, description, visibility.
+///
+/// Each field is `None` when the user left it alone, and only what changed is sent: an edit of
+/// the name must not blank a description we failed to read back off the page.
 #[tauri::command]
-pub async fn rename_playlist(
+pub async fn edit_playlist_details(
     state: St<'_>,
     playlist_id: String,
-    name: String,
+    name: Option<String>,
+    description: Option<String>,
+    public: Option<bool>,
 ) -> Result<(), String> {
     let client = editable_playlist(&state, &playlist_id)?;
-    state.it.playlist_rename(client, &playlist_id, &name).await.map_err(|e| e.to_string())
+    // The switch is two-state; YouTube's third value (UNLISTED) is only ever left as it was.
+    let privacy = public.map(|p| if p { "PUBLIC" } else { "PRIVATE" });
+    state
+        .it
+        .playlist_edit_details(
+            client,
+            &playlist_id,
+            name.as_deref(),
+            description.as_deref(),
+            privacy,
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Custom playlist artwork, kept on this machine: YouTube has no API to set a playlist thumbnail
+/// (it builds one from the tracks), so the picked image is copied in beside the local-music covers
+/// and swapped in wherever this playlist is drawn. `path: None` drops it, and YouTube's own
+/// artwork comes back. Answers the stored path, for the UI to render at once.
+#[tauri::command]
+pub async fn set_playlist_cover(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    playlist_id: String,
+    path: Option<String>,
+) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    const IMAGE_EXTS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "gif"];
+
+    let key = cover_key(&playlist_id);
+    // Whatever was there is ours and is about to be replaced or dropped.
+    if let Some(old) = state.db.get_setting(&key) {
+        let _ = std::fs::remove_file(old);
+    }
+    let Some(src) = path else {
+        state.db.delete_setting(&key);
+        return Ok(None);
+    };
+    let src = std::path::Path::new(&src);
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    if !IMAGE_EXTS.contains(&ext.as_str()) {
+        return Err("Pick a JPEG, PNG, WebP or GIF image.".into());
+    }
+    let dir = crate::local::covers_dir(&app).join("playlists");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // Timestamped, so replacing a cover can't be served out of the webview's cache under the name
+    // it already has. The id is filtered to filename characters rather than trusted: it arrives
+    // from the UI, and a `..` in it would write outside this directory.
+    let stem: String = playlist_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    let dest = dir.join(format!("{stem}-{}.{ext}", crate::db::now_secs()));
+    std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
+    let dest = dest.to_string_lossy().to_string();
+    // The covers directory is allowed recursively at startup, but the first cover on a fresh
+    // install is written after that ran, so name this file explicitly too.
+    let _ = app.asset_protocol_scope().allow_file(&dest);
+    state.db.set_setting(&key, &dest);
+    Ok(Some(dest))
+}
+
+fn cover_key(playlist_id: &str) -> String {
+    // Browse ids arrive `VL`-prefixed and playlist ids don't; one playlist, one key either way.
+    format!("playlist_cover:{}", playlist_id.strip_prefix("VL").unwrap_or(playlist_id))
+}
+
+/// The custom artwork stored for a playlist, if the file is still there. The user owns that
+/// directory and can empty it, and a dead path renders as a broken image.
+fn custom_cover(state: &Arc<AppState>, playlist_id: &str) -> Option<String> {
+    let path = state.db.get_setting(&cover_key(playlist_id))?;
+    std::path::Path::new(&path).is_file().then_some(path)
 }
 
 #[tauri::command]

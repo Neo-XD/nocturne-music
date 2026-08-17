@@ -565,19 +565,40 @@ impl InnerTube {
         self.edit_playlist(client, playlist_id, sort.edit_action()).await
     }
 
-    /// Rename a playlist you own. context/01 `browse/edit_playlist`.
-    pub async fn playlist_rename(
+    /// Edit the details of a playlist you own. context/01 `browse/edit_playlist`.
+    ///
+    /// Every field is optional and only the ones given are sent, so an edit of the name cannot
+    /// blank a description this parser failed to read back. `privacy` is YouTube's own vocabulary:
+    /// `PUBLIC` / `PRIVATE` / `UNLISTED`.
+    pub async fn playlist_edit_details(
         &self,
         client: &YouTubeClient,
         playlist_id: &str,
-        name: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        privacy: Option<&str>,
     ) -> Result<(), Error> {
-        self.edit_playlist(
-            client,
-            playlist_id,
-            serde_json::json!({ "action": "ACTION_SET_PLAYLIST_NAME", "playlistName": name }),
-        )
-        .await
+        let mut actions = Vec::new();
+        if let Some(name) = name {
+            actions.push(
+                serde_json::json!({ "action": "ACTION_SET_PLAYLIST_NAME", "playlistName": name }),
+            );
+        }
+        if let Some(description) = description {
+            actions.push(serde_json::json!({
+                "action": "ACTION_SET_PLAYLIST_DESCRIPTION",
+                "playlistDescription": description,
+            }));
+        }
+        if let Some(privacy) = privacy {
+            actions.push(
+                serde_json::json!({ "action": "ACTION_SET_PLAYLIST_PRIVACY", "playlistPrivacy": privacy }),
+            );
+        }
+        if actions.is_empty() {
+            return Ok(());
+        }
+        self.edit_playlist_actions(client, playlist_id, actions).await
     }
 
     async fn edit_playlist(
@@ -585,6 +606,15 @@ impl InnerTube {
         client: &YouTubeClient,
         playlist_id: &str,
         action: serde_json::Value,
+    ) -> Result<(), Error> {
+        self.edit_playlist_actions(client, playlist_id, vec![action]).await
+    }
+
+    async fn edit_playlist_actions(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+        actions: Vec<serde_json::Value>,
     ) -> Result<(), Error> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -596,7 +626,7 @@ impl InnerTube {
         let body = EditBody {
             context: self.context_for(client),
             playlist_id: strip_vl(playlist_id).to_owned(),
-            actions: vec![action],
+            actions,
         };
         match edit_rejection(&self.post("browse/edit_playlist", client, &body, true).await?) {
             Some(e) => Err(e),

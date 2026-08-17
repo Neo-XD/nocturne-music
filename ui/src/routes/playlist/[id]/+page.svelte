@@ -9,8 +9,6 @@
 		PencilEdit02Icon,
 		Delete02Icon,
 		MoreVerticalIcon,
-		Tick02Icon,
-		Cancel01Icon,
 		Radio02Icon,
 		ArrowUpNarrowWideIcon,
 		ArrowDownWideNarrowIcon,
@@ -25,6 +23,7 @@
 	import * as RadioGroup from '$lib/components/ui/radio-group';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import TrackRow from '$lib/components/TrackRow.svelte';
+	import EditPlaylistDialog from '$lib/components/EditPlaylistDialog.svelte';
 	import TrackFilter, { filterTracks } from '$lib/components/TrackFilter.svelte';
 	import TrackRowSkeleton from '$lib/components/TrackRowSkeleton.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
@@ -32,6 +31,7 @@
 	import { ON_REPEAT_ID } from '$lib/api';
 	import type { BrowseItem, PlaylistPage, SongItem } from '$lib/api';
 	import { getCached, putCached, invalidateCached } from '$lib/pagecache';
+	import { thumb } from '$lib/thumb';
 	import { anchorMenu } from '$lib/menu';
 	import { rowWindow } from '$lib/rows';
 	import { rowScroller } from '$lib/rows.svelte';
@@ -56,6 +56,7 @@
 		toast,
 		toggleSaved,
 		bumpLibraryTrackCount,
+		patchLibraryPlaylist,
 		lastPlaylistAdd
 	} from '$lib/player.svelte';
 
@@ -80,9 +81,10 @@
 	let mx = $state(0);
 	let my = $state(0);
 
-	// Inline rename state.
-	let editingName = $state(false);
-	let nameDraft = $state('');
+	// "Edit playlist": name, description, visibility and a cover of your own.
+	let editing = $state(false);
+	// The artwork on the page: whatever the user picked on this machine, else YouTube's own.
+	const art = $derived(thumb(pl?.cover ?? pl?.thumbnail, 400));
 
 	// Header filter box: matches title / artist / album over the rows loaded so far.
 	//
@@ -346,7 +348,7 @@
 		loadedKey = key;
 		const hit = getCached<PlaylistPage>(key);
 		confirmingDelete = false;
-		editingName = false;
+		editing = false;
 		sortOpen = false;
 		query = '';
 		applied = '';
@@ -527,7 +529,7 @@
 		subtitle,
 		// On Repeat stays artwork-free wherever it's rendered (shortcuts, recents) so it always
 		// draws its icon rather than one of its songs' covers.
-		thumbnail: isOnRepeat ? undefined : (pl?.thumbnail ?? bgImage ?? undefined)
+		thumbnail: isOnRepeat ? undefined : (pl?.cover ?? pl?.thumbnail ?? bgImage ?? undefined)
 	});
 
 	// `sourceId` points autoplay at that playlist's radio. On Repeat has no YouTube id, so pass
@@ -617,28 +619,19 @@
 		action();
 	}
 
-	function startRename() {
-		nameDraft = pl?.title ?? '';
-		editingName = true;
-	}
-
-	async function saveRename() {
-		const name = nameDraft.trim();
-		if (!pl || !name || name === pl.title) {
-			editingName = false;
-			return;
-		}
-		const prev = pl.title;
-		pl = { ...pl, title: name }; // optimistic
-		editingName = false;
-		try {
-			await api.renamePlaylist(id, name);
-			cacheCurrent();
-			toast.success('Playlist renamed');
-		} catch (e) {
-			pl = { ...pl, title: prev }; // revert
-			cacheCurrent();
-			toast.error(String(e));
+	// The dialog hands over what it changed (and hands the old values back if YouTube refused it),
+	// so the page never waits on a refetch to show an edit. The sidebar/Library row follows.
+	function applyEdit(patch: {
+		title?: string;
+		description?: string;
+		privacy?: string;
+		cover?: string;
+	}) {
+		if (!pl) return;
+		pl = { ...pl, ...patch };
+		cacheCurrent();
+		if ('title' in patch || 'cover' in patch) {
+			patchLibraryPlaylist(id, { title: pl.title, thumbnail: pl.cover ?? pl.thumbnail });
 		}
 	}
 
@@ -681,11 +674,6 @@
 			confirmingDelete = false;
 		}
 	}
-
-	function autofocus(node: HTMLInputElement) {
-		node.focus();
-		node.select();
-	}
 </script>
 
 <div class="flex h-full flex-col">
@@ -727,46 +715,16 @@
 				>
 					<HugeiconsIcon icon={ListRestartIcon} class="h-20 w-20" />
 				</div>
-			{:else if pl.thumbnail}
-				<img
-					src={pl.thumbnail}
-					alt=""
-					class="relative h-40 w-40 rounded-xl object-cover shadow-lg"
-				/>
+			{:else if art}
+				<img src={art} alt="" class="relative h-40 w-40 rounded-xl object-cover shadow-lg" />
 			{:else}
 				<div class="relative h-40 w-40 rounded-xl bg-muted"></div>
 			{/if}
 			<div class="relative min-w-0 flex-1">
 				<div class="text-xs font-medium uppercase text-muted-foreground">Playlist</div>
-				{#if editingName}
-					<div class="mt-1 flex items-center gap-2">
-						<input
-							use:autofocus
-							bind:value={nameDraft}
-							onkeydown={(e) => {
-								if (e.key === 'Enter') saveRename();
-								else if (e.key === 'Escape') (editingName = false);
-							}}
-							class="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 font-heading text-3xl font-bold outline-none focus:border-accent"
-							aria-label="Playlist name"
-						/>
-						<Button size="icon" aria-label="Save name" onclick={saveRename}>
-							<HugeiconsIcon icon={Tick02Icon} class="h-5 w-5" />
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon"
-							aria-label="Cancel rename"
-							onclick={() => (editingName = false)}
-						>
-							<HugeiconsIcon icon={Cancel01Icon} class="h-5 w-5 text-muted-foreground" />
-						</Button>
-					</div>
-				{:else}
-					<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow-lg">
+				<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow-lg">
 					{pl.title ?? 'Playlist'}
 				</h1>
-				{/if}
 				{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
 				<div class="mt-4 flex items-center justify-between gap-2">
 					<div class="flex items-center gap-2">
@@ -986,9 +944,9 @@
 		{#if editable}
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
-				onclick={() => run(startRename)}
+				onclick={() => run(() => (editing = true))}
 			>
-				<HugeiconsIcon icon={PencilEdit02Icon} class="h-4 w-4" /> Edit name
+				<HugeiconsIcon icon={PencilEdit02Icon} class="h-4 w-4" /> Edit playlist
 			</button>
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
@@ -998,4 +956,17 @@
 			</button>
 		{/if}
 	</div>
+{/if}
+
+{#if editable}
+	<EditPlaylistDialog
+		bind:open={editing}
+		{id}
+		title={pl?.title}
+		description={pl?.description}
+		privacy={pl?.privacy}
+		cover={pl?.cover}
+		fallback={pl?.thumbnail}
+		onchange={applyEdit}
+	/>
 {/if}

@@ -141,6 +141,12 @@ export async function createLibraryPlaylist(title: string): Promise<void> {
 	library.items = [{ kind: 'playlist', id: browseId, title }, ...library.items];
 }
 
+/** Optimistically apply an edit to a library playlist's row (sidebar + Library grid), so a rename
+ *  or a new cover shows up everywhere without a refetch. */
+export function patchLibraryPlaylist(playlistId: string, patch: Partial<BrowseItem>) {
+	library.items = library.items.map((it) => (it.id === playlistId ? { ...it, ...patch } : it));
+}
+
 /** Optimistically bump the "N tracks" count in a library playlist's subtitle (sidebar + Library). */
 export function bumpLibraryTrackCount(playlistId: string, delta: number) {
 	library.items = library.items.map((it) => {

@@ -181,6 +181,12 @@ export interface PlaylistPage {
 	title?: string;
 	subtitle?: string;
 	thumbnail?: string;
+	/** The playlist's own blurb, which the edit dialog prefills its description with. */
+	description?: string;
+	/** `PUBLIC` / `PRIVATE` / `UNLISTED`. Only playlists you own report it. */
+	privacy?: string;
+	/** Custom artwork picked on this machine; falls back to `thumbnail` when unset. */
+	cover?: string;
 	items: SongItem[];
 	continuation?: string;
 	/** True only when the signed-in user owns this playlist (rename/delete allowed). */
@@ -409,8 +415,16 @@ export const addToPlaylist = (playlistId: string, videoId: string) =>
 export const removeFromPlaylist = (playlistId: string, videoId: string, setVideoId: string) =>
 	invoke<void>('remove_from_playlist', { playlistId, videoId, setVideoId });
 export const createPlaylist = (title: string) => invoke<string>('create_playlist', { title });
-export const renamePlaylist = (playlistId: string, name: string) =>
-	invoke<void>('rename_playlist', { playlistId, name });
+/** Name / description / visibility, from the "Edit playlist" dialog. Leave a field out and
+ *  YouTube is never told about it, so an untouched one can't be overwritten. */
+export const editPlaylistDetails = (
+	playlistId: string,
+	changes: { name?: string; description?: string; public?: boolean }
+) => invoke<void>('edit_playlist_details', { playlistId, ...changes });
+/** Custom playlist artwork, stored on this machine (YouTube has no playlist-thumbnail API).
+ *  `path` is a file the user picked; `null` drops it. Answers where it was stored. */
+export const setPlaylistCover = (playlistId: string, path: string | null) =>
+	invoke<string | null>('set_playlist_cover', { playlistId, path });
 export const deletePlaylist = (playlistId: string) =>
 	invoke<void>('delete_playlist', { playlistId });
 export const subscribe = (channelId: string, subscribed: boolean) =>
