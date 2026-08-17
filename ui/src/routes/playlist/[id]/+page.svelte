@@ -83,6 +83,12 @@
 
 	// "Edit playlist": name, description, visibility and a cover of your own.
 	let editing = $state(false);
+	// The header's description, clamped to two lines until "More" is pressed.
+	let expanded = $state(false);
+	// ponytail: character count, not a measured overflow. It only decides whether the More button
+	// is worth drawing, and a blurb that short reads fine in full either way; measure the paragraph
+	// (and re-measure on resize) only if the button starts showing up under one-liners.
+	const longDescription = $derived((pl?.description?.length ?? 0) > 120);
 	// The artwork on the page: whatever the user picked on this machine, else YouTube's own.
 	const art = $derived(thumb(pl?.cover ?? pl?.thumbnail, 400));
 
@@ -349,6 +355,7 @@
 		const hit = getCached<PlaylistPage>(key);
 		confirmingDelete = false;
 		editing = false;
+		expanded = false;
 		sortOpen = false;
 		query = '';
 		applied = '';
@@ -726,6 +733,22 @@
 					{pl.title ?? 'Playlist'}
 				</h1>
 				{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
+				{#if pl.description}
+					<!-- Two lines, then More/Less, same as the album page. -->
+					<div class="mt-2 max-w-2xl">
+						<p class="whitespace-pre-line text-sm text-foreground/80 {expanded ? '' : 'line-clamp-2'}">
+							{pl.description}
+						</p>
+						{#if longDescription}
+							<button
+								class="mt-1 cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
+								onclick={() => (expanded = !expanded)}
+							>
+								{expanded ? 'Less' : 'More'}
+							</button>
+						{/if}
+					</div>
+				{/if}
 				<div class="mt-4 flex items-center justify-between gap-2">
 					<div class="flex items-center gap-2">
 						<Button
