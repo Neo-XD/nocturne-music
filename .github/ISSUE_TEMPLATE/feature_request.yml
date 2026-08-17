@@ -1,0 +1,20 @@
+name: Idea or request
+description: Something you wish Limusic did.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Limusic to do?
+      description: >
+        Rough is fine. If it is easier to say what annoys you today than to
+        describe the fix, say that instead.
+      placeholder: I would like the queue to survive a restart, I lose it every time I close the app.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Optional. Screenshots, sketches, or another app that already does this well.

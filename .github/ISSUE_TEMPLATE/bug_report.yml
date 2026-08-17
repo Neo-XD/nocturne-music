@@ -1,0 +1,39 @@
+name: Something is broken
+description: Report a bug. Two questions, the rest is optional.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What went wrong?
+      description: In your own words. What you did, and what the app did instead.
+      placeholder: I pressed play on a song and nothing happened, the bar at the bottom stayed empty.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Which system?
+      options:
+        - Linux
+        - Windows
+        - macOS
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Which version of Limusic?
+      description: Settings, About tab. Skip this if you cannot find it.
+      placeholder: "0.4.6"
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: >
+        All optional, whatever you have. A screenshot or a screen recording, your
+        Linux distro, how you installed Limusic, or anything the app printed in a
+        terminal. Drag images straight into this box.
