@@ -421,10 +421,11 @@ export const editPlaylistDetails = (
 	playlistId: string,
 	changes: { name?: string; description?: string; public?: boolean }
 ) => invoke<void>('edit_playlist_details', { playlistId, ...changes });
-/** Custom playlist artwork, stored on this machine (YouTube has no playlist-thumbnail API).
- *  `path` is a file the user picked; `null` drops it. Answers where it was stored. */
+/** Custom playlist artwork. `path` is a file the user picked; `null` drops it. Answers where the
+ *  local copy went, and on a removal the thumbnail YouTube rebuilt from the tracks (that one is
+ *  worth waiting for: YouTube's own thumbnail is the cover being removed until it lands). */
 export const setPlaylistCover = (playlistId: string, path: string | null) =>
-	invoke<string | null>('set_playlist_cover', { playlistId, path });
+	invoke<{ cover?: string; thumbnail?: string }>('set_playlist_cover', { playlistId, path });
 export const deletePlaylist = (playlistId: string) =>
 	invoke<void>('delete_playlist', { playlistId });
 export const subscribe = (channelId: string, subscribed: boolean) =>
@@ -472,14 +473,6 @@ export const onPlaybackNotice = (cb: (msg: string) => void): Promise<UnlistenFn>
  *  so the failure lands long after the picker closed). */
 export const onCoverError = (cb: (msg: string) => void): Promise<UnlistenFn> =>
 	listen<{ message: string }>('cover-error', (e) => cb(e.payload.message));
-/** The playlist's YouTube thumbnail after a cover was uploaded or removed. A removal is the reason
- *  this exists: YouTube rebuilds the four-track collage and only the response knows its URL. */
-export const onCoverSynced = (
-	cb: (p: { playlistId: string; thumbnail?: string; custom: boolean }) => void
-): Promise<UnlistenFn> =>
-	listen<{ playlistId: string; thumbnail?: string; custom: boolean }>('cover-synced', (e) =>
-		cb(e.payload)
-	);
 export const onAuthChanged = (cb: (a: Account) => void): Promise<UnlistenFn> =>
 	listen<Account>('auth-changed', (e) => cb(e.payload));
 export const onAccountSelectionRequired = (cb: () => void): Promise<UnlistenFn> =>

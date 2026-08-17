@@ -57,8 +57,7 @@
 		toggleSaved,
 		bumpLibraryTrackCount,
 		patchLibraryPlaylist,
-		lastPlaylistAdd,
-		lastCoverSync
+		lastPlaylistAdd
 	} from '$lib/player.svelte';
 
 	// `$state.raw`, not `$state`: a deep proxy makes every read of a row go through a trap and
@@ -416,19 +415,6 @@
 		fillSetVideoIds();
 	});
 
-	// A cover that finished syncing to YouTube: take the thumbnail it answered with, which is the
-	// only honest value for `thumbnail` once a custom cover has been up there. Removing the local
-	// cover would otherwise fall back to the URL of the cover just deleted, and the page would look
-	// stuck on it. Same epoch guard as the add above.
-	let seenCoverEpoch = lastCoverSync.epoch;
-	$effect(() => {
-		if (lastCoverSync.epoch === seenCoverEpoch) return;
-		seenCoverEpoch = lastCoverSync.epoch;
-		if (!pl || lastCoverSync.playlistId !== id) return;
-		pl = { ...pl, thumbnail: lastCoverSync.thumbnail || undefined };
-		cacheCurrent();
-	});
-
 	// Optimistic rows lack set_video_id, so "Remove from playlist" is hidden on them. Refetch and
 	// patch the real ids into place (merge, not replace — keeps loadMore pages and any row YouTube
 	// hasn't reflected yet). Retries because the add is eventually-consistent on YouTube's side.
@@ -647,11 +633,12 @@
 		description?: string;
 		privacy?: string;
 		cover?: string;
+		thumbnail?: string;
 	}) {
 		if (!pl) return;
 		pl = { ...pl, ...patch };
 		cacheCurrent();
-		if ('title' in patch || 'cover' in patch) {
+		if ('title' in patch || 'cover' in patch || 'thumbnail' in patch) {
 			patchLibraryPlaylist(id, { title: pl.title, thumbnail: pl.cover ?? pl.thumbnail });
 		}
 	}

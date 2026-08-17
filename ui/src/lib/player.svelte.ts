@@ -627,11 +627,6 @@ export function openAddManyToPlaylist(songs: SongItem[]) {
 // Last successful add-to-playlist — the open playlist page appends these optimistically.
 export const lastPlaylistAdd = $state({ playlistId: '', songs: [] as SongItem[], epoch: 0 });
 
-// The YouTube thumbnail a background cover sync left behind, for the playlist page that is open on
-// it. Its own copy is stale by then: after an upload, YouTube's thumbnail is the custom cover, so
-// removing that cover has nothing to fall back to until this lands.
-export const lastCoverSync = $state({ playlistId: '', thumbnail: '', epoch: 0 });
-
 export function notePlaylistAdd(playlistId: string, songs: SongItem[]) {
 	lastPlaylistAdd.playlistId = playlistId;
 	// Strip per-context fields: set_video_id belongs to the source playlist, the queue markers to
@@ -698,14 +693,6 @@ export function initApp(mini = false): () => void {
 		api.onPlaybackError((msg) => toast.error(msg)),
 		api.onPlaybackNotice((msg) => toast(msg)), // auto-skipped an unplayable track
 		api.onCoverError((msg) => toast.error(msg)), // playlist artwork YouTube wouldn't take
-		api.onCoverSynced(({ playlistId, thumbnail, custom }) => {
-			lastCoverSync.playlistId = playlistId;
-			lastCoverSync.thumbnail = thumbnail ?? '';
-			lastCoverSync.epoch++;
-			// A card holds one image, so it only follows YouTube once the local cover is gone:
-			// this is what puts the rebuilt collage back on the sidebar row and the Library grid.
-			if (!custom) patchLibraryPlaylist(playlistId, { thumbnail });
-		}),
 		api.onLocalChanged(forgetLocal), // a local file turned out to be gone — drop it everywhere
 		api.onAuthChanged((a) => {
 			auth.account = a;

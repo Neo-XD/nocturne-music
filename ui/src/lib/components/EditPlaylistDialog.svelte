@@ -44,6 +44,7 @@
 	let draftDescription = $state('');
 	let isPublic = $state(false);
 	let saving = $state(false);
+	let removing = $state(false);
 
 	// Fill the form from the page each time it opens, so a cancelled edit leaves nothing behind.
 	// Guarded on `open` before anything else is read: while closed, the props aren't tracked, so a
@@ -66,12 +67,19 @@
 		if (typeof picked === 'string') await storeCover(picked);
 	}
 
+	// Picking answers as soon as the file is copied. Removing waits on YouTube, because its own
+	// thumbnail is the cover being removed: dropping the local copy first would swap the header to
+	// that same image and only reach the rebuilt collage a beat later.
 	async function storeCover(path: string | null) {
+		if (removing) return;
+		removing = path === null;
 		try {
-			const saved = await api.setPlaylistCover(id, path);
-			onchange({ cover: saved ?? undefined });
+			const { cover: saved, thumbnail } = await api.setPlaylistCover(id, path);
+			onchange({ cover: saved ?? undefined, ...(thumbnail ? { thumbnail } : {}) });
 		} catch (e) {
 			toast.error(String(e));
+		} finally {
+			removing = false;
 		}
 	}
 
@@ -146,9 +154,10 @@
 							size="sm"
 							class="gap-1.5 text-xs text-muted-foreground"
 							onclick={() => storeCover(null)}
+							disabled={removing}
 						>
 							<HugeiconsIcon icon={Delete02Icon} class="h-3.5 w-3.5" />
-							Remove
+							{removing ? 'Removing…' : 'Remove'}
 						</Button>
 					{/if}
 				</div>

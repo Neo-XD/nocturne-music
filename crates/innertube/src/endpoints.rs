@@ -608,14 +608,12 @@ impl InnerTube {
     ///
     /// Signed in only, and YouTube treats the slot as square (`studio_square_thumbnail`): a photo
     /// that isn't gets cropped or refused at the far end, which the caller surfaces as-is.
-    /// Answers the playlist's thumbnail as it stands *after* the edit, which is the only place to
-    /// learn it: once a custom cover is up, YouTube's own thumbnail is that cover.
     pub async fn playlist_set_cover(
         &self,
         client: &YouTubeClient,
         playlist_id: &str,
         image: Vec<u8>,
-    ) -> Result<Option<String>, Error> {
+    ) -> Result<(), Error> {
         // 1. Open the upload. The id comes back in a header; the body says nothing.
         let (headers, _) = self
             .post_upload(
@@ -659,20 +657,18 @@ impl InnerTube {
             .map_err(|_| Error::Other("YouTube rejected the artwork upload.".into()))?;
 
         // 3. Attach the blob to the playlist. This one is an ordinary edit_playlist action.
-        let value = self
-            .edit_playlist_value(
-                client,
-                playlist_id,
-                vec![serde_json::json!({
-                    "action": "ACTION_SET_CUSTOM_THUMBNAIL",
-                    "addedCustomThumbnail": {
-                        "imageKey": custom_thumbnail_key(),
-                        "playlistScottyEncryptedBlobId": uploaded.encrypted_blob_id,
-                    },
-                })],
-            )
-            .await?;
-        Ok(edited_thumbnail(&value))
+        self.edit_playlist(
+            client,
+            playlist_id,
+            serde_json::json!({
+                "action": "ACTION_SET_CUSTOM_THUMBNAIL",
+                "addedCustomThumbnail": {
+                    "imageKey": custom_thumbnail_key(),
+                    "playlistScottyEncryptedBlobId": uploaded.encrypted_blob_id,
+                },
+            }),
+        )
+        .await
     }
 
     /// Drop the custom cover again, so YouTube goes back to building one out of the tracks.

@@ -723,30 +723,43 @@ pub async fn edit_playlist_details(
         .map_err(|e| e.to_string())
 }
 
-/// Custom playlist artwork. The picked image is copied in beside the local-music covers and shown
-/// straight away, then pushed to YouTube Music in the background (`sync_cover`), because the
-/// upload is three round trips and nobody should watch a spinner for their own file. `path: None`
-/// drops it in both places. Answers the stored path, for the UI to render at once.
+/// Custom playlist artwork, in both places it lives.
+///
+/// Setting one is local-first: the picked image is copied in beside the local-music covers and
+/// answered straight back, then pushed to YouTube Music in the background (`sync_cover`), because
+/// the upload is three round trips and nobody should watch a spinner for their own file.
+///
+/// Dropping one waits, and that is deliberate. Once a cover has been up there, YouTube's own
+/// thumbnail *is* that cover, so a local-first removal would fall back to the very image being
+/// removed and only reach the rebuilt collage a beat later: two swaps, the first of them pointless.
+/// The clear is a single small call, so it answers with the thumbnail YouTube rebuilt and the UI
+/// changes once.
 #[tauri::command]
 pub async fn set_playlist_cover(
     app: tauri::AppHandle,
     state: St<'_>,
     playlist_id: String,
     path: Option<String>,
-) -> Result<Option<String>, String> {
+) -> Result<CoverResult, String> {
     use tauri::Manager;
     const IMAGE_EXTS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "gif"];
 
     let key = cover_key(&playlist_id);
-    // Whatever was there is ours and is about to be replaced or dropped.
-    if let Some(old) = state.db.get_setting(&key) {
+    let stored = state.db.get_setting(&key);
+    let Some(src) = path else {
+        // Order matters: YouTube first, and the local copy stays on screen until it answers. A
+        // refusal leaves both sides as they were rather than half-removed.
+        let thumbnail = clear_cover_on_youtube(&state, &playlist_id).await?;
+        state.db.delete_setting(&key);
+        if let Some(old) = stored {
+            let _ = std::fs::remove_file(old);
+        }
+        return Ok(CoverResult { cover: None, thumbnail });
+    };
+    // Whatever was there is ours and is about to be replaced.
+    if let Some(old) = stored {
         let _ = std::fs::remove_file(old);
     }
-    let Some(src) = path else {
-        state.db.delete_setting(&key);
-        sync_cover(&state, &playlist_id, None);
-        return Ok(None);
-    };
     let src = std::path::Path::new(&src);
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !IMAGE_EXTS.contains(&ext.as_str()) {
@@ -775,8 +788,16 @@ pub async fn set_playlist_cover(
     // install is written after that ran, so name this file explicitly too.
     let _ = app.asset_protocol_scope().allow_file(&dest);
     state.db.set_setting(&key, &dest);
-    sync_cover(&state, &playlist_id, Some(dest.clone()));
-    Ok(Some(dest))
+    sync_cover(&state, &playlist_id, dest.clone());
+    Ok(CoverResult { cover: Some(dest), thumbnail: None })
+}
+
+/// What the UI needs to draw after a cover changed: where the local copy is, and (on a removal)
+/// the thumbnail YouTube rebuilt in its place.
+#[derive(serde::Serialize)]
+pub struct CoverResult {
+    cover: Option<String>,
+    thumbnail: Option<String>,
 }
 
 /// Send the cover on to YouTube Music behind the picker's back: the local copy is already on
@@ -785,7 +806,7 @@ pub async fn set_playlist_cover(
 /// A failure is a toast, not a rollback: the artwork is still right here, and it is still this
 /// playlist's cover on this machine. Signed out (or On Repeat, which YouTube has never heard of),
 /// there is nothing to sync and local is all there ever was.
-fn sync_cover(state: &Arc<AppState>, playlist_id: &str, path: Option<String>) {
+fn sync_cover(state: &Arc<AppState>, playlist_id: &str, path: String) {
     if playlist_id == ON_REPEAT_ID || !state.it.is_logged_in() {
         return;
     }
@@ -795,44 +816,35 @@ fn sync_cover(state: &Arc<AppState>, playlist_id: &str, path: Option<String>) {
         let Some(client) = state.clients.get(innertube::METADATA_CLIENT) else {
             return;
         };
-        let result = match &path {
-            // Read here, not on the command's thread: the file was just written and the caller has
-            // its answer already.
-            Some(p) => match std::fs::read(p) {
-                Ok(image) => state.it.playlist_set_cover(client, &playlist_id, image).await,
-                Err(e) => Err(innertube::Error::Other(e.to_string())),
-            },
-            None => state.it.playlist_clear_cover(client, &playlist_id).await,
+        // Read here, not on the command's thread: the file was just written and the caller has its
+        // answer already.
+        let result = match std::fs::read(&path) {
+            Ok(image) => state.it.playlist_set_cover(client, &playlist_id, image).await,
+            Err(e) => Err(innertube::Error::Other(e.to_string())),
         };
-        match result {
-            // The playlist's thumbnail as the edit left it. Worth sending on for the removal
-            // above all: once a cover has been up, YouTube's own thumbnail *is* that cover, so
-            // the page has nothing left to fall back to but the collage this answers with.
-            Ok(thumbnail) => {
-                let _ = state.app.emit(
-                    "cover-synced",
-                    serde_json::json!({
-                        "playlistId": playlist_id,
-                        "thumbnail": thumbnail,
-                        // Whether a local cover still shadows it, so a card that has one is left
-                        // pointing at the file rather than sent back to the network for the same
-                        // image.
-                        "custom": path.is_some(),
-                    }),
-                );
-            }
-            Err(e) => {
-                tracing::warn!(playlist_id, error = %e, "playlist cover didn't reach YouTube Music");
-                let what = if path.is_some() { "saved here" } else { "removed here" };
-                let _ = state.app.emit(
-                    "cover-error",
-                    serde_json::json!({
-                        "message": format!("Artwork {what}, but YouTube Music wouldn't take it: {e}"),
-                    }),
-                );
-            }
+        if let Err(e) = result {
+            tracing::warn!(playlist_id, error = %e, "playlist cover didn't reach YouTube Music");
+            let _ = state.app.emit(
+                "cover-error",
+                serde_json::json!({
+                    "message": format!("Artwork saved here, but YouTube Music wouldn't take it: {e}"),
+                }),
+            );
         }
     });
+}
+
+/// Drop the custom thumbnail from the account, answering the one YouTube rebuilt from the tracks.
+/// Nothing to do (and nothing to answer with) when there is no account behind the playlist.
+async fn clear_cover_on_youtube(
+    state: &Arc<AppState>,
+    playlist_id: &str,
+) -> Result<Option<String>, String> {
+    if playlist_id == ON_REPEAT_ID || !state.it.is_logged_in() {
+        return Ok(None);
+    }
+    let client = metadata_client(state)?;
+    state.it.playlist_clear_cover(client, playlist_id).await.map_err(|e| e.to_string())
 }
 
 fn cover_key(playlist_id: &str) -> String {
