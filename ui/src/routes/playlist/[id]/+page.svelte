@@ -639,7 +639,12 @@
 		pl = { ...pl, ...patch };
 		cacheCurrent();
 		if ('title' in patch || 'cover' in patch || 'thumbnail' in patch) {
-			patchLibraryPlaylist(id, { title: pl.title, thumbnail: pl.cover ?? pl.thumbnail });
+			// A row has to keep a name: a page whose header never gave us a title would otherwise
+			// blank the sidebar entry on a cover change.
+			patchLibraryPlaylist(id, {
+				...(pl.title ? { title: pl.title } : {}),
+				thumbnail: pl.cover ?? pl.thumbnail
+			});
 		}
 	}
 

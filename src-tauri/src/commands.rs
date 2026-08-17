@@ -778,10 +778,6 @@ pub async fn set_playlist_cover(
         }
         return Ok(CoverResult { cover: None, thumbnail });
     };
-    // Whatever was there is ours and is about to be replaced.
-    if let Some(old) = stored {
-        let _ = std::fs::remove_file(old);
-    }
     let src = std::path::Path::new(&src);
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !IMAGE_EXTS.contains(&ext.as_str()) {
@@ -805,6 +801,13 @@ pub async fn set_playlist_cover(
         .collect();
     let dest = dir.join(format!("{stem}-{}.{ext}", crate::db::now_secs()));
     std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
+    // Only now is the cover it replaces safe to unlink. Dropping it any earlier means a picked
+    // file this command goes on to refuse (wrong format, too big, unreadable) takes the artwork
+    // already on screen down with it, and the toast talks about the new file while the old one is
+    // the thing that just disappeared.
+    if let Some(old) = stored {
+        let _ = std::fs::remove_file(old);
+    }
     let dest = dest.to_string_lossy().to_string();
     // The covers directory is allowed recursively at startup, but the first cover on a fresh
     // install is written after that ran, so name this file explicitly too.
