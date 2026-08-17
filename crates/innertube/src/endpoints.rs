@@ -601,6 +601,94 @@ impl InnerTube {
         self.edit_playlist_actions(client, playlist_id, actions).await
     }
 
+    /// Give a playlist you own a cover of your own, the way YouTube Music's web client does it:
+    /// open a resumable ("Scotty") upload, send the whole image in one go, then attach the blob id
+    /// that comes back. Two of the three calls are not InnerTube endpoints at all. context/01
+    /// §custom playlist thumbnail.
+    ///
+    /// Signed in only, and YouTube treats the slot as square (`studio_square_thumbnail`): a photo
+    /// that isn't gets cropped or refused at the far end, which the caller surfaces as-is.
+    pub async fn playlist_set_cover(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+        image: Vec<u8>,
+    ) -> Result<(), Error> {
+        // 1. Open the upload. The id comes back in a header; the body says nothing.
+        let (headers, _) = self
+            .post_upload(
+                PLAYLIST_IMAGE_UPLOAD,
+                client,
+                &[
+                    ("x-goog-upload-command", "start".to_owned()),
+                    ("x-goog-upload-protocol", "resumable".to_owned()),
+                    ("x-goog-upload-header-content-length", image.len().to_string()),
+                ],
+                Vec::new(),
+            )
+            .await?;
+        let upload_id = headers
+            .get("x-guploader-uploadid")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| Error::Other("YouTube didn't open an upload for the artwork.".into()))?
+            .to_owned();
+
+        // 2. Send the bytes. "Resumable" in name only: one request, offset 0, finalized.
+        let (_, body) = self
+            .post_upload(
+                &format!(
+                    "{PLAYLIST_IMAGE_UPLOAD}?upload_id={}&upload_protocol=resumable",
+                    urlencoding::encode(&upload_id)
+                ),
+                client,
+                &[
+                    ("x-goog-upload-command", "upload, finalize".to_owned()),
+                    ("x-goog-upload-offset", "0".to_owned()),
+                ],
+                image,
+            )
+            .await?;
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Uploaded {
+            encrypted_blob_id: String,
+        }
+        let uploaded: Uploaded = serde_json::from_slice(&body)
+            .map_err(|_| Error::Other("YouTube rejected the artwork upload.".into()))?;
+
+        // 3. Attach the blob to the playlist. This one is an ordinary edit_playlist action.
+        self.edit_playlist(
+            client,
+            playlist_id,
+            serde_json::json!({
+                "action": "ACTION_SET_CUSTOM_THUMBNAIL",
+                "addedCustomThumbnail": {
+                    "imageKey": custom_thumbnail_key(),
+                    "playlistScottyEncryptedBlobId": uploaded.encrypted_blob_id,
+                },
+            }),
+        )
+        .await
+    }
+
+    /// Drop the custom cover again, so YouTube goes back to building one out of the tracks.
+    /// context/01 `browse/edit_playlist`.
+    pub async fn playlist_clear_cover(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+    ) -> Result<(), Error> {
+        self.edit_playlist(
+            client,
+            playlist_id,
+            serde_json::json!({
+                "action": "ACTION_REMOVE_CUSTOM_THUMBNAIL",
+                "deletedCustomThumbnail": custom_thumbnail_key(),
+            }),
+        )
+        .await
+    }
+
     async fn edit_playlist(
         &self,
         client: &YouTubeClient,
@@ -696,6 +784,18 @@ impl InnerTube {
         self.post(path, client, &body, true).await?;
         Ok(())
     }
+}
+
+/// Where custom playlist artwork goes up. Not a `youtubei/v1` endpoint: it is Google's generic
+/// resumable uploader, sitting on `music.youtube.com` under its own path. context/01.
+const PLAYLIST_IMAGE_UPLOAD: &str = "playlist_image_upload/playlist_custom_thumbnail";
+
+/// The single image slot a playlist has. Square by name and by what YouTube does with it.
+fn custom_thumbnail_key() -> serde_json::Value {
+    serde_json::json!({
+        "name": "studio_square_thumbnail",
+        "type": "PLAYLIST_IMAGE_TYPE_CUSTOM_THUMBNAIL",
+    })
 }
 
 /// Playlist edit/delete want the raw playlistId; browse gives it `VL`-prefixed. context/01.

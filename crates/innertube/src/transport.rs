@@ -205,6 +205,38 @@ impl InnerTube {
         }
     }
 
+    /// POST raw bytes to a path on the same origin that is *not* under `/youtubei`, with this
+    /// client's headers plus `extra`, and hand back the response headers along with the body.
+    ///
+    /// Google's resumable uploader ("Scotty") lives on its own path and answers the first step in
+    /// a header, so neither `post`'s URL shape nor its JSON-only return works here. The
+    /// `content-type: application/json` the client headers carry stays put even when the body is
+    /// an image: the uploader ignores it, and that is the shape known to work.
+    pub(crate) async fn post_upload(
+        &self,
+        path: &str,
+        client: &YouTubeClient,
+        extra: &[(&'static str, String)],
+        body: Vec<u8>,
+    ) -> Result<(HeaderMap, Vec<u8>), Error> {
+        let mut headers = self.headers(client, true);
+        for (name, value) in extra {
+            if let Ok(v) = HeaderValue::from_str(value) {
+                headers.insert(HeaderName::from_static(name), v);
+            }
+        }
+        let resp = self
+            .http
+            .post(format!("{ORIGIN}/{path}"))
+            .headers(headers)
+            .body(body)
+            .send()
+            .await?
+            .error_for_status()?;
+        let headers = resp.headers().clone();
+        Ok((headers, resp.bytes().await?.to_vec()))
+    }
+
     /// Per-request headers. context/01 §ytClient. Note `X-YouTube-Client-Name` carries the
     /// numeric client **id**, not the name string — intentional and required.
     fn headers(&self, client: &YouTubeClient, set_login: bool) -> HeaderMap {

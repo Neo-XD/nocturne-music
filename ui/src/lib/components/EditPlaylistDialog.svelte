@@ -2,8 +2,8 @@
 	// "Edit playlist" on a playlist you own: name, description, visibility and a cover of your own.
 	//
 	// The three text/visibility fields are one write, sent on Save and only for what actually
-	// changed. The cover is not a YouTube edit at all (there is no playlist-thumbnail API), so it
-	// is stored on this machine and applies the moment a file is picked.
+	// changed. The cover applies the moment a file is picked: it is stored on this machine (so it
+	// draws instantly and offline) and uploaded to YouTube Music behind the picker.
 	import { open as pickFile } from '@tauri-apps/plugin-dialog';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { ImageAdd02Icon, Delete02Icon } from '@hugeicons/core-free-icons';
@@ -175,7 +175,8 @@
 				<Switch bind:checked={isPublic} aria-label="Public playlist" />
 			</div>
 			<p class="text-xs text-muted-foreground">
-				Custom artwork is stored on this device. YouTube keeps its own cover for this playlist.
+				Artwork applies here at once and uploads to YouTube Music in the background. Square images
+				work best.
 			</p>
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (open = false)}>Cancel</Button>

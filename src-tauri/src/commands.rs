@@ -723,10 +723,10 @@ pub async fn edit_playlist_details(
         .map_err(|e| e.to_string())
 }
 
-/// Custom playlist artwork, kept on this machine: YouTube has no API to set a playlist thumbnail
-/// (it builds one from the tracks), so the picked image is copied in beside the local-music covers
-/// and swapped in wherever this playlist is drawn. `path: None` drops it, and YouTube's own
-/// artwork comes back. Answers the stored path, for the UI to render at once.
+/// Custom playlist artwork. The picked image is copied in beside the local-music covers and shown
+/// straight away, then pushed to YouTube Music in the background (`sync_cover`), because the
+/// upload is three round trips and nobody should watch a spinner for their own file. `path: None`
+/// drops it in both places. Answers the stored path, for the UI to render at once.
 #[tauri::command]
 pub async fn set_playlist_cover(
     app: tauri::AppHandle,
@@ -744,12 +744,20 @@ pub async fn set_playlist_cover(
     }
     let Some(src) = path else {
         state.db.delete_setting(&key);
+        sync_cover(&state, &playlist_id, None);
         return Ok(None);
     };
     let src = std::path::Path::new(&src);
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !IMAGE_EXTS.contains(&ext.as_str()) {
         return Err("Pick a JPEG, PNG, WebP or GIF image.".into());
+    }
+    // ponytail: a flat size cap instead of downscaling. It keeps a 40px sidebar thumb from
+    // decoding a camera raw in the webview and the upload from swallowing one; reach for the
+    // `image` crate and a real resize only if 8 MB turns out to bother anyone.
+    const MAX_BYTES: u64 = 8 * 1024 * 1024;
+    if src.metadata().map(|m| m.len()).unwrap_or(0) > MAX_BYTES {
+        return Err("That image is over 8 MB. Pick a smaller one.".into());
     }
     let dir = crate::local::covers_dir(&app).join("playlists");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -767,7 +775,46 @@ pub async fn set_playlist_cover(
     // install is written after that ran, so name this file explicitly too.
     let _ = app.asset_protocol_scope().allow_file(&dest);
     state.db.set_setting(&key, &dest);
+    sync_cover(&state, &playlist_id, Some(dest.clone()));
     Ok(Some(dest))
+}
+
+/// Send the cover on to YouTube Music behind the picker's back: the local copy is already on
+/// screen, and the upload is a three-call round trip nobody should wait through.
+///
+/// A failure is a toast, not a rollback: the artwork is still right here, and it is still this
+/// playlist's cover on this machine. Signed out (or On Repeat, which YouTube has never heard of),
+/// there is nothing to sync and local is all there ever was.
+fn sync_cover(state: &Arc<AppState>, playlist_id: &str, path: Option<String>) {
+    if playlist_id == ON_REPEAT_ID || !state.it.is_logged_in() {
+        return;
+    }
+    let state = Arc::clone(state);
+    let playlist_id = playlist_id.to_owned();
+    tauri::async_runtime::spawn(async move {
+        let Some(client) = state.clients.get(innertube::METADATA_CLIENT) else {
+            return;
+        };
+        let result = match &path {
+            // Read here, not on the command's thread: the file was just written and the caller has
+            // its answer already.
+            Some(p) => match std::fs::read(p) {
+                Ok(image) => state.it.playlist_set_cover(client, &playlist_id, image).await,
+                Err(e) => Err(innertube::Error::Other(e.to_string())),
+            },
+            None => state.it.playlist_clear_cover(client, &playlist_id).await,
+        };
+        if let Err(e) = result {
+            tracing::warn!(playlist_id, error = %e, "playlist cover didn't reach YouTube Music");
+            let what = if path.is_some() { "saved here" } else { "removed here" };
+            let _ = state.app.emit(
+                "cover-error",
+                serde_json::json!({
+                    "message": format!("Artwork {what}, but YouTube Music wouldn't take it: {e}"),
+                }),
+            );
+        }
+    });
 }
 
 fn cover_key(playlist_id: &str) -> String {

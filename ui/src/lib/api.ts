@@ -468,6 +468,10 @@ export const onPlaybackError = (cb: (msg: string) => void): Promise<UnlistenFn> 
 	listen<{ message: string }>('playback-error', (e) => cb(e.payload.message));
 export const onPlaybackNotice = (cb: (msg: string) => void): Promise<UnlistenFn> =>
 	listen<{ message: string }>('playback-notice', (e) => cb(e.payload.message));
+/** Custom playlist artwork applied here but refused by YouTube Music (it syncs in the background,
+ *  so the failure lands long after the picker closed). */
+export const onCoverError = (cb: (msg: string) => void): Promise<UnlistenFn> =>
+	listen<{ message: string }>('cover-error', (e) => cb(e.payload.message));
 export const onAuthChanged = (cb: (a: Account) => void): Promise<UnlistenFn> =>
 	listen<Account>('auth-changed', (e) => cb(e.payload));
 export const onAccountSelectionRequired = (cb: () => void): Promise<UnlistenFn> =>
