@@ -369,6 +369,13 @@ impl InnerTube {
                 }
             }
         }
+        for c in &mut page.sections {
+            self.drop_video_cards(&mut c.items);
+            // YouTube lists the album you are already on under "Other versions". A card that
+            // reopens the current page is noise, so drop it.
+            c.items.retain(|i| i.id != browse_id);
+        }
+        page.sections.retain(|c| !c.items.is_empty());
         Ok(page)
     }
 
