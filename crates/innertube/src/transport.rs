@@ -225,6 +225,12 @@ impl InnerTube {
                 headers.insert(HeaderName::from_static(name), v);
             }
         }
+        // Explicitly, from the body we are about to send: reqwest omits `content-length` entirely
+        // when the body is empty, and the uploader answers the empty "start" call with a bare
+        // 411 Length Required. Sending it ourselves costs nothing on the calls that carry bytes.
+        if let Ok(v) = HeaderValue::from_str(&body.len().to_string()) {
+            headers.insert(reqwest::header::CONTENT_LENGTH, v);
+        }
         let resp = self
             .http
             .post(format!("{ORIGIN}/{path}"))
