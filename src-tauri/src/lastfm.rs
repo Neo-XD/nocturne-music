@@ -392,8 +392,10 @@ fn open_browser(url: &str) -> Result<(), String> {
 /// binary (`kde-open`, `gio`), which then links the host's libcurl against our bundled libssl,
 /// built on Ubuntu 24.04 (OpenSSL 3.0) and missing every symbol version added since:
 ///
-///     kde-open: /tmp/.mount_limusiXXXXXX/usr/lib/libssl.so.3: version `OPENSSL_3.5.0' not found
-///               (required by /lib64/libcurl.so.4)
+/// ```text
+/// kde-open: /tmp/.mount_limusiXXXXXX/usr/lib/libssl.so.3: version `OPENSSL_3.5.0' not found
+///           (required by /lib64/libcurl.so.4)
+/// ```
 ///
 /// The opener dies before the browser ever starts, and since `spawn` itself succeeded, Last.fm's
 /// connect flow just sat there polling forever (issue #50, Fedora 44 / KDE).
