@@ -472,6 +472,14 @@ export const onPlaybackNotice = (cb: (msg: string) => void): Promise<UnlistenFn>
  *  so the failure lands long after the picker closed). */
 export const onCoverError = (cb: (msg: string) => void): Promise<UnlistenFn> =>
 	listen<{ message: string }>('cover-error', (e) => cb(e.payload.message));
+/** The playlist's YouTube thumbnail after a cover was uploaded or removed. A removal is the reason
+ *  this exists: YouTube rebuilds the four-track collage and only the response knows its URL. */
+export const onCoverSynced = (
+	cb: (p: { playlistId: string; thumbnail?: string; custom: boolean }) => void
+): Promise<UnlistenFn> =>
+	listen<{ playlistId: string; thumbnail?: string; custom: boolean }>('cover-synced', (e) =>
+		cb(e.payload)
+	);
 export const onAuthChanged = (cb: (a: Account) => void): Promise<UnlistenFn> =>
 	listen<Account>('auth-changed', (e) => cb(e.payload));
 export const onAccountSelectionRequired = (cb: () => void): Promise<UnlistenFn> =>

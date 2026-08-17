@@ -804,15 +804,33 @@ fn sync_cover(state: &Arc<AppState>, playlist_id: &str, path: Option<String>) {
             },
             None => state.it.playlist_clear_cover(client, &playlist_id).await,
         };
-        if let Err(e) = result {
-            tracing::warn!(playlist_id, error = %e, "playlist cover didn't reach YouTube Music");
-            let what = if path.is_some() { "saved here" } else { "removed here" };
-            let _ = state.app.emit(
-                "cover-error",
-                serde_json::json!({
-                    "message": format!("Artwork {what}, but YouTube Music wouldn't take it: {e}"),
-                }),
-            );
+        match result {
+            // The playlist's thumbnail as the edit left it. Worth sending on for the removal
+            // above all: once a cover has been up, YouTube's own thumbnail *is* that cover, so
+            // the page has nothing left to fall back to but the collage this answers with.
+            Ok(thumbnail) => {
+                let _ = state.app.emit(
+                    "cover-synced",
+                    serde_json::json!({
+                        "playlistId": playlist_id,
+                        "thumbnail": thumbnail,
+                        // Whether a local cover still shadows it, so a card that has one is left
+                        // pointing at the file rather than sent back to the network for the same
+                        // image.
+                        "custom": path.is_some(),
+                    }),
+                );
+            }
+            Err(e) => {
+                tracing::warn!(playlist_id, error = %e, "playlist cover didn't reach YouTube Music");
+                let what = if path.is_some() { "saved here" } else { "removed here" };
+                let _ = state.app.emit(
+                    "cover-error",
+                    serde_json::json!({
+                        "message": format!("Artwork {what}, but YouTube Music wouldn't take it: {e}"),
+                    }),
+                );
+            }
         }
     });
 }
