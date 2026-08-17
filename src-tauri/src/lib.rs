@@ -183,6 +183,20 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        // Reopen at the size/position the window was left at. Only "main": the mini widget is
+        // fixed-size and the login/cipher/PoToken webviews are windows too. Size, position and
+        // maximized only — VISIBLE would restore a window hidden to the tray as invisible, and
+        // DECORATIONS would fight the custom titlebar.
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .with_filter(|label| label == "main")
+                .build(),
+        )
         .setup(|app| {
             let handle = app.handle().clone();
 

@@ -47,6 +47,7 @@ discord-rich-presence = "1.1.0"
 md-5 = "0.10"
 lofty = "0.22.2"
 tauri-plugin-dialog = "2.7.2"
+tauri-plugin-window-state = "2.4.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.3.6"
