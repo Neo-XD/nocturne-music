@@ -363,7 +363,7 @@ pub fn status(state: &AppState) -> serde_json::Value {
 
 /// Open a URL in the user's default browser. No opener plugin in the app; three lines cover the
 /// three platforms.
-fn open_browser(url: &str) -> Result<(), String> {
+pub(crate) fn open_browser(url: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let cmd = {
         let mut cmd = std::process::Command::new("xdg-open");

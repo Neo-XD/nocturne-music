@@ -13,6 +13,7 @@
 	import * as api from '$lib/api';
 	import { ui, toast } from '$lib/player.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
+	import Changelog from '$lib/components/Changelog.svelte';
 	import {
 		THEMES,
 		FONTS,
@@ -719,6 +720,13 @@
 							</p>
 						</div>
 						<Switch checked={updateBannerOn} onCheckedChange={setUpdateBanner} />
+					</div>
+					<div class="border-t py-3">
+						<div class="font-medium">What's new</div>
+						<p class="mt-0.5 mb-1 text-sm text-muted-foreground">
+							What changed in this version and the ones before it.
+						</p>
+						<Changelog current={version} />
 					</div>
 				{/if}
 			</div>

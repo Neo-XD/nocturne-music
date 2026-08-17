@@ -307,6 +307,18 @@ export const clearCaches = () => invoke<void>('clear_caches');
 /** Grant the webview a URL for one font file the user picked, so `@font-face` can load it. */
 export const allowFontFile = (path: string) => invoke<void>('allow_font_file', { path });
 
+/** One published release: the GitHub release description, verbatim markdown. */
+export interface ReleaseNote {
+	version: string;
+	/** `YYYY-MM-DD` */
+	date: string;
+	body: string;
+}
+/** Changelog for Settings > About, from the GitHub releases API (cached in Rust per run). */
+export const releaseNotes = () => invoke<ReleaseNote[]>('release_notes');
+/** Open an http(s) link in the real browser, never in the webview itself. */
+export const openExternal = (url: string) => invoke<void>('open_external', { url });
+
 // --- auth (context/15) ---------------------------------------------------------------------
 export const getAccount = () => invoke<Account>('get_account');
 export const getAccountIdentities = () =>
