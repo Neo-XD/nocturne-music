@@ -742,7 +742,9 @@ pub async fn set_playlist_cover(
     path: Option<String>,
 ) -> Result<CoverResult, String> {
     use tauri::Manager;
-    const IMAGE_EXTS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "gif"];
+    // What YouTube's uploader will take. WebP is not on the list: it answers 415 for one, and a
+    // cover that only works on this machine is worse than one the picker never offered.
+    const IMAGE_EXTS: [&str; 3] = ["jpg", "jpeg", "png"];
 
     let key = cover_key(&playlist_id);
     let stored = state.db.get_setting(&key);
@@ -763,7 +765,7 @@ pub async fn set_playlist_cover(
     let src = std::path::Path::new(&src);
     let ext = src.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !IMAGE_EXTS.contains(&ext.as_str()) {
-        return Err("Pick a JPEG, PNG, WebP or GIF image.".into());
+        return Err("Pick a JPEG or PNG image: YouTube Music won't take anything else.".into());
     }
     // ponytail: a flat size cap instead of downscaling. It keeps a 40px sidebar thumb from
     // decoding a camera raw in the webview and the upload from swallowing one; reach for the

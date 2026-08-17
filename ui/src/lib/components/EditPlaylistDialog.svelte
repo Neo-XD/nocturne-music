@@ -59,10 +59,13 @@
 	const preview = $derived(thumb(cover ?? fallback, 400));
 
 	async function pickCover() {
+		// JPEG and PNG only, because that is what YouTube's uploader accepts (WebP comes back 415).
+		// Keeping the picker to those beats letting someone choose a file that can only ever be
+		// this machine's copy.
 		const picked = await pickFile({
 			multiple: false,
 			title: 'Choose playlist artwork',
-			filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }]
+			filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png'] }]
 		});
 		if (typeof picked === 'string') await storeCover(picked);
 	}
@@ -184,8 +187,8 @@
 				<Switch bind:checked={isPublic} aria-label="Public playlist" />
 			</div>
 			<p class="text-xs text-muted-foreground">
-				Artwork applies here at once and uploads to YouTube Music in the background. Square images
-				work best.
+				Artwork applies here at once and uploads to YouTube Music in the background. Square JPEG or
+				PNG works best.
 			</p>
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (open = false)}>Cancel</Button>
