@@ -28,6 +28,10 @@ pub enum Error {
     SessionExpired,
     #[error("This track is already in the playlist.")]
     AlreadyInPlaylist,
+    #[error(
+        "YouTube Music only allows custom playlist art on accounts with a verified phone number."
+    )]
+    CoverRefused,
     #[error("{0}")]
     Other(String),
 }
@@ -203,6 +207,44 @@ impl InnerTube {
                 Err(e) => return Err(e.into()),
             }
         }
+    }
+
+    /// POST raw bytes to a path on the same origin that is *not* under `/youtubei`, with this
+    /// client's headers plus `extra`, and hand back the response headers along with the body.
+    ///
+    /// Google's resumable uploader ("Scotty") lives on its own path and answers the first step in
+    /// a header, so neither `post`'s URL shape nor its JSON-only return works here. The
+    /// `content-type: application/json` the client headers carry stays put even when the body is
+    /// an image: the uploader ignores it, and that is the shape known to work.
+    pub(crate) async fn post_upload(
+        &self,
+        path: &str,
+        client: &YouTubeClient,
+        extra: &[(&'static str, String)],
+        body: Vec<u8>,
+    ) -> Result<(HeaderMap, Vec<u8>), Error> {
+        let mut headers = self.headers(client, true);
+        for (name, value) in extra {
+            if let Ok(v) = HeaderValue::from_str(value) {
+                headers.insert(HeaderName::from_static(name), v);
+            }
+        }
+        // Explicitly, from the body we are about to send: reqwest omits `content-length` entirely
+        // when the body is empty, and the uploader answers the empty "start" call with a bare
+        // 411 Length Required. Sending it ourselves costs nothing on the calls that carry bytes.
+        if let Ok(v) = HeaderValue::from_str(&body.len().to_string()) {
+            headers.insert(reqwest::header::CONTENT_LENGTH, v);
+        }
+        let resp = self
+            .http
+            .post(format!("{ORIGIN}/{path}"))
+            .headers(headers)
+            .body(body)
+            .send()
+            .await?
+            .error_for_status()?;
+        let headers = resp.headers().clone();
+        Ok((headers, resp.bytes().await?.to_vec()))
     }
 
     /// Per-request headers. context/01 §ytClient. Note `X-YouTube-Client-Name` carries the

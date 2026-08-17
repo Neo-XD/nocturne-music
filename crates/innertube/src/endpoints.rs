@@ -572,19 +572,133 @@ impl InnerTube {
         self.edit_playlist(client, playlist_id, sort.edit_action()).await
     }
 
-    /// Rename a playlist you own. context/01 `browse/edit_playlist`.
-    pub async fn playlist_rename(
+    /// Edit the details of a playlist you own. context/01 `browse/edit_playlist`.
+    ///
+    /// Every field is optional and only the ones given are sent, so an edit of the name cannot
+    /// blank a description this parser failed to read back. `privacy` is YouTube's own vocabulary:
+    /// `PUBLIC` / `PRIVATE` / `UNLISTED`.
+    pub async fn playlist_edit_details(
         &self,
         client: &YouTubeClient,
         playlist_id: &str,
-        name: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        privacy: Option<&str>,
     ) -> Result<(), Error> {
+        let mut actions = Vec::new();
+        if let Some(name) = name {
+            actions.push(
+                serde_json::json!({ "action": "ACTION_SET_PLAYLIST_NAME", "playlistName": name }),
+            );
+        }
+        if let Some(description) = description {
+            actions.push(serde_json::json!({
+                "action": "ACTION_SET_PLAYLIST_DESCRIPTION",
+                "playlistDescription": description,
+            }));
+        }
+        if let Some(privacy) = privacy {
+            actions.push(
+                serde_json::json!({ "action": "ACTION_SET_PLAYLIST_PRIVACY", "playlistPrivacy": privacy }),
+            );
+        }
+        if actions.is_empty() {
+            return Ok(());
+        }
+        self.edit_playlist_actions(client, playlist_id, actions).await
+    }
+
+    /// Give a playlist you own a cover of your own, the way YouTube Music's web client does it:
+    /// open a resumable ("Scotty") upload, send the whole image in one go, then attach the blob id
+    /// that comes back. Two of the three calls are not InnerTube endpoints at all. context/01
+    /// §custom playlist thumbnail.
+    ///
+    /// Signed in only, and YouTube treats the slot as square (`studio_square_thumbnail`): a photo
+    /// that isn't gets cropped or refused at the far end, which the caller surfaces as-is.
+    pub async fn playlist_set_cover(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+        image: Vec<u8>,
+    ) -> Result<(), Error> {
+        // 1. Open the upload. The id comes back in a header; the body says nothing.
+        let (headers, _) = self
+            .post_upload(
+                PLAYLIST_IMAGE_UPLOAD,
+                client,
+                &[
+                    ("x-goog-upload-command", "start".to_owned()),
+                    ("x-goog-upload-protocol", "resumable".to_owned()),
+                    ("x-goog-upload-header-content-length", image.len().to_string()),
+                ],
+                Vec::new(),
+            )
+            .await?;
+        let upload_id = headers
+            .get("x-guploader-uploadid")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| Error::Other("YouTube didn't open an upload for the artwork.".into()))?
+            .to_owned();
+
+        // 2. Send the bytes. "Resumable" in name only: one request, offset 0, finalized.
+        let (_, body) = self
+            .post_upload(
+                &format!(
+                    "{PLAYLIST_IMAGE_UPLOAD}?upload_id={}&upload_protocol=resumable",
+                    urlencoding::encode(&upload_id)
+                ),
+                client,
+                &[
+                    ("x-goog-upload-command", "upload, finalize".to_owned()),
+                    ("x-goog-upload-offset", "0".to_owned()),
+                ],
+                image,
+            )
+            .await?;
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Uploaded {
+            encrypted_blob_id: String,
+        }
+        let uploaded: Uploaded = serde_json::from_slice(&body)
+            .map_err(|_| Error::Other("YouTube rejected the artwork upload.".into()))?;
+
+        // 3. Attach the blob to the playlist. This one is an ordinary edit_playlist action.
         self.edit_playlist(
             client,
             playlist_id,
-            serde_json::json!({ "action": "ACTION_SET_PLAYLIST_NAME", "playlistName": name }),
+            serde_json::json!({
+                "action": "ACTION_SET_CUSTOM_THUMBNAIL",
+                "addedCustomThumbnail": {
+                    "imageKey": custom_thumbnail_key(),
+                    "playlistScottyEncryptedBlobId": uploaded.encrypted_blob_id,
+                },
+            }),
         )
         .await
+        .map_err(cover_refusal)
+    }
+
+    /// Drop the custom cover again, so YouTube goes back to building one out of the tracks.
+    /// Answers that rebuilt thumbnail: nothing here can guess the collage's URL.
+    /// context/01 `browse/edit_playlist`.
+    pub async fn playlist_clear_cover(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+    ) -> Result<Option<String>, Error> {
+        let value = self
+            .edit_playlist_value(
+                client,
+                playlist_id,
+                vec![serde_json::json!({
+                    "action": "ACTION_REMOVE_CUSTOM_THUMBNAIL",
+                    "deletedCustomThumbnail": custom_thumbnail_key(),
+                })],
+            )
+            .await
+            .map_err(cover_refusal)?;
+        Ok(edited_thumbnail(&value))
     }
 
     async fn edit_playlist(
@@ -593,6 +707,24 @@ impl InnerTube {
         playlist_id: &str,
         action: serde_json::Value,
     ) -> Result<(), Error> {
+        self.edit_playlist_actions(client, playlist_id, vec![action]).await
+    }
+
+    async fn edit_playlist_actions(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+        actions: Vec<serde_json::Value>,
+    ) -> Result<(), Error> {
+        self.edit_playlist_value(client, playlist_id, actions).await.map(|_| ())
+    }
+
+    async fn edit_playlist_value(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+        actions: Vec<serde_json::Value>,
+    ) -> Result<serde_json::Value, Error> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct EditBody {
@@ -603,11 +735,12 @@ impl InnerTube {
         let body = EditBody {
             context: self.context_for(client),
             playlist_id: strip_vl(playlist_id).to_owned(),
-            actions: vec![action],
+            actions,
         };
-        match edit_rejection(&self.post("browse/edit_playlist", client, &body, true).await?) {
+        let value = self.post("browse/edit_playlist", client, &body, true).await?;
+        match edit_rejection(&value) {
             Some(e) => Err(e),
-            None => Ok(()),
+            None => Ok(value),
         }
     }
 
@@ -675,6 +808,40 @@ impl InnerTube {
     }
 }
 
+/// Where custom playlist artwork goes up. Not a `youtubei/v1` endpoint: it is Google's generic
+/// resumable uploader, sitting on `music.youtube.com` under its own path. context/01.
+const PLAYLIST_IMAGE_UPLOAD: &str = "playlist_image_upload/playlist_custom_thumbnail";
+
+/// YouTube saying no to a custom playlist image, as opposed to the network saying nothing at all.
+///
+/// The gate is phone verification, and it is invisible: the account uploads the bytes fine (the
+/// credential is clearly good, the uploader took it), and then the attach comes back 4xx with
+/// nothing in the body naming a reason. A 403 in particular must not reach the user as our
+/// "session expired, sign in again", which is what the transport makes of one everywhere else.
+/// Timeouts and connect failures are left alone: those really are try-again.
+fn cover_refusal(e: Error) -> Error {
+    match &e {
+        Error::SessionExpired | Error::Other(_) => Error::CoverRefused,
+        Error::Http(h) if h.status().is_some() => Error::CoverRefused,
+        _ => e,
+    }
+}
+
+/// The playlist's thumbnail as the edit left it, off the header YouTube echoes back. Both cover
+/// actions answer with one, and after a removal it is the only way to learn the collage YouTube
+/// rebuilt out of the tracks. Scoped to `newHeader` so an unrelated avatar can't stand in for it.
+fn edited_thumbnail(response: &serde_json::Value) -> Option<String> {
+    metadata::find_all(response, "newHeader").into_iter().find_map(metadata::last_thumbnail)
+}
+
+/// The single image slot a playlist has. Square by name and by what YouTube does with it.
+fn custom_thumbnail_key() -> serde_json::Value {
+    serde_json::json!({
+        "name": "studio_square_thumbnail",
+        "type": "PLAYLIST_IMAGE_TYPE_CUSTOM_THUMBNAIL",
+    })
+}
+
 /// Playlist edit/delete want the raw playlistId; browse gives it `VL`-prefixed. context/01.
 fn strip_vl(id: &str) -> &str {
     id.strip_prefix("VL").unwrap_or(id)
@@ -703,6 +870,21 @@ mod tests {
     fn strips_vl_prefix() {
         assert_eq!(strip_vl("VLPL123"), "PL123");
         assert_eq!(strip_vl("PL123"), "PL123");
+    }
+
+    /// The image bytes were accepted moments earlier, so the credential is good: a refusal on the
+    /// attach is the account not being allowed a custom playlist image. Above all it must not come
+    /// out as "your session expired", which is what a 403 means anywhere else in this crate.
+    #[test]
+    fn a_refused_cover_never_reads_as_a_dead_session() {
+        assert!(matches!(cover_refusal(Error::SessionExpired), Error::CoverRefused));
+        // `edit_playlist`'s STATUS_FAILED rejection, which is how a 200 says no.
+        assert!(matches!(
+            cover_refusal(Error::Other("YouTube refused the playlist edit.".into())),
+            Error::CoverRefused
+        ));
+        // Nothing reached YouTube at all: still worth a retry, so leave it be.
+        assert!(matches!(cover_refusal(Error::VisitorDataNotFound), Error::VisitorDataNotFound));
     }
 
     // Both bodies are trimmed captures of the live responses.

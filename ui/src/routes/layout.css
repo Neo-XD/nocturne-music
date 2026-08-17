@@ -491,6 +491,13 @@
 	html {
 		@apply font-sans;
 	}
+	img {
+		/* No artwork in this app is a drag payload: the drag sources for the shortcuts grid and the
+		   queue are the wrapping card/row, never the image. Left native, every <img> peels off a
+		   ghost on mousedown-drag (issue #53). The wrapper still starts its own drag, same as the
+		   draggable="false" the cards already carry on their images. */
+		-webkit-user-drag: none;
+	}
 }
 
 /* --- Motion & interaction polish --- */

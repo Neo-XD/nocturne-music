@@ -141,6 +141,12 @@ export async function createLibraryPlaylist(title: string): Promise<void> {
 	library.items = [{ kind: 'playlist', id: browseId, title }, ...library.items];
 }
 
+/** Optimistically apply an edit to a library playlist's row (sidebar + Library grid), so a rename
+ *  or a new cover shows up everywhere without a refetch. */
+export function patchLibraryPlaylist(playlistId: string, patch: Partial<BrowseItem>) {
+	library.items = library.items.map((it) => (it.id === playlistId ? { ...it, ...patch } : it));
+}
+
 /** Optimistically bump the "N tracks" count in a library playlist's subtitle (sidebar + Library). */
 export function bumpLibraryTrackCount(playlistId: string, delta: number) {
 	library.items = library.items.map((it) => {
@@ -686,6 +692,7 @@ export function initApp(mini = false): () => void {
 		}),
 		api.onPlaybackError((msg) => toast.error(msg)),
 		api.onPlaybackNotice((msg) => toast(msg)), // auto-skipped an unplayable track
+		api.onCoverError((msg) => toast.error(msg)), // playlist artwork YouTube wouldn't take
 		api.onLocalChanged(forgetLocal), // a local file turned out to be gone — drop it everywhere
 		api.onAuthChanged((a) => {
 			auth.account = a;
