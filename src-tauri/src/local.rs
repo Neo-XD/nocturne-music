@@ -563,9 +563,11 @@ fn page_of(title: Option<String>, artist: Option<String>, tracks: &[LocalTrack])
         items: songs_of(&tracks),
         continuation: None,
         explicit: false,
-        // No YouTube playlist behind it: no radio to seed, nothing to save to the library.
+        // No YouTube playlist behind it: no radio to seed, nothing to save to the library, and
+        // nothing to recommend alongside it.
         playlist_id: None,
         in_library: false,
+        sections: Vec::new(),
     }
 }
 

@@ -19,6 +19,7 @@
         filterTracks,
     } from "$lib/components/TrackFilter.svelte";
     import TrackRowSkeleton from "$lib/components/TrackRowSkeleton.svelte";
+    import Shelf from "$lib/components/Shelf.svelte";
     import ErrorState from "$lib/components/ErrorState.svelte";
     import ArtistLine from "$lib/components/ArtistLine.svelte";
     import ExplicitIcon from "$lib/components/ExplicitIcon.svelte";
@@ -201,6 +202,13 @@
         if (!album?.items.length) return;
         menuOpen = false;
         openAddManyToPlaylist(album.items);
+    }
+
+    // A shelf's "See all" opens the same grid route the artist page uses.
+    function showMore(s: { title: string; moreBrowseId?: string; moreParams?: string }) {
+        const q = new URLSearchParams({ id: s.moreBrowseId!, title: s.title });
+        if (s.moreParams) q.set("params", s.moreParams);
+        goto(`/list?${q.toString()}`);
     }
 </script>
 
@@ -462,4 +470,21 @@
             </p>
         {/each}
     </div>
+
+    <!-- Other versions of this release, and what sits near it. Ruled off from the tracks so the
+         page reads as the album first and its surroundings second. -->
+    {#if album.sections?.length}
+        <div class="content-in mt-2 flex flex-col gap-8 border-t px-6 pb-8 pt-8">
+            {#each album.sections as section, i (i + ":" + section.title)}
+                <Shelf
+                    title={section.title}
+                    items={section.items}
+                    headingClass="font-heading text-xl font-bold"
+                    onMore={section.moreBrowseId
+                        ? () => showMore(section)
+                        : undefined}
+                />
+            {/each}
+        </div>
+    {/if}
 {/if}

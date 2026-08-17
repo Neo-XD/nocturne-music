@@ -273,6 +273,10 @@ pub struct AlbumPage {
     pub playlist_id: Option<String>,
     /// Whether the album is already saved to the signed-in user's library.
     pub in_library: bool,
+    /// The card shelves YouTube ships under the track list: other versions of this release, more
+    /// from the artist, related albums. Same response as the tracks, so they cost no extra fetch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<ArtistCarousel>,
 }
 
 /// Parse a `FEmusic_home` response into filter chips + titled carousel sections. context/08.
@@ -626,6 +630,12 @@ pub fn parse_album(root: &Value) -> AlbumPage {
         // Track rows carry the OLAK id; an album with no playable rows still has it on the
         // header's save-to-library button.
         playlist_id: album_playlist_id(root).or_else(|| library_toggle_playlist_id(header)),
+        // Whole-tree, not the section list: an album page splits into two columns and the shelves
+        // sit in the one the tracks don't.
+        sections: find_all(root, "musicCarouselShelfRenderer")
+            .into_iter()
+            .filter_map(parse_artist_carousel)
+            .collect(),
         in_library: library_toggle(header)
             .is_some_and(|t| t.get("isToggled").and_then(Value::as_bool).unwrap_or(false)),
     }
@@ -1451,9 +1461,14 @@ mod tests {
                         } }
                     ] } },
                     // "More from artist" carousel: a DIFFERENT album's OLAK id that must not win.
-                    { "musicCarouselShelfRenderer": { "contents": [
+                    { "musicCarouselShelfRenderer": {
+                      "header": { "musicCarouselShelfBasicHeaderRenderer": {
+                          "title": { "runs": [{ "text": "Other versions" }] }
+                      } },
+                      "contents": [
                         { "musicTwoRowItemRenderer": {
                             "title": { "runs": [{ "text": "Other Album" }] },
+                            "navigationEndpoint": { "browseEndpoint": { "browseId": "MPREother" } },
                             "thumbnailOverlay": { "musicItemThumbnailOverlayRenderer": { "content": {
                                 "musicPlayButtonRenderer": { "playNavigationEndpoint": {
                                     "watchPlaylistEndpoint": { "playlistId": "OLAK5uy_other" }
@@ -1485,6 +1500,12 @@ mod tests {
         // The album's own OLAK id from the track rows — never the carousel's other-album id.
         assert_eq!(a.playlist_id.as_deref(), Some("OLAK5uy_iceman"));
         assert!(!a.in_library); // no save button in this fixture
+
+        // The carousel becomes a shelf under the tracks; its card stays out of the track list.
+        assert_eq!(a.sections.len(), 1);
+        assert_eq!(a.sections[0].title, "Other versions");
+        assert_eq!(a.sections[0].items.len(), 1);
+        assert_eq!(a.sections[0].items[0].title, "Other Album");
     }
 
     /// On a single-artist album YouTube ships the per-track artist column *empty* (`"text": {}`,

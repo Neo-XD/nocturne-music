@@ -226,6 +226,8 @@ export interface AlbumPage {
 	playlistId?: string;
 	/** Already saved to the signed-in user's library. */
 	inLibrary: boolean;
+	/** Card shelves under the tracks: other versions, more from the artist, related releases. */
+	sections?: ArtistCarousel[];
 }
 
 export interface ArtistPage {
