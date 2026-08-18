@@ -1575,11 +1575,13 @@ impl AppState {
         // Push the same metadata to the OS media widget (context/16) and Discord.
         if let Some(m) = &self.media {
             // MPRIS/SMTC want a URL; a local track's artwork is a path, so hand it a file:// one.
+            // Scheme, not leading slash: a Windows cover path is `C:\...`, and SMTC drops the whole
+            // metadata update (cover included) when the thumbnail URI won't parse.
             let cover = item.thumbnail.as_ref().map(|t| {
-                if t.starts_with('/') {
-                    format!("file://{t}")
-                } else {
+                if t.contains("://") {
                     t.clone()
+                } else {
+                    format!("file://{t}")
                 }
             });
             m.set_metadata(&item.title, &item.artists, item.album.as_deref(), cover.as_deref());
