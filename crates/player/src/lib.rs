@@ -181,7 +181,8 @@ impl Player {
     /// Set output volume (0–100). The slider percent is perceptual, not mpv's raw scale:
     /// mpv cubes its `volume` property (gain = (v/100)³), which makes a 10-step drag near
     /// the bottom jump ~18 dB while the same drag near the top moves ~3 dB. Map the percent
-    /// linearly onto a 40 dB loudness range instead, so every slider step sounds the same size.
+    /// onto a 60 dB loudness range instead (see [`perceptual_to_mpv`]), so steps stay roughly
+    /// the same size and the bottom of the slider is actually quiet rather than just near-floor.
     pub fn set_volume(&self, volume: i64) -> Result<(), Error> {
         self.mpv.set_property("volume", perceptual_to_mpv(volume))?;
         Ok(())
@@ -373,14 +374,19 @@ fn quoted(arg: &str) -> String {
     format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Slider percent (perceptual, linear-in-dB over 40 dB) → mpv `volume` value. mpv applies
-/// gain = (v/100)³, i.e. 60·log10(v/100) dB, so v = 100·10^((s−100)/150) yields a perceived
-/// level of 0.4·(s−100) dB. 0 stays a hard mute.
+/// Slider percent → mpv `volume` value, over a 60 dB range. mpv applies gain = (v/100)³,
+/// i.e. 60·log10(v/100) dB, so v = 100·10^(−(1−s/100)^1.5) yields −60·(1−s/100)^1.5 dB:
+/// 50% is −21 dB, 25% is −39 dB, 1% is −59 dB. 0 stays a hard mute.
+///
+/// The 1.5 exponent buys the low end its range without moving anyone's saved setting much
+/// (the old linear-in-dB curve put 50% at −20 dB, this one at −21). Steps are 0.9 dB at the
+/// quiet end and 0.3 dB near the top, which is the right way round: fine control is wanted
+/// where a dB is loud, and the bottom of the slider needs to reach somewhere quiet.
 fn perceptual_to_mpv(percent: i64) -> f64 {
     if percent <= 0 {
         return 0.0;
     }
-    100.0 * 10f64.powf((percent.min(100) as f64 - 100.0) / 150.0)
+    100.0 * 10f64.powf(-(1.0 - percent.min(100) as f64 / 100.0).powf(1.5))
 }
 
 #[cfg(test)]
@@ -464,13 +470,15 @@ mod tests {
 
     #[test]
     fn volume_curve() {
-        assert_eq!(perceptual_to_mpv(0), 0.0);
+        let db = |s| 60.0 * (perceptual_to_mpv(s) / 100.0).log10();
+        assert_eq!(perceptual_to_mpv(0), 0.0); // hard mute, not just very quiet
         assert_eq!(perceptual_to_mpv(100), 100.0);
-        // 50% ≈ −20 dB perceived ⇒ mpv value 100·10^(−1/3)
-        assert!((perceptual_to_mpv(50) - 46.415).abs() < 0.01);
-        // Equal slider steps = equal dB steps: ratio between consecutive values is constant.
-        let r1 = perceptual_to_mpv(40) / perceptual_to_mpv(30);
-        let r2 = perceptual_to_mpv(90) / perceptual_to_mpv(80);
-        assert!((r1 - r2).abs() < 1e-9);
+        assert!((db(50) + 21.21).abs() < 0.01);
+        // The point of the curve: 1% has somewhere to go. The old 40 dB range bottomed out
+        // here, which left anyone listening quietly pinned to the floor.
+        assert!((db(1) + 59.10).abs() < 0.01);
+        // Monotonic, and finer steps at the loud end than the quiet one.
+        assert!((1..=100).all(|s| perceptual_to_mpv(s) > perceptual_to_mpv(s - 1)));
+        assert!(db(100) - db(99) < db(2) - db(1));
     }
 }
