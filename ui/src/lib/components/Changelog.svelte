@@ -2,9 +2,11 @@
 	What's new, in Settings > About. The text is the GitHub release description verbatim (see
 	RELEASING.md for the format releases are written in), so the changelog has one source of truth.
 
-	The markdown here is deliberately tiny: headings, bullets, bold, code, links, @mentions. That is
-	the whole vocabulary the release-note format uses, so a markdown dependency would be 40 KB to
-	render five constructs.
+	The markdown here is deliberately tiny: headings, bullets, bold, code, links, @mentions, images.
+	That is the whole vocabulary the release-note format uses, so a markdown dependency would be
+	40 KB to render six constructs. GitHub's own editor drops in raw HTML for images and their
+	<p align="center"> wrappers, so those are handled too and any other stray tag is dropped rather
+	than shown as text.
 -->
 <script lang="ts">
 	import { releaseNotes, openExternal } from '$lib/api';
@@ -18,7 +20,11 @@
 		| { t: 'h'; spans: Span[] }
 		| { t: 'p'; spans: Span[] }
 		| { t: 'ul'; items: Span[][] }
-		| { t: 'pre'; text: string };
+		| { t: 'pre'; text: string }
+		| { t: 'img'; src: string; alt: string };
+
+	/** ![alt](src) and GitHub's raw <img src=...>, which it writes when you paste a screenshot. */
+	const IMAGE = /!\[([^\]]*)\]\(([^)]+)\)|<img\b[^>]*?\bsrc=["']([^"']+)["'][^>]*>/gi;
 
 	const INLINE = /\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|(https?:\/\/\S+)|@([\w-]+)/g;
 
@@ -43,7 +49,7 @@
 		const blocks: Block[] = [];
 		let fenced: string[] | null = null;
 		for (const raw of body.replaceAll('\r', '').split('\n')) {
-			const line = raw.trim();
+			let line = raw.trim();
 			if (line.startsWith('```')) {
 				if (fenced) blocks.push({ t: 'pre', text: fenced.join('\n') });
 				fenced = fenced ? null : [];
@@ -53,6 +59,10 @@
 				fenced.push(raw);
 				continue;
 			}
+			const images = [...line.matchAll(IMAGE)];
+			// Whatever HTML is left over (<p align="center">, <br>, <details>) is layout, not content.
+			line = line.replace(IMAGE, '').replace(/<\/?[a-z][^>]*>/gi, '').trim();
+			for (const m of images) blocks.push({ t: 'img', src: m[2] ?? m[3], alt: m[1] ?? '' });
 			if (!line) continue;
 			const heading = line.match(/^#{1,6}\s+(.*)/);
 			const bullet = line.match(/^[-*]\s+(.*)/);
@@ -91,6 +101,13 @@
 						<h4 class="mt-3 mb-1 font-medium text-foreground">{@render spans(b.spans)}</h4>
 					{:else if b.t === 'p'}
 						<p class="mt-1">{@render spans(b.spans)}</p>
+					{:else if b.t === 'img'}
+						<img
+							src={b.src}
+							alt={b.alt}
+							loading="lazy"
+							class="mt-2 max-w-full rounded-lg border"
+						/>
 					{:else if b.t === 'pre'}
 						<pre
 							class="mt-2 overflow-x-auto rounded bg-muted px-2 py-1.5 text-xs">{b.text}</pre>
