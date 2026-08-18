@@ -13,7 +13,9 @@ function apply(next: number) {
 	next = Math.min(Math.max(next, MIN), MAX);
 	if (next === level) return;
 	level = next;
-	getCurrentWebview().setZoom(level);
+	getCurrentWebview()
+		.setZoom(level)
+		.catch(() => {});
 }
 
 export function initZoom() {
