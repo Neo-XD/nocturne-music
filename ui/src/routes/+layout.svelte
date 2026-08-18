@@ -30,6 +30,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
+	import { initZoom } from '$lib/zoom';
 	import { updateState, installUpdate, checkForUpdatesQuiet } from '$lib/updater.svelte';
 
 	let { children } = $props();
@@ -59,9 +60,11 @@
 		checkForUpdatesQuiet();
 		const teardownApp = initApp();
 		const teardownWin = initWin();
+		const teardownZoom = initZoom();
 		return () => {
 			teardownApp();
 			teardownWin();
+			teardownZoom();
 		};
 	});
 </script>
