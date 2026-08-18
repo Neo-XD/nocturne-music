@@ -150,8 +150,9 @@ fn apply_metadata(
 }
 
 /// Route an OS control press into the same [`AppState`] methods the UI commands use. Runs the
-/// async work on the Tauri runtime (the callback fires on souvlaki's own thread).
-fn handle_event(app: &AppHandle, event: MediaControlEvent) {
+/// async work on the Tauri runtime (the callback fires on souvlaki's own thread, and on Windows
+/// also on the UI thread via the taskbar toolbar).
+pub(crate) fn handle_event(app: &AppHandle, event: MediaControlEvent) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let Some(state) = app.try_state::<Arc<AppState>>() else { return };

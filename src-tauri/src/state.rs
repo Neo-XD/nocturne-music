@@ -1605,6 +1605,8 @@ impl AppState {
         if let Some(m) = &self.media {
             m.set_playback(playing, self.current_position());
         }
+        #[cfg(target_os = "windows")]
+        crate::taskbar::set_playing(&self.app, playing);
         if let Some(d) = &self.discord {
             d.set_playing(playing);
         }

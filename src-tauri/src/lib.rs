@@ -15,6 +15,8 @@ mod orchestrator;
 mod potoken;
 mod session;
 mod state;
+#[cfg(target_os = "windows")]
+mod taskbar;
 mod tray;
 mod webview;
 
@@ -251,6 +253,10 @@ pub fn run() {
             // OS media controls (MPRIS/SMTC/NowPlaying). Its callback resolves AppState lazily, so
             // it's fine to spawn before AppState is managed. context/16, D11.
             let media = media::spawn(handle.clone());
+            // Taskbar preview buttons (#47). Windows-only, and a different API from the SMTC
+            // session above.
+            #[cfg(target_os = "windows")]
+            taskbar::init(&handle);
 
             // Discord rich presence — off unless the user opted in; parks on its channel until then.
             let discord = discord::spawn(db.get_setting("discord_rpc").as_deref() == Some("true"));

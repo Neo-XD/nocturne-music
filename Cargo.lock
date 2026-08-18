@@ -2446,6 +2446,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "webkit2gtk",
+ "windows 0.61.3",
 ]
 
 [[package]]
