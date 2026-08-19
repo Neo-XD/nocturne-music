@@ -29,8 +29,8 @@ use windows::Win32::UI::Shell::{
     THB_FLAGS, THB_ICON, THB_TOOLTIP, THUMBBUTTON,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, GetSystemMetrics, RegisterWindowMessageW, HICON, ICONINFO, SM_CXSMICON,
-    SM_CYSMICON, WM_COMMAND,
+    CreateIconIndirect, GetSystemMetrics, IsWindowVisible, RegisterWindowMessageW, HICON, ICONINFO,
+    SM_CXSMICON, SM_CYSMICON, WM_COMMAND,
 };
 
 const ID_PREV: u32 = 1;
@@ -40,7 +40,8 @@ const SUBCLASS_ID: usize = 0x11_4d_05_1c;
 
 /// `RegisterWindowMessageW("TaskbarButtonCreated")`. The shell sends it once the taskbar button
 /// exists; `ThumbBarAddButtons` before that silently does nothing, and it comes again after an
-/// Explorer restart, which is why the whole attach lives in the subclass proc.
+/// Explorer restart or whenever the window is hidden and shown, which is why the attach also lives
+/// in the subclass proc.
 static BUTTON_CREATED: AtomicU32 = AtomicU32::new(0);
 
 struct Bar {
@@ -80,6 +81,17 @@ pub fn init(app: &AppHandle) {
         if !SetWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID, 0).as_bool() {
             tracing::warn!("taskbar toolbar: SetWindowSubclass failed");
         }
+    }
+    // If the window is already on screen, its taskbar button exists and the shell has sent the
+    // one `TaskbarButtonCreated` it will ever send for it, most likely while WebView2's init was
+    // pumping messages during window creation, long before the subclass above existed. That is
+    // what left the toolbar missing until the window was hidden to the tray and shown again
+    // (#47), so add to the button now rather than waiting for a message that has been and gone.
+    // A window still hidden here gets its button (and the message, which now lands) on first show,
+    // and must not be touched: `ThumbBarAddButtons` works once per window and there is nothing
+    // yet to add to.
+    if unsafe { IsWindowVisible(hwnd) }.as_bool() {
+        attach();
     }
 }
 
@@ -124,9 +136,15 @@ fn attach() {
             tracing::warn!(error = %e, "taskbar toolbar: HrInit failed");
             return;
         }
-        if let Err(e) = list.ThumbBarAddButtons(hwnd, &buttons(&icons, playing)) {
-            tracing::warn!(error = %e, "taskbar toolbar: ThumbBarAddButtons failed");
-            return;
+        // One add per window per Explorer session: whichever of `init` and `TaskbarButtonCreated`
+        // gets there second is left with the update call. After an Explorer restart the shell has
+        // forgotten the window and the add is the one that takes.
+        let b = buttons(&icons, playing);
+        if let Err(add) = list.ThumbBarAddButtons(hwnd, &b) {
+            if let Err(update) = list.ThumbBarUpdateButtons(hwnd, &b) {
+                tracing::warn!(%add, %update, "taskbar toolbar: no buttons added");
+                return;
+            }
         }
     }
     // Held so ThumbBarUpdateButtons can reuse it; the borrow is taken only after the COM calls,
