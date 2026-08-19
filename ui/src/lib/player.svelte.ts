@@ -16,6 +16,7 @@ import { applyLtState, lt } from './lt.svelte';
 import { clearCached } from './pagecache';
 import * as pl from './personal';
 import type { Personal } from './personal';
+import { appearance } from './theme.svelte';
 
 export const playback = $state({
 	now: null as NowPlaying | null,
@@ -42,7 +43,10 @@ export const playback = $state({
  */
 export const np = $state({ open: false, tab: 'queue' as 'queue' | 'lyrics' });
 
-export const openPlayer = () => (np.open = true);
+/** No-op when the user has turned the auto-open off (#64): playback starts, the view stays put. */
+export const openPlayer = () => {
+	if (appearance.openPlayerOnPlay) np.open = true;
+};
 
 /** Play one track (a search row, a song card, a shelf), and show it. */
 export function playSong(song: SongItem) {

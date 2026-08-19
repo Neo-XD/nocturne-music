@@ -90,7 +90,9 @@ export const appearance = $state({
 	 * buttons switch between them while it's open. Off, those buttons only ever open the floating
 	 * side panels, which then sit over the now-playing view like they sit over a page (#62).
 	 */
-	tabbedPlayer: true
+	tabbedPlayer: true,
+	/** Starting playback opens the now-playing view. Off, it plays and leaves you where you are (#64). */
+	openPlayerOnPlay: true
 });
 
 export function setAppearance(patch: Partial<typeof appearance>): void {
@@ -315,7 +317,7 @@ export function initTheme(): void {
 	}
 	try {
 		const saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) ?? '{}');
-		for (const k of ['artworkBackground', 'tabbedPlayer'] as const) {
+		for (const k of ['artworkBackground', 'tabbedPlayer', 'openPlayerOnPlay'] as const) {
 			if (typeof saved?.[k] === 'boolean') appearance[k] = saved[k];
 		}
 	} catch {

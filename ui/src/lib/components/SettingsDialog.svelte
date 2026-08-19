@@ -537,6 +537,20 @@
 
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
+							<div class="font-medium">Open the player when you press play</div>
+							<p class="mt-0.5 text-sm text-muted-foreground">
+								On, playing a song, album or playlist brings up the full player view. Off, it starts
+								playing and leaves you on the page you were browsing.
+							</p>
+						</div>
+						<Switch
+							checked={appearance.openPlayerOnPlay}
+							onCheckedChange={(on) => setAppearance({ openPlayerOnPlay: on })}
+						/>
+					</div>
+
+					<div class="flex items-start justify-between gap-4 border-b py-3">
+						<div class="min-w-0">
 							<div class="font-medium">Queue and lyrics in the player view</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
 								On, the player view carries them as tabs and the bar's two buttons switch between
