@@ -58,6 +58,7 @@
 		toast,
 		toggleSaved,
 		bumpLibraryTrackCount,
+		noteUnsavedFrom,
 		patchLibraryPlaylist,
 		lastPlaylistAdd
 	} from '$lib/player.svelte';
@@ -668,6 +669,7 @@
 			} else {
 				await api.removeFromPlaylist(id, track.video_id, track.set_video_id!);
 				bumpLibraryTrackCount(id, -1);
+				noteUnsavedFrom(id, track.video_id);
 				toast.success('Removed from playlist');
 			}
 			cacheCurrent();

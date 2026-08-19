@@ -663,6 +663,87 @@ fn editable_playlist<'a>(
     require_login(state)
 }
 
+/// Liked Music is a library playlist like any other, but the row already carries its thumbs-up
+/// state, so a second mark saying the same thing is noise. It is also the one list that runs to
+/// thousands of tracks, which would double the crawl on its own.
+const LIKED_MUSIC_ID: &str = "VLLM";
+/// How long the membership index is trusted before a re-crawl. Adds and removes made in this app
+/// patch it as they happen, so this window only ever covers edits made somewhere else.
+const PLAYLIST_INDEX_TTL_SECS: i64 = 6 * 3600;
+/// Continuation pages per playlist. YouTube hands back 100 tracks a page, so this covers 5000 of
+/// them. ponytail: a hard stop, not paging state. A playlist past it marks its first 5000 tracks
+/// and no more, which beats one pathological list turning a sync into hundreds of requests.
+const PLAYLIST_INDEX_MAX_PAGES: usize = 50;
+
+/// videoId → the ids of your playlists holding it, straight from SQLite with no network at all,
+/// so a track list can draw the "saved" mark on its first paint. Empty until the first sync.
+#[tauri::command]
+pub fn playlist_index(state: St<'_>) -> std::collections::HashMap<String, Vec<String>> {
+    state.db.playlist_memberships()
+}
+
+/// Rebuild that index by walking the playlists you own, then answer with it.
+///
+/// Nothing else knows playlist membership: the library browse gives cards, a playlist browse gives
+/// one list's tracks, and InnerTube's per-video add-to-playlist dialog would be a request per row.
+/// So the crawl is the price, and it is paid at most once every `PLAYLIST_INDEX_TTL_SECS`, on a
+/// launch or a sign-in. Playlists you merely saved are skipped: they are someone else's, so "you
+/// saved this song to it" would be a lie, and their long mixes would double the walk.
+#[tauri::command]
+pub async fn sync_playlist_index(
+    state: St<'_>,
+) -> Result<std::collections::HashMap<String, Vec<String>>, String> {
+    if !state.it.is_logged_in() {
+        state.db.clear_playlist_index();
+        return Ok(std::collections::HashMap::new());
+    }
+    let fresh_until = state
+        .db
+        .get_setting("playlist_index_synced_at")
+        .and_then(|at| at.parse::<i64>().ok())
+        .map(|at| at + PLAYLIST_INDEX_TTL_SECS);
+    if fresh_until.is_some_and(|until| now_secs() < until) {
+        return Ok(state.db.playlist_memberships());
+    }
+    let client = metadata_client(&state)?;
+    let library = state.it.library_playlists(client).await.map_err(|e| e.to_string())?;
+    // A degraded response that parses as an empty library would otherwise wipe every mark and
+    // then call the wipe fresh for six hours. Nothing to index is nothing to trust: keep what is
+    // stored and try again on the next launch.
+    if library.is_empty() {
+        return Ok(state.db.playlist_memberships());
+    }
+    let mut indexed: Vec<String> = Vec::new();
+    for item in library {
+        if item.id == ON_REPEAT_ID || item.id == LIKED_MUSIC_ID {
+            continue;
+        }
+        // One playlist failing (a deleted id, a hiccup) must not abandon the rest of the crawl,
+        // and must not drop what is already indexed for it either: leaving it out of `indexed`
+        // would have `retain_playlists` forget the tracks we do know about.
+        let Ok(page) = state.it.playlist(client, &item.id, None).await else {
+            indexed.push(item.id);
+            continue;
+        };
+        if !page.owned {
+            continue;
+        }
+        let mut video_ids: Vec<String> = page.items.into_iter().map(|song| song.video_id).collect();
+        let mut token = page.continuation;
+        for _ in 0..PLAYLIST_INDEX_MAX_PAGES {
+            let Some(next) = token.take() else { break };
+            let Ok(more) = state.it.playlist_continuation(client, &next).await else { break };
+            video_ids.extend(more.items.into_iter().map(|song| song.video_id));
+            token = more.continuation;
+        }
+        state.db.set_playlist_tracks(&item.id, &video_ids);
+        indexed.push(item.id);
+    }
+    state.db.retain_playlists(&indexed);
+    state.db.set_setting("playlist_index_synced_at", &now_secs().to_string());
+    Ok(state.db.playlist_memberships())
+}
+
 /// `false` means the playlist already had the track and YouTube added nothing — not an error, but
 /// the UI must not draw an optimistic row for it (there is no real row to remove later).
 #[tauri::command]
@@ -672,7 +753,12 @@ pub async fn add_to_playlist(
     video_id: String,
 ) -> Result<bool, String> {
     let client = editable_playlist(&state, &playlist_id)?;
-    state.it.playlist_add(client, &playlist_id, &video_id).await.map_err(|e| e.to_string())
+    let added =
+        state.it.playlist_add(client, &playlist_id, &video_id).await.map_err(|e| e.to_string())?;
+    // Also on `false`: YouTube refusing a duplicate means the playlist holds the track, which is
+    // exactly what the index should say. A stale index is how it got asked in the first place.
+    state.db.add_playlist_track(&playlist_id, &video_id);
+    Ok(added)
 }
 
 #[tauri::command]
@@ -687,7 +773,9 @@ pub async fn remove_from_playlist(
         .it
         .playlist_remove(client, &playlist_id, &video_id, &set_video_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    state.db.remove_playlist_track(&playlist_id, &video_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -899,7 +987,9 @@ fn custom_cover(state: &Arc<AppState>, playlist_id: &str) -> Option<String> {
 #[tauri::command]
 pub async fn delete_playlist(state: St<'_>, playlist_id: String) -> Result<(), String> {
     let client = editable_playlist(&state, &playlist_id)?;
-    state.it.delete_playlist(client, &playlist_id).await.map_err(|e| e.to_string())
+    state.it.delete_playlist(client, &playlist_id).await.map_err(|e| e.to_string())?;
+    state.db.forget_playlist(&playlist_id);
+    Ok(())
 }
 
 #[tauri::command]

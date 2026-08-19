@@ -12,7 +12,8 @@
 	import type { SongItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import { lt } from '$lib/lt.svelte';
-	import { isLiked, ratingOf, toggleRating } from '$lib/player.svelte';
+	import { isLiked, ratingOf, savedPlaylists, toggleRating } from '$lib/player.svelte';
+	import SavedInPlaylists from './SavedInPlaylists.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 	import ExplicitIcon from './ExplicitIcon.svelte';
@@ -74,6 +75,11 @@
 	// A local file has no YouTube identity, so there is nothing to rate (the same guard the ⋯ menu
 	// applies to its like item). The compact variant has no room: it keeps its single heart.
 	const showRating = $derived(!compact && !hideRating && !api.isLocalId(song.video_id));
+
+	// Your own playlists holding this song, for the "saved" mark. Gated on `showRating` because it
+	// answers the same three questions: a local file is in no YTM playlist, and the compact and
+	// queue variants have no width left for another mark.
+	const inPlaylists = $derived(showRating ? savedPlaylists(song.video_id) : []);
 
 	// The whole row is a play target (role="button"), so mirror native button keyboard activation.
 	// Only when the key lands on the row itself — keydowns bubble up from nested interactive
@@ -187,6 +193,11 @@
 	<div class="flex shrink-0 items-center {compact ? 'gap-0.5' : 'gap-2'}">
 		<!-- Always on, unlike the thumbs beside it: this is a property of the song, not an action,
 		     so hiding it until the pointer arrives would be hiding half of what it's for. -->
+		<!-- Always on, for the same reason the explicit mark is: which of your playlists hold this
+		     song is a fact about the row, not an action waiting for a pointer. -->
+		{#if inPlaylists.length}
+			<SavedInPlaylists playlists={inPlaylists} />
+		{/if}
 		{#if song.explicit && !hideRating}
 			<ExplicitIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 		{/if}

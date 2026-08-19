@@ -610,9 +610,17 @@ impl AppState {
             )
             .map_err(|e| format!("Couldn't save the selected YouTube channel: {e}"))?;
         self.persist_visitor_data(visitor_data);
+        self.forget_playlist_index();
         self.it.set_data_sync_id(selected.data_sync_id.clone());
         let _ = self.app.emit("auth-changed", &account);
         Ok(account)
+    }
+
+    /// The playlist membership index belongs to one account, so a sign-out or a channel switch
+    /// empties it. Its timestamp goes too, or the next sync would think it was still fresh.
+    fn forget_playlist_index(&self) {
+        self.db.clear_playlist_index();
+        self.db.delete_setting("playlist_index_synced_at");
     }
 
     fn restore_auth_transport(&self, cookie: Option<String>, data_sync_id: Option<String>) {
@@ -639,6 +647,7 @@ impl AppState {
         self.it.set_cookie(None);
         self.it.set_data_sync_id(None);
         self.db.delete_setting("session_cookie");
+        self.forget_playlist_index();
         let _ = self.db.clear_auth_identity();
         let _ = self.app.emit("auth-changed", serde_json::json!({ "signedIn": false }));
     }

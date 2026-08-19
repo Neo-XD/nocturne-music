@@ -425,6 +425,8 @@ pub fn run() {
             commands::get_library_artists,
             commands::get_playlist,
             commands::get_playlist_more,
+            commands::playlist_index,
+            commands::sync_playlist_index,
             commands::play_counts,
             commands::get_album,
             commands::get_local_library,

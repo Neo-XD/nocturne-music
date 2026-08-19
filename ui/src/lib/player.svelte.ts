@@ -86,6 +86,7 @@ let libraryGeneration = 0;
 function resetLibraryForAccount() {
 	libraryGeneration++;
 	library.items = [];
+	savedIn.map = {};
 	library.loaded = false;
 	library.loading = false;
 	library.error = null;
@@ -161,6 +162,61 @@ export function bumpLibraryTrackCount(playlistId: string, delta: number) {
 		});
 		return { ...it, subtitle };
 	});
+}
+
+// --- Saved-in-playlists index (Rust commands::playlist_index) ---------------------------------
+
+/**
+ * videoId → the ids of your own playlists holding it, mirrored from SQLite. Track rows read it to
+ * draw the "saved" checkmark, so every add and remove patches it in place: waiting for the next
+ * crawl would leave the row lying about a playlist the user just put it in.
+ */
+export const savedIn = $state({ map: {} as Record<string, string[]> });
+
+/**
+ * The playlists holding `videoId`, in library order. Resolved against `library.items` rather than
+ * carrying titles of its own, so a playlist deleted or unsaved anywhere stops being named here the
+ * moment the library list drops it.
+ */
+export function savedPlaylists(videoId: string): BrowseItem[] {
+	const ids = savedIn.map[videoId];
+	if (!ids?.length) return [];
+	const holding = new Set(ids);
+	return library.items.filter((it) => holding.has(it.id));
+}
+
+/**
+ * Load the index: the stored one first so rows mark up immediately, then whatever a refresh crawl
+ * turns up. Generation-guarded like the library itself, so an account switch mid-flight can't
+ * paint the previous channel's playlists.
+ */
+export async function loadSavedIndex() {
+	const generation = libraryGeneration;
+	const apply = (map: Record<string, string[]>) => {
+		if (generation === libraryGeneration) savedIn.map = map;
+	};
+	await api
+		.playlistIndex()
+		.then(apply)
+		.catch(() => {});
+	await api
+		.syncPlaylistIndex()
+		.then(apply)
+		.catch(() => {});
+}
+
+/** Every one of `videoIds` is now in `playlistId`, refused duplicates included: YouTube saying the
+ *  playlist already holds a track is the same fact the mark shows. */
+export function noteSavedIn(playlistId: string, videoIds: string[]) {
+	for (const videoId of videoIds) {
+		const ids = savedIn.map[videoId] ?? [];
+		if (!ids.includes(playlistId)) savedIn.map[videoId] = [...ids, playlistId];
+	}
+}
+
+export function noteUnsavedFrom(playlistId: string, videoId: string) {
+	const ids = savedIn.map[videoId];
+	if (ids?.includes(playlistId)) savedIn.map[videoId] = ids.filter((id) => id !== playlistId);
 }
 
 // --- Local music (Rust local.rs) --------------------------------------------------------------
@@ -708,7 +764,10 @@ export function initApp(mini = false): () => void {
 			resetLibraryForAccount();
 			// Signing out doesn't empty the library: On Repeat and anything saved on this machine
 			// are still there, and the backend answers both without touching YouTube.
-			if (!mini) loadLibrary(true);
+			if (!mini) {
+				loadLibrary(true);
+				loadSavedIndex();
+			}
 			if (!a.signedIn) {
 				ui.channelPickerOpen = false;
 				ui.channelPickerRequired = false;
@@ -758,6 +817,10 @@ export function initApp(mini = false): () => void {
 			}
 			loadLibrary();
 			if (a.signedIn) {
+				// The crawl behind this is the app's only bulk request, so it runs once here (and
+				// on a sign-in), never on navigation. It settles into the background while the
+				// first page paints from the stored index.
+				loadSavedIndex();
 				// Only when the stored answer might be the provisional one: databases that predate
 				// `canSwitch` default it to true so the action stays discoverable, and this is what
 				// demotes single-channel users back to no switcher. A stored `false` is already

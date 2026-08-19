@@ -367,6 +367,16 @@ export const setPlaylistSort = (playlistId: string, sort: ServerSort) =>
 export const getPlaylistMore = (token: string) =>
 	invoke<PlaylistContinuation>('get_playlist_more', { token });
 /**
+ * videoId → the ids of the playlists you own that hold it. Read straight from local SQLite, so it
+ * answers instantly and is empty until `syncPlaylistIndex` has filled it in at least once.
+ */
+export const playlistIndex = () => invoke<Record<string, string[]>>('playlist_index');
+/**
+ * Re-walk your own playlists and answer with the rebuilt map. Skips the crawl while the stored one
+ * is still inside its window, so calling this on every launch is cheap.
+ */
+export const syncPlaylistIndex = () => invoke<Record<string, string[]>>('sync_playlist_index');
+/**
  * videoId → times played, from the local listening history. Same trailing window On Repeat uses
  * (a month): the history table is pruned to it, so there is no older data. A videoId that isn't in
  * the map has not been played inside the window.

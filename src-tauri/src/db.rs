@@ -73,6 +73,12 @@ impl Db {
                 mtime         INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS local_tracks_album ON local_tracks(album_key);
+            CREATE TABLE IF NOT EXISTS playlist_track (
+                playlist_id TEXT NOT NULL,
+                video_id    TEXT NOT NULL,
+                PRIMARY KEY (playlist_id, video_id)
+            ) WITHOUT ROWID;
+            CREATE INDEX IF NOT EXISTS playlist_track_video ON playlist_track(video_id);
             "#,
         )?;
         // Migrate pre-Phase-4 DBs that predate the loudness_db column. Errors ("duplicate column")
@@ -341,6 +347,89 @@ impl Db {
         out
     }
 
+    // --- playlist membership index (which of your playlists hold a track) ----------------------
+    // Populated by `commands::sync_playlist_index`, which walks the library's owned playlists.
+    // Nothing here talks to YouTube; it is the answer, cached, so a track list can draw the
+    // "saved" mark on its first row instead of after a round-trip per song.
+
+    /// Replace one playlist's tracks. Delete-then-insert, not an upsert: a removal made on another
+    /// device only disappears if the rows the crawl no longer saw go away with it.
+    pub fn set_playlist_tracks(&self, playlist_id: &str, video_ids: &[String]) {
+        let mut conn = self.0.lock().unwrap();
+        let Ok(tx) = conn.transaction() else { return };
+        let _ = tx.execute("DELETE FROM playlist_track WHERE playlist_id = ?1", [playlist_id]);
+        for video_id in video_ids {
+            let _ = tx.execute(
+                "INSERT OR IGNORE INTO playlist_track(playlist_id, video_id) VALUES(?1, ?2)",
+                [playlist_id, video_id.as_str()],
+            );
+        }
+        let _ = tx.commit();
+    }
+
+    /// One track added to one playlist, so an add made here shows its mark without a re-crawl.
+    pub fn add_playlist_track(&self, playlist_id: &str, video_id: &str) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO playlist_track(playlist_id, video_id) VALUES(?1, ?2)",
+            [playlist_id, video_id],
+        );
+    }
+
+    pub fn remove_playlist_track(&self, playlist_id: &str, video_id: &str) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute(
+            "DELETE FROM playlist_track WHERE playlist_id = ?1 AND video_id = ?2",
+            [playlist_id, video_id],
+        );
+    }
+
+    pub fn forget_playlist(&self, playlist_id: &str) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute("DELETE FROM playlist_track WHERE playlist_id = ?1", [playlist_id]);
+    }
+
+    /// Drop every playlist the crawl no longer saw: deleted, unsaved, or no longer owned. An
+    /// empty list means nothing was indexed, which is the same thing as an empty index.
+    pub fn retain_playlists(&self, keep: &[String]) {
+        let conn = self.0.lock().unwrap();
+        if keep.is_empty() {
+            let _ = conn.execute("DELETE FROM playlist_track", []);
+            return;
+        }
+        let holes = vec!["?"; keep.len()].join(",");
+        let params = rusqlite::params_from_iter(keep.iter());
+        let _ = conn.execute(
+            &format!("DELETE FROM playlist_track WHERE playlist_id NOT IN ({holes})"),
+            params,
+        );
+    }
+
+    /// videoId → the playlists holding it. ponytail: the whole table in one go, like
+    /// `local_tracks`, since an owned-playlist library is thousands of rows and the UI needs random
+    /// access to it on every row it draws.
+    pub fn playlist_memberships(&self) -> std::collections::HashMap<String, Vec<String>> {
+        let conn = self.0.lock().unwrap();
+        let mut out: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT video_id, playlist_id FROM playlist_track") {
+            if let Ok(rows) =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            {
+                for (video_id, playlist_id) in rows.flatten() {
+                    out.entry(video_id).or_default().push(playlist_id);
+                }
+            }
+        }
+        out
+    }
+
+    /// The index is per-account, so signing out or switching channel empties it.
+    pub fn clear_playlist_index(&self) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute("DELETE FROM playlist_track", []);
+    }
+
     // --- local music library (local.rs) -------------------------------------------------------
 
     /// Every known file with its recorded mtime — the scanner re-reads tags only where it differs.
@@ -500,6 +589,42 @@ mod tests {
             d.play_counts(1_500) == vec![("c".into(), 1)],
             "`since` cuts the same way it does for top_plays"
         );
+    }
+
+    #[test]
+    fn playlist_index_replaces_patches_and_prunes() {
+        let d = db();
+        d.set_playlist_tracks("VL1", &["a".into(), "b".into()]);
+        d.set_playlist_tracks("VL2", &["b".into()]);
+
+        let m = d.playlist_memberships();
+        assert_eq!(m["a"], vec!["VL1"]);
+        let mut b = m["b"].clone();
+        b.sort();
+        assert_eq!(b, vec!["VL1", "VL2"], "one track can sit in several playlists");
+
+        // A re-crawl is the whole list, so a track it no longer saw has to disappear with it.
+        d.set_playlist_tracks("VL1", &["a".into()]);
+        assert_eq!(d.playlist_memberships()["b"], vec!["VL2"]);
+
+        // Single-track patches, the path an add or a remove made inside the app takes.
+        d.add_playlist_track("VL2", "a");
+        d.add_playlist_track("VL2", "a"); // idempotent: the index may already know
+        let mut a = d.playlist_memberships()["a"].clone();
+        a.sort();
+        assert_eq!(a, vec!["VL1", "VL2"]);
+        d.remove_playlist_track("VL2", "a");
+        assert_eq!(d.playlist_memberships()["a"], vec!["VL1"]);
+
+        d.forget_playlist("VL2");
+        assert!(!d.playlist_memberships().contains_key("b"), "VL2 held b alone");
+
+        // Retain keeps the named playlists and drops everything else, including on an empty list.
+        d.set_playlist_tracks("VL3", &["c".into()]);
+        d.retain_playlists(&["VL3".into()]);
+        assert_eq!(d.playlist_memberships().keys().collect::<Vec<_>>(), vec!["c"]);
+        d.retain_playlists(&[]);
+        assert!(d.playlist_memberships().is_empty());
     }
 
     #[test]

@@ -5,7 +5,13 @@
 	import { Cancel01Icon } from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
-	import { ui, toast, bumpLibraryTrackCount, notePlaylistAdd } from '$lib/player.svelte';
+	import {
+		ui,
+		toast,
+		bumpLibraryTrackCount,
+		notePlaylistAdd,
+		noteSavedIn
+	} from '$lib/player.svelte';
 
 	let playlists = $state<BrowseItem[]>([]);
 	let loading = $state(false);
@@ -42,6 +48,9 @@
 				if (await api.addToPlaylist(pl.id, song.video_id)) added.push(song);
 			}
 			const dupes = songs.length - added.length;
+			// Every song, not just the accepted ones: a refusal means the playlist already holds it,
+			// so its "saved" mark is right either way.
+			noteSavedIn(pl.id, songs.map((s) => s.video_id));
 			if (added.length) {
 				bumpLibraryTrackCount(pl.id, added.length);
 				notePlaylistAdd(pl.id, added);
