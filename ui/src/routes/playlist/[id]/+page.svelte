@@ -13,6 +13,7 @@
 		ArrowUpNarrowWideIcon,
 		ArrowDownWideNarrowIcon,
 		DashboardSquare02Icon,
+		Share08Icon,
 		BookmarkAdd02Icon,
 		BookmarkMinus02Icon,
 		ListRestartIcon,
@@ -51,6 +52,7 @@
 		isSynced,
 		playback,
 		openAddToPlaylist,
+		openShare,
 		playFrom,
 		startRadio,
 		toast,
@@ -950,6 +952,14 @@
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Add to shortcuts
 		</button>
+		{#if !isOnRepeat}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={() => run(() => openShare(asItem()))}
+			>
+				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
+			</button>
+		{/if}
 		{#if savable}
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"

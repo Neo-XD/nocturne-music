@@ -11,7 +11,8 @@
 		ArrowUpNarrowWideIcon,
 		ArrowDownWideNarrowIcon,
 		BookmarkMinus02Icon,
-		DashboardSquare02Icon
+		DashboardSquare02Icon,
+		Share08Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
@@ -22,6 +23,7 @@
 		auth,
 		isSaved,
 		isSynced,
+		openShare,
 		personal,
 		startRadio,
 		toast,
@@ -51,8 +53,9 @@
 	const savedHere = $derived(
 		isSaved(item.id) && !(auth.account?.signedIn && isSynced(item.id))
 	);
-	// Radio needs a YouTube item behind it: local folders and the locally-built On Repeat have none.
-	const hasRadio = $derived(!api.isLocalId(item.id) && item.id !== api.ON_REPEAT_ID);
+	// Radio and Share both need a YouTube item behind them: local folders and the locally-built
+	// On Repeat have none.
+	const onYouTube = $derived(!api.isLocalId(item.id) && item.id !== api.ON_REPEAT_ID);
 	// An artist isn't a track list — there's nothing unambiguous to queue. Songs, albums and
 	// playlists (local ones included) all are.
 	const canQueue = $derived(item.kind === 'song' || item.kind === 'album' || item.kind === 'playlist');
@@ -154,7 +157,7 @@
 				<HugeiconsIcon icon={ArrowDownWideNarrowIcon} class="h-4 w-4" /> Add to queue
 			</button>
 		{/if}
-		{#if hasRadio}
+		{#if onYouTube}
 			<button
 				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => startRadio(item.kind as 'artist' | 'album' | 'playlist', item.id, item.title))}
@@ -168,6 +171,14 @@
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Add to shortcuts
 		</button>
+		{#if onYouTube}
+			<button
+				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, () => openShare(item))}
+			>
+				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
+			</button>
+		{/if}
 		<!-- Only for cards saved on this machine: YouTube's own library rows are unsaved from their
 		     page, where the button knows which write action to send. -->
 		{#if savedHere}

@@ -571,6 +571,7 @@ export async function startRadio(
 // Transient UI state for write actions.
 export const ui = $state({
 	addSongs: null as SongItem[] | null, // add-to-playlist picker target(s), full items for optimistic appends
+	share: null as BrowseItem | null, // the share modal's target
 	toast: null as Toast | null,
 	settingsOpen: false, // the settings modal
 	ltOpen: false, // the Listen Together modal
@@ -614,6 +615,10 @@ export const toast = Object.assign((msg: string) => show(msg, 'info'), {
 	success: (msg: string) => show(msg, 'success'),
 	error: (msg: string) => show(msg, 'error')
 });
+
+export function openShare(item: BrowseItem) {
+	ui.share = item;
+}
 
 export function openAddToPlaylist(song: SongItem) {
 	ui.addSongs = [song];

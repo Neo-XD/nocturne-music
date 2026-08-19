@@ -14,6 +14,7 @@
 		RefreshIcon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
+	import { copyText } from '$lib/clipboard';
 	import { ui, toast } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
 
@@ -97,7 +98,10 @@
 	}
 
 	function copyInvite() {
-		navigator.clipboard.writeText(invite).then(() => toast.success('Invite copied, send it to a friend'));
+		copyText(invite).then(
+			() => toast.success('Invite copied, send it to a friend'),
+			() => toast.error('Could not copy the invite')
+		);
 	}
 </script>
 

@@ -18,12 +18,13 @@
 		UserListIcon,
 		Vynil02Icon,
 		DashboardSquare02Icon,
+		Share08Icon,
 		PreferenceVerticalIcon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
 	import { anchorMenu, toBody } from '$lib/menu';
-	import { addPick, enqueue, ratingOf, startRadio, toggleRating } from '$lib/player.svelte';
+	import { addPick, enqueue, openShare, ratingOf, startRadio, toggleRating } from '$lib/player.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
 
 	let {
@@ -187,6 +188,23 @@
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Add to shortcuts
 		</button>
+		{#if !isLocal}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) =>
+					run(e, () =>
+						openShare({
+							kind: 'song',
+							id: song.video_id,
+							title: song.title,
+							subtitle: song.artists,
+							thumbnail: song.thumbnail
+						})
+					)}
+			>
+				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
+			</button>
+		{/if}
 		{#if linksOnly}
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
