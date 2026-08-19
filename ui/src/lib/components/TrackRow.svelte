@@ -12,7 +12,7 @@
 	import type { SongItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import { lt } from '$lib/lt.svelte';
-	import { isLiked, ratingOf, savedPlaylists, toggleRating } from '$lib/player.svelte';
+	import { anySaved, isLiked, ratingOf, savedPlaylists, toggleRating } from '$lib/player.svelte';
 	import SavedInPlaylists from './SavedInPlaylists.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import ArtistLine from './ArtistLine.svelte';
@@ -191,15 +191,25 @@
 	{/if}
 
 	<div class="flex shrink-0 items-center {compact ? 'gap-0.5' : 'gap-2'}">
-		<!-- Always on, unlike the thumbs beside it: this is a property of the song, not an action,
-		     so hiding it until the pointer arrives would be hiding half of what it's for. -->
-		<!-- Always on, for the same reason the explicit mark is: which of your playlists hold this
-		     song is a fact about the row, not an action waiting for a pointer. -->
-		{#if inPlaylists.length}
-			<SavedInPlaylists playlists={inPlaylists} />
+		<!-- Both marks are always on, unlike the thumbs beside them: they are properties of the song,
+		     not actions, so hiding either until the pointer arrives would hide half of what it's for.
+		     Each also keeps its slot when it has nothing to show, or a track without an explicit tag
+		     would pull its checkmark into the tag's place and the column would zig-zag down the list.
+		     The checkmark's slot only exists once something is indexed: signed out, or before the
+		     first crawl, reserving it would be a hole on every row that can never fill. -->
+		{#if showRating && anySaved()}
+			<span class="flex h-7 w-7 shrink-0 items-center justify-center">
+				{#if inPlaylists.length}
+					<SavedInPlaylists playlists={inPlaylists} />
+				{/if}
+			</span>
 		{/if}
-		{#if song.explicit && !hideRating}
-			<ExplicitIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+		{#if !hideRating}
+			<span class="flex h-3.5 w-3.5 shrink-0 items-center">
+				{#if song.explicit}
+					<ExplicitIcon class="h-3.5 w-3.5 text-muted-foreground" />
+				{/if}
+			</span>
 		{/if}
 		{#if showRating}
 			<!-- Hover-revealed, except on a row that carries a rating: at rest that filled thumb is the

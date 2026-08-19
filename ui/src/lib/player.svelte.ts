@@ -185,6 +185,13 @@ export function savedPlaylists(videoId: string): BrowseItem[] {
 	return library.items.filter((it) => holding.has(it.id));
 }
 
+// Module-level, so the whole list shares one answer: a per-row `Object.keys` over a five-figure
+// map would be paid a thousand times a paint.
+const indexHasAnything = $derived(Object.keys(savedIn.map).length > 0);
+
+/** Whether anything is indexed at all, which is what decides if a row reserves the mark's slot. */
+export const anySaved = () => indexHasAnything;
+
 /**
  * Load the index: the stored one first so rows mark up immediately, then whatever a refresh crawl
  * turns up. Generation-guarded like the library itself, so an account switch mid-flight can't
