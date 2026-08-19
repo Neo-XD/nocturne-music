@@ -20,6 +20,16 @@
 	import QueueList from './QueueList.svelte';
 	import LyricsView from './LyricsView.svelte';
 
+	// Off in settings, this view drops its tabs and the queue/lyrics panels stay in charge of both
+	// (see +layout): they paint above this (z-30 over z-20), so all this needs is to hand back the
+	// width they take at lg+ instead of letting them cover a third of the artwork. Below lg they're
+	// a scrimmed overlay and there's nothing to shrink into. In tabbed mode both are always closed.
+	let { queueOpen, lyricsOpen }: { queueOpen: boolean; lyricsOpen: boolean } = $props();
+	const tabbed = $derived(appearance.tabbedPlayer);
+	// ponytail: mirrors QueuePanel / LyricsPanel's w-80, keep in sync if those change.
+	const panels = $derived(Number(queueOpen) + Number(lyricsOpen));
+	const inset = $derived(['', 'lg:right-80', 'lg:right-[40rem]'][panels]);
+
 	// Going somewhere means the user wants that page, not this one: minimise. The player bar brings
 	// it back. beforeNavigate (not a pathname effect) so clicking the tab you're already on counts.
 	beforeNavigate(() => (np.open = false));
@@ -71,7 +81,7 @@
 	transition:fly={{ y: '100%', duration: 320, easing: cubicOut }}
 	class="absolute inset-y-0 left-16 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {ui.sidebarCollapsed
 		? ''
-		: 'lg:left-60'}"
+		: 'lg:left-60'} {inset}"
 >
 	<!-- The artwork itself, blurred to a wash, is the background: same trick as HomeHero, and it
 	     needs no colour extraction (which a remote image would taint the canvas for anyway). The
@@ -101,8 +111,11 @@
 	>
 		{#if !big}
 			<!-- Centred against the full height of the column on the right. Below md there isn't room
-			     for both columns, and the queue wins. -->
-			<div class="hidden min-w-0 flex-1 items-center justify-center md:flex">
+			     for both columns, and the queue wins. Untabbed there is no second column, so the
+			     artwork is the whole view at every width. -->
+			<div
+				class="min-w-0 flex-1 items-center justify-center {tabbed ? 'hidden md:flex' : 'flex'}"
+			>
 				<button
 					type="button"
 					onclick={toggle}
@@ -146,50 +159,52 @@
 			</div>
 		{/if}
 
-		<div class="flex min-h-0 flex-col {big ? 'flex-1' : 'w-full md:w-[22rem] xl:w-[26rem]'}">
-			<Tabs.Root
-				value={np.tab}
-				onValueChange={(v) => (np.tab = v as typeof np.tab)}
-				class="min-h-0 flex-1"
-			>
-				<div class="flex items-center gap-2 {big ? 'justify-end' : ''}">
-					<!-- Same two glyphs the player bar uses for the queue and lyrics buttons. -->
-					<Tabs.List class={big ? 'hidden' : 'flex-1'}>
-						<Tabs.Trigger value="queue" class="gap-2.5">
-							<HugeiconsIcon icon={Queue01Icon} class="h-4 w-4" /> Queue
-						</Tabs.Trigger>
-						<Tabs.Trigger value="lyrics" class="gap-2.5">
-							<HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" /> Lyrics
-						</Tabs.Trigger>
-					</Tabs.List>
-					{#if np.tab === 'lyrics'}
-						<button
-							onclick={() => (big = !big)}
-							class="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground"
-							aria-label={big ? 'Shrink lyrics' : 'Enlarge lyrics'}
-						>
-							<!-- icon swap via altIcon/showAlt: `icon` is frozen at mount -->
-							<HugeiconsIcon
-								icon={Maximize01Icon}
-								altIcon={Minimize01Icon}
-								showAlt={big}
-								class="h-4 w-4"
-							/>
-						</button>
+		{#if tabbed}
+			<div class="flex min-h-0 flex-col {big ? 'flex-1' : 'w-full md:w-[22rem] xl:w-[26rem]'}">
+				<Tabs.Root
+					value={np.tab}
+					onValueChange={(v) => (np.tab = v as typeof np.tab)}
+					class="min-h-0 flex-1"
+				>
+					<div class="flex items-center gap-2 {big ? 'justify-end' : ''}">
+						<!-- Same two glyphs the player bar uses for the queue and lyrics buttons. -->
+						<Tabs.List class={big ? 'hidden' : 'flex-1'}>
+							<Tabs.Trigger value="queue" class="gap-2.5">
+								<HugeiconsIcon icon={Queue01Icon} class="h-4 w-4" /> Queue
+							</Tabs.Trigger>
+							<Tabs.Trigger value="lyrics" class="gap-2.5">
+								<HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" /> Lyrics
+							</Tabs.Trigger>
+						</Tabs.List>
+						{#if np.tab === 'lyrics'}
+							<button
+								onclick={() => (big = !big)}
+								class="cursor-pointer rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+								aria-label={big ? 'Shrink lyrics' : 'Enlarge lyrics'}
+							>
+								<!-- icon swap via altIcon/showAlt: `icon` is frozen at mount -->
+								<HugeiconsIcon
+									icon={Maximize01Icon}
+									altIcon={Minimize01Icon}
+									showAlt={big}
+									class="h-4 w-4"
+								/>
+							</button>
+						{/if}
+					</div>
+					<!-- Only the open tab is mounted: bits-ui keeps inactive content in the DOM, which would
+					     leave LyricsView fetching lyrics for every track you never asked to see. -->
+					{#if np.tab === 'queue'}
+						<Tabs.Content value="queue" class="flex min-h-0 flex-col">
+							<QueueList />
+						</Tabs.Content>
+					{:else}
+						<Tabs.Content value="lyrics" class="flex min-h-0 flex-col">
+							<LyricsView expanded={big} />
+						</Tabs.Content>
 					{/if}
-				</div>
-				<!-- Only the open tab is mounted: bits-ui keeps inactive content in the DOM, which would
-				     leave LyricsView fetching lyrics for every track you never asked to see. -->
-				{#if np.tab === 'queue'}
-					<Tabs.Content value="queue" class="flex min-h-0 flex-col">
-						<QueueList />
-					</Tabs.Content>
-				{:else}
-					<Tabs.Content value="lyrics" class="flex min-h-0 flex-col">
-						<LyricsView expanded={big} />
-					</Tabs.Content>
-				{/if}
-			</Tabs.Root>
-		</div>
+				</Tabs.Root>
+			</div>
+		{/if}
 	</div>
 </div>

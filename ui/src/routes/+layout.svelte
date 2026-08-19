@@ -13,7 +13,7 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
-	import { initTheme } from '$lib/theme.svelte';
+	import { appearance, initTheme } from '$lib/theme.svelte';
 	import { dragScroll } from '$lib/dnd';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Titlebar from '$lib/components/Titlebar.svelte';
@@ -40,10 +40,14 @@
 	// by side over the content; narrower, they stack (see QueuePanel / LyricsPanel).
 	let queueOpen = $state(false);
 	let lyricsOpen = $state(false);
-	// The now-playing view carries its own queue and lyrics, so the side panels step aside for it
-	// and the bar's two buttons switch its tabs instead of opening a panel on top of it.
+	// Two ways the now-playing view and these panels can divide the same two buttons, picked in
+	// settings (#62). Tabbed (the default): the view carries queue and lyrics itself, so the panels
+	// step aside for it and the bar's buttons switch its tabs. Off: these are the only owner, the
+	// buttons always mean the panels, and the panels float over that view like they float over a
+	// page, so opening it costs you nothing you had open.
+	const tabbed = $derived(np.open && appearance.tabbedPlayer);
 	$effect(() => {
-		if (np.open) queueOpen = lyricsOpen = false;
+		if (tabbed) queueOpen = lyricsOpen = false;
 	});
 
 	// The mini player runs this same SPA in a second window (Rust `mini.rs`), so the window label is
@@ -98,7 +102,7 @@
 					{@render children()}
 				{/key}
 			</main>
-			{#if np.open && playback.now}<NowPlaying />{/if}
+			{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
 			<!-- Lyrics before queue: side by side over the page, lyrics on the left, queue on the right. -->
 			{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} {queueOpen} />{/if}
 			{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
@@ -110,10 +114,10 @@
 			     earlier in the DOM, which is what puts it behind the bar as it slides in and out. -->
 			<div class="relative z-20" in:fly={{ y: 64, duration: 250, easing: cubicOut }}>
 				<PlayerBar
-					onToggleQueue={() => (np.open ? (np.tab = 'queue') : (queueOpen = !queueOpen))}
-					queueOpen={np.open ? np.tab === 'queue' : queueOpen}
-					onToggleLyrics={() => (np.open ? (np.tab = 'lyrics') : (lyricsOpen = !lyricsOpen))}
-					lyricsOpen={np.open ? np.tab === 'lyrics' : lyricsOpen}
+					onToggleQueue={() => (tabbed ? (np.tab = 'queue') : (queueOpen = !queueOpen))}
+					queueOpen={tabbed ? np.tab === 'queue' : queueOpen}
+					onToggleLyrics={() => (tabbed ? (np.tab = 'lyrics') : (lyricsOpen = !lyricsOpen))}
+					lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
 				/>
 			</div>
 		{/if}

@@ -537,6 +537,21 @@
 
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
+							<div class="font-medium">Queue and lyrics in the player view</div>
+							<p class="mt-0.5 text-sm text-muted-foreground">
+								On, the player view carries them as tabs and the bar's two buttons switch between
+								them. Off, those buttons only ever open the side panels, which stay open over the
+								player view so you can see both at once.
+							</p>
+						</div>
+						<Switch
+							checked={appearance.tabbedPlayer}
+							onCheckedChange={(on) => setAppearance({ tabbedPlayer: on })}
+						/>
+					</div>
+
+					<div class="flex items-start justify-between gap-4 border-b py-3">
+						<div class="min-w-0">
 							<div class="font-medium">Artwork background</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
 								Tint the player view with the playing track's cover, blurred. Off leaves it plain.

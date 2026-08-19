@@ -84,7 +84,13 @@ export const custom = $state<Custom>({
  */
 export const appearance = $state({
 	/** Blur the playing track's artwork behind the now-playing view. */
-	artworkBackground: true
+	artworkBackground: true,
+	/**
+	 * The now-playing view carries queue and lyrics itself, as tabs, and the player bar's two
+	 * buttons switch between them while it's open. Off, those buttons only ever open the floating
+	 * side panels, which then sit over the now-playing view like they sit over a page (#62).
+	 */
+	tabbedPlayer: true
 });
 
 export function setAppearance(patch: Partial<typeof appearance>): void {
@@ -309,8 +315,9 @@ export function initTheme(): void {
 	}
 	try {
 		const saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) ?? '{}');
-		if (typeof saved?.artworkBackground === 'boolean')
-			appearance.artworkBackground = saved.artworkBackground;
+		for (const k of ['artworkBackground', 'tabbedPlayer'] as const) {
+			if (typeof saved?.[k] === 'boolean') appearance[k] = saved[k];
+		}
 	} catch {
 		// unparseable — keep the defaults
 	}
