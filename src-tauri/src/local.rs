@@ -454,6 +454,7 @@ fn albums_of(tracks: &[LocalTrack]) -> Vec<BrowseItem> {
                 thumbnail: face.cover.clone(),
                 duration: None,
                 artist_runs: Vec::new(),
+                play_count: None,
                 is_video: false,
                 // Nothing on disk says explicit: no tag carries it and there is no row to badge.
                 explicit: false,
@@ -504,6 +505,7 @@ fn artists_of(tracks: &[LocalTrack]) -> Vec<BrowseItem> {
                 thumbnail: ts.iter().find_map(|t| t.cover.clone()),
                 duration: None,
                 artist_runs: Vec::new(),
+                play_count: None,
                 is_video: false,
                 explicit: false,
             }

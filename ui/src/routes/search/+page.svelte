@@ -20,13 +20,19 @@
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import Shelf from '$lib/components/Shelf.svelte';
 	import * as api from '$lib/api';
-	import type { SearchResults } from '$lib/api';
+	import type { SearchResults, SongItem } from '$lib/api';
 	import { getCached, putCached } from '$lib/pagecache';
 	import { openAddToPlaylist, playSong } from '$lib/player.svelte';
 	import { asSong } from '$lib/browse';
 
+	type Cached = { res: SearchResults; songs: SongItem[] };
+
 	let query = $state(lastQuery);
 	let res = $state<SearchResults | null>(null);
+	// The Songs shelf comes from the songs-filtered search, not from `res.songs`: an unfiltered
+	// response gives a song row either its artist or its length, never both, so those rows land
+	// duration-less. The filtered endpoint returns "Artist • Album • 3:58" on every row.
+	let songs = $state<SongItem[]>([]);
 	let searched = $state('');
 	let searching = $state(false);
 	let error = $state<string | null>(null);
@@ -40,9 +46,10 @@
 		latest = q;
 		lastQuery = q;
 		const key = `search:${q}`;
-		const hit = getCached<SearchResults>(key);
+		const hit = getCached<Cached>(key);
 		if (hit) {
-			res = hit;
+			res = hit.res;
+			songs = hit.songs;
 			searched = q;
 			searching = false;
 		} else {
@@ -50,11 +57,17 @@
 		}
 		error = null;
 		try {
-			const fresh = await api.searchAll(q);
+			// In parallel, and the filtered one may fail on its own: the shelf falls back to the
+			// unfiltered rows rather than the whole search erroring out.
+			const [fresh, freshSongs] = await Promise.all([
+				api.searchAll(q),
+				api.search(q).catch(() => [] as SongItem[])
+			]);
 			if (latest !== q) return; // a newer search superseded this one
 			res = fresh;
+			songs = freshSongs;
 			searched = q;
-			putCached(key, fresh);
+			putCached(key, { res: fresh, songs: freshSongs });
 		} catch (e) {
 			if (latest !== q) return;
 			if (!hit) error = String(e);
@@ -85,6 +98,8 @@
 		if (!urlQuery && query) runSearch();
 	});
 
+	const songRows = $derived(songs.length ? songs : (res?.songs ?? []).map(asSong));
+
 	// Sections are horizontal card rows, except Songs which is a vertical list. `top` has no "show more".
 	const sections = $derived(
 		res
@@ -94,7 +109,7 @@
 					{ key: 'albums', label: 'Albums', items: res.albums, max: 5, more: true, list: false },
 					{ key: 'artists', label: 'Artists', items: res.artists, max: 3, more: true, list: false },
 					{ key: 'playlists', label: 'Playlists', items: res.playlists, max: 5, more: true, list: false }
-				].filter((s) => s.items.length)
+				].filter((s) => (s.list ? songRows.length : s.items.length))
 			: []
 	);
 
@@ -161,9 +176,13 @@
 							{/if}
 						</div>
 						{#if sec.list}
-							{#each sec.items.slice(0, sec.max) as item (item.id)}
-								{@const song = asSong(item)}
-								<TrackRow {song} onplay={() => playSong(song)} onAdd={() => openAddToPlaylist(song)} />
+							{#each songRows.slice(0, sec.max) as song (song.video_id)}
+								<TrackRow
+									{song}
+									showPlayCount
+									onplay={() => playSong(song)}
+									onAdd={() => openAddToPlaylist(song)}
+								/>
 							{/each}
 						{:else}
 							<Shelf items={sec.items.slice(0, sec.max)} />

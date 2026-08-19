@@ -26,7 +26,7 @@ export interface SongItem {
 	/** The album's browseId (`MPRE…`), when linked — makes the album navigable. */
 	album_id?: string;
 	duration?: string;
-	/** Play count as YouTube abbreviates it ("53M"). Album rows only. */
+	/** Play count as YouTube abbreviates it ("53M"). Album, artist and search rows. */
 	play_count?: string;
 	thumbnail?: string;
 	/** Item id within a playlist — present only on playlist tracks; needed to remove them. */
@@ -110,6 +110,8 @@ export interface BrowseItem {
 	duration?: string;
 	/** Song cards only: the artist line run by run, so a card that gets played keeps its links. */
 	artistRuns?: ArtistRun[];
+	/** Play count as YouTube abbreviates it ("2.5B") — search song rows only. */
+	playCount?: string;
 	/** YouTube flags this track/album explicit. */
 	explicit?: boolean;
 }

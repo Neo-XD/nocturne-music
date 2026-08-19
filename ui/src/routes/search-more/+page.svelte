@@ -82,7 +82,12 @@
 	{:else if cat === 'songs'}
 		<div class="content-in">
 			{#each songs as song (song.video_id)}
-				<TrackRow {song} onplay={() => playSong(song)} onAdd={() => openAddToPlaylist(song)} />
+				<TrackRow
+					{song}
+					showPlayCount
+					onplay={() => playSong(song)}
+					onAdd={() => openAddToPlaylist(song)}
+				/>
 			{:else}
 				<p class="text-sm text-muted-foreground">Nothing found.</p>
 			{/each}

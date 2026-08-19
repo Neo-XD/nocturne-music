@@ -298,6 +298,7 @@
 				{#each artist.topSongs as song, i (song.video_id + i)}
 					<TrackRow
 						{song}
+						showPlayCount
 						active={song.video_id === nowId}
 						onplay={() => playFrom(asItem(), artist!.topSongs, i)}
 						onAdd={() => openAddToPlaylist(song)}

@@ -13,8 +13,8 @@ use serde_json::Value;
 use super::metadata::{
     artist_runs, artists_from_runs, duration_from_runs, find_all, find_all_shallow, find_first_str,
     first_artist_id, flex_column_text, flex_runs, is_explicit, is_video_endpoint, is_video_row,
-    last_thumbnail, list_item_video_id, parse_list_item, runs_text, runs_text_opt, ArtistRun,
-    SongItem,
+    last_thumbnail, list_item_video_id, parse_list_item, play_count, runs_text, runs_text_opt,
+    ArtistRun, SongItem,
 };
 
 /// One clickable card in a home carousel or library grid. Flat + `kind`-tagged so the UI can
@@ -41,6 +41,10 @@ pub struct BrowseItem {
     /// player bar with the same navigable artists a track row has. Empty when nothing links.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub artist_runs: Vec<ArtistRun>,
+    /// Song rows only: the play count as YouTube abbreviates it ("2.5B"), from a search row's
+    /// plays column. Absent on rows that carry no such column (home cards, carousels).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub play_count: Option<String>,
     /// Song cards only: this card links a music video, not the audio track. Drives the
     /// "hide music videos" setting.
     #[serde(default)]
@@ -504,6 +508,7 @@ fn list_item_to_browse_item(node: &Value) -> Option<BrowseItem> {
             thumbnail,
             duration: None,
             artist_runs: Vec::new(),
+            play_count: None,
             is_video: false,
             explicit: is_explicit(node),
         });
@@ -521,6 +526,7 @@ fn list_item_to_browse_item(node: &Value) -> Option<BrowseItem> {
         thumbnail,
         duration: duration_from_runs(runs),
         artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
+        play_count: play_count(node),
         is_video: is_video_row(node),
         explicit: is_explicit(node),
     })
@@ -555,6 +561,7 @@ fn card_shelf_main(card: &Value) -> Option<BrowseItem> {
             thumbnail,
             duration: duration_from_runs(runs),
             artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
+            play_count: None,
             is_video: nav.is_some_and(is_video_endpoint),
             explicit: is_explicit(card),
         });
@@ -572,6 +579,7 @@ fn card_shelf_main(card: &Value) -> Option<BrowseItem> {
         thumbnail,
         duration: None,
         artist_runs: Vec::new(),
+        play_count: None,
         is_video: false,
         explicit: is_explicit(card),
     })
@@ -856,6 +864,7 @@ fn parse_carousel_item(node: &Value) -> Option<BrowseItem> {
             thumbnail: song.thumbnail,
             duration: song.duration,
             artist_runs: song.artist_runs,
+            play_count: song.play_count,
             is_video: song.is_video,
             explicit: song.explicit,
         });
@@ -890,6 +899,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
             thumbnail,
             duration: duration_from_runs(runs),
             artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
+            play_count: None,
             is_video: is_video_row(node),
             explicit: is_explicit(node),
         });
@@ -908,6 +918,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
             thumbnail,
             duration: None,
             artist_runs: Vec::new(),
+            play_count: None,
             is_video: false,
             explicit: is_explicit(node),
         });
@@ -926,6 +937,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
         thumbnail,
         duration: None,
         artist_runs: Vec::new(),
+        play_count: None,
         is_video: false,
         explicit: is_explicit(node),
     })

@@ -453,7 +453,7 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
 /// The play count from an album row's third flex column ("53M plays" → "53M"). Playlist rows put
 /// the album name in that column instead, so the trailing "plays" is the discriminator — the
 /// locale is pinned to en (models::context), so it's always that word. Live-verified 2026-08.
-fn play_count(node: &Value) -> Option<String> {
+pub(crate) fn play_count(node: &Value) -> Option<String> {
     let text = flex_column_text(node, 2)?;
     let (count, unit) = text.trim().rsplit_once(' ')?;
     unit.eq_ignore_ascii_case("plays").then(|| count.to_owned())

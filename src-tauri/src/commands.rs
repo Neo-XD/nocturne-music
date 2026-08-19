@@ -407,6 +407,7 @@ pub async fn get_library(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
                 thumbnail: None, // the UI draws an icon cover for this one
                 duration: None,
                 artist_runs: Vec::new(),
+                play_count: None,
                 is_video: false,
                 explicit: false,
             },

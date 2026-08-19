@@ -833,6 +833,7 @@
 							<TrackRow
 								song={item}
 								index={n}
+								showPlayCount
 								active={item.video_id === nowId}
 								onplay={() => playAll(n)}
 								onAdd={() => openAddToPlaylist(item)}

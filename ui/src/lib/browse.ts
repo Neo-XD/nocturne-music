@@ -21,6 +21,7 @@ export const asSong = (i: BrowseItem): SongItem => ({
 	artist_runs: i.artistRuns,
 	artist_id: i.artistRuns?.find((r) => r.id)?.id,
 	duration: i.duration,
+	play_count: i.playCount,
 	thumbnail: i.thumbnail,
 	explicit: i.explicit
 });
