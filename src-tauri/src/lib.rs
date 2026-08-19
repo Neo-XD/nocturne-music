@@ -367,6 +367,18 @@ pub fn run() {
                 });
             }
 
+            // The window starts hidden and the SPA shows it once it has mounted, so the saved size
+            // is already applied by then (#45). Safety net: if the frontend never gets that far,
+            // show it anyway rather than leaving the app with no window at all.
+            if let Some(w) = app.get_webview_window("main") {
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    if !w.is_visible().unwrap_or(true) {
+                        let _ = w.show();
+                    }
+                });
+            }
+
             #[cfg(target_os = "linux")]
             {
                 tune_webview_labelled(app.handle(), "main");

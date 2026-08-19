@@ -62,9 +62,10 @@
 	// on every app open (silent unless one exists).
 	onMount(() => {
 		if (isMini) return initApp(true);
+		// First: it reveals the window (see initWin).
+		const teardownWin = initWin();
 		checkForUpdatesQuiet();
 		const teardownApp = initApp();
-		const teardownWin = initWin();
 		const teardownZoom = initZoom();
 		return () => {
 			teardownApp();
