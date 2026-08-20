@@ -218,8 +218,16 @@
 	     no request and nothing new to decode.
 	     Two opacities because the wash sits on opposite grounds: over white it has to stay pale
 	     enough for dark text, over near-black it can carry more colour before muted-foreground
-	     stops reading. Turn them up together if it's too subtle. -->
-	{#if appearance.artworkBackground && srcs[2] && !bgFailed}
+	     stops reading. Turn them up together if it's too subtle.
+
+	     Not while a video is playing. WebKitGTK re-runs this 40px blur for the damaged region on
+	     every video frame, and the damaged region is the video, so the cost grows with the window.
+	     Measured 2026-08-20 on a 1100px box, 720p30: with the wash 13 fps of video and 74ms UI
+	     frames, without it 30 fps and 17ms. Layer promotion does not help (will-change,
+	     translateZ(0) and contain:paint all measured as noise), and the cost tracks the blur
+	     radius rather than the image. A video fills the view on its own, so there is nothing to
+	     replace it with. -->
+	{#if appearance.artworkBackground && !showVideo && srcs[2] && !bgFailed}
 		<img
 			src={srcs[2]}
 			alt=""
@@ -233,10 +241,16 @@
 	     the column's width and the height left over once the titlebar, the player bar and this
 	     padding have had theirs, at 75% so the square doesn't dominate the view.
 	     ponytail: 11rem is those three measured, not computed. The 0.75 leaves it plenty of slack
-	     now, so only a much taller player bar would need it raised. -->
+	     now, so only a much taller player bar would need it raised.
+
+	     A video gets its own budget, and a wider cap to spend it in. 16:9 in the square's width
+	     leaves half the height empty, so --vid is the width that spends the same leftover height
+	     instead: height * 16 / 9, capped by the column (max-width can only shrink `w-full`). The
+	     80rem cap exists to stop a square drifting into an empty half, which a video this wide
+	     never does. -->
 	<div
-		class="relative flex w-full max-w-[80rem] gap-6 xl:gap-10"
-		style="--art:calc(min(100%,100vh - 11rem) * 0.75)"
+		class="relative flex w-full gap-6 xl:gap-10 {showVideo ? 'max-w-[100rem]' : 'max-w-[80rem]'}"
+		style="--art:calc(min(100%,100vh - 11rem) * 0.75); --vid:calc((100vh - 11rem) * 0.85 * 16 / 9)"
 	>
 		{#if !big}
 			<!-- Centred against the full height of the column on the right. Below md there isn't room
@@ -248,7 +262,7 @@
 				<!-- A div, not a button: the video-mode toggle has to be a sibling of the play/pause
 				     button rather than nested inside it (nested buttons are invalid HTML and the
 				     inner one never reliably gets the click). -->
-				<div class="relative w-full max-w-[var(--art)]">
+				<div class="relative w-full {showVideo ? 'max-w-[var(--vid)]' : 'max-w-[var(--art)]'}">
 					<button
 						type="button"
 						onclick={toggle}
@@ -276,7 +290,12 @@
 						{/if}
 						{#if showVideo}
 							<!-- Muted and never seeked by the user: mpv is the clock (see the sync effects).
-							     16:9 in the same --art width, so the column keeps its layout. -->
+							     16:9 in --vid, the width that spends the height the square leaves empty.
+
+							     No shadow, unlike the artwork: WebKitGTK re-blurs a resting box-shadow over
+							     the whole tile on every repaint, and a video repaints 24 times a second at
+							     this size. It dragged the whole app, not just the picture. Same cause as
+							     the card-hover cost measured on 2026-08-06. -->
 							<!-- svelte-ignore a11y_media_has_caption -->
 							<video
 								bind:this={videoEl}
@@ -286,7 +305,7 @@
 								preload="auto"
 								onloadedmetadata={syncVideo}
 								onerror={() => (videoUrl = null)}
-								class="aspect-video w-full rounded-2xl bg-black object-contain shadow-2xl"
+								class="aspect-video w-full rounded-2xl bg-black object-contain"
 							></video>
 						{:else if src && attempt < srcs.length}
 							<img
