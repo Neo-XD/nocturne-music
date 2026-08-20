@@ -84,9 +84,12 @@
 	const canVideo = $derived(prefs.musicVideos && !!playback.now?.isVideo);
 	const showVideo = $derived(canVideo && wantVideo && !!videoUrl);
 
-	const DRIFT_LIMIT = 1;
+	const DRIFT_LIMIT = 0.35;
 	const RESYNC_GAP = 2000;
 	let lastResync = 0;
+	// Learned cost of a seek (see `videoSeeked`), and when the outstanding one was issued.
+	let seekLead = 0;
+	let seekStart = 0;
 
 	$effect(() => {
 		const id = playback.now?.videoId;
@@ -101,21 +104,53 @@
 	});
 
 	// mpv owns the clock and this element is a picture stapled to it, but the staples have to be
-	// rare. Position ticks arrive at ~4 Hz (src-tauri/src/lib.rs), so `playback.position` is a
-	// sample up to 250 ms stale and the measured drift swings by that much with nothing actually
-	// wrong. Correcting for that swing is what made the picture stutter: a `playbackRate` nudge
-	// re-times the GStreamer pipeline and a seek flushes it, and the old code did one or the other
-	// four times a second, forever. Both clocks run on the same machine at the same speed, so once
-	// they agree they stay agreeing: leave the element alone until it is visibly wrong, then seek
-	// once and give the seek time to land before judging it again.
+	// both rare and accurate.
+	//
+	// **Rare**, because correcting constantly is what made the picture stutter: a `playbackRate`
+	// nudge re-times the GStreamer pipeline and a seek flushes it. Both clocks run on the same
+	// machine at the same speed, so once they agree they stay agreeing.
+	//
+	// **Accurate**, because `playback.position` is a sample and ticks land at ~4 Hz
+	// (src-tauri/src/lib.rs), so it is up to 250 ms old by the time anything reads it. Seeking the
+	// element to it parks the picture that far *behind* the music, every time and always in the
+	// same direction. Pausing hid it, since mpv stops moving and the stale sample becomes the true
+	// one, which is why pausing and unpausing looked like it fixed the sync.
+	/** Where mpv is *now*, not where it was when the last tick was emitted. */
+	function mpvNow() {
+		if (playback.paused) return playback.position;
+		const since = (performance.now() - playback.positionAt) / 1000;
+		// Past a couple of tick intervals the stream has stopped rather than slowed: a stall, a
+		// backgrounded window, or the instant after unpausing, where the newest sample is still the
+		// one from the pause. Extrapolating there would be a guess that overshoots, so take the
+		// sample as-is and let the next tick sort it out.
+		if (since > 0.4) return playback.position;
+		return playback.position + since * playback.speed;
+	}
+
 	function resync(tolerance: number) {
 		const el = videoEl;
 		if (!el || el.readyState === 0 || el.seeking) return;
 		const now = performance.now();
 		if (now - lastResync < RESYNC_GAP) return;
-		if (Math.abs(playback.position - el.currentTime) < tolerance) return;
+		const target = mpvNow();
+		if (Math.abs(target - el.currentTime) < tolerance) return;
 		lastResync = now;
-		el.currentTime = playback.position;
+		seekStart = now;
+		// Aim past the target by what the last seek cost, or the flush parks the picture behind
+		// again. Learned rather than guessed: it is a property of this machine's decode path, and
+		// it starts at 0 so a fast one never carries a handicap it does not need. Not while paused,
+		// where mpv does not advance during the seek and the lead would simply overshoot.
+		el.currentTime = target + (playback.paused ? 0 : seekLead);
+	}
+
+	// One seek's worth of feedback. `seeked` fires when the new position is ready, so the time
+	// since it was issued is what the aim fell short by. Half of it, folded in, converges in a
+	// couple of corrections without oscillating.
+	function videoSeeked() {
+		if (!seekStart || playback.paused) return;
+		const cost = (performance.now() - seekStart) / 1000;
+		seekStart = 0;
+		seekLead = Math.min(0.5, (seekLead + cost) / 2);
 	}
 
 	$effect(() => {
@@ -140,16 +175,31 @@
 		else el.play().catch(() => {});
 	});
 
-	// At `loadedmetadata` the element is at 0 and cannot play yet, so seeking here is only half the
-	// job: by the time it has buffered enough to start, mpv has moved on by however long that took,
-	// and that offset would sit there under DRIFT_LIMIT forever. `playing` is the moment its clock
-	// starts meaning something, so snap it tight there too. That is exactly what pausing and
-	// unpausing by hand used to do. It fires after every seek as well, which is why `resync` keeps
-	// its own gap: the follow-up call is a no-op instead of a loop.
-	const videoStart = () => {
-		resync(0.3);
+	// At `loadedmetadata` the element sits at 0 and cannot play yet, so this is only a positioning
+	// seek: land in the right part of the track so a resumed song does not start from zero and then
+	// jump. It deliberately does not go through `resync`, because it must not start the gap and
+	// swallow the correction below.
+	function videoLoaded() {
+		const el = videoEl;
+		if (!el) return;
+		el.currentTime = mpvNow();
+		startSync = true;
+		if (!playback.paused) el.play().catch(() => {});
+	}
+
+	// `playing` is the moment the element has a clock worth trusting, and getting here took however
+	// long buffering took, so this correction is what sets the steady-state offset. It is the one
+	// that pausing and unpausing by hand used to perform. Exactly one per loaded source may skip
+	// the gap: `playing` also fires after every seek, and letting those through would be a loop.
+	let startSync = false;
+	function videoPlaying() {
+		if (startSync) {
+			startSync = false;
+			lastResync = 0;
+		}
+		resync(0.15);
 		if (!playback.paused) videoEl?.play().catch(() => {});
-	};
+	}
 
 	// Minimised to the tray, the window still decodes video unless we stop it. Nothing here touches
 	// mpv, so the audio carries on.
@@ -157,7 +207,7 @@
 		const onVisibility = () => {
 			if (!videoEl) return;
 			if (document.hidden) videoEl.pause();
-			else videoStart();
+			else videoPlaying();
 		};
 		document.addEventListener('visibilitychange', onVisibility);
 		return () => document.removeEventListener('visibilitychange', onVisibility);
@@ -249,8 +299,9 @@
 								muted
 								playsinline
 								preload="auto"
-								onloadedmetadata={videoStart}
-								onplaying={videoStart}
+								onloadedmetadata={videoLoaded}
+								onplaying={videoPlaying}
+								onseeked={videoSeeked}
 								onerror={() => (videoUrl = null)}
 								class="aspect-video w-full rounded-2xl bg-black object-contain shadow-2xl"
 							></video>

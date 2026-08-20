@@ -23,6 +23,10 @@ export const playback = $state({
 	queue: { items: [], currentIndex: 0 } as QueueState,
 	paused: false,
 	position: 0,
+	/** `performance.now()` when `position` last arrived. Ticks land at ~4 Hz, so `position` on its
+	 *  own is a sample up to 250 ms old; anything that has to line up with the audio *right now*
+	 *  (the player view's music video) extrapolates from this instead of trusting it directly. */
+	positionAt: 0,
 	duration: 0,
 	volume: 100,
 	// Tempo + pitch ("Advanced"). Frontend-owned because nothing persists them: mpv starts at
@@ -761,7 +765,10 @@ export function initApp(mini = false): () => void {
 				sourceName: q.sourceName
 			};
 		}),
-		api.onPosition((p) => (playback.position = p)),
+		api.onPosition((p) => {
+			playback.position = p;
+			playback.positionAt = performance.now();
+		}),
 		api.onDuration((d) => (playback.duration = d)),
 		api.onPlaybackState((s) => (playback.paused = s === 'paused')),
 		api.onVolume((v) => {
@@ -818,6 +825,7 @@ export function initApp(mini = false): () => void {
 			playback.rating = s.now?.rating ?? 'indifferent';
 			playback.paused = s.paused;
 			playback.position = s.position;
+			playback.positionAt = performance.now();
 			playback.duration = s.duration;
 		})
 		.catch(() => {});
