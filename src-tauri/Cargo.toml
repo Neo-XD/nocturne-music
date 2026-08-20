@@ -31,7 +31,12 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
 regex = "1"
 urlencoding = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "stream"] }
+# Loopback HTTP server for the music-video proxy (videoproxy.rs). Already in the tree behind
+# reqwest, so this pins nothing new; WebKitGTK's media backend will only load http/https/blob.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 
 innertube = { path = "../crates/innertube" }
 player = { path = "../crates/player" }

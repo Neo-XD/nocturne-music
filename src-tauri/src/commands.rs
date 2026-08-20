@@ -207,7 +207,7 @@ pub async fn video_stream(state: St<'_>, video_id: String) -> Result<Option<Stri
     match state.orchestrator.resolve_video(&video_id, 720).await {
         Some(url) => {
             state.put_video_url(&video_id, url);
-            Ok(Some(crate::videoproxy::url_for(&video_id)))
+            Ok(crate::videoproxy::url_for(&video_id))
         }
         None => Ok(None),
     }

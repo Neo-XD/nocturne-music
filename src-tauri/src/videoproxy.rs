@@ -1,167 +1,171 @@
-//! The `limusicvideo://` custom scheme: the player view's `<video>` fetches its bytes from here,
-//! never from googlevideo (context/11: no YouTube shapes past the command boundary).
+//! Loopback HTTP proxy for the player view's music video: the `<video>` element fetches its bytes
+//! from here, never from googlevideo (context/11: no YouTube shapes past the command boundary).
 //!
-//! The UI is handed `limusicvideo://localhost/<videoId>`; `video_stream` has already put the real
-//! URL in [`AppState`] under that id. This handler is a thin range-proxy on top of it: parse the
-//! `Range` the media element asked for, ask googlevideo for the same bytes, hand back a 206.
+//! **Why a socket and not a `limusicvideo://` custom scheme.** The scheme was the plan, and it does
+//! work for `fetch`, XHR and an iframe: measured on WebKitGTK, a registered scheme answers a
+//! textbook `206` with `Content-Range: bytes 0-1445/35729196` and `Content-Type: video/webm`. A
+//! `<video>` still refuses it with `MEDIA_ERR_SRC_NOT_SUPPORTED` and never asks again, because the
+//! element hands the URI to GStreamer, whose source element only claims `http`, `https` and `blob`.
+//! The same bytes over `https` played at 1280x720. So the boundary is kept with a loopback socket
+//! instead: `http://127.0.0.1:<ephemeral>/<token>/<videoId>`, bound to localhost, with a random
+//! per-launch token in the path so nothing else on the machine can guess a URL.
+//!
+//! `video_stream` has already put the real googlevideo URL in [`AppState`] under that videoId; this
+//! is a thin range-proxy on top of it.
 
-use std::sync::Arc;
+use std::convert::Infallible;
+use std::io;
+use std::net::{Ipv4Addr, TcpListener};
+use std::sync::{Arc, OnceLock};
 
-use tauri::http::{header, Request, Response, StatusCode};
-use tauri::{Manager, UriSchemeContext, UriSchemeResponder, Wry};
+use futures_util::TryStreamExt;
+use http_body_util::{combinators::BoxBody, BodyExt, Empty, StreamBody};
+use hyper::body::{Bytes, Frame, Incoming};
+use hyper::header;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Method, Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
 
 use crate::state::AppState;
 
-/// Ceiling on one served slice. `UriSchemeResponder::respond` takes a fully buffered `Vec<u8>`
-/// (tauri 2.11.5, `app.rs`), so an open-ended `bytes=0-` on a 45 MB video would allocate 45 MB
-/// before a single frame drew. The media element just asks for the next slice.
-const MAX_SLICE: u64 = 2 * 1024 * 1024;
+/// Streamed, never buffered: a 35 MB video passes through in chunks, so the proxy costs a few KB of
+/// RAM no matter how long the track is.
+type ProxyBody = BoxBody<Bytes, io::Error>;
 
-/// The URL the UI puts in `<video src>`. Windows resolves custom schemes through a hostname, every
-/// other platform through the scheme itself (tauri `app.rs`).
-pub fn url_for(video_id: &str) -> String {
-    #[cfg(windows)]
-    {
-        format!("http://limusicvideo.localhost/{video_id}")
-    }
-    #[cfg(not(windows))]
-    {
-        format!("limusicvideo://localhost/{video_id}")
-    }
-}
+/// `(port, token)` of the running server. Set once at startup; unset if the bind failed, which just
+/// means video mode never finds a URL and the view keeps the artwork.
+static ENDPOINT: OnceLock<(u16, String)> = OnceLock::new();
 
-/// The inclusive `(start, end)` byte range to fetch, clamped to [`MAX_SLICE`]. `None` for a `Range`
-/// header we can't read, which the caller answers 416.
-///
-/// No total-size clamp: upstream knows the length and simply returns fewer bytes than we asked for,
-/// and its own `Content-Range` is what we echo back.
-fn slice(range: Option<&str>) -> Option<(u64, u64)> {
-    // No Range at all: the element wants the whole file, we start it at the first slice.
-    let Some(raw) = range else { return Some((0, MAX_SLICE - 1)) };
-    let spec = raw.trim().strip_prefix("bytes=")?;
-    // Single-range form only; WebKit's media stack never sends a multi-range for <video>.
-    let (from, to) = spec.split_once('-')?;
-    let start: u64 = from.trim().parse().ok()?;
-    let end = match to.trim() {
-        "" => start + MAX_SLICE - 1,
-        n => n.parse::<u64>().ok()?.min(start + MAX_SLICE - 1),
+/// Bind the loopback listener and start serving. Binds synchronously so [`url_for`] is usable the
+/// moment this returns, then hands the socket to tokio.
+pub fn start(state: Arc<AppState>) {
+    let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, 0)) {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(error = %e, "video proxy: bind failed (music videos disabled)");
+            return;
+        }
     };
-    (end >= start).then_some((start, end))
-}
-
-fn fail(responder: UriSchemeResponder, status: u16) {
-    if let Ok(r) = Response::builder().status(status).body(Vec::new()) {
-        responder.respond(r);
+    let port = match listener.local_addr() {
+        Ok(a) => a.port(),
+        Err(e) => {
+            tracing::warn!(error = %e, "video proxy: local_addr failed");
+            return;
+        }
+    };
+    if let Err(e) = listener.set_nonblocking(true) {
+        tracing::warn!(error = %e, "video proxy: set_nonblocking failed");
+        return;
     }
-}
-
-/// Registered on the builder as `register_asynchronous_uri_scheme_protocol("limusicvideo", ..)`.
-/// Returns immediately; the fetch runs on the tokio runtime.
-pub fn handle(
-    ctx: UriSchemeContext<'_, Wry>,
-    req: Request<Vec<u8>>,
-    responder: UriSchemeResponder,
-) {
-    let video_id = req.uri().path().trim_start_matches('/').to_owned();
-    let range = req.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_owned);
-
-    let Some(state) = ctx.app_handle().try_state::<Arc<AppState>>() else {
-        return fail(responder, 500);
-    };
-    // Nothing resolved this id: a stale element, or a `video_stream` that returned None.
-    let Some(upstream) = state.video_url(&video_id) else {
-        return fail(responder, 404);
-    };
+    let token = format!("{:016x}{:016x}", rand::random::<u64>(), rand::random::<u64>());
+    if ENDPOINT.set((port, token)).is_err() {
+        return; // already started
+    }
+    tracing::info!(port, "video proxy listening on loopback");
 
     tauri::async_runtime::spawn(async move {
-        let Some((start, end)) = slice(range.as_deref()) else {
-            return fail(responder, 416);
-        };
-        let res = crate::http::client()
-            .get(&upstream)
-            .header(header::RANGE.as_str(), format!("bytes={start}-{end}"))
-            .send()
-            .await;
-        let upstream_resp = match res {
-            Ok(r) if r.status().is_success() => r,
-            // Expired URL (googlevideo links last ~6h) or a network failure. The element errors and
-            // the view falls back to artwork; see plan 031's maintenance notes.
-            Ok(r) => {
-                tracing::debug!(video_id, status = %r.status(), "video proxy: upstream refused");
-                return fail(responder, 502);
-            }
-            Err(e) => {
-                tracing::debug!(video_id, error = %e, "video proxy: upstream failed");
-                return fail(responder, 502);
-            }
-        };
-
-        let partial = upstream_resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
-        let pick = |name: &str| {
-            upstream_resp.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned)
-        };
-        let content_type = pick("content-type").unwrap_or_else(|| "video/webm".to_owned());
-        let content_range = pick("content-range");
-
-        let body = match upstream_resp.bytes().await {
-            Ok(b) => b.to_vec(),
-            Err(e) => {
-                tracing::debug!(video_id, error = %e, "video proxy: body failed");
-                return fail(responder, 502);
-            }
-        };
-
-        let mut builder = Response::builder()
-            .header(header::CONTENT_TYPE, content_type)
-            .header(header::ACCEPT_RANGES, "bytes")
-            .header(header::CONTENT_LENGTH, body.len().to_string());
-        builder = match (partial, content_range) {
-            // Echo upstream's own Content-Range: it carries the total size the element needs to
-            // know the duration, and it already describes exactly the bytes in `body`.
-            (true, Some(cr)) => {
-                builder.status(StatusCode::PARTIAL_CONTENT).header(header::CONTENT_RANGE, cr)
-            }
-            (true, None) => builder.status(StatusCode::PARTIAL_CONTENT).header(
-                header::CONTENT_RANGE,
-                format!("bytes {start}-{}/*", start + body.len().saturating_sub(1) as u64),
-            ),
-            // Upstream ignored the Range → pass the 200 through, so the element stops asking for
-            // slices it will not get.
-            (false, _) => builder.status(StatusCode::OK),
-        };
-
-        match builder.body(body) {
-            Ok(r) => responder.respond(r),
-            Err(_) => fail(responder, 500),
+        let Ok(listener) = tokio::net::TcpListener::from_std(listener) else { return };
+        loop {
+            let Ok((stream, _)) = listener.accept().await else { continue };
+            let state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                let svc = service_fn(move |req| serve(req, state.clone()));
+                // A dropped connection is what a seek looks like from here, so errors are expected.
+                let _ = http1::Builder::new().serve_connection(TokioIo::new(stream), svc).await;
+            });
         }
     });
+}
+
+/// The URL the UI puts in `<video src>`, or `None` if the server never came up.
+pub fn url_for(video_id: &str) -> Option<String> {
+    let (port, token) = ENDPOINT.get()?;
+    Some(format!("http://127.0.0.1:{port}/{token}/{video_id}"))
+}
+
+/// `/<token>/<videoId>` to the videoId, once the token matches this launch's.
+fn video_id_from<'a>(path: &'a str, token: &str) -> Option<&'a str> {
+    let (t, id) = path.trim_start_matches('/').split_once('/')?;
+    (t == token && !id.is_empty()).then_some(id)
+}
+
+fn empty(status: StatusCode) -> Response<ProxyBody> {
+    let mut r = Response::new(Empty::<Bytes>::new().map_err(|e| match e {}).boxed());
+    *r.status_mut() = status;
+    r
+}
+
+async fn serve(
+    req: Request<Incoming>,
+    state: Arc<AppState>,
+) -> Result<Response<ProxyBody>, Infallible> {
+    Ok(handle(req, state).await.unwrap_or_else(empty))
+}
+
+async fn handle(
+    req: Request<Incoming>,
+    state: Arc<AppState>,
+) -> Result<Response<ProxyBody>, StatusCode> {
+    if !matches!(*req.method(), Method::GET | Method::HEAD) {
+        return Err(StatusCode::METHOD_NOT_ALLOWED);
+    }
+    let (_, token) = ENDPOINT.get().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    let video_id = video_id_from(req.uri().path(), token).ok_or(StatusCode::NOT_FOUND)?;
+    // Nothing resolved this id: a stale element, or a `video_stream` that returned None.
+    let upstream = state.video_url(video_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    // The element's Range goes upstream untouched and googlevideo does the arithmetic, so there is
+    // no range maths here to get wrong. Everything else the webview sent is dropped.
+    let mut out = crate::http::client().get(&upstream);
+    if let Some(range) = req.headers().get(header::RANGE) {
+        out = out.header(header::RANGE.as_str(), range);
+    }
+    let upstream_resp = match out.send().await {
+        Ok(r) if r.status().is_success() => r,
+        // Expired URL (googlevideo links last ~6h) or a network failure. The element errors and the
+        // view falls back to artwork; see plan 031's maintenance notes.
+        Ok(r) => {
+            tracing::debug!(video_id, status = %r.status(), "video proxy: upstream refused");
+            return Err(StatusCode::BAD_GATEWAY);
+        }
+        Err(e) => {
+            tracing::debug!(video_id, error = %e, "video proxy: upstream failed");
+            return Err(StatusCode::BAD_GATEWAY);
+        }
+    };
+
+    // Pass the shape of the answer through as-is: the status decides 200 vs 206, and Content-Range
+    // carries the total size the element needs for the duration.
+    let mut builder = Response::builder()
+        .status(upstream_resp.status().as_u16())
+        .header(header::ACCEPT_RANGES, "bytes");
+    for name in [header::CONTENT_TYPE, header::CONTENT_LENGTH, header::CONTENT_RANGE] {
+        if let Some(v) = upstream_resp.headers().get(&name) {
+            builder = builder.header(name, v);
+        }
+    }
+
+    let body = if req.method() == Method::HEAD {
+        Empty::<Bytes>::new().map_err(|e| match e {}).boxed()
+    } else {
+        StreamBody::new(upstream_resp.bytes_stream().map_ok(Frame::data).map_err(io::Error::other))
+            .boxed()
+    };
+    builder.body(body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The token is the only thing keeping another local process off the proxy, so a wrong or
+    /// missing one has to miss.
     #[test]
-    fn slice_clamps_to_max() {
-        assert_eq!(slice(None), Some((0, MAX_SLICE - 1)));
-        assert_eq!(slice(Some("bytes=0-")), Some((0, MAX_SLICE - 1)));
-        assert_eq!(slice(Some("bytes=5000000-")), Some((5_000_000, 5_000_000 + MAX_SLICE - 1)));
-        assert_eq!(slice(Some("bytes=0-99999999")), Some((0, MAX_SLICE - 1)));
-    }
-
-    /// A small explicit range is honoured, not padded out to MAX_SLICE: WebKit probes the header
-    /// with a short read first, and answering that with 2 MiB wastes the probe.
-    #[test]
-    fn slice_honours_small_explicit_range() {
-        assert_eq!(slice(Some("bytes=0-1023")), Some((0, 1023)));
-        assert_eq!(slice(Some(" bytes=100-200 ")), Some((100, 200)));
-    }
-
-    #[test]
-    fn slice_rejects_garbage() {
-        assert_eq!(slice(Some("items=0-1")), None);
-        assert_eq!(slice(Some("bytes=abc-")), None);
-        assert_eq!(slice(Some("bytes=500-100")), None);
-        assert_eq!(slice(Some("bytes=0")), None);
+    fn only_the_right_token_routes() {
+        assert_eq!(video_id_from("/abc123/dQw4w9WgXcQ", "abc123"), Some("dQw4w9WgXcQ"));
+        assert_eq!(video_id_from("/wrong/dQw4w9WgXcQ", "abc123"), None);
+        assert_eq!(video_id_from("/dQw4w9WgXcQ", "abc123"), None);
+        assert_eq!(video_id_from("/abc123/", "abc123"), None);
     }
 }

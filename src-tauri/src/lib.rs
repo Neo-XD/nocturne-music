@@ -205,9 +205,6 @@ pub fn run() {
                 .with_filter(|label| label == "main")
                 .build(),
         )
-        // The player view's <video> pulls its bytes from Rust, so the webview never sees a
-        // googlevideo URL (context/11). videoproxy.rs.
-        .register_asynchronous_uri_scheme_protocol("limusicvideo", videoproxy::handle)
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -296,6 +293,11 @@ pub fn run() {
                 lastfm,
             ));
             app.manage(app_state.clone());
+
+            // The player view's <video> pulls its bytes from Rust over loopback, so the webview
+            // never sees a googlevideo URL (context/11). videoproxy.rs explains why a socket and
+            // not a custom scheme.
+            videoproxy::start(app_state.clone());
 
             // Local music artwork reaches the webview over the asset protocol, whose configured
             // scope is empty — the folders it may read are the ones the user picked (local.rs).
