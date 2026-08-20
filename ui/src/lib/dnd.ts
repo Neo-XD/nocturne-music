@@ -105,3 +105,16 @@ export function dragScroll(el: HTMLElement, mime: string = ITEM_MIME) {
 		document.removeEventListener('dragend', stop);
 	};
 }
+
+// --- foreign drags --------------------------------------------------------------------------
+
+/**
+ * Swallow a drag that isn't ours. The window is built with `dragDropEnabled: false` (Tauri's own
+ * handler blocks HTML5 drag and drop on Windows, which is what the queue reorder and the Shortcuts
+ * grid are built on), and with nothing catching them a file or a link dropped on the window
+ * navigates the webview to it and blanks the app. Ours carry an `x-limusic` type and pass through
+ * untouched, so the "no drop" cursor still shows where a card can't land.
+ */
+export function blockForeignDrag(e: DragEvent): void {
+	if (!e.dataTransfer?.types.some((t) => t.startsWith('application/x-limusic'))) e.preventDefault();
+}

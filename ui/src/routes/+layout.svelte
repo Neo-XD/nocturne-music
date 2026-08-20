@@ -14,7 +14,7 @@
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { appearance, initTheme } from '$lib/theme.svelte';
-	import { dragScroll } from '$lib/dnd';
+	import { blockForeignDrag, dragScroll } from '$lib/dnd';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Titlebar from '$lib/components/Titlebar.svelte';
 	import ResizeBorders from '$lib/components/ResizeBorders.svelte';
@@ -74,6 +74,8 @@
 		};
 	});
 </script>
+
+<svelte:window ondragover={blockForeignDrag} ondrop={blockForeignDrag} />
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 <ModeWatcher />
