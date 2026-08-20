@@ -74,7 +74,7 @@
 	// --- Music videos (plan 031) -------------------------------------------------------------
 	// When the track *is* a music video, this box draws the video instead of the artwork. mpv stays
 	// the audio master: the element is muted and its clock is stapled to mpv's position. Bytes come
-	// from Rust over limusicvideo://, so nothing here ever sees a googlevideo URL.
+	// from Rust over a loopback proxy, so nothing here ever sees a googlevideo URL.
 	//
 	// `wantVideo` is session-sticky on purpose: someone who hits "show artwork" wants artwork now
 	// and almost certainly on the next video too, but a permanent no is what the setting is for.
@@ -84,9 +84,14 @@
 	const canVideo = $derived(prefs.musicVideos && !!playback.now?.isVideo);
 	const showVideo = $derived(canVideo && wantVideo && !!videoUrl);
 
+	const DRIFT_LIMIT = 1;
+	const RESYNC_GAP = 2000;
+	let lastResync = 0;
+
 	$effect(() => {
 		const id = playback.now?.videoId;
 		videoUrl = null;
+		lastResync = 0; // a new element gets its first sync immediately, not after the gap
 		if (!id || !canVideo || !wantVideo) return;
 		let cancelled = false;
 		// Silent on failure: a null answer is the ordinary case (no video stream), and the artwork
@@ -95,16 +100,36 @@
 		return () => (cancelled = true);
 	});
 
-	// mpv owns the clock; this element is a picture stapled to it. Position ticks arrive at ~4 Hz
-	// (src-tauri/src/lib.rs), which is plenty: nudge the rate for small drift and only hard-seek
-	// once it is past noticing.
-	$effect(() => {
-		const pos = playback.position;
+	// mpv owns the clock and this element is a picture stapled to it, but the staples have to be
+	// rare. Position ticks arrive at ~4 Hz (src-tauri/src/lib.rs), so `playback.position` is a
+	// sample up to 250 ms stale and the measured drift swings by that much with nothing actually
+	// wrong. Correcting for that swing is what made the picture stutter: a `playbackRate` nudge
+	// re-times the GStreamer pipeline and a seek flushes it, and the old code did one or the other
+	// four times a second, forever. Both clocks run on the same machine at the same speed, so once
+	// they agree they stay agreeing: leave the element alone until it is visibly wrong, then seek
+	// once and give the seek time to land before judging it again.
+	function resync(tolerance: number) {
 		const el = videoEl;
-		if (!el || !showVideo || el.readyState === 0) return;
-		const drift = pos - el.currentTime;
-		if (Math.abs(drift) > 0.35) el.currentTime = pos;
-		else el.playbackRate = Math.min(1.05, Math.max(0.95, 1 + drift * 0.5));
+		if (!el || el.readyState === 0 || el.seeking) return;
+		const now = performance.now();
+		if (now - lastResync < RESYNC_GAP) return;
+		if (Math.abs(playback.position - el.currentTime) < tolerance) return;
+		lastResync = now;
+		el.currentTime = playback.position;
+	}
+
+	$effect(() => {
+		playback.position; // the tick this effect exists to answer
+		if (showVideo) resync(DRIFT_LIMIT);
+	});
+
+	// Follow the tempo control, or mpv's clock outruns the element at any speed but 1x and the
+	// resync above turns into a seek every few seconds. This is a stable value the user picked and
+	// it is written only when it changes, which is what makes it safe where the old nudge was not.
+	$effect(() => {
+		const rate = playback.speed;
+		const el = videoEl;
+		if (el && showVideo && el.playbackRate !== rate) el.playbackRate = rate;
 	});
 
 	$effect(() => {
@@ -115,15 +140,16 @@
 		else el.play().catch(() => {});
 	});
 
-	// `canplay` fires again after every seek, so this has to be drift-guarded or it seeks itself in
-	// a loop. At `loadedmetadata` currentTime is 0, which is already the right answer for a track
-	// that just started and a real seek for one resumed mid-way.
-	function videoReady() {
-		const el = videoEl;
-		if (!el) return;
-		if (Math.abs(playback.position - el.currentTime) > 0.35) el.currentTime = playback.position;
-		if (!playback.paused) el.play().catch(() => {});
-	}
+	// At `loadedmetadata` the element is at 0 and cannot play yet, so seeking here is only half the
+	// job: by the time it has buffered enough to start, mpv has moved on by however long that took,
+	// and that offset would sit there under DRIFT_LIMIT forever. `playing` is the moment its clock
+	// starts meaning something, so snap it tight there too. That is exactly what pausing and
+	// unpausing by hand used to do. It fires after every seek as well, which is why `resync` keeps
+	// its own gap: the follow-up call is a no-op instead of a loop.
+	const videoStart = () => {
+		resync(0.3);
+		if (!playback.paused) videoEl?.play().catch(() => {});
+	};
 
 	// Minimised to the tray, the window still decodes video unless we stop it. Nothing here touches
 	// mpv, so the audio carries on.
@@ -131,7 +157,7 @@
 		const onVisibility = () => {
 			if (!videoEl) return;
 			if (document.hidden) videoEl.pause();
-			else videoReady();
+			else videoStart();
 		};
 		document.addEventListener('visibilitychange', onVisibility);
 		return () => document.removeEventListener('visibilitychange', onVisibility);
@@ -223,8 +249,8 @@
 								muted
 								playsinline
 								preload="auto"
-								onloadedmetadata={videoReady}
-								oncanplay={videoReady}
+								onloadedmetadata={videoStart}
+								onplaying={videoStart}
 								onerror={() => (videoUrl = null)}
 								class="aspect-video w-full rounded-2xl bg-black object-contain shadow-2xl"
 							></video>
