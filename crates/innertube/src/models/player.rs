@@ -144,6 +144,9 @@ pub struct Format {
     pub width: Option<i32>,
     #[serde(default)]
     pub height: Option<i32>,
+    /// Video formats only. Used to prefer 30fps over the 60fps twin at the same height.
+    #[serde(default)]
+    pub fps: Option<i32>,
     #[serde(default)]
     pub content_length: Option<String>,
     #[serde(default)]
@@ -245,6 +248,28 @@ pub fn find_format(data: &StreamingData, quality: AudioQuality) -> Option<&Forma
     }
 }
 
+/// Best VP9 video-only format at or below `max_height`, for the player view's music-video mode.
+///
+/// Video-only: the audio still comes from mpv, which is playing the same videoId. VP9 rather than
+/// MP4 because a stock Fedora only ships openh264 (constrained baseline) and YouTube's 720p/1080p
+/// MP4 is High profile, so itag 137 would fail for those users. context/03.
+pub fn find_video_format(data: &StreamingData, max_height: i32) -> Option<&Format> {
+    data.adaptive_formats
+        .iter()
+        .filter(|f| {
+            !f.is_audio()
+                && f.mime_type.contains("vp9")
+                && f.height.is_some_and(|h| h <= max_height)
+        })
+        // Biggest picture that fits, then the cheaper of a 30/60fps pair, then the better encode.
+        .max_by(|a, b| {
+            a.height
+                .cmp(&b.height)
+                .then(b.fps.unwrap_or(30).cmp(&a.fps.unwrap_or(30)))
+                .then(a.bitrate.cmp(&b.bitrate))
+        })
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoDetails {
@@ -302,6 +327,43 @@ mod tests {
         assert_eq!(sd.expires_in_seconds, Some(21540));
         assert_eq!(sd.adaptive_formats[0].bitrate, 141210);
         assert!(find_format(&sd, AudioQuality::High).is_some());
+    }
+
+    /// Video-only picker (plan 031): VP9 only, capped by height, 30fps preferred over the 60fps
+    /// twin. AV1 and MP4 are deliberately not fallbacks; see `find_video_format`.
+    #[test]
+    fn find_video_format_picks_capped_vp9() {
+        let json = r#"{
+            "playabilityStatus": { "status": "OK" },
+            "streamingData": { "adaptiveFormats": [
+                { "itag": 251, "url": "a", "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 141210 },
+                { "itag": 243, "url": "v360", "mimeType": "video/webm; codecs=\"vp9\"", "bitrate": 300000, "width": 640, "height": 360, "fps": 30 },
+                { "itag": 244, "url": "v480", "mimeType": "video/webm; codecs=\"vp9\"", "bitrate": 600000, "width": 854, "height": 480, "fps": 30 },
+                { "itag": 247, "url": "v720", "mimeType": "video/webm; codecs=\"vp9\"", "bitrate": 1500000, "width": 1280, "height": 720, "fps": 24 },
+                { "itag": 302, "url": "v720-60", "mimeType": "video/webm; codecs=\"vp9\"", "bitrate": 2500000, "width": 1280, "height": 720, "fps": 60 },
+                { "itag": 248, "url": "v1080", "mimeType": "video/webm; codecs=\"vp9\"", "bitrate": 3000000, "width": 1920, "height": 1080, "fps": 30 },
+                { "itag": 399, "url": "av1", "mimeType": "video/mp4; codecs=\"av01.0.08M.08\"", "bitrate": 2000000, "width": 1920, "height": 1080, "fps": 30 },
+                { "itag": 137, "url": "h264", "mimeType": "video/mp4; codecs=\"avc1.640028\"", "bitrate": 4000000, "width": 1920, "height": 1080, "fps": 30 }
+            ] }
+        }"#;
+        let sd = serde_json::from_str::<PlayerResponse>(json).unwrap().streaming_data.unwrap();
+        assert_eq!(find_video_format(&sd, 720).unwrap().itag, 247); // 720p24 over the 720p60
+        assert_eq!(find_video_format(&sd, 480).unwrap().itag, 244);
+        assert_eq!(find_video_format(&sd, 2160).unwrap().itag, 248); // never the AV1/H.264 1080p
+    }
+
+    /// Audio-only response (the ordinary case for a song): no video, so the view keeps the artwork.
+    #[test]
+    fn find_video_format_none_without_vp9() {
+        let json = r#"{
+            "playabilityStatus": { "status": "OK" },
+            "streamingData": { "adaptiveFormats": [
+                { "itag": 251, "url": "a", "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 141210 },
+                { "itag": 137, "url": "h264", "mimeType": "video/mp4; codecs=\"avc1.640028\"", "bitrate": 4000000, "width": 1920, "height": 1080, "fps": 30 }
+            ] }
+        }"#;
+        let sd = serde_json::from_str::<PlayerResponse>(json).unwrap().streaming_data.unwrap();
+        assert!(find_video_format(&sd, 720).is_none());
     }
 }
 

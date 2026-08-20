@@ -66,6 +66,11 @@ pub struct AppState {
     last_pos_persist: AtomicU64,
     /// Wall-clock secs of the last position push to the OS media controls (throttled ~1s).
     last_media_push: AtomicU64,
+    /// videoId → the googlevideo URL the `limusicvideo://` proxy streams from. Written by the
+    /// `video_stream` command, read by `videoproxy::handle`. Only the player view uses this, and it
+    /// only ever looks at one track at a time.
+    /// ponytail: cleared wholesale at 8 entries rather than LRU-evicted.
+    video_urls: std::sync::Mutex<std::collections::HashMap<String, String>>,
     /// Fingerprint of the item list the UI was last sent (see `queue_fingerprint`). When it is
     /// unchanged, `emit_queue` sends the small `queue-index` event instead of megabytes of JSON:
     /// a Tauri event inlines its payload into a JavaScript source string, so a 5,000-track queue
@@ -325,12 +330,26 @@ impl AppState {
             is_playing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
             pending_seek: std::sync::Mutex::new(None),
+            video_urls: std::sync::Mutex::new(std::collections::HashMap::new()),
             latest_position: AtomicU64::new(0),
             last_pos_persist: AtomicU64::new(0),
             last_media_push: AtomicU64::new(0),
             last_queue_fingerprint: AtomicU64::new(0),
             last_persisted_fingerprint: AtomicU64::new(0),
         }
+    }
+
+    /// Remember where the `limusicvideo://` proxy should fetch `id` from.
+    pub fn put_video_url(&self, id: &str, url: String) {
+        let Ok(mut map) = self.video_urls.lock() else { return };
+        if map.len() >= 8 {
+            map.clear();
+        }
+        map.insert(id.to_owned(), url);
+    }
+
+    pub fn video_url(&self, id: &str) -> Option<String> {
+        self.video_urls.lock().ok()?.get(id).cloned()
     }
 
     fn quality(&self) -> AudioQuality {
@@ -1558,6 +1577,9 @@ impl AppState {
             "duration": item.duration,
             "streamClient": stream_client,
             "rating": item.rating,
+            // YouTube's own `musicVideoType` says this track is a video upload, not the generated
+            // audio track, which is what the player view's music-video mode gates on (plan 031).
+            "isVideo": item.is_video,
         })
     }
 

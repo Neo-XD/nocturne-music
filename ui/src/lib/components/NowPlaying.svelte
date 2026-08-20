@@ -10,11 +10,13 @@
 		MusicNote01Icon,
 		PlayIcon,
 		PauseIcon,
-		Queue01Icon
+		Queue01Icon,
+		Video01Icon,
+		VideoOffIcon
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
-	import { np, playback, ui } from '$lib/player.svelte';
+	import { np, playback, prefs, ui } from '$lib/player.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
 	import QueueList from './QueueList.svelte';
@@ -68,6 +70,72 @@
 		flashTimer = setTimeout(() => (flash = null), 220);
 		api.togglePause();
 	}
+
+	// --- Music videos (plan 031) -------------------------------------------------------------
+	// When the track *is* a music video, this box draws the video instead of the artwork. mpv stays
+	// the audio master: the element is muted and its clock is stapled to mpv's position. Bytes come
+	// from Rust over limusicvideo://, so nothing here ever sees a googlevideo URL.
+	//
+	// `wantVideo` is session-sticky on purpose: someone who hits "show artwork" wants artwork now
+	// and almost certainly on the next video too, but a permanent no is what the setting is for.
+	let wantVideo = $state(true);
+	let videoUrl = $state<string | null>(null);
+	let videoEl = $state<HTMLVideoElement | null>(null);
+	const canVideo = $derived(prefs.musicVideos && !!playback.now?.isVideo);
+	const showVideo = $derived(canVideo && wantVideo && !!videoUrl);
+
+	$effect(() => {
+		const id = playback.now?.videoId;
+		videoUrl = null;
+		if (!id || !canVideo || !wantVideo) return;
+		let cancelled = false;
+		// Silent on failure: a null answer is the ordinary case (no video stream), and the artwork
+		// staying put is already the right thing to show.
+		api.videoStream(id).then((u) => !cancelled && (videoUrl = u)).catch(() => {});
+		return () => (cancelled = true);
+	});
+
+	// mpv owns the clock; this element is a picture stapled to it. Position ticks arrive at ~4 Hz
+	// (src-tauri/src/lib.rs), which is plenty: nudge the rate for small drift and only hard-seek
+	// once it is past noticing.
+	$effect(() => {
+		const pos = playback.position;
+		const el = videoEl;
+		if (!el || !showVideo || el.readyState === 0) return;
+		const drift = pos - el.currentTime;
+		if (Math.abs(drift) > 0.35) el.currentTime = pos;
+		else el.playbackRate = Math.min(1.05, Math.max(0.95, 1 + drift * 0.5));
+	});
+
+	$effect(() => {
+		const paused = playback.paused;
+		const el = videoEl;
+		if (!el || !showVideo) return;
+		if (paused) el.pause();
+		else el.play().catch(() => {});
+	});
+
+	// `canplay` fires again after every seek, so this has to be drift-guarded or it seeks itself in
+	// a loop. At `loadedmetadata` currentTime is 0, which is already the right answer for a track
+	// that just started and a real seek for one resumed mid-way.
+	function videoReady() {
+		const el = videoEl;
+		if (!el) return;
+		if (Math.abs(playback.position - el.currentTime) > 0.35) el.currentTime = playback.position;
+		if (!playback.paused) el.play().catch(() => {});
+	}
+
+	// Minimised to the tray, the window still decodes video unless we stop it. Nothing here touches
+	// mpv, so the audio carries on.
+	$effect(() => {
+		const onVisibility = () => {
+			if (!videoEl) return;
+			if (document.hidden) videoEl.pause();
+			else videoReady();
+		};
+		document.addEventListener('visibilitychange', onVisibility);
+		return () => document.removeEventListener('visibilitychange', onVisibility);
+	});
 </script>
 
 <!-- Covers the page but not the sidebar (you navigate away to minimise) and not the player bar,
@@ -116,46 +184,84 @@
 			<div
 				class="min-w-0 flex-1 items-center justify-center {tabbed ? 'hidden md:flex' : 'flex'}"
 			>
-				<button
-					type="button"
-					onclick={toggle}
-					aria-label="Play/pause"
-					class="relative w-full max-w-[var(--art)] cursor-pointer"
-				>
-					{#if flash}
-						<!-- No backdrop-blur: re-blurring the plate on every frame of the scale is what made
-						     this stutter on WebKitGTK. Transform and opacity only. -->
-						<div
-							in:scale={{ start: 0.7, duration: 150, easing: cubicOut }}
-							out:scale={{ start: 1.3, duration: 320, easing: cubicOut }}
-							class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
-						>
-							<div class="rounded-full bg-black/55 p-3.5 text-white">
-								<!-- icon is frozen at mount, so swap via showAlt, not a ternary. -->
-								<HugeiconsIcon
-									icon={PauseIcon}
-									altIcon={PlayIcon}
-									showAlt={flash === 'play'}
-									class="h-7 w-7"
-								/>
+				<!-- A div, not a button: the video-mode toggle has to be a sibling of the play/pause
+				     button rather than nested inside it (nested buttons are invalid HTML and the
+				     inner one never reliably gets the click). -->
+				<div class="relative w-full max-w-[var(--art)]">
+					<button
+						type="button"
+						onclick={toggle}
+						aria-label="Play/pause"
+						class="block w-full cursor-pointer"
+					>
+						{#if flash}
+							<!-- No backdrop-blur: re-blurring the plate on every frame of the scale is what made
+							     this stutter on WebKitGTK. Transform and opacity only. -->
+							<div
+								in:scale={{ start: 0.7, duration: 150, easing: cubicOut }}
+								out:scale={{ start: 1.3, duration: 320, easing: cubicOut }}
+								class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+							>
+								<div class="rounded-full bg-black/55 p-3.5 text-white">
+									<!-- icon is frozen at mount, so swap via showAlt, not a ternary. -->
+									<HugeiconsIcon
+										icon={PauseIcon}
+										altIcon={PlayIcon}
+										showAlt={flash === 'play'}
+										class="h-7 w-7"
+									/>
+								</div>
 							</div>
-						</div>
-					{/if}
-					{#if src && attempt < srcs.length}
-						<img
-							{src}
-							alt=""
-							onerror={imgFailed}
-							class="aspect-square w-full rounded-2xl object-cover shadow-2xl"
-						/>
-					{:else}
-						<div
-							class="flex aspect-square w-full items-center justify-center rounded-2xl bg-muted text-muted-foreground/40"
+						{/if}
+						{#if showVideo}
+							<!-- Muted and never seeked by the user: mpv is the clock (see the sync effects).
+							     16:9 in the same --art width, so the column keeps its layout. -->
+							<!-- svelte-ignore a11y_media_has_caption -->
+							<video
+								bind:this={videoEl}
+								src={videoUrl}
+								muted
+								playsinline
+								preload="auto"
+								onloadedmetadata={videoReady}
+								oncanplay={videoReady}
+								onerror={() => (videoUrl = null)}
+								class="aspect-video w-full rounded-2xl bg-black object-contain shadow-2xl"
+							></video>
+						{:else if src && attempt < srcs.length}
+							<img
+								{src}
+								alt=""
+								onerror={imgFailed}
+								class="aspect-square w-full rounded-2xl object-cover shadow-2xl"
+							/>
+						{:else}
+							<div
+								class="flex aspect-square w-full items-center justify-center rounded-2xl bg-muted text-muted-foreground/40"
+							>
+								<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
+							</div>
+						{/if}
+					</button>
+					{#if canVideo}
+						<!-- Both directions, or there is no way back to the video. On a plate, since it sits
+						     over whatever frame happens to be showing. -->
+						<button
+							type="button"
+							onclick={() => (wantVideo = !wantVideo)}
+							aria-label={showVideo ? 'Show artwork' : 'Show video'}
+							class="absolute right-3 top-3 z-10 cursor-pointer rounded-md bg-black/40 p-1.5 text-white/70 transition-colors hover:text-white"
 						>
-							<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
-						</div>
+							<!-- icon swap via altIcon/showAlt: `icon` is frozen at mount -->
+							<HugeiconsIcon
+								icon={Video01Icon}
+								altIcon={VideoOffIcon}
+								showAlt={showVideo}
+								class="h-4 w-4"
+							/>
+						</button>
 					{/if}
-				</button>
+				</div>
 			</div>
 		{/if}
 

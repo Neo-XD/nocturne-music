@@ -62,7 +62,7 @@ pub fn open(app: &AppHandle) -> Result<(), String> {
         // Same treatment as the main window: this is a second web process, and it needs the media
         // and 3D stacks even less than the app does.
         #[cfg(target_os = "linux")]
-        crate::tune_webview_labelled(app, LABEL);
+        crate::tune_webview_labelled(app, LABEL, false);
         let _ = win.show();
         let _ = win.set_focus();
     }

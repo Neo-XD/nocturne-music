@@ -46,6 +46,8 @@ export interface SongItem {
 	/** YouTube flags the track explicit. Browse/search rows only: `/next` carries no badge, so a
 	 *  radio- or autoplay-appended track arrives without it. */
 	explicit?: boolean;
+	/** This row links a music video rather than the audio track. */
+	is_video?: boolean;
 }
 
 export interface NowPlaying {
@@ -60,6 +62,9 @@ export interface NowPlaying {
 	streamClient: string;
 	/** The user's rating of the track (null if unknown). */
 	rating?: Rating | null;
+	/** YouTube's `musicVideoType` says this is a video upload, not the generated audio track.
+	 *  Gates the player view's music-video mode. */
+	isVideo?: boolean;
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';
@@ -294,6 +299,10 @@ export const setVolume = (volume: number) => invoke<void>('set_volume', { volume
 export const setPlaybackParams = (speed: number, semitones: number) =>
 	invoke<void>('set_playback_params', { speed, semitones });
 export const getQueue = () => invoke<QueueState>('get_queue');
+/** A `limusicvideo://` URL for the track's music video, or null when there isn't one. The bytes are
+ *  proxied through Rust; the webview never sees a googlevideo URL. */
+export const videoStream = (videoId: string) =>
+	invoke<string | null>('video_stream', { videoId });
 
 /** What the event stream already reported, for a webview that started after it did. */
 export interface PlaybackSnapshot {

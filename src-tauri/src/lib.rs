@@ -18,6 +18,7 @@ mod state;
 #[cfg(target_os = "windows")]
 mod taskbar;
 mod tray;
+mod videoproxy;
 mod webview;
 
 use std::sync::Arc;
@@ -65,22 +66,27 @@ fn spawn_heap_trimmer() {
 /// keeps whole previous documents alive; this is a SvelteKit SPA doing client-side routing, so it
 /// never gets a back/forward navigation to restore and that memory is pure waste.
 ///
-/// **Subsystems.** Audio is libmpv's job and the UI has no `<audio>`, `<video>`, `AudioContext`,
+/// **Subsystems.** Audio is libmpv's job and the UI has no `<audio>`, `AudioContext`,
 /// `getUserMedia` or WebGL anywhere in it (only 2D canvas, in `theme.svelte.ts`), yet every web
 /// process boots the media and 3D stacks regardless: GStreamer, libLLVM and Mesa's gallium are all
 /// mapped into it. Measured A/B in `cargo tauri dev`, same build otherwise, home feed loaded:
 /// **259 MiB → 247 MiB** PSS at T+180s (236 → 223 at T+60s).
+///
+/// `media` is the one exception, and only the main window passes `true`: the player view draws a
+/// `<video>` for music videos (plan 031). That is a plain `<video src>`, so `mediasource`,
+/// `media_stream`, `media_capabilities`, `encrypted_media`, `webaudio`, `webrtc` and `webgl` all
+/// stay off. The mini player has no video surface, so it keeps the whole media stack off.
 ///
 /// Applies to one webview, because WebKit settings are per-view: the main window and the mini
 /// player each cost their own web process, so each has to be told. The hidden cipher/PoToken
 /// webviews are deliberately left at the defaults, since the fingerprinting code they exist to run
 /// is entitled to probe whatever it likes.
 #[cfg(target_os = "linux")]
-fn tune_webview(win: &tauri::WebviewWindow) {
+fn tune_webview(win: &tauri::WebviewWindow, media: bool) {
     use webkit2gtk::{CacheModel, SettingsExt, WebContextExt, WebViewExt};
 
     let label = win.label().to_owned();
-    let res = win.with_webview(|wv| {
+    let res = win.with_webview(move |wv| {
         let webview = wv.inner();
         // Context-wide, so the second call is a no-op. Set here anyway: whichever window comes up
         // first should not depend on the other existing.
@@ -89,7 +95,7 @@ fn tune_webview(win: &tauri::WebviewWindow) {
         }
         if let Some(settings) = WebViewExt::settings(&webview) {
             settings.set_enable_page_cache(false);
-            settings.set_enable_media(false);
+            settings.set_enable_media(media);
             settings.set_enable_mediasource(false);
             settings.set_enable_media_stream(false);
             settings.set_enable_media_capabilities(false);
@@ -102,7 +108,7 @@ fn tune_webview(win: &tauri::WebviewWindow) {
     });
     match res {
         Ok(()) => {
-            tracing::info!(label, "webkit: DocumentBrowser cache, page cache + media + webgl off")
+            tracing::info!(label, media, "webkit: DocumentBrowser cache, page cache + webgl off")
         }
         Err(e) => tracing::warn!(label, error = %e, "webkit tuning failed (continuing)"),
     }
@@ -110,9 +116,9 @@ fn tune_webview(win: &tauri::WebviewWindow) {
 
 /// [`tune_webview`] for a window looked up by label. No-op if it isn't up.
 #[cfg(target_os = "linux")]
-pub(crate) fn tune_webview_labelled(app: &tauri::AppHandle, label: &str) {
+pub(crate) fn tune_webview_labelled(app: &tauri::AppHandle, label: &str, media: bool) {
     if let Some(win) = app.get_webview_window(label) {
-        tune_webview(&win);
+        tune_webview(&win, media);
     }
 }
 
@@ -199,6 +205,9 @@ pub fn run() {
                 .with_filter(|label| label == "main")
                 .build(),
         )
+        // The player view's <video> pulls its bytes from Rust, so the webview never sees a
+        // googlevideo URL (context/11). videoproxy.rs.
+        .register_asynchronous_uri_scheme_protocol("limusicvideo", videoproxy::handle)
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -381,7 +390,7 @@ pub fn run() {
 
             #[cfg(target_os = "linux")]
             {
-                tune_webview_labelled(app.handle(), "main");
+                tune_webview_labelled(app.handle(), "main", true);
                 spawn_heap_trimmer();
             }
             Ok(())
@@ -407,6 +416,7 @@ pub fn run() {
             commands::set_playback_params,
             commands::get_queue,
             commands::get_playback,
+            commands::video_stream,
             commands::get_settings,
             commands::set_setting,
             commands::get_stream_clients,

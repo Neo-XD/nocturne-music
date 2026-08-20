@@ -24,7 +24,8 @@ pub use models::metadata::{
     AccountIdentity, AccountInfo, NextResult, Rating, SearchResult, SongItem,
 };
 pub use models::player::{
-    find_format, AudioQuality, Format, PlaybackTracking, PlayerResponse, StreamingData,
+    find_format, find_video_format, AudioQuality, Format, PlaybackTracking, PlayerResponse,
+    StreamingData,
 };
 pub use rustypipe_fallback::{FallbackError, StreamCandidate};
 pub use transport::{cookie_sapisid, generate_cpn, Error, InnerTube, Session};

@@ -178,7 +178,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 13] = [
+const UI_SETTINGS: [&str; 14] = [
     "volume",
     "proxy",
     "quality",
@@ -192,7 +192,26 @@ const UI_SETTINGS: [&str; 13] = [
     "prevent_duplicates",
     "update_banner",
     "lyrics_boidu",
+    "music_videos",
 ];
+
+/// Resolve the music video for `video_id` and hand back a `limusicvideo://` URL the player view
+/// can put in a `<video src>`. `None` when YouTube has no usable video stream for it, which is the
+/// ordinary answer for a song and leaves the artwork in place. The real googlevideo URL never
+/// leaves Rust (context/11).
+#[tauri::command]
+pub async fn video_stream(state: St<'_>, video_id: String) -> Result<Option<String>, String> {
+    if crate::local::is_local_song(&video_id) {
+        return Ok(None);
+    }
+    match state.orchestrator.resolve_video(&video_id, 720).await {
+        Some(url) => {
+            state.put_video_url(&video_id, url);
+            Ok(Some(crate::videoproxy::url_for(&video_id)))
+        }
+        None => Ok(None),
+    }
+}
 
 #[tauri::command]
 pub async fn get_settings(state: St<'_>) -> Result<serde_json::Value, String> {

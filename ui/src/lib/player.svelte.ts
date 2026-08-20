@@ -43,6 +43,13 @@ export const playback = $state({
  */
 export const np = $state({ open: false, tab: 'queue' as 'queue' | 'lyrics' });
 
+/**
+ * Backend settings the app has to know outside the settings modal (which holds the rest in its own
+ * local state). Hydrated once in `initApp`; the modal writes here too, so a toggle takes effect
+ * without a reload.
+ */
+export const prefs = $state({ musicVideos: true });
+
 /** No-op when the user has turned the auto-open off (#64): playback starts, the view stays put. */
 export const openPlayer = () => {
 	if (appearance.openPlayerOnPlay) np.open = true;
@@ -815,6 +822,9 @@ export function initApp(mini = false): () => void {
 		})
 		.catch(() => {});
 	if (mini) return teardown;
+	api.getSettings()
+		.then((s) => (prefs.musicVideos = s.music_videos !== 'false'))
+		.catch(() => {});
 	api.getAccount()
 		.then((a) => {
 			auth.account = a;

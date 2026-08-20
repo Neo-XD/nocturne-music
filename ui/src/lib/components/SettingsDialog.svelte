@@ -11,7 +11,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import * as api from '$lib/api';
-	import { ui, toast } from '$lib/player.svelte';
+	import { prefs, ui, toast } from '$lib/player.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import Changelog from '$lib/components/Changelog.svelte';
 	import {
@@ -148,6 +148,7 @@
 	const historyOn = $derived(settings.enable_history !== 'false');
 	const autoplayOn = $derived(settings.autoplay !== 'false');
 	const hideVideosOn = $derived(settings.hide_videos === 'true');
+	const musicVideosOn = $derived(settings.music_videos !== 'false');
 	const boiduOn = $derived(settings.lyrics_boidu !== 'false');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
@@ -185,6 +186,14 @@
 	async function setAutoplay(on: boolean) {
 		settings.autoplay = on ? 'true' : 'false';
 		await api.setSetting('autoplay', settings.autoplay);
+	}
+
+	// Also lands in `prefs`, which is where the player view reads it: the switch has to take effect
+	// on the track that's already playing, not on the next launch.
+	async function setMusicVideos(on: boolean) {
+		settings.music_videos = on ? 'true' : 'false';
+		prefs.musicVideos = on;
+		await api.setSetting('music_videos', settings.music_videos);
 	}
 
 	async function setHideVideos(on: boolean) {
@@ -633,6 +642,16 @@
 							</p>
 						</div>
 						<Switch checked={preventDuplicatesOn} onCheckedChange={setPreventDuplicates} />
+					</div>
+					<div class="flex items-start justify-between gap-4 border-b py-3">
+						<div class="min-w-0">
+							<div class="font-medium">Play music videos</div>
+							<p class="mt-0.5 text-sm text-muted-foreground">
+								When a track is a music video, the player shows the video instead of the artwork.
+								Uses noticeably more data and battery than audio alone.
+							</p>
+						</div>
+						<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">

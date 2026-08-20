@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use innertube::{
-    find_format, rustypipe_fallback, AudioQuality, Clients, Format, InnerTube, PlayerResponse,
-    MAIN_CLIENT, STREAM_FALLBACK_ORDER,
+    find_format, find_video_format, rustypipe_fallback, AudioQuality, Clients, Format, InnerTube,
+    PlayerResponse, MAIN_CLIENT, STREAM_FALLBACK_ORDER,
 };
 use tokio::sync::Mutex;
 
@@ -309,6 +309,37 @@ impl Orchestrator {
                 Err(ResolveError::AllClientsFailed(video_id.to_owned()))
             }
         }
+    }
+
+    /// A video-only stream URL for `video_id`, for the player view's music-video mode (plan 031).
+    ///
+    /// Deliberately not part of [`resolve`](Self::resolve): this runs only while someone is looking
+    /// at the player view with video on, it needs no cipher, no PoToken and no HEAD two-pass, and it
+    /// must never be able to make audio slower or less reliable. A `None` here just means the view
+    /// keeps the artwork.
+    pub async fn resolve_video(&self, video_id: &str, max_height: i32) -> Option<String> {
+        for key in ["VISIONOS", "ANDROID_VR_1_65_10"] {
+            let Some(client) = self.clients.get(key) else { continue };
+            let resp = match self.it.player(client, video_id, None, None, None).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::debug!(video_id, client = key, error = %e, "video: /player failed");
+                    continue;
+                }
+            };
+            if !resp.playability_status.is_ok() {
+                continue;
+            }
+            let Some(sd) = resp.streaming_data.as_ref() else { continue };
+            // Only ever a direct URL: these clients don't cipher, and a ciphered video is not worth
+            // waking the cipher webview for.
+            if let Some(url) = find_video_format(sd, max_height).and_then(|f| f.direct_url()) {
+                tracing::debug!(video_id, client = key, "video: resolved");
+                return Some(url.to_owned());
+            }
+        }
+        tracing::debug!(video_id, "video: no usable format");
+        None
     }
 
     /// A format's playable URL: direct, else deciphered from its `signatureCipher`. context/05.
