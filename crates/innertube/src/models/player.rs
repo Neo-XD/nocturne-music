@@ -261,11 +261,11 @@ pub fn find_video_format(data: &StreamingData, max_height: i32) -> Option<&Forma
                 && f.mime_type.contains("vp9")
                 && f.height.is_some_and(|h| h <= max_height)
         })
-        // Biggest picture that fits, then the cheaper of a 30/60fps pair, then the better encode.
+        // Biggest picture that fits, then the smoother of a 30/60fps pair, then the better encode.
         .max_by(|a, b| {
             a.height
                 .cmp(&b.height)
-                .then(b.fps.unwrap_or(30).cmp(&a.fps.unwrap_or(30)))
+                .then(a.fps.unwrap_or(30).cmp(&b.fps.unwrap_or(30)))
                 .then(a.bitrate.cmp(&b.bitrate))
         })
 }
@@ -284,6 +284,17 @@ pub struct VideoDetails {
     pub music_video_type: Option<String>,
     #[serde(default)]
     pub thumbnail: Option<Thumbnails>,
+}
+
+impl VideoDetails {
+    /// Whether this videoId is a video upload rather than the audio track YouTube generates for a
+    /// release, from YouTube's own `musicVideoType`. `None` when the response didn't say, which is
+    /// every non-Music client: only WEB_REMIX carries the field, so a fallback client's answer
+    /// must not be read as "not a video". Authoritative for the player view's music-video mode,
+    /// where the queue row's flag is only as good as the parse that built it.
+    pub fn is_music_video(&self) -> Option<bool> {
+        Some(self.music_video_type.as_deref()? != super::metadata::AUDIO_TRACK_TYPE)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -329,8 +340,9 @@ mod tests {
         assert!(find_format(&sd, AudioQuality::High).is_some());
     }
 
-    /// Video-only picker (plan 031): VP9 only, capped by height, 30fps preferred over the 60fps
-    /// twin. AV1 and MP4 are deliberately not fallbacks; see `find_video_format`.
+    /// Video-only picker (plan 031): VP9 only, capped by height, 60fps preferred over the 30fps
+    /// twin (plan 032: decode was never the bottleneck). AV1 and MP4 are deliberately not
+    /// fallbacks; see `find_video_format`.
     #[test]
     fn find_video_format_picks_capped_vp9() {
         let json = r#"{
@@ -347,7 +359,7 @@ mod tests {
             ] }
         }"#;
         let sd = serde_json::from_str::<PlayerResponse>(json).unwrap().streaming_data.unwrap();
-        assert_eq!(find_video_format(&sd, 720).unwrap().itag, 247); // 720p24 over the 720p60
+        assert_eq!(find_video_format(&sd, 720).unwrap().itag, 302); // 720p60 over the 720p24
         assert_eq!(find_video_format(&sd, 480).unwrap().itag, 244);
         assert_eq!(find_video_format(&sd, 2160).unwrap().itag, 248); // never the AV1/H.264 1080p
     }
@@ -364,6 +376,32 @@ mod tests {
         }"#;
         let sd = serde_json::from_str::<PlayerResponse>(json).unwrap().streaming_data.unwrap();
         assert!(find_video_format(&sd, 720).is_none());
+    }
+
+    /// The player view's video mode believes this over the queue row's flag, so ATV must classify
+    /// as audio and a response without the field must stay undecided rather than answer "audio".
+    #[test]
+    fn music_video_type_classifies_the_track() {
+        let details = |kind: &str| {
+            let t = if kind.is_empty() {
+                String::new()
+            } else {
+                format!(r#", "musicVideoType": "{kind}""#)
+            };
+            let body = format!(
+                r#"{{ "playabilityStatus": {{ "status": "OK" }},
+                      "videoDetails": {{ "videoId": "a"{t} }} }}"#
+            );
+            serde_json::from_str::<PlayerResponse>(&body).unwrap().video_details.unwrap()
+        };
+        let atv = details("MUSIC_VIDEO_TYPE_ATV");
+        let omv = details("MUSIC_VIDEO_TYPE_OMV");
+        let ugc = details("MUSIC_VIDEO_TYPE_UGC");
+        let bare = details("");
+        assert_eq!(atv.is_music_video(), Some(false));
+        assert_eq!(omv.is_music_video(), Some(true));
+        assert_eq!(ugc.is_music_video(), Some(true));
+        assert_eq!(bare.is_music_video(), None);
     }
 }
 
