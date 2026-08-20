@@ -17,14 +17,20 @@
 	let loading = $state(false);
 
 	// Fetch the library playlists fresh each time the picker opens (cheap; picks up new playlists).
-	// On Repeat is dropped: it's built from local play counts, so there is nothing to add a song to.
-	// The command boundary refuses it too, but a target you can tap and can't use is the bug.
+	// On Repeat and Liked Music are dropped: On Repeat is built from local play counts, and Liked
+	// Music takes likes rather than playlist edits (YouTube 400s the add). The command boundary
+	// refuses both too, but a target you can tap and can't use is the bug.
 	$effect(() => {
 		if (ui.addSongs) {
 			loading = true;
 			api
 				.getLibrary()
-				.then((p) => (playlists = p.filter((i) => i.id !== api.ON_REPEAT_ID)))
+				.then(
+					(p) =>
+						(playlists = p.filter(
+							(i) => i.id !== api.ON_REPEAT_ID && i.id !== api.LIKED_MUSIC_ID
+						))
+				)
 				.catch((e) => toast.error(String(e)))
 				.finally(() => (loading = false));
 		}

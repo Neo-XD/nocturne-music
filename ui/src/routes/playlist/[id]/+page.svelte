@@ -122,7 +122,7 @@
 	const id = $derived(page.params.id ?? '');
 	const nowId = $derived(playback.now?.videoId);
 	// The liked-music auto-playlist isn't a user playlist — no rename/delete, but shuffle is fine.
-	const isLiked = $derived(id === 'VLLM');
+	const isLiked = $derived(id === api.LIKED_MUSIC_ID);
 	// On Repeat is built locally from play counts: no artwork, and no radio to seed autoplay from.
 	const isOnRepeat = $derived(id === ON_REPEAT_ID);
 	// Only offer rename/delete on playlists the signed-in user actually owns (backend `owned` flag).
