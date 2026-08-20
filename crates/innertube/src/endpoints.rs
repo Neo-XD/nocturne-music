@@ -359,6 +359,10 @@ impl InnerTube {
                             if *is_video {
                                 item.video_id = audio_item.video_id;
                                 item.duration = audio_item.duration.or(item.duration.take());
+                                // The row linked the MV, but the id it now carries is the audio
+                                // track: leaving the flag set would put the player view's video
+                                // mode on a still album-art stream.
+                                item.is_video = false;
                             }
                         }
                     }

@@ -725,6 +725,10 @@ impl AppState {
                 artists: None,
                 duration: None,
                 thumbnail: None,
+                // Cached alongside the URL: a hit skips `/player`, so without it a replay inside
+                // the cache window (hours, and every track you just listened to) would fall back
+                // to the queue row's flag, which is exactly the thing that can't be trusted.
+                is_video: c.is_video,
                 stream_client: "cache".to_owned(),
             });
         }
@@ -739,6 +743,7 @@ impl AppState {
                 data.itag,
                 now + data.expires_in_seconds.max(0),
                 data.loudness_db,
+                data.is_video,
                 now,
             );
         }
@@ -1417,7 +1422,12 @@ impl AppState {
         // Items played from cards/radio can arrive without a duration; the player response knows
         // the exact length of the cut we stream. Backfill before emitting — lyrics matching keys
         // on it (a wrong-cut LRCLIB match plays lyrics seconds off the audio).
-        backfill_metadata(&mut item, data.duration.as_deref(), data.artists.as_deref());
+        backfill_metadata(
+            &mut item,
+            data.duration.as_deref(),
+            data.artists.as_deref(),
+            data.is_video,
+        );
         {
             let mut q = self.queue.lock().await;
             q.current_client = Some(data.stream_client.clone());
@@ -1431,7 +1441,12 @@ impl AppState {
                 // Same repair on the queue's own copy: it's what the queue panel renders, what
                 // `persist_queue` saves, and what `record_play` writes into On Repeat.
                 if qi.video_id == item.video_id {
-                    backfill_metadata(qi, data.duration.as_deref(), data.artists.as_deref());
+                    backfill_metadata(
+                        qi,
+                        data.duration.as_deref(),
+                        data.artists.as_deref(),
+                        data.is_video,
+                    );
                 }
             }
         }
@@ -1550,7 +1565,7 @@ impl AppState {
         // Same backfill as start_current: a gapless advance emits this item straight from the
         // queue, so the repair has to land before it becomes the current track.
         if let Some(qi) = q.items.get_mut(next_idx) {
-            backfill_metadata(qi, data.duration.as_deref(), data.artists.as_deref());
+            backfill_metadata(qi, data.duration.as_deref(), data.artists.as_deref(), data.is_video);
         }
         tracing::debug!(index = next_idx, "gapless lookahead primed");
     }
@@ -3029,11 +3044,23 @@ fn format_duration(ms: i64) -> String {
 /// and Last.fm, and a wrong artist there is worse than a missing one: it scrobbles as another
 /// artist entirely. Rows persisted before this existed are healed the next time they play, because
 /// the caller writes the repaired item back into the queue.
-fn backfill_metadata(item: &mut SongItem, length_seconds: Option<&str>, author: Option<&str>) {
+fn backfill_metadata(
+    item: &mut SongItem,
+    length_seconds: Option<&str>,
+    author: Option<&str>,
+    is_video: Option<bool>,
+) {
     if item.duration.is_none() {
         if let Some(secs) = length_seconds.and_then(|s| s.trim().parse::<i64>().ok()) {
             item.duration = Some(format_duration(secs * 1000));
         }
+    }
+    // YouTube's own `musicVideoType` outranks whatever the row was parsed with: a card played
+    // from a shelf never carried the flag, an album row keeps it after being swapped to its audio
+    // id, and a mirrored or restored row has no flag at all. Overwrite, don't OR: a stale `true`
+    // on an audio track would put the still album-art "video" on screen (plan 031).
+    if let Some(is_video) = is_video {
+        item.is_video = is_video;
     }
     if let Some(author) = author.map(str::trim).filter(|a| !a.is_empty()) {
         if item.artists.trim().is_empty() || item.artists.contains('•') {
@@ -3249,7 +3276,7 @@ mod tests {
 
         // No artist (an album track) → YouTube's own author.
         let mut it = with("", vec![]);
-        backfill_metadata(&mut it, None, Some("Delara"));
+        backfill_metadata(&mut it, None, Some("Delara"), None);
         assert_eq!(it.artists, "Delara");
 
         // A display subtitle that was parsed as the artist → replaced, and the links that pointed
@@ -3260,21 +3287,21 @@ mod tests {
             "Song • Dua Lipa",
         ] {
             let mut it = with(bogus, vec![bogus]);
-            backfill_metadata(&mut it, None, Some("Dua Lipa"));
+            backfill_metadata(&mut it, None, Some("Dua Lipa"), None);
             assert_eq!(it.artists, "Dua Lipa", "{bogus} should have been replaced");
             assert!(it.artist_runs.is_empty(), "{bogus}: stale links must not survive the swap");
         }
 
         // A real artist line is never second-guessed, links included. Collabs use "&" and ",".
         let mut it = with("Nicki Minaj, Ice Spice & Aqua", vec!["Nicki Minaj", " & ", "Aqua"]);
-        backfill_metadata(&mut it, None, Some("Nicki Minaj"));
+        backfill_metadata(&mut it, None, Some("Nicki Minaj"), None);
         assert_eq!(it.artists, "Nicki Minaj, Ice Spice & Aqua");
         assert_eq!(it.artist_runs.len(), 3);
 
         // Nothing to repair with (rustypipe served the stream, or /player had no author) → as-is.
         for author in [None, Some(""), Some("   ")] {
             let mut it = with("", vec![]);
-            backfill_metadata(&mut it, None, author);
+            backfill_metadata(&mut it, None, author, None);
             assert_eq!(it.artists, "");
         }
     }
@@ -3282,16 +3309,34 @@ mod tests {
     #[test]
     fn player_response_fills_only_a_missing_duration() {
         let mut it = song("v", None);
-        backfill_metadata(&mut it, Some("191"), None);
+        backfill_metadata(&mut it, Some("191"), None, None);
         assert_eq!(it.duration.as_deref(), Some("3:11"));
         // A duration the row already carried wins: it's the length of the cut YouTube listed.
         let mut it = innertube::SongItem { duration: Some("3:02".into()), ..song("v", None) };
-        backfill_metadata(&mut it, Some("191"), None);
+        backfill_metadata(&mut it, Some("191"), None, None);
         assert_eq!(it.duration.as_deref(), Some("3:02"));
         // Junk from the player response can't blank an existing one.
         let mut it = song("v", None);
-        backfill_metadata(&mut it, Some("not-a-number"), None);
+        backfill_metadata(&mut it, Some("not-a-number"), None, None);
         assert_eq!(it.duration, None);
+    }
+
+    /// The player view's music-video mode reads this flag, and the rows that reach it are only as
+    /// good as the parse that built them: a card played from a shelf carries no flag at all, and an
+    /// album row keeps a `true` after being swapped to its audio id. `/player` settles both ways.
+    #[test]
+    fn player_response_settles_whether_the_track_is_a_video() {
+        let mut it = song("v", None);
+        backfill_metadata(&mut it, None, None, Some(true));
+        assert!(it.is_video);
+        // A stale `true` on what YouTube calls an audio track is cleared, not kept: video mode on
+        // an art track shows a still image, which is worse than the artwork it replaced.
+        backfill_metadata(&mut it, None, None, Some(false));
+        assert!(!it.is_video);
+        // Nothing said (rustypipe, or a cached URL) → whatever the row already claimed stands.
+        it.is_video = true;
+        backfill_metadata(&mut it, None, None, None);
+        assert!(it.is_video);
     }
 
     #[test]

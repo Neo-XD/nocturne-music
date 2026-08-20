@@ -37,6 +37,11 @@ pub struct PlaybackData {
     pub artists: Option<String>,
     pub duration: Option<String>,
     pub thumbnail: Option<String>,
+    /// YouTube's own `musicVideoType` for this videoId: `Some(true)` = a video upload, `Some(false)`
+    /// = the generated audio track, `None` = the metadata client never answered. The player view's
+    /// music-video mode believes this over the queue row's flag, which several rows arrive without
+    /// (a card played from a shelf, a Listen Together mirror, an album row swapped to its audio id).
+    pub is_video: Option<bool>,
     /// Which client produced the stream (diagnostics). context/06.
     pub stream_client: String,
 }
@@ -302,6 +307,8 @@ impl Orchestrator {
                 artists: None,
                 duration: c.duration_secs.map(|s| s.to_string()),
                 thumbnail: None,
+                // rustypipe answers without a `musicVideoType`, so the queue row's flag stands.
+                is_video: None,
                 stream_client: "rustypipe".to_owned(),
             }),
             Err(e) => {
@@ -395,6 +402,7 @@ impl Orchestrator {
             artists: vd.and_then(|v| v.author.clone()),
             duration: vd.and_then(|v| v.length_seconds.clone()),
             thumbnail: main_resp.as_ref().and_then(best_thumbnail),
+            is_video: vd.and_then(|v| v.is_music_video()),
             stream_client: client.to_owned(),
         }
     }
