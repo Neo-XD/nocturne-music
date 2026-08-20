@@ -85,22 +85,33 @@
 	const showVideo = $derived(canVideo && wantVideo && !!videoUrl);
 
 	// How the picture is kept in step with mpv. Measured against mpv actually playing the same
-	// track:
+	// track, because the guesses before it were all wrong in the same direction:
 	//
 	//   - Drift is *flat*. Once the two agree they stay agreeing over minutes, so nothing needs
 	//     continuous correction.
-	//   - A seek is expensive: a real mid-stream one costs about a second of re-buffering, and mpv
-	//     plays on throughout.
+	//   - A seek is expensive. A tiny buffered one loses ~85 ms of motion; a real mid-stream one
+	//     costs about a second of re-buffering, and mpv plays on throughout. A seek issued to close
+	//     a small gap therefore *opens* a gap of roughly its own cost, and a loop that seeks
+	//     whenever it is out seeks forever. That was the stutter, twice, and it is also where the
+	//     steady half-second offset came from: the seek landed exactly its own cost behind.
+	//   - A `playbackRate` change is nearly free and holds exactly: 1.5x measured a dead-steady
+	//     ratio of 1.500 with no stalls, on a picture that is muted anyway.
 	//
-	// So the picture is seeked once, when it first has a clock, and then left alone. The only other
-	// seek is for a gap that has actually opened (a scrub, coming back from the tray).
-	/** A gap this big is worth one seek. Below it, leave the picture alone: two clocks both running
-	 *  at 1x do not drift apart over a song, and a seek costs about a second of re-buffering, so
-	 *  correcting a small gap opens a bigger one. */
-	const SEEK_FROM = 0.5;
+	// So the rate does the work and seeking is the exception. A seek is only for a gap too big to
+	// trim out in reasonable time (opening the view mid-track, a scrub, coming back from the tray),
+	// and it aims past the target by what the re-buffer will cost. The first sync of a fresh element
+	// is one of those cases by definition: resolving the video costs a round trip, so mpv is already
+	// a second or two in before the element can seek at all.
+	/** Trim bands. Quantised so a correction costs a handful of rate writes, never one per tick. */
+	const TRIM_FROM = 0.2;
+	const TRIM_TO = 0.06;
+	/** Above this, trimming would take too long to sit through, so pay for one seek instead. */
+	const SEEK_FROM = 2.5;
+	const SEEK_COST = 1;
 	const SEEK_COOLDOWN = 6000;
 	/** A fresh element starts at 0 while mpv is already a second or two in, because resolving the
-	 *  video costs a round trip. So the first sync always seeks, whatever the gap. */
+	 *  video costs a round trip. Trimming that in takes seconds of visibly wrong-speed picture, so
+	 *  the first sync seeks instead, whatever the gap. */
 	let synced = false;
 	let lastSeek = 0;
 
@@ -139,19 +150,36 @@
 		return playback.position + since * playback.speed;
 	}
 
+	/** Catch-up rate for a gap. `floor` keeps a correction that has already started running until
+	 *  the gap is properly closed, so the rate does not chatter around `TRIM_FROM`. */
+	function trimFor(drift: number, floor: boolean) {
+		const a = Math.abs(drift);
+		const k = a > 1.2 ? 0.5 : a > 0.5 ? 0.25 : a > TRIM_FROM || floor ? 0.1 : 0;
+		return playback.speed * (1 + Math.sign(drift) * k);
+	}
+
 	function syncVideo() {
 		const el = videoEl;
 		// readyState 0 has no clock to compare against, and mid-seek the comparison is meaningless.
+		// Anything above that is fair game: re-buffering sits at 2 for long stretches and the
+		// picture keeps moving perfectly well there.
 		if (!el || !showVideo || el.seeking || el.readyState < 1) return;
-		// mpv owns the tempo, so the picture mirrors it and nothing else ever writes the rate.
-		if (el.playbackRate !== playback.speed) el.playbackRate = playback.speed;
 		const drift = mpvNow() - el.currentTime;
-		if (synced && Math.abs(drift) < SEEK_FROM) return;
-		const now = performance.now();
-		if (synced && now - lastSeek < SEEK_COOLDOWN) return; // let the last one finish re-buffering
-		synced = true;
-		lastSeek = now;
-		el.currentTime = mpvNow();
+		if (!synced || Math.abs(drift) > SEEK_FROM) {
+			const now = performance.now();
+			if (synced && now - lastSeek < SEEK_COOLDOWN) return; // let the last one finish re-buffering
+			synced = true;
+			lastSeek = now;
+			el.playbackRate = playback.speed;
+			// Aim past the re-buffer this is about to cost, or it lands behind by exactly that.
+			// Not while paused: mpv is not moving, so the lead would only overshoot.
+			el.currentTime = mpvNow() + (playback.paused ? 0 : SEEK_COST);
+			return;
+		}
+		if (playback.paused) return; // nothing is moving, so there is nothing to trim
+		const trimming = el.playbackRate !== playback.speed;
+		const want = trimFor(drift, trimming && Math.abs(drift) >= TRIM_TO);
+		if (el.playbackRate !== want) el.playbackRate = want;
 	}
 
 	$effect(() => {
