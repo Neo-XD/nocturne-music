@@ -88,12 +88,13 @@
 					</div>
 				{/if}
 			</div>
-			{#if auth.account.canSwitch}
-				<Button variant="outline" size="sm" class="mb-2 w-full gap-2" onclick={switchChannel}>
-					<HugeiconsIcon icon={UserCircleIcon} class="h-4 w-4" />
-					Switch channel
-				</Button>
-			{/if}
+			<!-- Always offered, never gated on a stored "you have one channel": that answer comes from
+			     a single accounts_list call at sign-in, and when it fails the switcher used to vanish
+			     for good. The picker fetches the list live and shows its own error. -->
+			<Button variant="outline" size="sm" class="mb-2 w-full gap-2" onclick={switchChannel}>
+				<HugeiconsIcon icon={UserCircleIcon} class="h-4 w-4" />
+				Switch channel
+			</Button>
 			<Button variant="outline" size="sm" class="w-full gap-2" onclick={doSignOut}>
 				<HugeiconsIcon icon={Logout01Icon} class="h-4 w-4" />
 				Sign out

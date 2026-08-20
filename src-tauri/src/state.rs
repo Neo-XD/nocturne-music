@@ -415,6 +415,15 @@ impl AppState {
 
         let active_visitor_data = active.visitor_data.clone();
 
+        // Discovery must go out with the login-bound visitorData account_menu just handed us, not
+        // the anonymous bootstrap id still sitting in the session: pairing that id with login
+        // cookies is what gets accounts_list rejected, and a rejected list reads below as "this
+        // Google account has one channel". Every success path persists this same value; hand the
+        // old one back until then so a rolled-back sign-in isn't left holding it.
+        let previous_visitor_data = self.it.visitor_data();
+        if active_visitor_data.is_some() {
+            self.it.set_visitor_data(active_visitor_data.clone());
+        }
         // Losing the list endpoint must not regress ordinary one-channel sign-in. It only removes
         // the optional switcher for this login attempt; account_menu still supplies a valid active
         // identity exactly as older releases used it.
@@ -425,6 +434,7 @@ impl AppState {
                 Vec::new()
             }
         };
+        self.it.set_visitor_data(previous_visitor_data);
 
         let chosen = persisted_id
             .as_deref()
