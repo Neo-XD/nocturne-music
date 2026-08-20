@@ -200,11 +200,17 @@ const UI_SETTINGS: [&str; 14] = [
 /// ordinary answer for a song and leaves the artwork in place. The real googlevideo URL never
 /// leaves Rust (context/11).
 #[tauri::command]
-pub async fn video_stream(state: St<'_>, video_id: String) -> Result<Option<String>, String> {
+pub async fn video_stream(
+    state: St<'_>,
+    video_id: String,
+    max_height: i32,
+) -> Result<Option<String>, String> {
     if crate::local::is_local_song(&video_id) {
         return Ok(None);
     }
-    match state.orchestrator.resolve_video(&video_id, 720).await {
+    // The webview picks the height from its own box, so clamp it here rather than trusting it.
+    let max_height = max_height.clamp(144, 1080);
+    match state.orchestrator.resolve_video(&video_id, max_height).await {
         Some(url) => {
             state.put_video_url(&video_id, url);
             Ok(crate::videoproxy::url_for(&video_id))
@@ -670,14 +676,18 @@ pub async fn set_album_saved(
     state.it.like_playlist(client, &playlist_id, saved).await.map_err(|e| e.to_string())
 }
 
-/// Login, plus the guard every playlist edit needs: On Repeat has no YouTube playlist behind it, so
-/// its synthetic id must never reach `edit_playlist`, which answers 400 for an id it doesn't know.
+/// Login, plus the guard every playlist edit needs. Two ids never reach `edit_playlist`: On Repeat
+/// has no YouTube playlist behind it, and Liked Music is an auto-playlist YouTube edits through the
+/// rating endpoint instead. Both answer 400 there.
 fn editable_playlist<'a>(
     state: &'a Arc<AppState>,
     playlist_id: &str,
 ) -> Result<&'a innertube::YouTubeClient, String> {
     if playlist_id == ON_REPEAT_ID {
         return Err("On Repeat builds itself from what you play.".into());
+    }
+    if playlist_id == LIKED_MUSIC_ID {
+        return Err("Liked Music follows your likes; like the song instead.".into());
     }
     require_login(state)
 }

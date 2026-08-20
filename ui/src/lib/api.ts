@@ -146,6 +146,12 @@ export interface HomePage {
 export const ON_REPEAT_ID = 'LIMUSIC_ON_REPEAT';
 
 /**
+ * Liked Music's browseId. YouTube edits this one through the rating endpoint, not `edit_playlist`,
+ * so it is never an add/remove/rename target: liking the song is the edit.
+ */
+export const LIKED_MUSIC_ID = 'VLLM';
+
+/**
  * Local music (Rust `local.rs`). A file on disk is a song whose `video_id` is `LOCAL:<path>`, and
  * an album of them is a browseId `LOCALALBUM:<key>` — so local items ride every existing surface
  * (cards, queue, Shortcuts, the album page) and play with no network.
@@ -299,10 +305,11 @@ export const setVolume = (volume: number) => invoke<void>('set_volume', { volume
 export const setPlaybackParams = (speed: number, semitones: number) =>
 	invoke<void>('set_playback_params', { speed, semitones });
 export const getQueue = () => invoke<QueueState>('get_queue');
-/** A `limusicvideo://` URL for the track's music video, or null when there isn't one. The bytes are
- *  proxied through Rust; the webview never sees a googlevideo URL. */
-export const videoStream = (videoId: string) =>
-	invoke<string | null>('video_stream', { videoId });
+/** A `limusicvideo://` URL for the track's music video, or null when there isn't one. `maxHeight`
+ *  caps the picture at what the box on screen can actually show. The bytes are proxied through
+ *  Rust; the webview never sees a googlevideo URL. */
+export const videoStream = (videoId: string, maxHeight: number) =>
+	invoke<string | null>('video_stream', { videoId, maxHeight });
 
 /** What the event stream already reported, for a webview that started after it did. */
 export interface PlaybackSnapshot {

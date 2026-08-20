@@ -104,6 +104,15 @@
 	let synced = false;
 	let lastSeek = 0;
 
+	/** The ladder YouTube actually publishes. Snapped up, so the picture is never softer than the
+	 *  box; capped at 720 because that is already more than the box gets on a 1080p screen.
+	 *  ponytail: measured once per track, not re-measured on resize. Resizing mid-track keeps the
+	 *  picture it started with, which is a soft edge at worst. */
+	function wantedHeight() {
+		const px = (window.innerHeight - 176) * 0.85; // --vid's height, see the layout comment below
+		return [360, 480, 720].find((h) => h >= px) ?? 720;
+	}
+
 	$effect(() => {
 		const id = playback.now?.videoId;
 		videoUrl = null;
@@ -113,7 +122,7 @@
 		let cancelled = false;
 		// Silent on failure: a null answer is the ordinary case (no video stream), and the artwork
 		// staying put is already the right thing to show.
-		api.videoStream(id).then((u) => !cancelled && (videoUrl = u)).catch(() => {});
+		api.videoStream(id, wantedHeight()).then((u) => !cancelled && (videoUrl = u)).catch(() => {});
 		return () => (cancelled = true);
 	});
 
