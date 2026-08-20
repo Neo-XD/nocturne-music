@@ -84,17 +84,35 @@
 	const canVideo = $derived(prefs.musicVideos && !!playback.now?.isVideo);
 	const showVideo = $derived(canVideo && wantVideo && !!videoUrl);
 
-	const DRIFT_LIMIT = 0.35;
-	const RESYNC_GAP = 2000;
-	let lastResync = 0;
-	// Learned cost of a seek (see `videoSeeked`), and when the outstanding one was issued.
-	let seekLead = 0;
-	let seekStart = 0;
+	// How the picture is kept in step with mpv. Measured against mpv actually playing the same
+	// track, because the guesses before it were all wrong in the same direction:
+	//
+	//   - Drift is *flat*. Once the two agree they stay agreeing over minutes, so nothing needs
+	//     continuous correction.
+	//   - A seek is expensive. A tiny buffered one loses ~85 ms of motion; a real mid-stream one
+	//     costs about a second of re-buffering, and mpv plays on throughout. A seek issued to close
+	//     a small gap therefore *opens* a gap of roughly its own cost, and a loop that seeks
+	//     whenever it is out seeks forever. That was the stutter, twice, and it is also where the
+	//     steady half-second offset came from: the seek landed exactly its own cost behind.
+	//   - A `playbackRate` change is nearly free and holds exactly: 1.5x measured a dead-steady
+	//     ratio of 1.500 with no stalls, on a picture that is muted anyway.
+	//
+	// So the rate does the work and seeking is the exception. A seek is only for a gap too big to
+	// trim out in reasonable time (opening the view mid-track, a scrub, coming back from the tray),
+	// and it aims past the target by what the re-buffer will cost.
+	/** Trim bands. Quantised so a correction costs a handful of rate writes, never one per tick. */
+	const TRIM_FROM = 0.2;
+	const TRIM_TO = 0.06;
+	/** Above this, trimming would take too long to sit through, so pay for one seek instead. */
+	const SEEK_FROM = 2.5;
+	const SEEK_COST = 1;
+	const SEEK_COOLDOWN = 6000;
+	let lastSeek = 0;
 
 	$effect(() => {
 		const id = playback.now?.videoId;
 		videoUrl = null;
-		lastResync = 0; // a new element gets its first sync immediately, not after the gap
+		lastSeek = 0; // a new element may sync at once, whatever the last one was doing
 		if (!id || !canVideo || !wantVideo) return;
 		let cancelled = false;
 		// Silent on failure: a null answer is the ordinary case (no video stream), and the artwork
@@ -103,68 +121,54 @@
 		return () => (cancelled = true);
 	});
 
-	// mpv owns the clock and this element is a picture stapled to it, but the staples have to be
-	// both rare and accurate.
-	//
-	// **Rare**, because correcting constantly is what made the picture stutter: a `playbackRate`
-	// nudge re-times the GStreamer pipeline and a seek flushes it. Both clocks run on the same
-	// machine at the same speed, so once they agree they stay agreeing.
-	//
-	// **Accurate**, because `playback.position` is a sample and ticks land at ~4 Hz
-	// (src-tauri/src/lib.rs), so it is up to 250 ms old by the time anything reads it. Seeking the
-	// element to it parks the picture that far *behind* the music, every time and always in the
-	// same direction. Pausing hid it, since mpv stops moving and the stale sample becomes the true
-	// one, which is why pausing and unpausing looked like it fixed the sync.
-	/** Where mpv is *now*, not where it was when the last tick was emitted. */
+	/** Where mpv is *now*, not where it was when the last tick was emitted. Ticks land at ~4 Hz
+	 *  (src-tauri/src/lib.rs), so `playback.position` alone is up to 250 ms old, and lining the
+	 *  picture up against it parks it that far behind the music every time. */
 	function mpvNow() {
 		if (playback.paused) return playback.position;
 		const since = (performance.now() - playback.positionAt) / 1000;
 		// Past a couple of tick intervals the stream has stopped rather than slowed: a stall, a
 		// backgrounded window, or the instant after unpausing, where the newest sample is still the
-		// one from the pause. Extrapolating there would be a guess that overshoots, so take the
-		// sample as-is and let the next tick sort it out.
+		// one from the pause. Extrapolating there would be a guess that overshoots.
 		if (since > 0.4) return playback.position;
 		return playback.position + since * playback.speed;
 	}
 
-	function resync(tolerance: number) {
-		const el = videoEl;
-		if (!el || el.readyState === 0 || el.seeking) return;
-		const now = performance.now();
-		if (now - lastResync < RESYNC_GAP) return;
-		const target = mpvNow();
-		if (Math.abs(target - el.currentTime) < tolerance) return;
-		lastResync = now;
-		seekStart = now;
-		// Aim past the target by what the last seek cost, or the flush parks the picture behind
-		// again. Learned rather than guessed: it is a property of this machine's decode path, and
-		// it starts at 0 so a fast one never carries a handicap it does not need. Not while paused,
-		// where mpv does not advance during the seek and the lead would simply overshoot.
-		el.currentTime = target + (playback.paused ? 0 : seekLead);
+	/** Catch-up rate for a gap. `floor` keeps a correction that has already started running until
+	 *  the gap is properly closed, so the rate does not chatter around `TRIM_FROM`. */
+	function trimFor(drift: number, floor: boolean) {
+		const a = Math.abs(drift);
+		const k = a > 1.2 ? 0.5 : a > 0.5 ? 0.25 : a > TRIM_FROM || floor ? 0.1 : 0;
+		return playback.speed * (1 + Math.sign(drift) * k);
 	}
 
-	// One seek's worth of feedback. `seeked` fires when the new position is ready, so the time
-	// since it was issued is what the aim fell short by. Half of it, folded in, converges in a
-	// couple of corrections without oscillating.
-	function videoSeeked() {
-		if (!seekStart || playback.paused) return;
-		const cost = (performance.now() - seekStart) / 1000;
-		seekStart = 0;
-		seekLead = Math.min(0.5, (seekLead + cost) / 2);
+	function syncVideo() {
+		const el = videoEl;
+		// readyState 0 has no clock to compare against, and mid-seek the comparison is meaningless.
+		// Anything above that is fair game: re-buffering sits at 2 for long stretches and the
+		// picture keeps moving perfectly well there.
+		if (!el || !showVideo || el.seeking || el.readyState < 1) return;
+		const drift = mpvNow() - el.currentTime;
+		if (Math.abs(drift) > SEEK_FROM) {
+			const now = performance.now();
+			if (now - lastSeek < SEEK_COOLDOWN) return; // let the last one finish re-buffering
+			lastSeek = now;
+			el.playbackRate = playback.speed;
+			// Aim past the re-buffer this is about to cost, or it lands behind by exactly that.
+			// Not while paused: mpv is not moving, so the lead would only overshoot.
+			el.currentTime = mpvNow() + (playback.paused ? 0 : SEEK_COST);
+			return;
+		}
+		if (playback.paused) return; // nothing is moving, so there is nothing to trim
+		const trimming = el.playbackRate !== playback.speed;
+		const want = trimFor(drift, trimming && Math.abs(drift) >= TRIM_TO);
+		if (el.playbackRate !== want) el.playbackRate = want;
 	}
 
 	$effect(() => {
-		playback.position; // the tick this effect exists to answer
-		if (showVideo) resync(DRIFT_LIMIT);
-	});
-
-	// Follow the tempo control, or mpv's clock outruns the element at any speed but 1x and the
-	// resync above turns into a seek every few seconds. This is a stable value the user picked and
-	// it is written only when it changes, which is what makes it safe where the old nudge was not.
-	$effect(() => {
-		const rate = playback.speed;
-		const el = videoEl;
-		if (el && showVideo && el.playbackRate !== rate) el.playbackRate = rate;
+		playback.position; // the tick this runs on
+		playback.paused; // and a pause/resume, which position ticks do not cover
+		syncVideo();
 	});
 
 	$effect(() => {
@@ -175,39 +179,20 @@
 		else el.play().catch(() => {});
 	});
 
-	// At `loadedmetadata` the element sits at 0 and cannot play yet, so this is only a positioning
-	// seek: land in the right part of the track so a resumed song does not start from zero and then
-	// jump. It deliberately does not go through `resync`, because it must not start the gap and
-	// swallow the correction below.
-	function videoLoaded() {
-		const el = videoEl;
-		if (!el) return;
-		el.currentTime = mpvNow();
-		startSync = true;
-		if (!playback.paused) el.play().catch(() => {});
-	}
-
-	// `playing` is the moment the element has a clock worth trusting, and getting here took however
-	// long buffering took, so this correction is what sets the steady-state offset. It is the one
-	// that pausing and unpausing by hand used to perform. Exactly one per loaded source may skip
-	// the gap: `playing` also fires after every seek, and letting those through would be a loop.
-	let startSync = false;
-	function videoPlaying() {
-		if (startSync) {
-			startSync = false;
-			lastResync = 0;
-		}
-		resync(0.15);
-		if (!playback.paused) videoEl?.play().catch(() => {});
-	}
-
 	// Minimised to the tray, the window still decodes video unless we stop it. Nothing here touches
 	// mpv, so the audio carries on.
 	$effect(() => {
 		const onVisibility = () => {
 			if (!videoEl) return;
-			if (document.hidden) videoEl.pause();
-			else videoPlaying();
+			if (document.hidden) {
+				videoEl?.pause();
+				return;
+			}
+			// Seconds out by definition: the picture stood still while the music carried on, so let
+			// it seek straight away rather than sitting out the cooldown.
+			lastSeek = 0;
+			videoEl?.play().catch(() => {});
+			syncVideo();
 		};
 		document.addEventListener('visibilitychange', onVisibility);
 		return () => document.removeEventListener('visibilitychange', onVisibility);
@@ -299,9 +284,7 @@
 								muted
 								playsinline
 								preload="auto"
-								onloadedmetadata={videoLoaded}
-								onplaying={videoPlaying}
-								onseeked={videoSeeked}
+								onloadedmetadata={syncVideo}
 								onerror={() => (videoUrl = null)}
 								class="aspect-video w-full rounded-2xl bg-black object-contain shadow-2xl"
 							></video>
