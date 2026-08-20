@@ -8,7 +8,7 @@
 # Also runs against a published release: extract it with `--appimage-extract` and mount
 # squashfs-root instead. CI calls it for debian:sid and archlinux on every build.
 #
-# Three checks, in the order they catch things:
+# Four checks, in the order they catch things:
 #
 #   1. ldd -r on the app binary — every load-time symbol resolves. Catches KI-6, KI-7, KI-8.
 #   2. Host libraries the app dlopens are still loadable with the AppDir on the search path.
@@ -16,7 +16,12 @@
 #      vendor, gio modules, pixbuf loaders, IM modules) links against *our* copies of the shared
 #      sonames. If ours are older than what the host's copy needs, it fails to load and the caller
 #      usually reports something unrelated-looking. That is KI-9, and ldd -r cannot see it.
-#   3. An actual launch under Xvfb. The verification hole behind four broken releases in one night
+#   3. The bundled GStreamer can still produce the elements a music video needs. WebKit decodes
+#      <video> through GStreamer, and v0.5.0 shipped the GStreamer core libraries with no plugin
+#      directory at all: the registry came up empty on every distro whose plugin path is not
+#      Debian's, and WebKit aborted the web process the moment a video drew. Nothing else here sees
+#      that, because the app starts and plays audio perfectly without a single plugin.
+#   4. An actual launch under Xvfb. The verification hole behind four broken releases in one night
 #      was that nothing ever started the app anywhere except the build host's own OS family.
 set -uo pipefail
 
@@ -31,19 +36,19 @@ if command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y -qq --no-install-recommends \
-    xvfb xauth dbus dbus-x11 \
+    xvfb xauth dbus dbus-x11 python3 \
     libegl-mesa0 libgl1-mesa-dri libglx-mesa0 libgles2 libgl1 libegl1 \
     libharfbuzz0b libharfbuzz-icu0 libkrb5-3 libgssapi-krb5-2 libpango-1.0-0 \
     libasound2t64 libfribidi0 libusb-1.0-0 libcom-err2 libgpg-error0 libexpat1 \
     libfontconfig1 fonts-dejavu-core ca-certificates gvfs
 elif command -v pacman >/dev/null; then
   pacman -Sy --noconfirm --quiet \
-    xorg-server-xvfb xorg-xauth dbus \
+    xorg-server-xvfb xorg-xauth dbus python \
     mesa libglvnd harfbuzz harfbuzz-icu krb5 pango alsa-lib fribidi libusb \
     expat fontconfig ttf-dejavu ca-certificates gvfs
 elif command -v dnf >/dev/null; then
   dnf install -y -q \
-    xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon dbus-x11 \
+    xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon dbus-x11 python3 \
     mesa-libEGL mesa-libGL mesa-libGLES libglvnd harfbuzz krb5-libs pango alsa-lib \
     fribidi libusb1 expat fontconfig dejavu-sans-fonts ca-certificates gvfs
 else
@@ -52,7 +57,7 @@ fi
 # gvfs is deliberately installed: it is what makes a host/bundle GLib mismatch visible.
 # A half-installed container makes every check below meaningless, and the missing symbols it
 # produces look exactly like a real defect (KI-8). Stop here instead.
-for tool in xvfb-run dbus-run-session ldd; do
+for tool in xvfb-run dbus-run-session ldd python3; do
   command -v "$tool" >/dev/null || { echo "   package install failed: no $tool"; exit 1; }
 done
 
@@ -93,6 +98,35 @@ if [ "$BROKEN" = 1 ]; then
 else
   echo "   clean"
 fi
+
+step "the bundled GStreamer can decode a music video"
+# Sources the AppRun hook rather than setting GST_PLUGIN_SYSTEM_PATH_1_0 by hand, because half of
+# what broke in v0.5.0 was that nothing set it at all. Loads our libgstreamer by absolute path and
+# leaves LD_LIBRARY_PATH alone: the bundled libs carry RUNPATH $ORIGIN, so they resolve on their
+# own, and putting the AppDir on python's own library path would shadow its libffi for no reason.
+cat > /tmp/gstprobe.py <<'PROBE'
+import ctypes, sys
+gst = ctypes.CDLL("/app/usr/lib/libgstreamer-1.0.so.0")
+gst.gst_init(None, None)
+gst.gst_element_factory_find.restype = ctypes.c_void_p
+# A muted, video-only VP9/WebM stream, plus the audio sink WebKit builds whether or not the
+# stream has any audio in it.
+need = ["typefind", "matroskademux", "vp9dec", "videoconvert", "videoscale", "audioconvert",
+        "audioresample", "queue2", "appsink", "decodebin", "autoaudiosink"]
+missing = [e for e in need if not gst.gst_element_factory_find(e.encode())]
+print("   elements missing: " + (", ".join(missing) if missing else "none"))
+sys.exit(1 if missing else 0)
+PROBE
+(
+  # set +u for the hook only: it appends to XDG_DATA_DIRS, which a container does not set, and this
+  # script's own `set -u` would kill the subshell on that line with the output redirected away.
+  set +u
+  export APPDIR="$APPDIR" HOME=/tmp/apphome
+  mkdir -p "$HOME"
+  . "$APPDIR/apprun-hooks/linuxdeploy-plugin-gtk.sh" >/dev/null 2>&1
+  echo "   GST_PLUGIN_SYSTEM_PATH_1_0=${GST_PLUGIN_SYSTEM_PATH_1_0:-<unset>}"
+  python3 /tmp/gstprobe.py
+) || bad "the bundled GStreamer cannot build a video pipeline, so the webview aborts on a music video"
 
 step "launching the app under Xvfb"
 export HOME=/tmp/apphome

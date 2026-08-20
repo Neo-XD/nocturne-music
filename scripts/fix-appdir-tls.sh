@@ -2,7 +2,7 @@
 # Repair the bundled AppDir so it runs on hosts that aren't the build machine, then repack and
 # re-sign the AppImage in place.
 #
-# Four defects, all from linuxdeploy:
+# Five defects, all from linuxdeploy:
 #
 #   1. GIO_EXTRA_MODULES is written with a literal newline in it, plus an absolute path into the
 #      build machine's own target/ directory. GLib parses one garbage path, finds no module, and
@@ -35,6 +35,20 @@
 #      them into our 2.80 and they fail. Fixed by also setting GIO_MODULE_DIR, which replaces the
 #      compiled-in path rather than adding to it.
 #
+#   5. No GStreamer plugin is bundled at all. libwebkit2gtk DT_NEEDs ten GStreamer *core* libraries,
+#      so linuxdeploy bundles those and stops there. WebKit plays every <video> through GStreamer,
+#      and a registry with no plugins in it has no demuxer, no decoder, not even typefind. The
+#      bundled Ubuntu libgstreamer has /usr/lib/x86_64-linux-gnu/gstreamer-1.0 compiled in as its
+#      plugin path, which does not exist on Fedora (/usr/lib64/gstreamer-1.0) or Arch
+#      (/usr/lib/gstreamer-1.0), so the registry comes up empty, WebKit cannot build a pipeline and
+#      calls its own CRASH(). That is what killed the web process on every music video in v0.5.0.
+#      Measured against the shipped v0.5.0 AppDir: 1 plugin, against 237 from the host stack that
+#      `cargo tauri dev` uses, which is exactly why it only ever failed in the AppImage. Fixed by
+#      bundling the plugins that pipeline needs, plus gst-plugin-scanner, and pointing
+#      GST_PLUGIN_SYSTEM_PATH_1_0 at them. The host's plugin directory stays out of it for the same
+#      reason the host's gio modules do (defect 4): those are built against the host's GStreamer,
+#      not the one we ship.
+#
 # ON PRUNING. v0.2.11 pruned eight libraries and broke worse than what it fixed, so the bar is high,
 # but "never prune" is the wrong rule — defect 3 above is only fixable by pruning. What made v0.2.11
 # wrong, and what a prune has to clear:
@@ -66,6 +80,17 @@ APPIMAGE="$(ls "$BUNDLE"/limusic_*.AppImage 2>/dev/null | head -1 || true)"
 [ -n "$APPIMAGE" ] || { echo "no limusic_*.AppImage in $BUNDLE"; exit 1; }
 APPIMAGE="$(readlink -f "$APPIMAGE")"
 
+# Libraries that must come from the HOST, never from us. Bundling one of these shadows the host's
+# own copy for everything the app dlopens later, which is how v0.2.14 shipped an AppImage that could
+# not open a single webview (defect 3). Keep in step with HOST_BASELINE in
+# .github/workflows/linux-release.yml: that list fails the build when we *fail* to bundle something
+# not on it, this one stops us bundling something that is. Same question, opposite sides.
+HOST_BASELINE="libGL.so.1 libEGL.so.1 libGLX.so.0 libGLdispatch.so.0 libOpenGL.so.0
+  libdrm.so.2 libgbm.so.1 libwayland-client.so.0 libX11.so.6 libX11-xcb.so.1 libxcb.so.1
+  libxcb-dri3.so.0 libexpat.so.1 libfontconfig.so.1 libfreetype.so.6 libharfbuzz.so.0
+  libfribidi.so.0 libz.so.1 libasound.so.2 libusb-1.0.so.0 libcom_err.so.2 libgpg-error.so.0
+  libresolv.so.2 libgcc_s.so.1 libstdc++.so.6"
+
 # Copy every DT_NEEDED of $1 that the AppDir doesn't already have. glibc and the loader are the
 # host's job; everything else has to travel with us, or we just move "cannot open shared object
 # file" one library along (jackd2's libjack needs libdb-5.3, which Arch doesn't ship at all).
@@ -73,6 +98,7 @@ bundle_deps_of() {
   local of="$1" name path
   while read -r name path; do
     case "$name" in libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|ld-linux*) continue;; esac
+    case " $(echo "$HOST_BASELINE" | tr -s ' \n' ' ') " in *" $name "*) continue;; esac
     [ -e "$APPDIR/usr/lib/$name" ] && continue
     [ -e "$path" ] || continue
     cp -L "$path" "$APPDIR/usr/lib/$name"
@@ -129,6 +155,61 @@ for lib in "$APPDIR"/usr/lib/libwayland-client.so.0*; do
   echo "==> removed $(basename "$lib") — the host's Mesa must link its own"
 done
 
+# 1d. GStreamer plugins, so the webview can decode a music video. See defect 5 in the header.
+#     Named one by one rather than "everything in the host's plugin directory" or "everything in
+#     these packages": gstreamer1.0-plugins-good alone is 74 plugins, and copying the lot drags
+#     libv4l2, libdv, libshout, libwavpack and a camera stack into the bundle for a feature that
+#     plays one muted video-only VP9 stream. The set below is that pipeline, plus mp4 and the audio
+#     decoders in case a stream ever carries sound, plus an audio sink because WebKit builds one
+#     either way. If WebKit turns out to want something else, the element check in
+#     scripts/appdir-foreign-check.sh is what will say so.
+GST_PLUGINS="libgstcoreelements.so libgsttypefindfunctions.so libgstplayback.so libgstapp.so
+             libgstaudioconvert.so libgstaudioresample.so libgstvolume.so
+             libgstvideoconvertscale.so libgstmatroska.so libgstisomp4.so libgstvpx.so
+             libgstopus.so libgstvorbis.so libgstogg.so libgstaudioparsers.so
+             libgstautodetect.so libgstalsa.so libgstpulseaudio.so libgstopengl.so libgstlibav.so"
+GSTDIR="$APPDIR/usr/lib/gstreamer-1.0"
+if ls "$GSTDIR"/libgst*.so >/dev/null 2>&1; then
+  echo "==> GStreamer plugins already bundled"
+else
+  mkdir -p "$GSTDIR"
+  for plugin in $GST_PLUGINS; do
+    src=""
+    for dir in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 /usr/lib64/gstreamer-1.0 /usr/lib/gstreamer-1.0; do
+      [ -e "$dir/$plugin" ] && { src="$dir/$plugin"; break; }
+    done
+    [ -n "$src" ] || {
+      echo "$plugin not on the build host: install the gstreamer1.0-plugins-base/-good/-gl/-libav/-alsa set"
+      exit 1; }
+    cp -L "$src" "$GSTDIR/$plugin"
+    # Everything linuxdeploy bundles gets RUNPATH $ORIGIN; ours arrive after it ran, so give them
+    # the same treatment. Their dependencies sit one directory up, in usr/lib. AppRun's
+    # LD_LIBRARY_PATH would find them anyway, so a host without patchelf is not fatal, but a plugin
+    # that resolves on its own is a plugin that still works wherever GStreamer dlopens it from.
+    patchelf --set-rpath '$ORIGIN/..' "$GSTDIR/$plugin" 2>/dev/null || true
+    bundle_deps_of "$src"
+  done
+fi
+
+# The scanner is a separate binary GStreamer forks to probe plugins out of process. Without it the
+# probe happens in-process instead, which works right up until one bad plugin takes the whole web
+# process down with it.
+if [ -e "$APPDIR/usr/bin/gst-plugin-scanner" ]; then
+  echo "==> gst-plugin-scanner already bundled"
+else
+  SCANNER=""
+  for cand in /usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner \
+              /usr/libexec/gstreamer-1.0/gst-plugin-scanner \
+              /usr/lib64/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner; do
+    [ -e "$cand" ] && { SCANNER="$cand"; break; }
+  done
+  [ -n "$SCANNER" ] || { echo "gst-plugin-scanner not found on the build host"; exit 1; }
+  cp -L "$SCANNER" "$APPDIR/usr/bin/gst-plugin-scanner"
+  patchelf --set-rpath '$ORIGIN/../lib' "$APPDIR/usr/bin/gst-plugin-scanner" 2>/dev/null || true
+  echo "==> bundled gst-plugin-scanner from $SCANNER"
+  bundle_deps_of "$SCANNER"
+fi
+
 # 2. Point GIO_EXTRA_MODULES at the AppDir's own module directories — never the host's, see the
 #    header. Appended rather than edited in place: AppRun *sources* the hook, so the last assignment
 #    wins, and appending can't be broken by linuxdeploy reshaping the lines above it.
@@ -166,6 +247,36 @@ done
   echo "no gio modules bundled — install glib-networking on the build host, or the webview gets no TLS backend"
   exit 1; }
 echo "==> bundled gio modules: $MODS"
+
+# 2b. Point GStreamer at the bundled plugins. Same shape as GIO_MODULE_DIR above and for the same
+#     reason: GST_PLUGIN_SYSTEM_PATH_1_0 *replaces* the path compiled into libgstreamer, so the
+#     host's plugin directory is never scanned. Its own sentinel, not defect 4's: an AppDir fixed by
+#     an older copy of this script already has GIO_MODULE_DIR, and sharing a sentinel would make
+#     this block silently skip itself there.
+grep -q 'GST_PLUGIN_SYSTEM_PATH_1_0' "$HOOK" || cat >> "$HOOK" <<'EOF'
+
+# Limusic: WebKit decodes <video> through GStreamer, and the plugins travel with us (defect 5).
+# _1_0 is the versioned spelling GStreamer 1.x reads first, and SYSTEM_PATH replaces the compiled-in
+# /usr/lib/x86_64-linux-gnu/gstreamer-1.0 rather than adding to it, so a Debian host's own plugins
+# are never loaded into the older GStreamer we ship.
+export GST_PLUGIN_SYSTEM_PATH_1_0="$APPDIR/usr/lib/gstreamer-1.0"
+export GST_PLUGIN_SCANNER_1_0="$APPDIR/usr/bin/gst-plugin-scanner"
+# The default registry is $XDG_CACHE_HOME/gstreamer-1.0/registry.<arch>.bin, shared with every other
+# GStreamer app on the machine. Ours describes a different plugin set to a different GStreamer, so
+# give it its own file rather than have the two rewrite each other's on every launch.
+export GST_REGISTRY_1_0="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/limusic/gstreamer-registry.bin"
+mkdir -p "$(dirname "$GST_REGISTRY_1_0")" 2>/dev/null || true
+EOF
+
+# …and, exactly as with the gio modules, check there is something there to find. An AppDir whose
+# plugin directory is empty is v0.5.0 again: the app starts, plays audio, and dies the moment a
+# music video draws.
+GSTPLUGINS=0
+for f in "$GSTDIR"/libgst*.so; do [ -e "$f" ] && GSTPLUGINS=$((GSTPLUGINS + 1)); done
+[ "$GSTPLUGINS" -gt 0 ] || {
+  echo "no GStreamer plugins bundled: the webview would abort on the first music video"
+  exit 1; }
+echo "==> bundled GStreamer plugins: $GSTPLUGINS"
 
 # 3. Repack with the packer Tauri already downloaded for the original bundle.
 # Globbed, not hardcoded: the exact filename is Tauri's business and CI runs a different CLI version.
