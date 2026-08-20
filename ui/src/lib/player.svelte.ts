@@ -52,7 +52,7 @@ export const np = $state({ open: false, tab: 'queue' as 'queue' | 'lyrics' });
  * local state). Hydrated once in `initApp`; the modal writes here too, so a toggle takes effect
  * without a reload.
  */
-export const prefs = $state({ musicVideos: true });
+export const prefs = $state({ musicVideos: false });
 
 /** No-op when the user has turned the auto-open off (#64): playback starts, the view stays put. */
 export const openPlayer = () => {
@@ -831,7 +831,7 @@ export function initApp(mini = false): () => void {
 		.catch(() => {});
 	if (mini) return teardown;
 	api.getSettings()
-		.then((s) => (prefs.musicVideos = s.music_videos !== 'false'))
+		.then((s) => (prefs.musicVideos = s.music_videos === 'true'))
 		.catch(() => {});
 	api.getAccount()
 		.then((a) => {

@@ -148,7 +148,9 @@
 	const historyOn = $derived(settings.enable_history !== 'false');
 	const autoplayOn = $derived(settings.autoplay !== 'false');
 	const hideVideosOn = $derived(settings.hide_videos === 'true');
-	const musicVideosOn = $derived(settings.music_videos !== 'false');
+	// Off until the setting is turned on: still experimental, so nobody gets video they didn't ask
+	// for. Same test in `player.svelte.ts`, which hydrates `prefs` at launch.
+	const musicVideosOn = $derived(settings.music_videos === 'true');
 	const boiduOn = $derived(settings.lyrics_boidu !== 'false');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
@@ -645,7 +647,14 @@
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Play music videos</div>
+							<div class="flex items-center gap-2">
+								<span class="font-medium">Play music videos</span>
+								<span
+									class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
+								>
+									Experimental
+								</span>
+							</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
 								When a track is a music video, the player shows the video instead of the artwork.
 								Uses noticeably more data and battery than audio alone.
