@@ -93,7 +93,7 @@ pub enum Rating {
 
 /// `MUSIC_VIDEO_TYPE_ATV` — the audio track YouTube Music generates for a release. Anything else
 /// (`_OMV`, `_UGC`) is a video upload.
-const AUDIO_TRACK_TYPE: &str = "MUSIC_VIDEO_TYPE_ATV";
+pub(crate) const AUDIO_TRACK_TYPE: &str = "MUSIC_VIDEO_TYPE_ATV";
 
 /// The `musicVideoType` a watch endpoint carries, if any.
 fn endpoint_video_type(endpoint: &Value) -> Option<&str> {
