@@ -18,7 +18,15 @@
 	import TrackRowSkeleton from '$lib/components/TrackRowSkeleton.svelte';
 	import * as api from '$lib/api';
 	import type { BrowseItem, HomeChip, HomePage, HomeSection } from '$lib/api';
-	import { auth, library, personal, playback, seedOnRepeatPick, toast } from '$lib/player.svelte';
+	import {
+		auth,
+		library,
+		noteHomeSections,
+		personal,
+		playback,
+		seedOnRepeatPick,
+		toast
+	} from '$lib/player.svelte';
 	import {
 		arrangeSections,
 		freshen,
@@ -109,6 +117,33 @@
 		return arrangeSections([...local, ...shelves], personal);
 	});
 	const visible = $derived(blocks.filter((b) => !hidden.has(b.key)));
+	/**
+	 * What the Edit modal lists. Not `blocks`: the feed arrives a page at a time, so `blocks` holds
+	 * only the shelves scrolled to so far, and the modal showed five rows before a scroll and
+	 * fifteen after one. Every shelf home has ever rendered is remembered (`noteSections`), and the
+	 * ones this visit hasn't fetched yet are listed alongside the loaded ones — a section can be
+	 * hidden or moved before the page has got to it, which is the whole point of the modal.
+	 *
+	 * Kept apart from `blocks` deliberately: these carry no shelf, so they must never reach the
+	 * feed's renderer. Unranked ones sort to the end, since where they belong is exactly what
+	 * hasn't loaded.
+	 */
+	const known = $derived.by(() => {
+		if (selected) return blocks; // a mood feed is the chip's, and its shelves aren't home's
+		const have = new Set(blocks.map((b) => b.key));
+		const unloaded: Block[] = personal.home.seen
+			.filter((t) => !have.has(t))
+			.map((t) => ({ id: `seen:${t}`, key: t, title: t }));
+		return unloaded.length ? arrangeSections([...blocks, ...unloaded], personal) : blocks;
+	});
+
+	// Every page of the feed adds to that memory. Only the unfiltered feed: a mood chip's shelves
+	// belong to the chip, not to home's arrangement.
+	$effect(() => {
+		if (selected) return;
+		const titles = feed.map((s) => s.title);
+		if (titles.length) noteHomeSections(titles);
+	});
 
 	/** Latch the shelf whenever a page turns out to carry it. Called after every `home` change. */
 	function noteForgotten() {
@@ -414,4 +449,4 @@
 	</button>
 {/if}
 
-<HomeLayoutDialog bind:open={editing} sections={blocks} />
+<HomeLayoutDialog bind:open={editing} sections={known} />

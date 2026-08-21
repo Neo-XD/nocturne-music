@@ -374,8 +374,15 @@ export async function seedOnRepeatPick() {
  * display order, hidden ones included — a hidden section that keeps its slot comes back where it was.
  */
 export function saveHomeLayout(order: string[], hidden: string[]) {
-	personal.home = { order, hidden };
+	// Spread, not a fresh object: `seen` is written by the feed, not by the modal, and rebuilding
+	// `home` from the two lists the modal owns used to drop it.
+	personal.home = { ...personal.home, order, hidden };
 	savePersonal();
+}
+
+/** Remember the shelves this page of the feed carried, for Edit home. See `pl.noteSections`. */
+export function noteHomeSections(titles: string[]) {
+	if (pl.noteSections(personal, titles)) savePersonal();
 }
 
 /** Called from every card click app-wide, so only persist when the id was actually on the grid. */

@@ -22,6 +22,7 @@ import {
 	markSynced,
 	mergeSaved,
 	noteRecent,
+	noteSections,
 	orderLibrary,
 	placePick,
 	recentItems,
@@ -265,7 +266,7 @@ const range = (n: number, prefix: string) => Array.from({ length: n }, (_, i) =>
 
 	ok(keys(arrangeSections(secs('a', 'b', 'c'), p)) === 'a,b,c', 'no saved order leaves the feed alone');
 
-	p.home = { order: ['c', 'a'], hidden: ['a'] };
+	p.home = { order: ['c', 'a'], hidden: ['a'], seen: [] };
 	// Hidden sections still come back: the Edit modal lists them so they can be offered again.
 	ok(keys(arrangeSections(secs('a', 'b', 'c'), p)) === 'c,a,b', 'saved order first, the rest after');
 	ok(hiddenSections(p).has('a') && !hiddenSections(p).has('c'), 'hidden is read back as a set');
@@ -277,11 +278,12 @@ const range = (n: number, prefix: string) => Array.from({ length: n }, (_, i) =>
 // --- the arrangement survives a round trip, and a corrupt one degrades instead of throwing --------
 {
 	const p = empty();
-	p.home = { order: ['@recent', 'Listen again'], hidden: ['@forgotten'] };
+	p.home = { order: ['@recent', 'Listen again'], hidden: ['@forgotten'], seen: ['Listen again'] };
 	const back = hydrate(JSON.parse(JSON.stringify(p)));
 	// '@familiar' is slotted into an order saved before it existed, so it doesn't sink to the bottom.
 	ok(back.home.order.join() === '@recent,@familiar,Listen again', 'order survives persistence');
 	ok(back.home.hidden.join() === '@forgotten', 'hidden survives persistence');
+	ok(back.home.seen.join() === 'Listen again', 'so does the list of shelves home has ever shown');
 	ok(
 		hydrate({ home: { order: ['Listen again'], hidden: [] } }).home.order.join() ===
 			'Listen again,@familiar',
@@ -370,6 +372,23 @@ const range = (n: number, prefix: string) => Array.from({ length: n }, (_, i) =>
 	const bare: BrowseItem[] = [{ kind: 'playlist', id: 'VL1', title: 'Workout' }];
 	ok(freshen(stale, bare).thumbnail === 'old.jpg', 'a live row with no cover keeps the old one');
 	ok(freshen(stale, bare).subtitle === '14 tracks', 'same for a row with no subtitle');
+}
+
+// --- every shelf home has ever shown, so Edit home isn't bounded by how far you scrolled --------
+{
+	const p = empty();
+	ok(noteSections(p, ['Quick picks', 'Listen again']), 'the first page is all new');
+	ok(!noteSections(p, ['Listen again']), 'a page with nothing new writes nothing');
+	ok(noteSections(p, ['Listen again', 'Albums for you']), 'a later page adds only what is new');
+	ok(p.home.seen.join() === 'Albums for you,Quick picks,Listen again', 'newest first');
+	ok(!noteSections(p, ['', '']), 'a shelf YouTube sent untitled is not a section');
+	ok(noteSections(p, ['Dup', 'Dup']) && p.home.seen.filter((t) => t === 'Dup').length === 1,
+		'one page carrying the same title twice records it once');
+	// The cap is what keeps a shelf YouTube stopped sending from living in the modal forever.
+	for (let i = 0; i < 60; i++) noteSections(p, [`shelf ${i}`]);
+	ok(p.home.seen.length === 40, 'capped');
+	ok(p.home.seen[0] === 'shelf 59', 'and it is the stalest that goes, not the newest');
+	ok(!p.home.seen.includes('Quick picks'), 'the first shelves ever seen have aged out');
 }
 
 console.log('ok');

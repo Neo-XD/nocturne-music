@@ -51,8 +51,11 @@ export type Personal = {
 	 * suggest this again": a hand-added tile is unaffected, since `addPick` ignores the list.
 	 */
 	dismissedSeeds: string[];
-	/** How home is arranged: see `arrangeSections`. Both lists hold section keys. */
-	home: { order: string[]; hidden: string[] };
+	/**
+	 * How home is arranged: see `arrangeSections`. All three lists hold section keys. `seen` is
+	 * every shelf home has ever shown, so Edit home can list the ones the feed hasn't reached yet.
+	 */
+	home: { order: string[]; hidden: string[]; seen: string[] };
 };
 
 export function empty(): Personal {
@@ -63,7 +66,7 @@ export function empty(): Personal {
 		recent: {},
 		artists: {},
 		dismissedSeeds: [],
-		home: { order: [], hidden: [] }
+		home: { order: [], hidden: [], seen: [] }
 	};
 }
 
@@ -95,7 +98,7 @@ export function hydrate(raw: unknown): Personal {
 		const h = o.home as Partial<Personal['home']>;
 		const keys = (v: unknown) =>
 			Array.isArray(v) ? v.filter((k): k is string => typeof k === 'string') : [];
-		base.home = { order: keys(h.order), hidden: keys(h.hidden) };
+		base.home = { order: keys(h.order), hidden: keys(h.hidden), seen: keys(h.seen) };
 		// '@familiar' shipped after some users had already saved an arrangement, and an unranked key
 		// sorts to the bottom of the feed. Slot it where the code puts it, once.
 		if (base.home.order.length && !base.home.order.includes('@familiar')) {
@@ -324,6 +327,26 @@ export function arrangeSections<T extends { key: string }>(sections: T[], p: Per
 }
 
 export const hiddenSections = (p: Personal): Set<string> => new Set(p.home.hidden);
+
+/**
+ * Home arrives a page at a time, so at any moment the feed holds only the shelves the reader has
+ * scrolled to. Edit home lists sections, and listing only the loaded ones meant the modal showed
+ * five entries before a scroll and fifteen after one. Remember every shelf title the feed has ever
+ * rendered and the modal can offer all of them, whether or not this visit has fetched them yet.
+ *
+ * Returns whether anything was added, so a caller that runs on every page can skip the write.
+ *
+ * ponytail: newest-first, capped, so a shelf YouTube stops sending ages out instead of sitting in
+ * the modal forever. No timestamps — the cap is the only thing that reads the order.
+ */
+const MAX_SEEN = 40;
+export function noteSections(p: Personal, titles: string[]): boolean {
+	const have = new Set(p.home.seen);
+	const fresh = [...new Set(titles.filter((t) => t && !have.has(t)))];
+	if (!fresh.length) return false;
+	p.home.seen = [...fresh, ...p.home.seen].slice(0, MAX_SEEN);
+	return true;
+}
 
 // --- Recency + artist counts -------------------------------------------------------------------
 
