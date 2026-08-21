@@ -18,12 +18,14 @@
 	import {
 		Cancel01Icon,
 		Add01Icon,
+		DashboardSquare02Icon,
 		Edit01Icon,
 		PlayIcon,
 		MusicNote01Icon,
 		UserIcon,
 		ListRestartIcon
 	} from '@hugeicons/core-free-icons';
+	import SectionHeading from './SectionHeading.svelte';
 	import ShortcutPicker from './ShortcutPicker.svelte';
 	import { ON_REPEAT_ID } from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
@@ -94,9 +96,8 @@
 <svelte:window ondragend={() => (before = undefined)} />
 
 <section>
-	<div class="mb-3 flex items-baseline justify-between gap-3">
-		<div class="flex min-w-0 items-center gap-2">
-			<h2 class="font-heading text-lg font-semibold">Shortcuts</h2>
+	<SectionHeading title="Shortcuts" icon={DashboardSquare02Icon}>
+		{#snippet lead()}
 			{#if onEdit}
 				<!-- Labelled and outlined, not a bare glyph: this is the only entry point to rearranging
 				     home, and as an icon on its own nobody found it. The tooltip carries the scope the
@@ -110,7 +111,7 @@
 					Edit Home
 				</button>
 			{/if}
-		</div>
+		{/snippet}
 		{#if picks.length && picks.length < MAX_PICKS}
 			<!-- Adding is an action, not a tile: as a trailing "+" square it left a dashed hole at the
 			     end of the grid forever, and a ragged one whenever the last row was short. -->
@@ -122,7 +123,7 @@
 				Add
 			</button>
 		{/if}
-	</div>
+	</SectionHeading>
 
 	<div
 		role="group"

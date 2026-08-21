@@ -6,7 +6,8 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { UserLove02Icon, UserIcon } from '@hugeicons/core-free-icons';
+	import { UserLove02Icon, UserIcon, UserStar01Icon } from '@hugeicons/core-free-icons';
+	import SectionHeading from './SectionHeading.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import PlaylistMenu from './PlaylistMenu.svelte';
 	import * as api from '$lib/api';
@@ -120,7 +121,7 @@
 
 {#if loading ? ids.length >= MIN : artists.length >= MIN}
 	<section>
-		<h2 class="mb-3 font-heading text-lg font-semibold">Familiar Artists</h2>
+		<SectionHeading title="Familiar Artists" icon={UserStar01Icon} />
 		<div class="grid items-center gap-6 md:grid-cols-2 md:gap-10">
 			<div class="flex flex-col gap-1">
 				{#if loading}
@@ -217,7 +218,7 @@
 							<Skeleton class="h-full w-full rounded-full" />
 						{:else}
 							<button
-								class="h-full w-full cursor-pointer overflow-hidden rounded-full bg-muted shadow-sm transition-transform duration-200 ease-out hover:scale-105 hover:shadow-lg"
+								class="h-full w-full cursor-pointer overflow-hidden rounded-full bg-muted transition-transform duration-200 ease-out hover:scale-105"
 								title={a.name ?? 'Artist'}
 								aria-label={a.name ?? 'Artist'}
 								onclick={() => open(a)}

@@ -12,8 +12,10 @@
 		PlayIcon,
 		MusicNote01Icon,
 		UserIcon,
-		ListRestartIcon
+		ListRestartIcon,
+		ArrowTurnBackwardIcon
 	} from '@hugeicons/core-free-icons';
+	import SectionHeading from './SectionHeading.svelte';
 	import { ON_REPEAT_ID } from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
@@ -41,7 +43,7 @@
 </script>
 
 <section>
-	<h2 class="mb-3 font-heading text-lg font-semibold">Jump back in</h2>
+	<SectionHeading title="Jump back in" icon={ArrowTurnBackwardIcon} />
 	<!-- CSS columns, same idiom as Forgotten favourites: fills top-to-bottom, balances the last
 	     column itself, and needs no row count per breakpoint. -->
 	<div class="columns-1 gap-x-6 md:columns-2 xl:columns-3">

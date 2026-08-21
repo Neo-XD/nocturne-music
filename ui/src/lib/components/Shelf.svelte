@@ -1,29 +1,114 @@
 <script lang="ts">
-	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
+	// A horizontal shelf, drawn according to what it actually holds.
+	//
+	// Every shelf used to be the same row of square cards, which is exactly what YouTube Music does
+	// and the reason a home feed reads as one undifferentiated wall. A square of artwork is the right
+	// shape for an album and the wrong shape for everything else: a song needs its title and its
+	// artist, an artist needs a face at a size you can see, a playlist needs to look like more than
+	// one thing. So the shelf picks a form from the items:
+	//
+	//   songs     -> columns of readable, numbered rows you page through: no artwork worth showing,
+	//                all information
+	//   artists   -> tall poster frames with the name set on the photograph
+	//   playlists -> a cover with the stack behind it showing
+	//   anything else, or a mixed shelf -> the plain card, unchanged
+	//
+	// The rail, its arrows, the edge fades and the content-visibility budget are shared by all of
+	// them; only the slot changes.
+	import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/svelte';
+	import {
+		ArrowLeft01Icon,
+		ArrowRight01Icon,
+		CdIcon,
+		MusicNote01Icon,
+		PlayListIcon,
+		UserMultiple02Icon
+	} from '@hugeicons/core-free-icons';
 	import MediaCard from './MediaCard.svelte';
 	import CommunityCard from './CommunityCard.svelte';
+	import PortraitCard from './PortraitCard.svelte';
+	import StackCard from './StackCard.svelte';
+	import SectionHeading from './SectionHeading.svelte';
+	import TrackRow from './TrackRow.svelte';
+	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
+	import { asSong } from '$lib/browse';
+	import { openAddToPlaylist, openPlayer, playback } from '$lib/player.svelte';
 
 	let {
 		title,
 		items,
 		onMore,
 		community = false,
+		rich = true,
 		headingClass = 'font-heading text-lg font-semibold'
 	}: {
 		title?: string;
 		items: BrowseItem[];
-		/** Renders a "More" button in the header when provided. */
+		/** Renders a "See all" button in the header when provided. */
 		onMore?: () => void;
 		/**
-		 * Community playlist cards: three per row at most, stretching to fill the width instead of
+		 * Community playlist cards: four per row at most, stretching to fill the width instead of
 		 * fitting more cards as the window grows. The arrows page through the rest.
 		 */
 		community?: boolean;
-		/** Artist pages use text-xl font-bold; home uses the default. */
+		/** Opt out of the per-kind forms and render plain cards. */
+		rich?: boolean;
+		/** Artist and album pages use text-xl font-bold; home uses the default. */
 		headingClass?: string;
 	} = $props();
+
+	// A shelf is only worth a form of its own when it's overwhelmingly one kind of thing. Below the
+	// threshold it's a mixed bag ("Listen again"), and the plain card is the honest way to draw it.
+	const MOSTLY = 0.75;
+	type Mode = 'song' | 'album' | 'artist' | 'playlist' | 'card';
+	const mode = $derived.by<Mode>(() => {
+		if (community || !rich || !items.length) return 'card';
+		const counts = new Map<string, number>();
+		for (const i of items) counts.set(i.kind, (counts.get(i.kind) ?? 0) + 1);
+		const [kind, n] = [...counts].sort((a, b) => b[1] - a[1])[0];
+		return n / items.length >= MOSTLY ? (kind as Mode) : 'card';
+	});
+
+	const ICONS: Record<Mode, IconSvgElement | undefined> = {
+		song: MusicNote01Icon,
+		album: CdIcon,
+		artist: UserMultiple02Icon,
+		playlist: PlayListIcon,
+		card: undefined
+	};
+
+	// Song mode: four rows to a column, paged sideways. Twelve legible tracks per screenful against
+	// the six anonymous squares that fitted before. The odd non-song in a song shelf is dropped
+	// rather than drawn as a row that can't be queued with the rest.
+	const ROWS = 4;
+	const songs = $derived(mode === 'song' ? items.filter((i) => i.kind === 'song').map(asSong) : []);
+	const columns = $derived(
+		Array.from({ length: Math.ceil(songs.length / ROWS) }, (_, c) =>
+			songs.slice(c * ROWS, c * ROWS + ROWS)
+		)
+	);
+	// Clicking any row starts there and queues the whole shelf, so a shelf plays as the set it is.
+	const play = (start: number) => {
+		openPlayer();
+		return api.playPlaylist(songs, start, undefined, title);
+	};
+
+	// Slot width per form, and the height the rail reserves before it has been laid out.
+	const SLOT: Record<Mode, string> = {
+		song: 'basis-full sm:basis-1/2 xl:basis-1/3',
+		album: 'w-40',
+		artist: 'w-40',
+		playlist: 'w-44',
+		card: 'w-40'
+	};
+	const HEIGHT: Record<Mode, string> = {
+		song: '17rem',
+		album: '17.5rem',
+		artist: '17.5rem',
+		playlist: '17.5rem',
+		card: '17.5rem'
+	};
 
 	let row = $state<HTMLDivElement | null>(null);
 	let canLeft = $state(false);
@@ -55,35 +140,14 @@
 <!-- content-visibility: a home feed grows to hundreds of cards and WebKit keeps every one of them in
      style, layout and paint. Because it rasterizes in tiles, one card's hover repaint re-rasterizes
      the images around it, so hovering gets slower the further you scroll. Skipping off-screen
-     shelves caps that at a screenful. `auto 17.5rem` is a shelf's height (heading + w-40 row); the
-     `auto` keyword swaps in the real size once measured, so the scrollbar stays put. -->
-<section class="[content-visibility:auto] [contain-intrinsic-size:auto_17.5rem]">
+     shelves caps that at a screenful. The intrinsic size is a shelf of this form (heading + row);
+     the `auto` keyword swaps in the real size once measured, so the scrollbar stays put. -->
+<section
+	class="[content-visibility:auto]"
+	style="contain-intrinsic-size: auto {HEIGHT[mode]};"
+>
 	{#if title || onMore}
-		<div class="mb-3 flex items-baseline justify-between gap-3">
-			<!-- The title is the same navigation as "See all": a shelf header is a big, obvious click
-			     target and every music app treats it as one. "See all" stays visible so the affordance
-			     doesn't depend on hovering to discover it. -->
-			{#if title && onMore}
-				<button
-					class="min-w-0 cursor-pointer text-left hover:underline"
-					onclick={onMore}
-					title="See all {title}"
-				>
-					<h2 class="{headingClass} truncate">{title}</h2>
-				</button>
-			{:else if title}
-				<h2 class="{headingClass} truncate">{title}</h2>
-			{/if}
-			{#if onMore}
-				<button
-					class="flex shrink-0 cursor-pointer items-center gap-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-					onclick={onMore}
-				>
-					See all
-					<HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" />
-				</button>
-			{/if}
-		</div>
+		<SectionHeading title={title ?? ''} icon={ICONS[mode]} {onMore} {headingClass} />
 	{/if}
 	<!-- Measure on pointer enter, because a shelf skipped by content-visibility has no layout at
 	     mount: scrollWidth reads 0 and the arrows never appear. They only show on hover, so measuring
@@ -91,26 +155,59 @@
 	     An attachment rather than onpointerenter: the handler doesn't make this div interactive. -->
 	<div class="group/shelf relative" {@attach measureOnEnter}>
 		<div
-			class="flex snap-x overflow-x-auto pb-2 {community ? 'gap-3' : 'gap-2'}"
+			class="flex snap-x overflow-x-auto pb-2 {mode === 'song'
+				? 'gap-0'
+				: community
+					? 'gap-3'
+					: 'gap-2'}"
 			bind:this={row}
 			onscroll={update}
 		>
-			{#each items as item, i (item.id + ':' + i)}
-				<!-- A community shelf is playlists, but don't stretch a stray song/album card to a third
-				     of the row if one ever shows up — it keeps the plain card and its width. -->
-				{@const rich = community && item.kind === 'playlist'}
-				<div
-					class="shrink-0 snap-start {rich
-						? 'basis-full sm:basis-[calc((100%-0.75rem)/2)] lg:basis-[calc((100%-1.5rem)/3)]'
-						: 'w-40'}"
-				>
-					{#if rich}
-						<CommunityCard {item} />
-					{:else}
-						<MediaCard {item} />
-					{/if}
-				</div>
-			{/each}
+			{#if mode === 'song'}
+				<!-- A rule down each column but the first: the same editorial device as the heading, and
+				     what makes a paged block of rows read as columns rather than one long list. -->
+				{#each columns as col, c (c)}
+					<div class="min-w-0 shrink-0 snap-start {SLOT.song} {c ? 'border-l pl-4' : ''} pr-4">
+						{#each col as song, r (song.video_id + ':' + r)}
+							<TrackRow
+								{song}
+								compact
+								index={c * ROWS + r}
+								active={playback.now?.videoId === song.video_id}
+								onplay={() => play(c * ROWS + r)}
+								onAdd={() => openAddToPlaylist(song)}
+							/>
+						{/each}
+					</div>
+				{/each}
+			{:else}
+				{#each items as item, i (item.id + ':' + i)}
+					<!-- A shelf keeps its form even where one item doesn't fit it: a stray song in an
+					     artist shelf gets the plain card and its width, not a poster it isn't. -->
+					{@const own = community ? item.kind === 'playlist' : item.kind === mode}
+					<!-- min-w-0: a flex item's automatic minimum size is its min-content, which overrides
+					     the basis, so without this a card with a long title grows past its slot. -->
+					<div
+						class="min-w-0 shrink-0 snap-start {own
+							? community
+								? 'basis-full sm:basis-[calc((100%-0.75rem)/2)] lg:basis-[calc((100%-2.25rem)/4)]'
+								: SLOT[mode]
+							: 'w-40'}"
+					>
+						{#if !own}
+							<MediaCard {item} />
+						{:else if community}
+							<CommunityCard {item} />
+						{:else if mode === 'artist'}
+							<PortraitCard {item} />
+						{:else if mode === 'playlist'}
+							<StackCard {item} />
+						{:else}
+							<MediaCard {item} />
+						{/if}
+					</div>
+				{/each}
+			{/if}
 		</div>
 		<!-- Fades, not just arrows: a card sliced by the edge should read as "the row continues", which
 		     is also what makes the arrow legible sitting on top of artwork. Both are pointer-transparent

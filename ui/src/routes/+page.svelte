@@ -54,9 +54,14 @@
 			.map((r) => freshen(r, library.items))
 	);
 
+	// Outlined at rest, filled with the accent when on. Grey-on-grey pills that go black when
+	// selected are YouTube Music's chip row exactly, and they carry no colour of the app at all;
+	// this way the one active filter is the only saturated thing above the feed.
 	const chipClass = (active: boolean) =>
-		`shrink-0 cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-			active ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-muted/70'
+		`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
+			active
+				? 'border-primary bg-primary text-primary-foreground'
+				: 'border-border text-muted-foreground hover:border-foreground/25 hover:text-foreground'
 		}`;
 
 	// "Forgotten favourites" is pulled out of the feed and rendered as a list above it (see the
@@ -294,7 +299,7 @@
 		<div class="sticky top-0 z-20 border-b bg-background px-6 pt-2.5" aria-hidden="true">
 			<div class="flex gap-2 overflow-hidden pb-2">
 				{#each ['w-10', 'w-16', 'w-20', 'w-14', 'w-24', 'w-16'] as w, i (i)}
-					<Skeleton class="h-8 shrink-0 rounded-lg {w}" />
+					<Skeleton class="h-8 shrink-0 rounded-full {w}" />
 				{/each}
 			</div>
 		</div>

@@ -80,11 +80,14 @@
 
 <div
 	bind:this={root}
-	class="group flex h-full flex-col gap-2 rounded-2xl border bg-card/40 p-2.5 transition-colors hover:border-foreground/20 hover:bg-card"
+	class="group flex h-full min-w-0 flex-col gap-2 rounded-2xl border bg-card/40 p-2.5 transition-colors hover:border-foreground/20 hover:bg-card"
 >
 	<button class="block w-full min-w-0 cursor-pointer" onclick={open} title={item.title}>
+		<!-- No shadow at rest, and none faded in on hover: transitioning shadow-sm to shadow-lg makes
+		     WebKit compute a different gaussian blur every frame, for every card in the repainted
+		     tile. The card's border and background already answer the hover. -->
 		<div
-			class="relative mx-auto aspect-square w-full max-w-44 overflow-hidden rounded-xl bg-muted shadow-sm transition-shadow duration-300 group-hover:shadow-lg"
+			class="relative mx-auto aspect-square w-full max-w-44 overflow-hidden rounded-xl bg-muted"
 		>
 			{#if mosaic.length === 4}
 				<div class="grid h-full w-full grid-cols-2 grid-rows-2">
@@ -114,11 +117,11 @@
 		{/if}
 	</button>
 
-	<div class="flex flex-col gap-0.5">
+	<div class="flex min-w-0 flex-col gap-0.5">
 		{#if tracks.length}
 			{#each tracks as t, i (t.video_id + ':' + i)}
 				<button
-					class="flex cursor-pointer items-center gap-2 rounded-lg p-1 text-left transition-colors hover:bg-accent/10"
+					class="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg p-1 text-left transition-colors hover:bg-accent/10"
 					onclick={() => playFrom(item, pl!.items, i, item.id, undefined, pl!.continuation)}
 					title={t.artists ? `${t.title} — ${t.artists}` : t.title}
 				>
@@ -132,7 +135,10 @@
 					{:else}
 						<div class="h-8 w-8 shrink-0 rounded-md bg-muted"></div>
 					{/if}
-					<span class="min-w-0">
+					<!-- flex-1, not a bare min-w-0: with flex-basis left at auto the wrapper asks for its
+					     content's width and a long title pushes the row wide instead of ellipsing. The
+					     skeleton rows below always had this; the real ones did not. -->
+					<span class="min-w-0 flex-1">
 						<span class="block truncate text-xs font-medium">{t.title}</span>
 						<span class="block truncate text-[0.6875rem] text-muted-foreground">{t.artists}</span>
 					</span>
