@@ -6,7 +6,7 @@ step just emits `cargo:rustc-link-lib=mpv` (via `libmpv2-sys`), so "getting it t
 "putting libmpv's import library on the linker's search path"; "getting it to run" is "shipping the
 matching shared library next to the app."
 
-Bundle targets are set per platform: `tauri.conf.json` → `rpm` (Linux), `tauri.windows.conf.json` →
+Bundle targets are set per platform: `tauri.conf.json` → `deb` + `rpm` (Linux), `tauri.windows.conf.json` →
 `nsis` + `msi`, `tauri.macos.conf.json` → `app` + `dmg`. Tauri auto-merges the platform file over
 the base for the current OS.
 
@@ -19,13 +19,21 @@ the base for the current OS.
 
 ---
 
-## Fedora / Linux (primary, dev target)
+## Linux (Fedora / Debian / Ubuntu)
 
+### Fedora / RHEL
 ```bash
 sudo dnf install mpv-libs mpv-libs-devel webkit2gtk4.1-devel \
   gcc gcc-c++ make openssl-devel librsvg2-devel   # + standard Tauri build deps
 cd ui && pnpm install && pnpm build
-cargo tauri build            # → target/release/bundle/rpm/limusic-*.rpm
+cargo tauri build            # → target/release/bundle/rpm/limusic-*.rpm & deb/limusic_*.deb
+```
+
+### Ubuntu / Debian
+```bash
+sudo apt install libmpv-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+cd ui && pnpm install && pnpm build
+cargo tauri build            # → target/release/bundle/deb/limusic_*.deb
 ```
 
 - libmpv is system-provided (`mpv-libs`), found on the default linker path — no bundling needed.

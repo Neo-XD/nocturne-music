@@ -7,13 +7,14 @@ export const RELEASES_URL = `${REPO_URL}/releases/latest`
 export interface RepoInfo {
   version: string | null
   stars: number | null
+  deb: string | null
   rpm: string | null
   appimage: string | null
   exe: string | null
   msi: string | null
 }
 
-const empty: RepoInfo = { version: null, stars: null, rpm: null, appimage: null, exe: null, msi: null }
+const empty: RepoInfo = { version: null, stars: null, deb: null, rpm: null, appimage: null, exe: null, msi: null }
 
 /* Fetches the latest release + star count once on mount. Everything degrades to the
    GitHub releases page if the API is unreachable or rate-limited. */
@@ -30,6 +31,7 @@ export function useGitHub(): RepoInfo {
         setInfo(prev => ({
           ...prev,
           version: d.tag_name,
+          deb: find(d.assets, n => n.endsWith('.deb')),
           rpm: find(d.assets, n => n.endsWith('.rpm')),
           appimage: find(d.assets, n => n.endsWith('.AppImage')),
           exe: find(d.assets, n => n.endsWith('.exe')),

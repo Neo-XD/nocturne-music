@@ -36,7 +36,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["rpm", "appimage"],
+    "targets": ["deb", "rpm", "appimage"],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/icon.png",
@@ -51,6 +51,9 @@
       "debugApplicationIdSuffix": ".debug"
     },
     "linux": {
+      "deb": {
+        "depends": ["libayatana-appindicator3-1 | libappindicator3-1", "libmpv2 | libmpv1"]
+      },
       "rpm": {
         "depends": ["libappindicator-gtk3", "mpv-libs"]
       }
