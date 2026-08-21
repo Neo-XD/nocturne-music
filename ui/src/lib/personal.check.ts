@@ -13,6 +13,7 @@ import {
 	empty,
 	firstArtist,
 	forgetIds,
+	freshen,
 	hiddenSections,
 	hydrate,
 	interleave,
@@ -351,6 +352,24 @@ const range = (n: number, prefix: string) => Array.from({ length: n }, (_, i) =>
 	ok(topArtistIds(p).join() === 'UCb,UCa', 'ordered by plays, name-keyed entries dropped');
 	ok(topArtistIds(p, 1).join() === 'UCb', 'capped at n');
 	ok(topArtistIds(empty()).length === 0, 'no listening history is not an error');
+}
+
+// --- stored cards follow the live library ------------------------------------------------------
+{
+	const stale = { ...item('VL1'), subtitle: '14 tracks', thumbnail: 'old.jpg', lastUsedAt: 5 };
+	const live: BrowseItem[] = [
+		{ kind: 'playlist', id: 'VL1', title: 'Workout', subtitle: '15 tracks', thumbnail: 'new.jpg' }
+	];
+	const fresh = freshen(stale, live);
+	ok(fresh.subtitle === '15 tracks', 'the live track count wins over the snapshot');
+	ok(fresh.title === 'Workout' && fresh.thumbnail === 'new.jpg', 'so do the title and the cover');
+	ok(fresh.lastUsedAt === 5, 'and the tile keeps everything the library knows nothing about');
+	ok(freshen(stale, []) === stale, 'a card the library has no row for is left alone');
+	// On Repeat and local albums are drawn from their own store; a row without art must not blank
+	// a snapshot that has some.
+	const bare: BrowseItem[] = [{ kind: 'playlist', id: 'VL1', title: 'Workout' }];
+	ok(freshen(stale, bare).thumbnail === 'old.jpg', 'a live row with no cover keeps the old one');
+	ok(freshen(stale, bare).subtitle === '14 tracks', 'same for a row with no subtitle');
 }
 
 console.log('ok');

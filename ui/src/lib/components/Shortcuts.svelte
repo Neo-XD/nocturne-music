@@ -29,8 +29,8 @@
 	import type { BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import { openItem, playItem } from '$lib/browse';
-	import { personal, placePick, removePick } from '$lib/player.svelte';
-	import { MAX_PICKS } from '$lib/personal';
+	import { library, personal, placePick, removePick } from '$lib/player.svelte';
+	import { freshen, MAX_PICKS } from '$lib/personal';
 	import { getDragItem, isDragItem, setDragItem } from '$lib/dnd';
 
 	// The page owns the Edit-home modal; this section only lends it a place to be opened from. Its
@@ -38,7 +38,9 @@
 	// rearranges the rest of the page lives here rather than following a section that can be hidden.
 	let { onEdit }: { onEdit?: () => void } = $props();
 
-	const picks = $derived(personal.picks);
+	// Tiles are stored as a snapshot of the card, so a playlist that has gained tracks since it was
+	// pinned would keep showing the old count; `freshen` overlays the live library row (#67).
+	const picks = $derived(personal.picks.map((p) => freshen(p, library.items)));
 	let picking = $state(false);
 	// Where a drop would land: the id of the tile it goes in front of, `null` for the end of the grid,
 	// `undefined` when no drag of ours is over the section at all.

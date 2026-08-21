@@ -18,9 +18,10 @@
 	import TrackRowSkeleton from '$lib/components/TrackRowSkeleton.svelte';
 	import * as api from '$lib/api';
 	import type { BrowseItem, HomeChip, HomePage, HomeSection } from '$lib/api';
-	import { auth, personal, playback, seedOnRepeatPick, toast } from '$lib/player.svelte';
+	import { auth, library, personal, playback, seedOnRepeatPick, toast } from '$lib/player.svelte';
 	import {
 		arrangeSections,
+		freshen,
 		hiddenSections,
 		interleave,
 		recentItems,
@@ -44,10 +45,13 @@
 	// two different shapes. Recents earn their space by being what Shortcuts *isn't*. Nine survivors
 	// = three full columns; the window is generous because most of it gets filtered away.
 	const pinned = $derived(new Set(personal.picks.map((p) => p.id)));
+	// Same snapshot problem as the Shortcuts tiles: the stored card is what it looked like when it
+	// was last played from, so the live library row wins where there is one (#67).
 	const recent = $derived(
 		recentItems(personal, 100)
 			.filter((r) => !pinned.has(r.id))
 			.slice(0, 9)
+			.map((r) => freshen(r, library.items))
 	);
 
 	const chipClass = (active: boolean) =>

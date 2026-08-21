@@ -198,6 +198,28 @@ export function touchPick(p: Personal, id: string, now = Date.now()): boolean {
 	return true;
 }
 
+/**
+ * A stored card read back against the live library list. A Shortcuts tile and a recent both keep the
+ * card as it looked the day it went in, so a playlist that has since gained tracks or changed cover
+ * kept showing the old count right next to a library grid showing the new one (#67). The library
+ * list is fetched and every add/remove patches it, so it wins wherever it holds the same id.
+ * Anything the library doesn't know (On Repeat, a local album, something never saved) keeps its
+ * snapshot, which is also what makes those tiles render offline.
+ *
+ * ponytail: library playlists and liked music, because those are what change under you. Feed it
+ * `local.albums` too if a rescan ever leaves a local tile's count stale in the same way.
+ */
+export function freshen<T extends BrowseItem>(item: T, live: BrowseItem[]): T {
+	const row = live.find((i) => i.id === item.id);
+	if (!row) return item;
+	return {
+		...item,
+		title: row.title,
+		subtitle: row.subtitle ?? item.subtitle,
+		thumbnail: row.thumbnail ?? item.thumbnail
+	};
+}
+
 // --- Saved library ------------------------------------------------------------------------------
 
 /** Save or unsave a playlist/album/artist. Returns whether it is saved now. */
