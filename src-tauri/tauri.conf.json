@@ -36,7 +36,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["rpm", "appimage"],
+    "targets": ["deb", "rpm", "appimage"],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/icon.png",
@@ -51,6 +51,9 @@
       "debugApplicationIdSuffix": ".debug"
     },
     "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libmpv2", "libc6 (>= 2.39)"]
+      },
       "rpm": {
         "depends": ["libappindicator-gtk3", "mpv-libs"]
       }

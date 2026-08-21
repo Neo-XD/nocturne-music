@@ -294,6 +294,7 @@ function Download({ info, os }: { info: ReturnType<typeof useGitHub>; os: string
       detected: os === 'linux',
       links: [
         { label: '.AppImage — any distro', href: info.appimage },
+        { label: '.deb — Ubuntu / Debian', href: info.deb },
         { label: '.rpm — Fedora / RHEL', href: info.rpm },
       ],
       note: 'The AppImage updates itself automatically.',

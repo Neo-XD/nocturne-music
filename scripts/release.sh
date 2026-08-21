@@ -8,13 +8,16 @@
 # a failed rpm build leaves a published release with no rpm on it, recoverable with one
 # `gh release upload`, and the script tells you the exact command if it happens.
 #
-# The AppImage is NOT built here. An AppImage inherits its build host's glibc floor, and this
-# machine is Fedora (newest glibc in existence) — one built here starts nowhere else. It is built by
-# .github/workflows/linux-release.yml on a pinned older runner, which also attaches it, adds the
-# linux-x86_64 entry to latest.json and marks the release "Latest". Windows and macOS do the same
-# for their own entries. So this script publishes the release NOT-latest on purpose: until CI has
-# attached the binaries, the updater endpoint (.../releases/latest/download/latest.json) keeps
-# resolving to the previous, complete manifest instead of one with no platforms in it.
+# Neither the AppImage nor the .deb is built here, and for the same reason: both inherit their
+# build host's glibc floor, and this machine is Fedora (the newest glibc in existence), so one built
+# here starts nowhere else. The deb is the worse of the two, because Tauri writes its Depends
+# verbatim from tauri.conf.json and never emits a libc6 constraint: a Fedora-built deb installs
+# cleanly on Debian and then dies at startup on a missing GLIBC symbol. Both are built by
+# .github/workflows/linux-release.yml on a pinned ubuntu-24.04 runner, which also attaches them,
+# adds the linux-x86_64 entry to latest.json and marks the release "Latest". Windows and macOS do
+# the same for their own entries. So this script publishes the release NOT-latest on purpose: until
+# CI has attached the binaries, the updater endpoint (.../releases/latest/download/latest.json)
+# keeps resolving to the previous, complete manifest instead of one with no platforms in it.
 #
 # Usage:  scripts/release.sh ["release notes"]
 # Bump "version" in src-tauri/tauri.conf.json AND Cargo.toml BEFORE running (tauri.conf.json is the
@@ -211,8 +214,8 @@ has_platform windows-x86_64 || { echo "    MISSING: latest.json has no windows-x
 has_platform darwin-aarch64 || { echo "    MISSING: latest.json has no darwin-aarch64 entry (Mac users get no update)"; OK=0; }
 
 if [ "$OK" = 1 ] && [ "$CI_OK" = 1 ]; then
-  echo "==> $TAG is live and complete: rpm + AppImage + Windows installers + macOS dmg, all three"
-  echo "    platforms in latest.json, marked Latest. Installed users will be prompted."
+  echo "==> $TAG is live and complete: rpm + deb + AppImage + Windows installers + macOS dmg, all"
+  echo "    three platforms in latest.json, marked Latest. Installed users will be prompted."
 else
   echo >&2
   echo "==> $TAG IS PUBLISHED BUT INCOMPLETE. Check what failed, then re-dispatch that workflow:" >&2

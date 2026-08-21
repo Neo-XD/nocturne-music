@@ -1,6 +1,6 @@
 // Auto-update via Tauri's updater plugin. Checks a signed latest.json on GitHub Releases; the
 // startup check is silent unless an update exists, the Settings check always reports a result.
-// Only self-updates the AppImage build on Linux (Tauri limitation) — the .rpm can't self-update.
+// Only self-updates the AppImage build on Linux (Tauri limitation) — .deb and .rpm packages can't self-update.
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { toast } from './player.svelte';
