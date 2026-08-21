@@ -18,7 +18,8 @@
 		CheckmarkCircle01Icon,
 		Loading03Icon,
 		HotspotOfflineIcon,
-		UserGroup02Icon
+		UserGroup02Icon,
+		Link04Icon
 	} from '@hugeicons/core-free-icons';
 	import LastFmIcon from './LastFmIcon.svelte';
 	import DiscordIcon from './DiscordIcon.svelte';
@@ -173,6 +174,17 @@
 		     <header> only, so these children are ordinary buttons — don't add the attribute here. -->
 		<AccountMenu />
 		<div class="mx-1.5 h-4 w-px bg-border"></div>
+
+		<!-- Paste a YouTube Music link and go to it: the only way into a playlist that is shared by
+		     link and never appears in search or the library (#63). -->
+		<button
+			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+			onclick={() => (ui.linkOpen = true)}
+			title="Open link"
+			aria-label="Open link"
+		>
+			<HugeiconsIcon icon={Link04Icon} class="h-4 w-4" />
+		</button>
 
 		<!-- Opens the same modal as the home hero's button (one dialog, mounted in +layout). -->
 		<button

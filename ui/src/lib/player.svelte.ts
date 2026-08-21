@@ -653,6 +653,7 @@ export const ui = $state({
 	toast: null as Toast | null,
 	settingsOpen: false, // the settings modal
 	ltOpen: false, // the Listen Together modal
+	linkOpen: false, // the "open a pasted link" modal
 	channelPickerOpen: false,
 	channelPickerRequired: false, // true while a multi-channel login is not finalized yet
 	channelIdentities: [] as AccountIdentity[],

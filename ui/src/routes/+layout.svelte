@@ -26,6 +26,7 @@
 	import ShareDialog from '$lib/components/ShareDialog.svelte';
 	import ChannelPicker from '$lib/components/ChannelPicker.svelte';
 	import ListenTogether from '$lib/components/ListenTogether.svelte';
+	import LinkDialog from '$lib/components/LinkDialog.svelte';
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -131,6 +132,7 @@
 	<SettingsDialog />
 	<ChannelPicker />
 	<ListenTogether />
+	<LinkDialog />
 
 	<!-- The two notification banners below run at z-[100]. Dialogs and menus sit at z-50 and portal to
 	     <body>, so a z-50 banner loses the tie on DOM order and hides behind an open modal. -->
