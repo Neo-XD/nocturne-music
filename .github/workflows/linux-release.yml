@@ -342,7 +342,12 @@ jobs:
       # us that list is right, so let it: install the real package on the oldest release the floor
       # claims to support and resolve every DT_NEEDED against whatever apt pulled in. This catches a
       # too-new glibc too, since ldd reports a missing GLIBC_x.yz the same way.
+      # continue-on-error, and the attach step below skips the upload if this failed. The AppImage
+      # is how every Linux user gets updates; the deb is a convenience. A broken deb must not take
+      # the release down with it, so a failure here costs the deb and nothing else.
       - name: Verify the .deb installs and resolves its libraries
+        id: deb_check
+        continue-on-error: true
         run: |
           set -euo pipefail
           DEB="$(ls target/release/bundle/deb/limusic_${VERSION}_*.deb | head -1)"
@@ -405,12 +410,16 @@ jobs:
 
           # The deb rides along unsigned and stays out of latest.json: Tauri's updater has no deb
           # support, so there is nothing for a signature to be checked by. Debian users update by
-          # downloading the next one.
+          # downloading the next one. Skipped entirely if it failed its check, which is a warning
+          # rather than an error: the release is complete without it.
           DEB="$(ls target/release/bundle/deb/limusic_${VERSION}_*.deb 2>/dev/null | head -1 || true)"
-          if [ -z "$DEB" ]; then
-            echo "::error::no deb for $VERSION"; find target/release/bundle -maxdepth 2; exit 1
+          if [ "${{ steps.deb_check.outcome }}" != "success" ]; then
+            echo "::warning::the deb failed its install check and was NOT attached — fix bundle.linux.deb.depends and re-dispatch"
+          elif [ -z "$DEB" ]; then
+            echo "::warning::no deb for $VERSION in target/release/bundle/deb — nothing attached"
+          else
+            retry 3 gh release upload "$TAG" "$DEB" --clobber --repo "$GITHUB_REPOSITORY"
           fi
-          retry 3 gh release upload "$TAG" "$DEB" --clobber --repo "$GITHUB_REPOSITORY"
 
           # latest.json is the one thing both release workflows write, and they now run in parallel.
           # There is no compare-and-swap on release assets, so: merge, upload, read back, and retry
