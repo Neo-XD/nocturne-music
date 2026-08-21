@@ -37,7 +37,12 @@
 		type Custom,
 		type ThemeId
 	} from '$lib/theme.svelte';
-	import { updateState, checkForUpdatesInteractive, installUpdate } from '$lib/updater.svelte';
+	import {
+		updateState,
+		checkForUpdatesInteractive,
+		installUpdate,
+		openDownloadPage
+	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
 	type TabId = 'general' | 'themes' | 'playback' | 'data' | 'about';
@@ -741,14 +746,19 @@
 						<div class="min-w-0">
 							<div class="font-medium">Updates</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								{#if updateState.available}
+								{#if updateState.available && !updateState.canInstall}
+									Version {updateState.available.version} is available. This build was installed by a
+									package manager, so update it the same way.
+								{:else if updateState.available}
 									Version {updateState.available.version} is available.
 								{:else}
 									Check GitHub for a newer release.
 								{/if}
 							</p>
 						</div>
-						{#if updateState.available}
+						{#if updateState.available && !updateState.canInstall}
+							<Button size="sm" onclick={openDownloadPage}>Download</Button>
+						{:else if updateState.available}
 							<Button size="sm" onclick={installUpdate} disabled={updateState.installing}>
 								{updateState.installing ? 'Updating…' : 'Update now'}
 							</Button>

@@ -1236,6 +1236,32 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     Ok(CACHE.get_or_init(|| notes).clone())
 }
 
+/// Whether this build can install an update itself, or only point the user at the download.
+///
+/// Tauri's Linux updater knows one trick: rewrite an AppImage in place. It takes the path from
+/// `Env::appimage` and, when that is unset, falls back to `current_exe()` and writes the downloaded
+/// AppImage bytes over whatever it finds there. On the `.rpm` and on distro packages (the AUR's
+/// `limusic-bin`) that is a package-manager-owned `/usr/bin/limusic-app`: it fails on permissions
+/// rather than doing damage, but offering the button at all is a lie. Those users update through
+/// their package manager, so the UI shows them a download link instead.
+///
+/// Reads the same `Env::appimage` the updater plugin decides on, so the two cannot disagree.
+#[tauri::command]
+pub fn can_self_update(app: tauri::AppHandle) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use tauri::Manager;
+        app.env().appimage.is_some()
+    }
+    // Windows runs the NSIS installer and macOS swaps the .app bundle; both work however the app
+    // was installed.
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        true
+    }
+}
+
 /// Open a link from the UI in the real browser. An `<a href>` inside the webview would navigate
 /// the app itself off the SPA, with no way back.
 #[tauri::command]

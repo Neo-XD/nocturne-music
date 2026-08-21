@@ -33,7 +33,12 @@
 	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
-	import { updateState, installUpdate, checkForUpdatesQuiet } from '$lib/updater.svelte';
+	import {
+		updateState,
+		installUpdate,
+		openDownloadPage,
+		checkForUpdatesQuiet
+	} from '$lib/updater.svelte';
 
 	let { children } = $props();
 	// Queue and lyrics toggle independently and both float over the page rather than docking into
@@ -142,9 +147,15 @@
 			class="fixed bottom-24 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-lg border bg-card px-4 py-2 text-sm shadow-lg"
 		>
 			<span>Update available — v{updateState.available.version}</span>
-			<Button size="sm" onclick={installUpdate} disabled={updateState.installing}>
-				{updateState.installing ? 'Updating…' : 'Update now'}
-			</Button>
+			{#if updateState.canInstall}
+				<Button size="sm" onclick={installUpdate} disabled={updateState.installing}>
+					{updateState.installing ? 'Updating…' : 'Update now'}
+				</Button>
+			{:else}
+				<!-- Packaged build (.rpm, AUR): the updater can only rewrite an AppImage, so send them
+				     to the releases page and let their package manager do it. -->
+				<Button size="sm" onclick={openDownloadPage}>Download</Button>
+			{/if}
 			{#if !updateState.installing}
 				<button
 					class="text-muted-foreground hover:text-foreground"
