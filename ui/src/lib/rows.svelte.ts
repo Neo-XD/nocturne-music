@@ -23,6 +23,7 @@ export function rowScroller() {
 	let scrollTop = $state(0);
 	let viewportPx = $state(0);
 	let rowPx = $state(ROW_PX);
+	let offsetPx = $state(0);
 
 	return {
 		get scrollTop() {
@@ -33,6 +34,13 @@ export function rowScroller() {
 		},
 		get rowPx() {
 			return rowPx;
+		},
+		/**
+		 * Distance from the container's scroll origin down to the rows, px: 0 unless the container
+		 * holds something above them (a page header that scrolls away) marked `data-rows`.
+		 */
+		get offsetPx() {
+			return offsetPx;
 		},
 		attach: (node: HTMLElement) => {
 			const read = () => {
@@ -46,6 +54,13 @@ export function rowScroller() {
 				// drawn height in one step and cannot then oscillate between the two.
 				const h = node.querySelector('[data-row]')?.getBoundingClientRect().height ?? 0;
 				if (h > rowPx) rowPx = h;
+				// Where row 0 sits, for a container that scrolls a header away above the rows. Latest,
+				// not largest: the header genuinely changes height (expanding a description), and a
+				// stale offset would put the window in the wrong place.
+				const rows = node.querySelector('[data-rows]');
+				offsetPx = rows
+					? rows.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop
+					: 0;
 			};
 			read();
 			// Again after a frame: the first read can land before any row has been rendered, where

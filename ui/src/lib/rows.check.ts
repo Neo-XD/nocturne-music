@@ -62,6 +62,19 @@ ok(past.end === TOTAL, 'end clamps to the list');
 ok(past.padBottom === 0, 'padding never goes negative');
 ok(past.start <= TOTAL, 'start clamps to the list');
 
+// Negative, which is what a scrolling page header produces: the caller subtracts the offset of
+// row 0, so while the header is still on screen the window is asked for a position above the list.
+for (const top of [-1200, -56, -1]) {
+	const w = rowWindow(top, VIEWPORT, TOTAL);
+	ok(w.start === 0 && w.padTop === 0, `nothing reserved above row 0 at scrollTop=${top}`);
+	ok(
+		w.padTop + (w.end - w.start) * ROW_PX + w.padBottom === TOTAL * ROW_PX,
+		`reserved height is constant at scrollTop=${top}`
+	);
+	// Whatever of the viewport hangs below row 0 is still covered.
+	ok(w.end > Math.floor((top + VIEWPORT) / ROW_PX), `covers what is on screen at scrollTop=${top}`);
+}
+
 // A list shorter than the viewport renders whole, with no padding at all.
 const tiny = rowWindow(0, VIEWPORT, 3);
 ok(tiny.start === 0 && tiny.end === 3, 'a short list renders in full');

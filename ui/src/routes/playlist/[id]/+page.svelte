@@ -493,7 +493,11 @@
 	// A Liked Songs list runs to five figures, and `content-visibility` spares the layout and the
 	// paint but not the DOM node, the style or the component.
 	const sc = rowScroller();
-	const win = $derived(rowWindow(sc.scrollTop, sc.viewportPx, shown.length, sc.rowPx));
+	// The header scrolls away with the rows, so the window is measured from where row 0 sits
+	// rather than from the top of the scroller.
+	const win = $derived(
+		rowWindow(sc.scrollTop - sc.offsetPx, sc.viewportPx, shown.length, sc.rowPx)
+	);
 
 	// One page per approach to the bottom: the observer only fires when the sentinel *enters* view,
 	// so an appended page that pushes it back out is required before the next fetch. rootMargin
@@ -712,169 +716,171 @@
 	{:else if error}
 		<div class="p-6"><ErrorState message={error} onRetry={() => load(id)} /></div>
 	{:else if pl}
-		<div class="content-in relative flex min-h-[38vh] items-end gap-6 overflow-hidden border-b p-6">
-			{#if bgImage}
-				<img
-					src={bgImage}
-					alt=""
-					class="pointer-events-none absolute inset-0 h-full w-full object-cover object-center"
-				/>
-			{/if}
-			<!-- Fade the cover into the page so the text stays readable: solid at the bottom and on the
-			     left (behind the title), the image itself visible toward the top-right. -->
-			<div
-				class="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-background/20"
-			></div>
-			<div class="absolute inset-0 bg-gradient-to-r from-background via-background/50 to-transparent"></div>
-			{#if isOnRepeat}
-				<div
-					class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"
-				>
-					<HugeiconsIcon icon={ListRestartIcon} class="h-20 w-20" />
-				</div>
-			{:else if art}
-				<img src={art} alt="" class="relative h-40 w-40 rounded-xl object-cover shadow-lg" />
-			{:else}
-				<div class="relative h-40 w-40 rounded-xl bg-muted"></div>
-			{/if}
-			<div class="relative min-w-0 flex-1">
-				<div class="text-xs font-medium uppercase text-muted-foreground">Playlist</div>
-				<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow-lg">
-					{pl.title ?? 'Playlist'}
-				</h1>
-				{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
-				{#if pl.description}
-					<!-- Two lines, then More/Less, same as the album page. -->
-					<div class="mt-2 max-w-2xl">
-						<p class="whitespace-pre-line text-sm text-foreground/80 {expanded ? '' : 'line-clamp-2'}">
-							{pl.description}
-						</p>
-						{#if longDescription}
-							<button
-								class="mt-1 cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
-								onclick={() => (expanded = !expanded)}
-							>
-								{expanded ? 'Less' : 'More'}
-							</button>
-						{/if}
-					</div>
+		<!-- One scroller for the whole page: the header scrolls away above the rows, same as the
+		     album page. -->
+		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
+			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden border-b p-6">
+				{#if bgImage}
+					<img
+						src={bgImage}
+						alt=""
+						class="pointer-events-none absolute inset-0 h-full w-full object-cover object-center"
+					/>
 				{/if}
-				<div class="mt-4 flex items-center justify-between gap-2">
-					<div class="flex items-center gap-2">
-						<Button
-							class="gap-2"
-							onclick={() => playAll(null)}
-							disabled={!pl.items.length || preparing || resorting}
-						>
-							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
-							{preparing || resorting ? 'Sorting…' : 'Play'}
-						</Button>
-						{#if confirmingDelete}
-							<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
-								<span class="text-xs text-muted-foreground">Delete this playlist?</span>
-								<Button variant="destructive" size="sm" onclick={deleteThisPlaylist}>Delete</Button>
-								<Button variant="ghost" size="sm" onclick={() => (confirmingDelete = false)}>
-									Cancel
+				<!-- Fade the cover into the page so the text stays readable: solid at the bottom and on the
+				     left (behind the title), the image itself visible toward the top-right. -->
+				<div
+					class="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-background/20"
+				></div>
+				<div class="absolute inset-0 bg-gradient-to-r from-background via-background/50 to-transparent"></div>
+				{#if isOnRepeat}
+					<div
+						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"
+					>
+						<HugeiconsIcon icon={ListRestartIcon} class="h-20 w-20" />
+					</div>
+				{:else if art}
+					<img src={art} alt="" class="relative h-40 w-40 rounded-xl object-cover shadow-lg" />
+				{:else}
+					<div class="relative h-40 w-40 rounded-xl bg-muted"></div>
+				{/if}
+				<div class="relative min-w-0 flex-1">
+					<div class="text-xs font-medium uppercase text-muted-foreground">Playlist</div>
+					<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow-lg">
+						{pl.title ?? 'Playlist'}
+					</h1>
+					{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
+					{#if pl.description}
+						<!-- Two lines, then More/Less, same as the album page. -->
+						<div class="mt-2 max-w-2xl">
+							<p class="whitespace-pre-line text-sm text-foreground/80 {expanded ? '' : 'line-clamp-2'}">
+								{pl.description}
+							</p>
+							{#if longDescription}
+								<button
+									class="mt-1 cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
+									onclick={() => (expanded = !expanded)}
+								>
+									{expanded ? 'Less' : 'More'}
+								</button>
+							{/if}
+						</div>
+					{/if}
+					<div class="mt-4 flex items-center justify-between gap-2">
+						<div class="flex items-center gap-2">
+							<Button
+								class="gap-2"
+								onclick={() => playAll(null)}
+								disabled={!pl.items.length || preparing || resorting}
+							>
+								<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
+								{preparing || resorting ? 'Sorting…' : 'Play'}
+							</Button>
+							{#if confirmingDelete}
+								<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
+									<span class="text-xs text-muted-foreground">Delete this playlist?</span>
+									<Button variant="destructive" size="sm" onclick={deleteThisPlaylist}>Delete</Button>
+									<Button variant="ghost" size="sm" onclick={() => (confirmingDelete = false)}>
+										Cancel
+									</Button>
+								</div>
+							{:else}
+								<Button
+									variant="ghost"
+									size="icon"
+									aria-label="Playlist options"
+									onclick={openMenu}
+								>
+									<HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5 text-muted-foreground" />
 								</Button>
-							</div>
-						{:else}
+							{/if}
+						</div>
+						<!-- Pushed to the far end of the header, away from the play controls. -->
+						<div class="flex items-center gap-1">
+							<Button
+								variant="ghost"
+								size="sm"
+								class="gap-2 {sort === 'default' ? 'text-muted-foreground' : ''}"
+								onclick={openSort}
+								disabled={!pl.items.length}
+							>
+								<HugeiconsIcon icon={Sorting01Icon} class="h-4 w-4" />
+								{sortLabel}
+							</Button>
 							<Button
 								variant="ghost"
 								size="icon"
-								aria-label="Playlist options"
-								onclick={openMenu}
+								class={desc ? '' : 'text-muted-foreground'}
+								aria-label="Sort direction: {desc ? 'descending' : 'ascending'}"
+								onclick={toggleDesc}
+								disabled={!pl.items.length}
 							>
-								<HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5 text-muted-foreground" />
+								<HugeiconsIcon icon={ArrowUpDownIcon} class="h-4 w-4" />
 							</Button>
-						{/if}
-					</div>
-					<!-- Pushed to the far end of the header, away from the play controls. -->
-					<div class="flex items-center gap-1">
-						<Button
-							variant="ghost"
-							size="sm"
-							class="gap-2 {sort === 'default' ? 'text-muted-foreground' : ''}"
-							onclick={openSort}
-							disabled={!pl.items.length}
-						>
-							<HugeiconsIcon icon={Sorting01Icon} class="h-4 w-4" />
-							{sortLabel}
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon"
-							class={desc ? '' : 'text-muted-foreground'}
-							aria-label="Sort direction: {desc ? 'descending' : 'ascending'}"
-							onclick={toggleDesc}
-							disabled={!pl.items.length}
-						>
-							<HugeiconsIcon icon={ArrowUpDownIcon} class="h-4 w-4" />
-						</Button>
-					</div>
-				</div>
-			</div>
-			<div class="absolute right-6 top-6">
-				<TrackFilter bind:value={query} placeholder="Search this playlist" />
-			</div>
-		</div>
-		<div
-			class="content-in min-h-0 flex-1 overflow-y-auto p-4 transition-opacity {resorting
-				? 'opacity-50'
-				: ''}"
-			aria-busy={resorting}
-			{@attach sc.attach}
-		>
-			{#if shown.length}
-				<!-- The padding stands in for the rows outside the window, so the scrollbar is the
-				     length of the whole playlist even though only ~30 rows exist. -->
-				<div style="padding-top:{win.padTop}px;padding-bottom:{win.padBottom}px">
-					{#each shown.slice(win.start, win.end) as item, i (item.video_id + (win.start + i))}
-						{@const n = win.start + i}
-						<!-- data-row: what the scroller measures a row's real height from. -->
-						<div data-row>
-							<TrackRow
-								song={item}
-								index={n}
-								showPlayCount
-								active={item.video_id === nowId}
-								onplay={() => playAll(n)}
-								onAdd={() => openAddToPlaylist(item)}
-								onRemove={isLiked || (editable && item.set_video_id)
-									? () => removeTrack(item)
-									: undefined}
-							/>
 						</div>
-					{/each}
+					</div>
 				</div>
-			{:else if filtering}
-				<p class="p-4 text-sm text-muted-foreground">
-					No tracks match “{applied.trim()}”{pl.continuation && !moreError
-						? ' yet, still loading'
-						: ''}.
-				</p>
-			{:else}
-				<p class="p-4 text-sm text-muted-foreground">This playlist is empty.</p>
-			{/if}
-			{#if pl.continuation}
-				{#if moreError}
-					<div class="p-3 text-center">
-						<Button variant="outline" size="sm" onclick={loadMore} disabled={loadingMore}>
-							{loadingMore ? 'Loading…' : 'Try again'}
-						</Button>
+				<div class="absolute right-6 top-6">
+					<TrackFilter bind:value={query} placeholder="Search this playlist" />
+				</div>
+			</div>
+			<div
+				class="p-4 transition-opacity {resorting ? 'opacity-50' : ''}"
+				aria-busy={resorting}
+			>
+				{#if shown.length}
+					<!-- The padding stands in for the rows outside the window, so the scrollbar is the
+					     length of the whole playlist even though only ~30 rows exist.
+					     data-rows: what the scroller measures row 0's position from. -->
+					<div data-rows style="padding-top:{win.padTop}px;padding-bottom:{win.padBottom}px">
+						{#each shown.slice(win.start, win.end) as item, i (item.video_id + (win.start + i))}
+							{@const n = win.start + i}
+							<!-- data-row: what the scroller measures a row's real height from. -->
+							<div data-row>
+								<TrackRow
+									song={item}
+									index={n}
+									showPlayCount
+									active={item.video_id === nowId}
+									onplay={() => playAll(n)}
+									onAdd={() => openAddToPlaylist(item)}
+									onRemove={isLiked || (editable && item.set_video_id)
+										? () => removeTrack(item)
+										: undefined}
+								/>
+							</div>
+						{/each}
 					</div>
+				{:else if filtering}
+					<p class="p-4 text-sm text-muted-foreground">
+						No tracks match “{applied.trim()}”{pl.continuation && !moreError
+							? ' yet, still loading'
+							: ''}.
+					</p>
 				{:else}
-					<!-- The sentinel sits above the skeletons: it triggers the next page as it scrolls
-					     into range, so the rest of a long playlist arrives without a button. -->
-					<div aria-busy={loadingMore}>
-						<div {@attach sentinel}></div>
-						{#if loadingMore}
-							{#each Array(4) as _, i (i)}
-								<TrackRowSkeleton />
-							{/each}
-						{/if}
-					</div>
+					<p class="p-4 text-sm text-muted-foreground">This playlist is empty.</p>
 				{/if}
-			{/if}
+				{#if pl.continuation}
+					{#if moreError}
+						<div class="p-3 text-center">
+							<Button variant="outline" size="sm" onclick={loadMore} disabled={loadingMore}>
+								{loadingMore ? 'Loading…' : 'Try again'}
+							</Button>
+						</div>
+					{:else}
+						<!-- The sentinel sits above the skeletons: it triggers the next page as it scrolls
+						     into range, so the rest of a long playlist arrives without a button. -->
+						<div aria-busy={loadingMore}>
+							<div {@attach sentinel}></div>
+							{#if loadingMore}
+								{#each Array(4) as _, i (i)}
+									<TrackRowSkeleton />
+								{/each}
+							{/if}
+						</div>
+					{/if}
+				{/if}
+			</div>
 		</div>
 	{/if}
 </div>
