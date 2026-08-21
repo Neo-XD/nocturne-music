@@ -1,7 +1,8 @@
 name: Linux release binaries
 
-# Builds and signs the Linux AppImage for a release that ALREADY EXISTS, attaches it, adds the
-# `linux-x86_64` entry to latest.json, and finally marks the release "Latest".
+# Builds and signs the Linux AppImage and builds the .deb for a release that ALREADY EXISTS,
+# attaches both, adds the `linux-x86_64` entry to latest.json, and finally marks the release
+# "Latest".
 #
 # WHY THIS EXISTS: an AppImage bundles the *build host's* system libraries but cannot bundle glibc,
 # so it inherits the build host's glibc floor. Built on Fedora (glibc 2.43) the 0.2.9 AppImage
@@ -12,6 +13,12 @@ name: Linux release binaries
 # `runs-on` is PINNED ON PURPOSE. Never change it to `ubuntu-latest` — that tracks the newest
 # Ubuntu and would silently reintroduce exactly the bug this workflow exists to fix. The
 # "Check the glibc floor" step below fails the build if someone does it anyway.
+#
+# The .deb is here for exactly the same reason, and needs it more. Tauri writes a deb's Depends
+# verbatim from tauri.conf.json and never runs dpkg-shlibdeps, so nothing in the package records a
+# glibc floor at all: a Fedora-built deb installs cleanly on Debian and then dies at startup on a
+# missing GLIBC symbol. Built here it matches the AppImage's 2.39, which is what the hand-written
+# `libc6 (>= 2.39)` in tauri.conf.json claims.
 #
 # scripts/release.sh (run on Fedora) still builds and publishes the .rpm — an rpm links against the
 # host's system libs, so Fedora is the correct place to build it.
@@ -34,7 +41,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to build the Linux AppImage for (e.g. v0.2.9)
+        description: Existing release tag to build the Linux AppImage + deb for (e.g. v0.2.9)
         required: true
         type: string
       dry_run:
@@ -110,7 +117,8 @@ jobs:
         run: |
           nohup docker pull debian:sid      > /tmp/pull-debian.log 2>&1 &
           nohup docker pull archlinux:latest > /tmp/pull-arch.log  2>&1 &
-          echo "pulling debian:sid and archlinux:latest in the background"
+          nohup docker pull ubuntu:24.04     > /tmp/pull-ubuntu.log 2>&1 &
+          echo "pulling debian:sid, archlinux:latest and ubuntu:24.04 in the background"
 
       # Bake a snapshot of the community player-cipher registry into src-tauri/cipher_configs.json,
       # which is `include_str!`d into the binary. Nothing needing a deciphered stream URL plays
@@ -205,7 +213,7 @@ jobs:
             echo "::warning::LASTFM_API_KEY / LASTFM_API_SECRET secrets not set — this Linux build ships without Last.fm scrobbling"
           fi
 
-      - name: Build + sign the AppImage
+      - name: Build + sign the AppImage, build the deb
         env:
           # Scoped to this step only — no other step (or third-party action) sees the signing key.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -227,7 +235,7 @@ jobs:
           # frontend packages (ui/, website/) pnpm picks is up to the filesystem: Windows resolved
           # it to ui, Linux to website, whose deps this job never installs. It only works locally
           # because you run it from ui/.
-          tauri build --bundles appimage --config '{"build":{"beforeBuildCommand":""}}'
+          tauri build --bundles appimage,deb --config '{"build":{"beforeBuildCommand":""}}'
           # Strip the bundled TLS trust stack + gio modules out of the AppDir and repack: they are
           # coupled to the build host's config and leave the webview with no TLS backend anywhere
           # else. Repacking invalidates the bundler's signature, so the script re-signs — which is
@@ -328,11 +336,35 @@ jobs:
             exit 1
           fi
 
+      # The .deb gets no dependency detection whatsoever: Tauri copies Depends straight out of
+      # tauri.conf.json and never runs dpkg-shlibdeps, so a library the binary links but the config
+      # forgets installs perfectly and then fails at startup. dpkg is the only thing that can tell
+      # us that list is right, so let it: install the real package on the oldest release the floor
+      # claims to support and resolve every DT_NEEDED against whatever apt pulled in. This catches a
+      # too-new glibc too, since ldd reports a missing GLIBC_x.yz the same way.
+      - name: Verify the .deb installs and resolves its libraries
+        run: |
+          set -euo pipefail
+          DEB="$(ls target/release/bundle/deb/limusic_${VERSION}_*.deb | head -1)"
+          docker run --rm -v "$PWD/$DEB:/limusic.deb:ro" ubuntu:24.04 bash -c '
+            set -eu
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y --no-install-recommends /limusic.deb
+            BIN="$(dpkg -L limusic | grep "^/usr/bin/" | head -1)"
+            echo "installed $BIN, declared: $(dpkg-query -f "\${Depends}" -W limusic)"
+            if ldd "$BIN" | grep "not found"; then
+              echo "the deb declares nothing that provides the libraries above"
+              exit 1
+            fi
+            echo "every library the binary needs came from the declared Depends"
+          '
+
       - name: Dry run — built and verified, attaching nothing
         if: ${{ inputs.dry_run }}
         run: echo "dry_run - every build step and guard passed; release assets left untouched."
 
-      - name: Attach the AppImage + teach latest.json about Linux
+      - name: Attach the AppImage + deb, teach latest.json about Linux
         if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -370,6 +402,15 @@ jobs:
           fi
 
           retry 3 gh release upload "$TAG" "$APPIMAGE" "$SIG" --clobber --repo "$GITHUB_REPOSITORY"
+
+          # The deb rides along unsigned and stays out of latest.json: Tauri's updater has no deb
+          # support, so there is nothing for a signature to be checked by. Debian users update by
+          # downloading the next one.
+          DEB="$(ls target/release/bundle/deb/limusic_${VERSION}_*.deb 2>/dev/null | head -1 || true)"
+          if [ -z "$DEB" ]; then
+            echo "::error::no deb for $VERSION"; find target/release/bundle -maxdepth 2; exit 1
+          fi
+          retry 3 gh release upload "$TAG" "$DEB" --clobber --repo "$GITHUB_REPOSITORY"
 
           # latest.json is the one thing both release workflows write, and they now run in parallel.
           # There is no compare-and-swap on release assets, so: merge, upload, read back, and retry

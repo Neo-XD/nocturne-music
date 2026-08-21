@@ -52,7 +52,7 @@
     },
     "linux": {
       "deb": {
-        "depends": ["libayatana-appindicator3-1 | libappindicator3-1", "libmpv2 | libmpv1"]
+        "depends": ["libwebkit2gtk-4.1-0", "libmpv2", "libc6 (>= 2.39)"]
       },
       "rpm": {
         "depends": ["libappindicator-gtk3", "mpv-libs"]

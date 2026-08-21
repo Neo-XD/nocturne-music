@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # Cut a signed release: publish the tag with an empty updater manifest, start the three CI builds,
-# build the .deb and .rpm locally while they run, then wait and verify the whole thing landed.
+# build the .rpm locally while they run, then wait and verify the whole thing landed.
 #
-# ORDER MATTERS. The release is created and every workflow is dispatched BEFORE the local deb/rpm
+# ORDER MATTERS. The release is created and every workflow is dispatched BEFORE the local rpm
 # build, not after: CI's ~15 minutes and this machine's ~5 minutes then overlap instead of queueing.
-# The deb and rpm are uploaded to the already-published release afterwards. The cost of that ordering is that
-# a failed deb/rpm build leaves a published release with no deb/rpm on it, recoverable with one
+# The rpm is uploaded to the already-published release afterwards. The cost of that ordering is that
+# a failed rpm build leaves a published release with no rpm on it, recoverable with one
 # `gh release upload`, and the script tells you the exact command if it happens.
 #
-# The AppImage is NOT built here. An AppImage inherits its build host's glibc floor, and this
-# machine is Fedora (newest glibc in existence) — one built here starts nowhere else. It is built by
-# .github/workflows/linux-release.yml on a pinned older runner, which also attaches it, adds the
-# linux-x86_64 entry to latest.json and marks the release "Latest". Windows and macOS do the same
-# for their own entries. So this script publishes the release NOT-latest on purpose: until CI has
-# attached the binaries, the updater endpoint (.../releases/latest/download/latest.json) keeps
-# resolving to the previous, complete manifest instead of one with no platforms in it.
+# Neither the AppImage nor the .deb is built here, and for the same reason: both inherit their
+# build host's glibc floor, and this machine is Fedora (the newest glibc in existence), so one built
+# here starts nowhere else. The deb is the worse of the two, because Tauri writes its Depends
+# verbatim from tauri.conf.json and never emits a libc6 constraint: a Fedora-built deb installs
+# cleanly on Debian and then dies at startup on a missing GLIBC symbol. Both are built by
+# .github/workflows/linux-release.yml on a pinned ubuntu-24.04 runner, which also attaches them,
+# adds the linux-x86_64 entry to latest.json and marks the release "Latest". Windows and macOS do
+# the same for their own entries. So this script publishes the release NOT-latest on purpose: until
+# CI has attached the binaries, the updater endpoint (.../releases/latest/download/latest.json)
+# keeps resolving to the previous, complete manifest instead of one with no platforms in it.
 #
 # Usage:  scripts/release.sh ["release notes"]
 # Bump "version" in src-tauri/tauri.conf.json AND Cargo.toml BEFORE running (tauri.conf.json is the
@@ -164,13 +167,13 @@ RUN_WIN="$(wait_for_run "Windows release binaries" "$BEFORE_WIN" || true)"
 RUN_MAC="$(wait_for_run "macOS release binaries" "$BEFORE_MAC" || true)"
 echo "    linux run ${RUN_LINUX:-?}, windows run ${RUN_WIN:-?}, macos run ${RUN_MAC:-?}"
 
-echo "==> Building the deb and rpm locally while CI runs…"
-if ! cargo tauri build --bundles deb,rpm; then
+echo "==> Building the rpm locally while CI runs…"
+if ! cargo tauri build --bundles rpm; then
   echo >&2
-  echo "ERROR: the deb/rpm build failed, but $TAG is already published and CI is building the rest." >&2
-  echo "       Fix it, then attach the packages by hand:" >&2
-  echo "         cargo tauri build --bundles deb,rpm" >&2
-  echo "         gh release upload $TAG target/release/bundle/rpm/limusic-$VERSION-*.rpm target/release/bundle/deb/limusic_*_*.deb --clobber --repo $REPO" >&2
+  echo "ERROR: the rpm build failed, but $TAG is already published and CI is building the rest." >&2
+  echo "       Fix it, then attach the rpm by hand:" >&2
+  echo "         cargo tauri build --bundles rpm" >&2
+  echo "         gh release upload $TAG target/release/bundle/rpm/limusic-$VERSION-*.rpm --clobber --repo $REPO" >&2
   exit 1
 fi
 
@@ -180,11 +183,6 @@ RPM="$(ls target/release/bundle/rpm/limusic-${VERSION}-*.rpm 2>/dev/null | head 
 [ -n "$RPM" ] || die "no rpm for $VERSION in target/release/bundle/rpm"
 gh release upload "$TAG" "$RPM" --clobber --repo "$REPO"
 echo "    attached $(basename "$RPM")"
-
-DEB="$(ls target/release/bundle/deb/limusic_${VERSION}_*.deb target/release/bundle/deb/limusic-${VERSION}-*.deb 2>/dev/null | head -1)"
-[ -n "$DEB" ] || die "no deb for $VERSION in target/release/bundle/deb"
-gh release upload "$TAG" "$DEB" --clobber --repo "$REPO"
-echo "    attached $(basename "$DEB")"
 
 # ---------------------------------------------------------------------------
 # Wait for CI and check the release is actually complete. Without this the
@@ -216,8 +214,8 @@ has_platform windows-x86_64 || { echo "    MISSING: latest.json has no windows-x
 has_platform darwin-aarch64 || { echo "    MISSING: latest.json has no darwin-aarch64 entry (Mac users get no update)"; OK=0; }
 
 if [ "$OK" = 1 ] && [ "$CI_OK" = 1 ]; then
-  echo "==> $TAG is live and complete: deb + rpm + AppImage + Windows installers + macOS dmg, all three"
-  echo "    platforms in latest.json, marked Latest. Installed users will be prompted."
+  echo "==> $TAG is live and complete: rpm + deb + AppImage + Windows installers + macOS dmg, all"
+  echo "    three platforms in latest.json, marked Latest. Installed users will be prompted."
 else
   echo >&2
   echo "==> $TAG IS PUBLISHED BUT INCOMPLETE. Check what failed, then re-dispatch that workflow:" >&2
