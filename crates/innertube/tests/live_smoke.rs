@@ -337,3 +337,48 @@ async fn radio_seeds_resolve() {
     eprintln!("RDAMPL{pl}: {} tracks", album_radio.items.len());
     assert!(album_radio.items.len() > 1, "album radio came back empty");
 }
+
+/// Issue #73: the Library's Songs tab is a plain browse of `FEmusic_liked_videos` read back through
+/// the playlist parser (that browseId is YouTube's own Library ▸ Songs, despite the name). Nothing
+/// else in the app touches it, so this is what says whether YouTube still answers it with a track
+/// shelf and a paging token.
+///   LIMUSIC_COOKIE=… LIMUSIC_VISITOR=… cargo test -p innertube --features integration-tests library_songs -- --ignored --nocapture
+#[tokio::test]
+#[ignore]
+async fn library_songs_browse_returns_tracks() {
+    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
+        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
+        return;
+    };
+    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
+    let it = InnerTube::new(
+        Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
+        None,
+    )
+    .unwrap();
+    let clients = Clients::bundled();
+    let client = clients.get("WEB_REMIX").expect("WEB_REMIX client");
+
+    let page = it.playlist(client, "FEmusic_liked_videos", None).await.expect("library songs");
+    eprintln!(
+        "{} songs, continuation: {}, sort menu: {:?}, title: {:?}, subtitle: {:?}",
+        page.items.len(),
+        page.continuation.is_some(),
+        page.sort_menu,
+        page.title,
+        page.subtitle
+    );
+    assert!(!page.items.is_empty(), "no tracks came back — is the account's library empty?");
+    for i in &page.items {
+        assert!(!i.video_id.is_empty(), "row {:?} has no videoId", i.title);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for i in &page.items {
+        assert!(seen.insert(i.video_id.clone()), "first page repeated {}", i.video_id);
+    }
+    if let Some(t) = &page.continuation {
+        let more = it.playlist_continuation(client, t).await.expect("continuation");
+        eprintln!("continuation: {} more songs", more.items.len());
+        assert!(!more.items.is_empty(), "the paging token resolved to nothing");
+    }
+}

@@ -12,6 +12,7 @@
 		Add01Icon,
 		CloudSyncIcon,
 		DriveIcon,
+		MusicNote01Icon,
 		MusicNoteSquare02Icon,
 		Playlist02Icon,
 		SquareStackIcon,
@@ -22,6 +23,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import LibrarySongs from '$lib/components/LibrarySongs.svelte';
 	import LocalMusic from '$lib/components/LocalMusic.svelte';
 	import MediaCard from '$lib/components/MediaCard.svelte';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
@@ -224,6 +226,9 @@
 			<Tabs.Trigger value="artists">
 				<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> Artists
 			</Tabs.Trigger>
+			<Tabs.Trigger value="songs">
+				<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> Songs
+			</Tabs.Trigger>
 			<Tabs.Trigger value="local">
 				<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
 			</Tabs.Trigger>
@@ -232,10 +237,23 @@
 		     renders all five and hides the others. Left alone, opening Library builds each card twice
 		     (once for All, once for its own tab) and mounts the whole Local tab, disk scan included,
 		     for a panel you cannot see. -->
-		<!-- Local stands alone: no account, no connection, and none of the states below apply. -->
+		<!-- Songs and Local stand apart: one is a track list rather than a card grid, the other needs
+		     neither an account nor a connection, and the states below fit neither. -->
+		<Tabs.Content value="songs">
+			{#if tab === 'songs'}
+				{#if signedOut}
+					<p class="text-sm text-muted-foreground">
+						Sign in to see the songs saved in your YouTube Music library. Music on this machine is
+						in the Local tab.
+					</p>
+				{:else}
+					<LibrarySongs />
+				{/if}
+			{/if}
+		</Tabs.Content>
 		<Tabs.Content value="local">{#if tab === 'local'}<LocalMusic />{/if}</Tabs.Content>
-		{#if tab === 'local'}
-			<!-- nothing else: the YouTube states below have no bearing on files on this disk -->
+		{#if tab === 'local' || tab === 'songs'}
+			<!-- nothing else: the grid states below have no bearing on these two -->
 		{:else if loading}
 			<div class="card-grid">
 				{#each Array(12) as _, i (i)}

@@ -152,6 +152,13 @@ export const ON_REPEAT_ID = 'LIMUSIC_ON_REPEAT';
 export const LIKED_MUSIC_ID = 'VLLM';
 
 /**
+ * YouTube Music's own Library ▸ Songs, despite the name: the songs saved to the account's library.
+ * It browses like a playlist (no header, no sort menu), so `getPlaylist` reads it and the Library
+ * page's Songs tab pages through it with `getPlaylistMore`.
+ */
+export const LIBRARY_SONGS_ID = 'FEmusic_liked_videos';
+
+/**
  * Local music (Rust `local.rs`). A file on disk is a song whose `video_id` is `LOCAL:<path>`, and
  * an album of them is a browseId `LOCALALBUM:<key>` — so local items ride every existing surface
  * (cards, queue, Shortcuts, the album page) and play with no network.
