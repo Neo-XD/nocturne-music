@@ -48,7 +48,8 @@ const EDGE = 8;
  * Inline style placing a `w` x `h` popup against `box`: below it, or above when there isn't room
  * below and there is above; hanging off its left or right edge; and never closer to the window
  * edge than EDGE, whatever the anchor asked for. All four offsets are named so the result can
- * replace `UNPLACED` wholesale.
+ * replace `UNPLACED` wholesale, and the transform origin is whichever corner ends up at the anchor,
+ * so the open animation grows out of the pointer (or the ⋯) rather than out of thin air.
  */
 export function place(a: Anchor, w: number, h: number) {
 	const { box, gap, align } = a;
@@ -62,7 +63,8 @@ export function place(a: Anchor, w: number, h: number) {
 	const y = clamp(up ? vh - box.top + gap : box.bottom + gap, h, vh);
 	return (
 		`${NO_TRANSITION};left:${right ? 'auto' : x + 'px'};right:${right ? x + 'px' : 'auto'};` +
-		`top:${up ? 'auto' : y + 'px'};bottom:${up ? y + 'px' : 'auto'}`
+		`top:${up ? 'auto' : y + 'px'};bottom:${up ? y + 'px' : 'auto'};` +
+		`transform-origin:${up ? 'bottom' : 'top'} ${right ? 'right' : 'left'}`
 	);
 }
 
@@ -94,8 +96,8 @@ export function anchorMenu(e: Event, { align = 'left' }: { align?: 'left' | 'rig
 export function fitMenu(a: Anchor) {
 	return (el: HTMLElement) => {
 		el.style.cssText = `${UNPLACED};left:0;top:0;right:auto;bottom:auto`;
-		// offset*, not a client rect: the popup fades in and a client rect is the *transformed* box,
-		// so any transform on it would be measured as part of the size.
+		// offset*, not a client rect: the popup opens under a `zoom-in-95` animation, and a client
+		// rect is the *transformed* box, so it would report 95% of the real size.
 		const { offsetWidth, offsetHeight } = el;
 		el.style.cssText = place(a, offsetWidth, offsetHeight);
 	};

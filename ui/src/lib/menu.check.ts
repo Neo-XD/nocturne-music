@@ -9,8 +9,10 @@ import { anchorMenu, place } from './menu.ts';
 const eq = (got: string, want: string) => {
 	if (got !== want) throw new Error(`expected\n  ${want}\ngot\n  ${got}`);
 };
-// Every placement carries `transition:none` (see menu.ts); the offsets are what these check.
-const eqp = (got: string, want: string) => eq(got, `transition:none;${want}`);
+// Every placement carries `transition:none` and a transform origin (see menu.ts); the offsets and
+// which corner sits at the anchor are what these check.
+const eqp = (got: string, want: string, origin: string) =>
+	eq(got, `transition:none;${want};transform-origin:${origin}`);
 const viewport = (w: number, h: number) => Object.assign(globalThis, { window: { innerWidth: w, innerHeight: h } });
 // A mid-sized menu, the size `fitMenu` would have measured.
 const W = 224;
@@ -29,26 +31,26 @@ const from = (box: { left: number; right: number; top: number; bottom: number },
 viewport(1000, 800);
 
 // Pointer, room everywhere: opens down and to the right of the cursor.
-eqp(at(100, 100), 'left:100px;right:auto;top:100px;bottom:auto');
+eqp(at(100, 100), 'left:100px;right:auto;top:100px;bottom:auto', 'top left');
 // Near the bottom it flips above the cursor; near the right it hangs off it leftwards.
-eqp(at(100, 700), 'left:100px;right:auto;top:auto;bottom:100px');
-eqp(at(900, 100), 'left:auto;right:100px;top:100px;bottom:auto');
-eqp(at(900, 700), 'left:auto;right:100px;top:auto;bottom:100px');
+eqp(at(100, 700), 'left:100px;right:auto;top:auto;bottom:100px', 'bottom left');
+eqp(at(900, 100), 'left:auto;right:100px;top:100px;bottom:auto', 'top right');
+eqp(at(900, 700), 'left:auto;right:100px;top:auto;bottom:100px', 'bottom right');
 
 // A trigger: 4px below its box, and `align: 'right'` lines the menu's right edge up with it.
 const box = { left: 400, right: 440, top: 200, bottom: 240 };
-eqp(from(box), 'left:400px;right:auto;top:244px;bottom:auto');
-eqp(from(box, 'right'), 'left:auto;right:560px;top:244px;bottom:auto');
+eqp(from(box), 'left:400px;right:auto;top:244px;bottom:auto', 'top left');
+eqp(from(box, 'right'), 'left:auto;right:560px;top:244px;bottom:auto', 'top right');
 
 // The clamp, which is what stops a menu running off screen when the anchor asks for too much:
 // a left-aligned trigger near the right edge flips, and a right-aligned one near the left edge
 // stops 8px short instead of hanging off it.
-eqp(from({ left: 900, right: 940, top: 200, bottom: 240 }), 'left:auto;right:60px;top:244px;bottom:auto');
-eqp(from({ left: 10, right: 50, top: 200, bottom: 240 }, 'right'), 'left:auto;right:768px;top:244px;bottom:auto');
+eqp(from({ left: 900, right: 940, top: 200, bottom: 240 }), 'left:auto;right:60px;top:244px;bottom:auto', 'top right');
+eqp(from({ left: 10, right: 50, top: 200, bottom: 240 }, 'right'), 'left:auto;right:768px;top:244px;bottom:auto', 'top right');
 
 // Too little room either way (a short window): stays downwards rather than flipping into nothing,
 // and the clamp pulls it back inside.
 viewport(1000, 300);
-eqp(at(100, 150), 'left:100px;right:auto;top:12px;bottom:auto');
+eqp(at(100, 150), 'left:100px;right:auto;top:12px;bottom:auto', 'top left');
 
 console.log('menu.check: ok');
