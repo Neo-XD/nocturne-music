@@ -79,10 +79,13 @@
 	};
 
 	// Song mode: four rows to a column, paged sideways. Twelve legible tracks per screenful against
-	// the six anonymous squares that fitted before. The odd non-song in a song shelf is dropped
-	// rather than drawn as a row that can't be queued with the rest.
+	// the six anonymous squares that fitted before. A non-song can't be a row that queues with the
+	// rest, so it leads the shelf as a plain card instead, the same thing the other modes do with an
+	// item that doesn't fit their form. Search's "Top results" is exactly this shape (the artist you
+	// searched for plus three of their songs), and dropping it hid the match entirely.
 	const ROWS = 4;
 	const songs = $derived(mode === 'song' ? items.filter((i) => i.kind === 'song').map(asSong) : []);
+	const others = $derived(mode === 'song' ? items.filter((i) => i.kind !== 'song') : []);
 	const columns = $derived(
 		Array.from({ length: Math.ceil(songs.length / ROWS) }, (_, c) =>
 			songs.slice(c * ROWS, c * ROWS + ROWS)
@@ -164,10 +167,17 @@
 			onscroll={update}
 		>
 			{#if mode === 'song'}
+				{#each others as item (item.id)}
+					<div class="min-w-0 w-40 shrink-0 snap-start pr-4"><MediaCard {item} /></div>
+				{/each}
 				<!-- A rule down each column but the first: the same editorial device as the heading, and
 				     what makes a paged block of rows read as columns rather than one long list. -->
 				{#each columns as col, c (c)}
-					<div class="min-w-0 shrink-0 snap-start {SLOT.song} {c ? 'border-l pl-4' : ''} pr-4">
+					<div
+						class="min-w-0 shrink-0 snap-start {SLOT.song} {c || others.length
+							? 'border-l pl-4'
+							: ''} pr-4"
+					>
 						{#each col as song, r (song.video_id + ':' + r)}
 							<TrackRow
 								{song}
