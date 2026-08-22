@@ -19,10 +19,19 @@ type Box = { left: number; right: number; top: number; bottom: number };
 export type Anchor = { style: string; box: Box; gap: number; align: 'left' | 'right' };
 
 /**
+ * `transition:none` is load-bearing, not tidiness. The popups carry Tailwind's `duration-150` for
+ * their fade, which sets `transition-duration` — and CSS's default `transition-property` is `all`,
+ * so the moment `fitMenu` writes `top`, WebKit *transitions* the menu from wherever it was to where
+ * it belongs, over 150ms. Measured: a menu with `top:258px` in its inline style rendered at 157 and
+ * crept down to 258 over the next 150ms, which is the "slides in from the top" this was reported as.
+ */
+const NO_TRANSITION = 'transition:none';
+
+/**
  * The style a popup renders with until `fitMenu` measures it. Laid out (so it can be measured) but
  * never painted, because until then the only honest answer to where it goes is "not yet known".
  */
-const UNPLACED = 'visibility:hidden';
+const UNPLACED = `visibility:hidden;${NO_TRANSITION}`;
 
 /** Placeholder for a menu that has never been opened. */
 export const NO_ANCHOR: Anchor = {
@@ -52,7 +61,7 @@ export function place(a: Anchor, w: number, h: number) {
 	const x = clamp(right ? vw - box.right : box.left, w, vw);
 	const y = clamp(up ? vh - box.top + gap : box.bottom + gap, h, vh);
 	return (
-		`left:${right ? 'auto' : x + 'px'};right:${right ? x + 'px' : 'auto'};` +
+		`${NO_TRANSITION};left:${right ? 'auto' : x + 'px'};right:${right ? x + 'px' : 'auto'};` +
 		`top:${up ? 'auto' : y + 'px'};bottom:${up ? y + 'px' : 'auto'}`
 	);
 }
