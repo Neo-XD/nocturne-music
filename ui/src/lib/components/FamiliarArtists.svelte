@@ -140,6 +140,7 @@
 							class="group/row flex cursor-pointer items-center gap-3 rounded-lg p-1.5 text-left transition-colors hover:bg-accent/10"
 							role="button"
 							tabindex="0"
+							data-ctx
 							onclick={() => open(a)}
 							onkeydown={(e) => {
 								if (e.target !== e.currentTarget) return;

@@ -35,6 +35,7 @@
 		toggleSaved
 	} from '$lib/player.svelte';
 	import { getCached, putCached } from '$lib/pagecache';
+	import { anchorMenu, ctxHost, type Anchor } from '$lib/menu';
 
 	let artist = $state<ArtistPage | null>(null);
 	let loading = $state(true);
@@ -81,14 +82,14 @@
 	});
 
 	// ⋯ options menu, positioned `fixed` at the button so it isn't clipped (matches the album page).
+	// A right-click anywhere on the hero opens the same menu at the pointer (`ctxHost`).
 	let menuOpen = $state(false);
-	let mx = $state(0);
-	let my = $state(0);
+	let anchor = $state<Anchor>({ style: '', origin: '' });
 
 	function openMenu(e: MouseEvent) {
-		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		mx = r.left;
-		my = r.bottom + 4;
+		e.preventDefault(); // a right-click must not also raise WebKit's own menu
+		e.stopPropagation();
+		anchor = anchorMenu(e, { height: 200 });
 		menuOpen = true;
 	}
 
@@ -185,7 +186,10 @@
 	<div class="p-6"><ErrorState message={error} onRetry={() => load(id)} /></div>
 {:else if artist}
 	<!-- Hero -->
-	<div class="content-in relative flex min-h-[45vh] flex-col justify-end overflow-hidden">
+	<div
+		class="content-in relative flex min-h-[45vh] flex-col justify-end overflow-hidden"
+		data-ctx
+	>
 		{#if artist.thumbnail}
 			<img src={artist.thumbnail} alt="" class="absolute inset-0 h-full w-full object-cover" />
 		{/if}
@@ -264,6 +268,7 @@
 					class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border text-muted-foreground transition hover:bg-accent/10 hover:text-foreground"
 					onclick={openMenu}
 					aria-label="More options"
+					{@attach ctxHost(openMenu)}
 				>
 					<HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5" />
 				</button>
@@ -322,11 +327,15 @@
 	<button
 		class="fixed inset-0 z-40 cursor-default"
 		onclick={() => (menuOpen = false)}
+		oncontextmenu={(e) => {
+			e.preventDefault();
+			menuOpen = false;
+		}}
 		aria-label="Close menu"
 	></button>
 	<div
-		class="fixed z-50 min-w-52 origin-top-left animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
-		style="left:{mx}px; top:{my}px;"
+		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+		style={anchor.style}
 	>
 		<button
 			class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"

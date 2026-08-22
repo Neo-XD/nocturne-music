@@ -123,6 +123,7 @@
 <div
 	role="button"
 	tabindex="0"
+	data-ctx
 	onclick={onplay}
 	onkeydown={onKey}
 	aria-label={guestAdd ? `Add ${song.title} to the session queue` : `Play ${song.title}`}

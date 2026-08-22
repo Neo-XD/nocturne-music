@@ -9,7 +9,7 @@
 	import { CheckmarkCircle03Icon } from '@hugeicons/core-free-icons';
 	import type { BrowseItem } from '$lib/api';
 	import { hrefFor } from '$lib/browse';
-	import { anchorMenu, toBody } from '$lib/menu';
+	import { anchorMenu, toBody, type Anchor } from '$lib/menu';
 
 	let { playlists }: { playlists: BrowseItem[] } = $props();
 
@@ -18,17 +18,14 @@
 	const extra = $derived(playlists.length - shown.length);
 
 	let open = $state(false);
-	let mx = $state(0);
-	let my = $state(0);
-	let openUp = $state(false);
+	let anchor = $state<Anchor>({ style: '', origin: '' });
 	// Crossing the gap between the mark and the popup is a mouseleave with nothing under the
 	// pointer, so closing waits long enough for the next mouseenter to cancel it.
 	let closing: ReturnType<typeof setTimeout> | undefined;
 
 	function show(e: Event) {
 		clearTimeout(closing);
-		const trigger = e.currentTarget as HTMLElement;
-		({ right: mx, y: my, openUp } = anchorMenu(trigger, 44 + shown.length * 40));
+		anchor = anchorMenu(e, { height: 44 + shown.length * 40, align: 'right' });
 		open = true;
 	}
 	function hide() {
@@ -64,10 +61,8 @@
 
 {#if open}
 	<div
-		class="fixed z-50 min-w-52 max-w-72 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {openUp
-			? 'origin-bottom-right'
-			: 'origin-top-right'}"
-		style="right:{mx}px; {openUp ? 'bottom' : 'top'}:{my}px;"
+		class="fixed z-50 min-w-52 max-w-72 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+		style={anchor.style}
 		onmouseenter={keep}
 		onmouseleave={hide}
 		role="tooltip"

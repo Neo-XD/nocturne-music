@@ -131,8 +131,9 @@
 	onclick={onBarClick}
 	class="flex items-center gap-2 border-t bg-card px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3"
 >
-	<!-- Now playing -->
-	<div class="flex min-w-0 flex-1 items-center gap-3">
+	<!-- Now playing. data-ctx: right-clicking the cover, the title or the space around them opens
+	     the ⋮ menu for the track that's playing. -->
+	<div class="flex min-w-0 flex-1 items-center gap-3" data-ctx>
 		{#key playback.now?.videoId}
 			{#if playback.now?.thumbnail}
 				<img

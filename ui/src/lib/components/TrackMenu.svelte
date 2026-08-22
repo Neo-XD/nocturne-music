@@ -1,5 +1,7 @@
 <script lang="ts">
 	// The ⋯ options menu shared by TrackRow (inline trigger) and MediaCard (overlay trigger).
+	// Right-clicking anywhere in the surrounding `[data-ctx]` element opens the same menu at the
+	// pointer (see `ctxHost`), which is what a track row's whole surface is for.
 	// The queue actions + like are universal; go-to-artist/album/playlist show when the song carries
 	// them. The popup is `fixed`, anchored at the trigger and moved to <body> (`toBody`), so no
 	// scroll container clips it and no contained ancestor becomes its containing block.
@@ -23,7 +25,7 @@
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
-	import { anchorMenu, toBody } from '$lib/menu';
+	import { anchorMenu, ctxHost, toBody, type Anchor } from '$lib/menu';
 	import { addPick, enqueue, openShare, ratingOf, startRadio, toggleRating } from '$lib/player.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
 
@@ -51,13 +53,13 @@
 	let menuOpen = $state(false);
 	// Player-bar only: tempo/pitch belong to playback, not to a row you happen to be pointing at.
 	let advancedOpen = $state(false);
-	let mx = $state(0);
-	let my = $state(0);
-	let openUp = $state(false);
+	let anchor = $state<Anchor>({ style: '', origin: '' });
 
+	// Click on the ⋯ opens under the button; right-click on the host row opens at the pointer.
 	function openMenu(e: MouseEvent) {
+		e.preventDefault(); // a right-click must not also raise WebKit's own menu
 		e.stopPropagation();
-		({ right: mx, y: my, openUp } = anchorMenu(e.currentTarget as HTMLElement));
+		anchor = anchorMenu(e, { align: 'right' });
 		menuOpen = true;
 	}
 	// stopPropagation everywhere: the trigger sits inside a clickable row (TrackRow's whole row is a
@@ -69,7 +71,10 @@
 		menuOpen = false;
 		action?.();
 	}
+	// Right-clicking off the menu dismisses it, same as a left click: the backdrop swallows the
+	// event, so the row underneath never sees it.
 	function close(e: MouseEvent) {
+		e.preventDefault();
 		e.stopPropagation();
 		menuOpen = false;
 	}
@@ -80,7 +85,12 @@
 	const isLocal = $derived(api.isLocalId(song.video_id));
 </script>
 
-<button class="{triggerClass} {menuOpen ? 'opacity-100' : ''}" onclick={openMenu} aria-label="Track options">
+<button
+	class="{triggerClass} {menuOpen ? 'opacity-100' : ''}"
+	onclick={openMenu}
+	aria-label="Track options"
+	{@attach ctxHost(openMenu)}
+>
 	<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount -->
 	<HugeiconsIcon
 		icon={MoreHorizontalIcon}
@@ -94,14 +104,13 @@
 	<button
 		class="fixed inset-0 z-40 cursor-default"
 		onclick={close}
+		oncontextmenu={close}
 		aria-label="Close menu"
 		{@attach toBody}
 	></button>
 	<div
-		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {openUp
-			? 'origin-bottom-right'
-			: 'origin-top-right'}"
-		style="right:{mx}px; {openUp ? 'bottom' : 'top'}:{my}px;"
+		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+		style={anchor.style}
 		{@attach toBody}
 	>
 		{#if !linksOnly}

@@ -194,7 +194,7 @@
 				{#each playlists as pl, i (pl.id)}
 					<!-- The ⋯ is a sibling of the link, not a child: a <button> inside an <a> is invalid
 					     HTML. pr-9 keeps the title clear of the button that overlays the row on hover. -->
-					<div class="group/row relative">
+					<div class="group/row relative" data-ctx>
 						<a
 							href={playlistHref(pl)}
 							title={pl.title}

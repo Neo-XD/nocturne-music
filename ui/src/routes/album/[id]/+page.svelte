@@ -42,13 +42,24 @@
     } from "$lib/player.svelte";
     import { getCached, putCached } from "$lib/pagecache";
     import { thumb } from "$lib/thumb";
+    import { anchorMenu, ctxHost, toBody, type Anchor } from "$lib/menu";
 
     let album = $state<AlbumPage | null>(null);
     let artistHero = $state<string | null>(null);
     let loading = $state(true);
     let error = $state<string | null>(null);
     let expanded = $state(false);
+    // ⋯ options menu. `fixed` and anchored at whatever opened it: the ⋯ button on a click, the
+    // pointer on a right-click anywhere in the header (`ctxHost`).
     let menuOpen = $state(false);
+    let anchor = $state<Anchor>({ style: "", origin: "" });
+
+    function openMenu(e: MouseEvent) {
+        e.preventDefault(); // a right-click must not also raise WebKit's own menu
+        e.stopPropagation();
+        anchor = anchorMenu(e, { height: 260 });
+        menuOpen = true;
+    }
     // Header filter box: matches title / artist / album.
     let query = $state("");
 
@@ -238,7 +249,7 @@
     <div class="p-6"><ErrorState message={error} onRetry={() => load(id)} /></div>
 {:else if album}
     <!-- Header with the artist image as a hero backdrop -->
-    <div class="content-in relative overflow-hidden">
+    <div class="content-in relative overflow-hidden" data-ctx>
         {#if artistHero}
             <img
                 src={artistHero}
@@ -377,20 +388,30 @@
                 {/if}
                 <button
                     class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border text-muted-foreground transition hover:bg-accent/10 hover:text-foreground"
-                    onclick={() => (menuOpen = !menuOpen)}
+                    onclick={openMenu}
                     aria-label="More options"
+                    {@attach ctxHost(openMenu)}
                 >
                     <HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5" />
                 </button>
 
                 {#if menuOpen}
+                    <!-- Moved to <body>: the header clips its overflow, and a menu opened from the
+                         bottom of it would be cut off. -->
                     <button
                         class="fixed inset-0 z-40 cursor-default"
                         onclick={() => (menuOpen = false)}
+                        oncontextmenu={(e) => {
+                            e.preventDefault();
+                            menuOpen = false;
+                        }}
                         aria-label="Close menu"
+                        {@attach toBody}
                     ></button>
                     <div
-                        class="absolute bottom-12 left-40 z-50 min-w-48 origin-bottom-left animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+                        class="fixed z-50 min-w-48 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+                        style={anchor.style}
+                        {@attach toBody}
                     >
                         <button
                             class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"

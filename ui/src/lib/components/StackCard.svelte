@@ -43,7 +43,7 @@
 
 <!-- pt-3 is headroom for the lifted sheets: the shelf scrolls horizontally, which makes it clip
      vertically too, so anything reaching above the cover has to be inside the card's own box. -->
-<div class="group relative w-full pt-4">
+<div class="group relative w-full pt-4" data-ctx>
 	<div
 		class="cursor-pointer"
 		role="button"

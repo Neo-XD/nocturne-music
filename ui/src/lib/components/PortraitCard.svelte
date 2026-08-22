@@ -27,7 +27,7 @@
 	const hasArt = $derived(!!item.thumbnail && attempt < 2);
 </script>
 
-<div class="group relative w-full">
+<div class="group relative w-full" data-ctx>
 	<div
 		class="relative aspect-[3/4] w-full cursor-pointer overflow-hidden rounded-2xl bg-muted"
 		role="button"

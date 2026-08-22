@@ -1,6 +1,7 @@
 <script lang="ts">
-	// The ⋯ menu on a sidebar library row. Positioned `fixed` and moved to <body> like TrackMenu:
-	// the playlist list is a scroll container, so an absolute popup would be clipped by it.
+	// The ⋯ menu on a sidebar library row, a card, or an artist row. Positioned `fixed` and moved to
+	// <body> like TrackMenu: the playlist list is a scroll container, so an absolute popup would be
+	// clipped by it. Right-clicking the surrounding `[data-ctx]` element opens it at the pointer.
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
 		MoreHorizontalIcon,
@@ -17,7 +18,7 @@
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import { enqueueItem } from '$lib/browse';
-	import { anchorMenu, toBody } from '$lib/menu';
+	import { anchorMenu, ctxHost, toBody, type Anchor } from '$lib/menu';
 	import {
 		addPick,
 		auth,
@@ -75,13 +76,13 @@
 	}
 
 	let menuOpen = $state(false);
-	let mx = $state(0);
-	let my = $state(0);
-	let openUp = $state(false);
+	let anchor = $state<Anchor>({ style: '', origin: '' });
 
+	// Click on the ⋯ opens under the button; right-click on the host card or row opens at the pointer.
 	function openMenu(e: MouseEvent) {
+		e.preventDefault(); // a right-click must not also raise WebKit's own menu
 		e.stopPropagation();
-		({ right: mx, y: my, openUp } = anchorMenu(e.currentTarget as HTMLElement, 130));
+		anchor = anchorMenu(e, { height: 130, align: 'right' });
 		menuOpen = true;
 	}
 	// stopPropagation everywhere: the trigger sits over a clickable host (a card's whole surface is a
@@ -92,7 +93,9 @@
 		menuOpen = false;
 		action?.();
 	}
+	// Right-clicking off the menu dismisses it, same as a left click.
 	function close(e: MouseEvent) {
+		e.preventDefault();
 		e.stopPropagation();
 		menuOpen = false;
 	}
@@ -102,6 +105,7 @@
 	class="{triggerClass} {menuOpen ? 'opacity-100' : ''}"
 	onclick={openMenu}
 	aria-label="Playlist options"
+	{@attach ctxHost(openMenu)}
 >
 	<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount -->
 	<HugeiconsIcon
@@ -116,14 +120,13 @@
 	<button
 		class="fixed inset-0 z-40 cursor-default"
 		onclick={close}
+		oncontextmenu={close}
 		aria-label="Close menu"
 		{@attach toBody}
 	></button>
 	<div
-		class="fixed z-50 min-w-48 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {openUp
-			? 'origin-bottom-right'
-			: 'origin-top-right'}"
-		style="right:{mx}px; {openUp ? 'bottom' : 'top'}:{my}px;"
+		class="fixed z-50 min-w-48 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+		style={anchor.style}
 		{@attach toBody}
 	>
 		{#if showPin}
