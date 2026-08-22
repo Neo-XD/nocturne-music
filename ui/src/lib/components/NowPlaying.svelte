@@ -326,11 +326,16 @@
 								class="aspect-video w-full rounded-2xl bg-black object-contain"
 							></video>
 						{:else if src && attempt < srcs.length}
+							<!-- The 120 underneath is the one the player bar already has for this track, so it
+							     paints on the frame the track changes. Without it an <img> keeps showing the
+							     *previous* track's picture for as long as this one's fetch takes (#77): 720 is
+							     a size nothing else in the app asks for, so it is always a cold request. -->
 							<img
 								{src}
 								alt=""
 								onerror={imgFailed}
-								class="aspect-square w-full rounded-2xl object-cover shadow-2xl"
+								style={srcs[2] ? `background-image:url(${srcs[2]})` : undefined}
+								class="aspect-square w-full rounded-2xl bg-cover object-cover shadow-2xl"
 							/>
 						{:else}
 							<div
