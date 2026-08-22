@@ -35,7 +35,7 @@
 		toggleSaved
 	} from '$lib/player.svelte';
 	import { getCached, putCached } from '$lib/pagecache';
-	import { anchorMenu, ctxHost, type Anchor } from '$lib/menu';
+	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR } from '$lib/menu';
 
 	let artist = $state<ArtistPage | null>(null);
 	let loading = $state(true);
@@ -84,12 +84,12 @@
 	// ⋯ options menu, positioned `fixed` at the button so it isn't clipped (matches the album page).
 	// A right-click anywhere on the hero opens the same menu at the pointer (`ctxHost`).
 	let menuOpen = $state(false);
-	let anchor = $state<Anchor>({ style: '', origin: '' });
+	let anchor = $state(NO_ANCHOR);
 
 	function openMenu(e: MouseEvent) {
 		e.preventDefault(); // a right-click must not also raise WebKit's own menu
 		e.stopPropagation();
-		anchor = anchorMenu(e, { height: 200 });
+		anchor = anchorMenu(e);
 		menuOpen = true;
 	}
 
@@ -334,8 +334,9 @@
 		aria-label="Close menu"
 	></button>
 	<div
-		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
 		style={anchor.style}
+		{@attach fitMenu(anchor)}
 	>
 		<button
 			class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"

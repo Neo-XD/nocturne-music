@@ -8,16 +8,14 @@
 	import * as api from '$lib/api';
 	import { auth, openChannelPicker } from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
+	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 
 	let menuOpen = $state(false);
-	let mx = $state(0);
-	let my = $state(0);
+	let anchor = $state(NO_ANCHOR);
 
 	// Right-anchored under the trigger, like the Last.fm menu next to it.
 	function openMenu(e: MouseEvent) {
-		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		mx = window.innerWidth - r.right;
-		my = r.bottom + 6;
+		anchor = anchorMenu(e, { align: 'right' });
 		menuOpen = !menuOpen;
 	}
 
@@ -76,8 +74,9 @@
 		aria-label="Close menu"
 	></button>
 	<div
-		class="fixed z-50 w-72 origin-top-right animate-in rounded-xl border bg-popover p-4 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
-		style="right:{mx}px; top:{my}px;"
+		class="fixed z-50 w-72 animate-in rounded-xl border bg-popover p-4 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+		style={anchor.style}
+		{@attach fitMenu(anchor)}
 	>
 		{#if auth.account?.signedIn}
 			<div class="mb-3">

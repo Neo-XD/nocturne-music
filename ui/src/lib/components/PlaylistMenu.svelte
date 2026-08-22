@@ -18,7 +18,7 @@
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import { enqueueItem } from '$lib/browse';
-	import { anchorMenu, ctxHost, toBody, type Anchor } from '$lib/menu';
+	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 	import {
 		addPick,
 		auth,
@@ -76,13 +76,13 @@
 	}
 
 	let menuOpen = $state(false);
-	let anchor = $state<Anchor>({ style: '', origin: '' });
+	let anchor = $state(NO_ANCHOR);
 
 	// Click on the ⋯ opens under the button; right-click on the host card or row opens at the pointer.
 	function openMenu(e: MouseEvent) {
 		e.preventDefault(); // a right-click must not also raise WebKit's own menu
 		e.stopPropagation();
-		anchor = anchorMenu(e, { height: 130, align: 'right' });
+		anchor = anchorMenu(e, { align: 'right' });
 		menuOpen = true;
 	}
 	// stopPropagation everywhere: the trigger sits over a clickable host (a card's whole surface is a
@@ -125,9 +125,10 @@
 		{@attach toBody}
 	></button>
 	<div
-		class="fixed z-50 min-w-48 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+		class="fixed z-50 min-w-48 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
 		style={anchor.style}
 		{@attach toBody}
+		{@attach fitMenu(anchor)}
 	>
 		{#if showPin}
 			<button

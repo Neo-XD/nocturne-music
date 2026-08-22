@@ -25,7 +25,7 @@
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
-	import { anchorMenu, ctxHost, toBody, type Anchor } from '$lib/menu';
+	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 	import { addPick, enqueue, openShare, ratingOf, startRadio, toggleRating } from '$lib/player.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
 
@@ -53,7 +53,7 @@
 	let menuOpen = $state(false);
 	// Player-bar only: tempo/pitch belong to playback, not to a row you happen to be pointing at.
 	let advancedOpen = $state(false);
-	let anchor = $state<Anchor>({ style: '', origin: '' });
+	let anchor = $state(NO_ANCHOR);
 
 	// Click on the ⋯ opens under the button; right-click on the host row opens at the pointer.
 	function openMenu(e: MouseEvent) {
@@ -109,9 +109,10 @@
 		{@attach toBody}
 	></button>
 	<div
-		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
 		style={anchor.style}
 		{@attach toBody}
+		{@attach fitMenu(anchor)}
 	>
 		{#if !linksOnly}
 			<button

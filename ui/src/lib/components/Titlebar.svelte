@@ -28,6 +28,7 @@
 	import * as api from '$lib/api';
 	import { openMiniPlayer, toast, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
+	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 
 	const win = getCurrentWindow();
 
@@ -49,8 +50,7 @@
 	let username = $state<string | null>(null);
 	let connecting = $state(false);
 	let menuOpen = $state(false);
-	let mx = $state(0);
-	let my = $state(0);
+	let anchor = $state(NO_ANCHOR);
 
 	// Discord Rich Presence — a plain on/off toggle of the `discord_rpc` setting (the backend
 	// connects/clears the presence the moment it flips). Optimistic; reverted on failure.
@@ -112,9 +112,7 @@
 	}
 
 	function openMenu(e: MouseEvent) {
-		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		mx = window.innerWidth - r.right;
-		my = r.bottom + 6;
+		anchor = anchorMenu(e, { align: 'right' });
 		menuOpen = true;
 	}
 
@@ -302,8 +300,9 @@
 		aria-label="Close menu"
 	></button>
 	<div
-		class="fixed z-50 min-w-52 origin-top-right animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
-		style="right:{mx}px; top:{my}px;"
+		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+		style={anchor.style}
+		{@attach fitMenu(anchor)}
 	>
 		<div class="flex items-center gap-2.5 px-2 py-2">
 			<LastFmIcon class="h-4 w-4 shrink-0" />

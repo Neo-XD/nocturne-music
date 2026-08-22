@@ -33,7 +33,7 @@
 	import type { BrowseItem, PlaylistPage, SongItem } from '$lib/api';
 	import { getCached, putCached, invalidateCached } from '$lib/pagecache';
 	import { thumb } from '$lib/thumb';
-	import { anchorMenu, ctxHost, type Anchor } from '$lib/menu';
+	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR } from '$lib/menu';
 	import { rowWindow } from '$lib/rows';
 	import { rowScroller } from '$lib/rows.svelte';
 	import {
@@ -81,7 +81,7 @@
 
 	// ⋯ options menu, positioned `fixed` at the button so it isn't clipped (matches TrackRow).
 	let menuOpen = $state(false);
-	let anchor = $state<Anchor>({ style: '', origin: '' });
+	let anchor = $state(NO_ANCHOR);
 
 	// "Edit playlist": name, description, visibility and a cover of your own.
 	let editing = $state(false);
@@ -148,7 +148,7 @@
 	let sort = $state<SortKey>('default');
 	let desc = $state(false);
 	let sortOpen = $state(false);
-	let sortAnchor = $state<Anchor>({ style: '', origin: '' });
+	let sortAnchor = $state(NO_ANCHOR);
 	let preparing = $state(false);
 	// A YouTube sort is a round trip, so the rows on screen are the previous order until it lands.
 	// Dim them meanwhile, or picking a sort looks like it did nothing.
@@ -340,7 +340,7 @@
 	// Right-anchored, unlike the ⋯ menu: this button sits at the far end of the header, so a menu
 	// wider than it would run off the page opening leftwards from its left edge.
 	function openSort(e: MouseEvent) {
-		sortAnchor = anchorMenu(e, { height: 240, align: 'right' });
+		sortAnchor = anchorMenu(e, { align: 'right' });
 		sortOpen = true;
 	}
 
@@ -623,7 +623,7 @@
 	function openMenu(e: MouseEvent) {
 		e.preventDefault(); // a right-click must not also raise WebKit's own menu
 		e.stopPropagation();
-		anchor = anchorMenu(e, { height: 320 });
+		anchor = anchorMenu(e);
 		menuOpen = true;
 	}
 	function run(action: () => void) {
@@ -894,8 +894,9 @@
 		aria-label="Close menu"
 	></button>
 	<div
-		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {sortAnchor.origin}"
+		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
 		style={sortAnchor.style}
+		{@attach fitMenu(sortAnchor)}
 	>
 		<RadioGroup.Root
 			value={sort}
@@ -925,8 +926,9 @@
 		aria-label="Close menu"
 	></button>
 	<div
-		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95 {anchor.origin}"
+		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
 		style={anchor.style}
+		{@attach fitMenu(anchor)}
 	>
 		<button
 			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
