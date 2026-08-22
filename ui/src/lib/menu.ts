@@ -15,12 +15,18 @@ export function toBody(el: HTMLElement) {
 /** What a popup hangs off: a trigger's box, or a zero-size box at the pointer. */
 type Box = { left: number; right: number; top: number; bottom: number };
 
-/** A placement, plus what `fitMenu` needs to redo it once the popup's real size is known. */
+/** What `fitMenu` needs to place the popup once its real size is known. */
 export type Anchor = { style: string; box: Box; gap: number; align: 'left' | 'right' };
 
-/** Placeholder for a menu that has never been opened; nothing renders until `anchorMenu` runs. */
+/**
+ * The style a popup renders with until `fitMenu` measures it. Laid out (so it can be measured) but
+ * never painted, because until then the only honest answer to where it goes is "not yet known".
+ */
+const UNPLACED = 'visibility:hidden';
+
+/** Placeholder for a menu that has never been opened. */
 export const NO_ANCHOR: Anchor = {
-	style: '',
+	style: UNPLACED,
 	box: { left: 0, right: 0, top: 0, bottom: 0 },
 	gap: 0,
 	align: 'left'
@@ -28,17 +34,15 @@ export const NO_ANCHOR: Anchor = {
 
 /** Closest the popup may come to the window edge. */
 const EDGE = 8;
-// First guess only, for the frame before `fitMenu` measures. Roughly a mid-sized menu.
-const GUESS_W = 224;
-const GUESS_H = 280;
 
 /**
  * Inline style placing a `w` x `h` popup against `box`: below it, or above when there isn't room
  * below and there is above; hanging off its left or right edge; and never closer to the window
  * edge than EDGE, whatever the anchor asked for. All four offsets are named so the result can
- * replace an earlier one wholesale.
+ * replace `UNPLACED` wholesale.
  */
-function layout(box: Box, gap: number, align: 'left' | 'right', w: number, h: number) {
+export function place(a: Anchor, w: number, h: number) {
+	const { box, gap, align } = a;
 	const { innerWidth: vw, innerHeight: vh } = window;
 	const up = box.bottom + gap + h > vh && box.top - gap - h >= 0;
 	const right = align === 'right' || box.left + w > vw;
@@ -49,18 +53,16 @@ function layout(box: Box, gap: number, align: 'left' | 'right', w: number, h: nu
 	const y = clamp(up ? vh - box.top + gap : box.bottom + gap, h, vh);
 	return (
 		`left:${right ? 'auto' : x + 'px'};right:${right ? x + 'px' : 'auto'};` +
-		`top:${up ? 'auto' : y + 'px'};bottom:${up ? y + 'px' : 'auto'};` +
-		`transform-origin:${up ? 'bottom' : 'top'} ${right ? 'right' : 'left'}`
+		`top:${up ? 'auto' : y + 'px'};bottom:${up ? y + 'px' : 'auto'}`
 	);
 }
 
 /**
- * Place a `fixed` menu for whatever opened it: a click on a ⋯ trigger anchors to the trigger's box
+ * Record what a `fixed` menu should hang off: a click on a ⋯ trigger anchors to the trigger's box
  * (`e.currentTarget`), a right-click anchors to the pointer. `align: 'right'` lines the menu's
  * right edge up with the trigger's, which is what a ⋯ button wants.
  *
- * The size here is a guess. Pair it with `fitMenu` on the popup, which measures the real thing and
- * places it again before the frame is painted.
+ * Nothing is placed here — the size isn't known yet. `fitMenu` on the popup does the placing.
  */
 export function anchorMenu(e: Event, { align = 'left' }: { align?: 'left' | 'right' } = {}): Anchor {
 	const atPointer = e.type === 'contextmenu';
@@ -68,25 +70,25 @@ export function anchorMenu(e: Event, { align = 'left' }: { align?: 'left' | 'rig
 	const box = atPointer
 		? { left: px, right: px, top: py, bottom: py }
 		: (e.currentTarget as HTMLElement).getBoundingClientRect();
-	const gap = atPointer ? 0 : 4;
-	return { style: layout(box, gap, align, GUESS_W, GUESS_H), box, gap, align };
+	return { style: UNPLACED, box, gap: atPointer ? 0 : 4, align };
 }
 
 /**
- * Attachment for the popup itself: measure it, then place it for real. An estimate can't know that
- * a ten-item track menu is 380px tall or that "Remove from Liked Songs" makes it 260 wide, which is
- * how menus near a window edge ended up half off screen.
+ * Attachment for the popup itself: measure it, then place it, in the same tick it was created and
+ * so before anything is painted. Sizes can't be guessed — a ten-item track menu is 380px tall and
+ * "Remove from Liked Songs" makes it 260 wide — and a guess that has to be corrected is a menu that
+ * moves after you can already see it.
  *
- * Measuring happens at left:0 first: a `fixed` box shrink-wraps to the room left of the window
- * edge, so a menu sitting where it doesn't fit reports the squeezed width rather than its own.
+ * Measuring happens at the top-left corner: a `fixed` box shrink-wraps to the room left of the
+ * window edge, so a menu measured where it will sit reports the squeezed width, not its own.
  */
 export function fitMenu(a: Anchor) {
 	return (el: HTMLElement) => {
-		el.style.cssText = 'left:0;top:0;right:auto;bottom:auto';
-		// offset*, not getBoundingClientRect: the popup opens under a `zoom-in-95` animation, and a
-		// client rect is the *transformed* box, so it would report 95% of the real size.
+		el.style.cssText = `${UNPLACED};left:0;top:0;right:auto;bottom:auto`;
+		// offset*, not a client rect: the popup fades in and a client rect is the *transformed* box,
+		// so any transform on it would be measured as part of the size.
 		const { offsetWidth, offsetHeight } = el;
-		el.style.cssText = layout(a.box, a.gap, a.align, offsetWidth, offsetHeight);
+		el.style.cssText = place(a, offsetWidth, offsetHeight);
 	};
 }
 
