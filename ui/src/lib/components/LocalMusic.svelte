@@ -18,8 +18,10 @@
 	import MediaCard from './MediaCard.svelte';
 	import MediaCardSkeleton from './MediaCardSkeleton.svelte';
 	import ErrorState from './ErrorState.svelte';
+	import TrackFilter from './TrackFilter.svelte';
 	import TrackRow from './TrackRow.svelte';
 	import * as api from '$lib/api';
+	import { indexCards, indexSongs, match } from '$lib/localsearch';
 	import {
 		addLocalFolder,
 		local,
@@ -38,9 +40,31 @@
 
 	let view = $state('albums');
 	// A local collection can be thousands of files, and WebKitGTK does not enjoy thousands of rows.
-	// Render a page at a time — Play all and Shuffle still take the whole list.
+	// Render a page at a time — Play all and Shuffle still take every song in the list.
 	const PAGE = 100;
 	let shown = $state(PAGE);
+
+	// Filtering the collection. It is all in memory already, so this is a scan and not a request:
+	// no debounce, no loading state, the lists narrow as you type. The one cost worth dodging is
+	// Svelte's — `local` is `$state`, so reading `song.title` for thousands of songs on every
+	// keystroke goes through as many proxy traps — so `localsearch.ts` flattens the text into plain
+	// strings once per library change and each keystroke scans those. Reading `ix` at all is behind
+	// the empty-query check below, so a library nobody searches never pays for the pass.
+	let query = $state('');
+	const ix = $derived({
+		songs: indexSongs(local.songs),
+		albums: indexCards(local.albums),
+		artists: indexCards(local.artists)
+	});
+	const q = $derived(query.trim());
+	const songs = $derived(q ? match(ix.songs, q) : local.songs);
+	const albums = $derived(q ? match(ix.albums, q) : local.albums);
+	const artists = $derived(q ? match(ix.artists, q) : local.artists);
+
+	$effect(() => {
+		q; // a narrower list starts from the first page again
+		shown = PAGE;
+	});
 
 	// Same shape as the playlist page and home: one page per approach to the bottom. Nothing is
 	// fetched here (the whole library is already in memory), so this only grows how much of it is
@@ -53,9 +77,9 @@
 		return () => io.disconnect();
 	}
 	const nowId = $derived(playback.now?.videoId);
-	// The whole local collection as one queue — what the Play/Shuffle buttons above the song list
-	// do, and what the queue panel calls it. Not a `playFrom`: there's no page behind "everything on
-	// this disk", so it has no business landing in recents or the sidebar's last-played order.
+	// The song list as one queue — what the Play/Shuffle buttons above it do, and what the queue
+	// panel calls it. Not a `playFrom`: there's no page behind "the music on this disk", so it has
+	// no business landing in recents or the sidebar's last-played order.
 	const SOURCE = 'Local music';
 
 	async function pickFolder() {
@@ -63,10 +87,11 @@
 		if (typeof picked === 'string') await addLocalFolder(picked);
 	}
 
+	// The filtered list, not the whole library: Play all plays what the list shows.
 	function playAll(shuffle: boolean) {
-		if (!local.songs.length) return;
+		if (!songs.length) return;
 		openPlayer();
-		api.playPlaylist(local.songs, null, undefined, SOURCE, shuffle);
+		api.playPlaylist(songs, null, undefined, SOURCE, shuffle);
 	}
 
 	async function forget(path: string) {
@@ -137,17 +162,24 @@
 		</div>
 	{:else if local.songs.length}
 		<Tabs.Root bind:value={view}>
-			<Tabs.List class="mb-4">
-				<Tabs.Trigger value="albums">Albums ({local.albums.length})</Tabs.Trigger>
-				<Tabs.Trigger value="artists">Artists ({local.artists.length})</Tabs.Trigger>
-				<Tabs.Trigger value="songs">Songs ({local.songs.length})</Tabs.Trigger>
-			</Tabs.List>
+			<!-- The counts follow the filter, so the tabs say where the matches are. -->
+			<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+				<Tabs.List>
+					<Tabs.Trigger value="albums">Albums ({albums.length})</Tabs.Trigger>
+					<Tabs.Trigger value="artists">Artists ({artists.length})</Tabs.Trigger>
+					<Tabs.Trigger value="songs">Songs ({songs.length})</Tabs.Trigger>
+				</Tabs.List>
+				<TrackFilter bind:value={query} placeholder="Search your music" />
+			</div>
+			{#if q && !songs.length && !albums.length && !artists.length}
+				<p class="text-sm text-muted-foreground">Nothing on this device matches “{q}”.</p>
+			{/if}
 			<!-- Gated on `view`: bits-ui hides an inactive panel rather than unmounting it, so all three
 			     views of the same collection would be built on every visit. -->
 			<Tabs.Content value="albums">
 				{#if view === 'albums'}
 					<div class="card-grid content-in">
-						{#each local.albums as album (album.id)}
+						{#each albums as album (album.id)}
 							<MediaCard item={album} />
 						{/each}
 					</div>
@@ -156,7 +188,7 @@
 			<Tabs.Content value="artists">
 				{#if view === 'artists'}
 					<div class="card-grid content-in">
-						{#each local.artists as artist (artist.id)}
+						{#each artists as artist (artist.id)}
 							<MediaCard item={artist} />
 						{/each}
 					</div>
@@ -165,32 +197,38 @@
 			<Tabs.Content value="songs">
 				{#if view === 'songs'}
 					<div class="mb-3 flex gap-2">
-						<Button size="sm" class="gap-2 rounded-full" onclick={() => playAll(false)}>
+						<Button
+							size="sm"
+							class="gap-2 rounded-full"
+							disabled={!songs.length}
+							onclick={() => playAll(false)}
+						>
 							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> Play all
 						</Button>
 						<Button
 							size="sm"
 							variant="outline"
 							class="gap-2 rounded-full"
+							disabled={!songs.length}
 							onclick={() => playAll(true)}
 						>
 							<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> Shuffle
 						</Button>
 					</div>
 					<div class="content-in">
-						{#each local.songs.slice(0, shown) as song, i (song.video_id)}
+						{#each songs.slice(0, shown) as song, i (song.video_id)}
 							<TrackRow
 								{song}
 								index={i}
 								active={song.video_id === nowId}
 								onplay={() => {
 									openPlayer();
-									api.playPlaylist(local.songs, i, undefined, SOURCE);
+									api.playPlaylist(songs, i, undefined, SOURCE);
 								}}
 							/>
 						{/each}
 					</div>
-					{#if local.songs.length > shown}
+					{#if songs.length > shown}
 						<div {@attach sentinel}></div>
 					{/if}
 				{/if}
