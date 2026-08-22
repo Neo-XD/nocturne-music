@@ -25,25 +25,31 @@
 
 <DialogPortal {...portalProps}>
 	<Dialog.Overlay />
-	<DialogPrimitive.Content
-		bind:ref
-		data-slot="dialog-content"
-		class={cn(
-			"bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 ring-foreground/5 grid max-w-[calc(100%-2rem)] gap-6 rounded-4xl p-6 text-sm ring-1 duration-100 sm:max-w-md fixed top-1/2 left-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2 outline-none",
-			className
-		)}
-		{...restProps}
-	>
-		{@render children?.()}
-		{#if showCloseButton}
-			<DialogPrimitive.Close data-slot="dialog-close">
-				{#snippet child({ props })}
-					<Button variant="ghost" class="absolute top-4 right-4" size="icon-sm" {...props}>
-						<HugeiconsIcon icon={Cancel01Icon} strokeWidth={2}  />
-						<span class="sr-only">Close</span>
-					</Button>
-				{/snippet}
-			</DialogPrimitive.Close>
-		{/if}
-	</DialogPrimitive.Content>
+	<!-- Centred by the flex wrapper, never with translate(-50%, -50%): a half-pixel transform
+	     offset (any dialog with an odd height) is not pixel-snapped, so WebKitGTK's compositor
+	     resamples the whole layer and the text goes soft. See issue #75. Not inset-0 + m-auto +
+	     h-fit either: WebKitGTK ignores height:fit-content there and stretches to the viewport. -->
+	<div class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center">
+		<DialogPrimitive.Content
+			bind:ref
+			data-slot="dialog-content"
+			class={cn(
+				"bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 ring-foreground/5 grid max-w-[calc(100%-2rem)] gap-6 rounded-4xl p-6 text-sm ring-1 duration-100 sm:max-w-md pointer-events-auto relative w-full outline-none",
+				className
+			)}
+			{...restProps}
+		>
+			{@render children?.()}
+			{#if showCloseButton}
+				<DialogPrimitive.Close data-slot="dialog-close">
+					{#snippet child({ props })}
+						<Button variant="ghost" class="absolute top-4 right-4" size="icon-sm" {...props}>
+							<HugeiconsIcon icon={Cancel01Icon} strokeWidth={2}  />
+							<span class="sr-only">Close</span>
+						</Button>
+					{/snippet}
+				</DialogPrimitive.Close>
+			{/if}
+		</DialogPrimitive.Content>
+	</div>
 </DialogPortal>
