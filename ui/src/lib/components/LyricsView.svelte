@@ -5,7 +5,10 @@
 	// `expanded` only sizes the type and centres the column. The owner of the extra room (the side
 	// panel, or the now-playing view) decides how much there is. Toggling it must not remount this
 	// component, or the lyrics refetch and the scroll position is lost.
-	let { expanded = false }: { expanded?: boolean } = $props();
+	// `compact` is the mini-player: a ~220px column with no room for the source footer or a
+	// scrollbar. It only shrinks the type and chrome; the sync/auto-scroll logic is identical.
+	let { expanded = false, compact = false }: { expanded?: boolean; compact?: boolean } =
+		$props();
 
 	/** "3:21" / "1:02:03" → seconds. */
 	function durationSecs(d?: string): number | undefined {
@@ -147,7 +150,11 @@
 	onwheel={onUserScroll}
 	ontouchmove={onUserScroll}
 	onpointerdown={onUserScroll}
-	class="min-h-0 flex-1 overflow-y-auto py-6 {expanded ? 'px-10' : 'px-5'}"
+	class="min-h-0 flex-1 overflow-y-auto {compact
+		? 'px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+		: expanded
+			? 'px-10 py-6'
+			: 'px-5 py-6'}"
 >
 	{#if loading}
 		<div class="space-y-3">
@@ -167,7 +174,7 @@
 					data-line={i}
 					onclick={() => seekTo(line)}
 					class="block w-full origin-left cursor-pointer text-left font-heading font-bold leading-snug transition-[color,transform] duration-300 ease-out hover:text-foreground
-						{expanded ? 'py-3 text-3xl' : 'py-2 text-xl'}
+						{expanded ? 'py-3 text-3xl' : compact ? 'py-1 text-sm' : 'py-2 text-xl'}
 						{isActive
 						? 'scale-[1.04] text-foreground'
 						: isPast
@@ -220,7 +227,9 @@
 		<div
 			class="space-y-2 leading-relaxed text-foreground/90 {expanded
 				? 'mx-auto max-w-3xl text-xl'
-				: 'text-[15px]'}"
+				: compact
+					? 'text-xs'
+					: 'text-[15px]'}"
 		>
 			{#each lyrics.lines as line, i (i)}
 				{#if line.text}
@@ -239,7 +248,7 @@
 		<p class="py-8 text-center text-sm text-muted-foreground">No lyrics found for this track.</p>
 	{/if}
 </div>
-{#if lyrics && !loading}
+{#if lyrics && !loading && !compact}
 	<p class="border-t px-4 py-2 text-xs text-muted-foreground">
 		{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}
 	</p>

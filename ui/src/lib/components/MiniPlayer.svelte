@@ -19,6 +19,7 @@
 		FavouriteIcon,
 		MusicNote01Icon,
 		MaximizeScreenIcon,
+		Mic01Icon,
 		VolumeHighIcon,
 		VolumeMute02Icon
 	} from '@hugeicons/core-free-icons';
@@ -33,7 +34,13 @@
 		toggleNowPlayingLike
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
+	import LyricsView from './LyricsView.svelte';
 	import Marquee from './Marquee.svelte';
+
+	// Which of the two the right column is showing. Local, and reset when the widget is destroyed:
+	// nothing here is worth persisting. The queue is the default because it is the cheaper view —
+	// lyrics only fetch (and run the karaoke clock) while this is 'lyrics'.
+	let tab = $state<'queue' | 'lyrics'>('queue');
 
 	const now = $derived(playback.now);
 	const shuffleOn = $derived(playback.queue.shuffle ?? false);
@@ -106,7 +113,7 @@
 				src={thumb(now.thumbnail, 480)}
 				alt=""
 				in:fade={{ duration: 300 }}
-				class="pointer-events-none absolute inset-y-0 left-0 h-full w-[62%] object-cover"
+				class="pointer-events-none absolute inset-y-0 left-0 h-full w-[56%] object-cover"
 				style="mask-image:linear-gradient(to right,#000 0,#000 70%,transparent 100%);-webkit-mask-image:linear-gradient(to right,#000 0,#000 70%,transparent 100%)"
 			/>
 		{/if}
@@ -114,7 +121,7 @@
 	<!-- Enough shade to keep white text readable over a bright cover, following the same fade so it
 	     never draws an edge of its own. The art stays plainly visible under it. -->
 	<div
-		class="pointer-events-none absolute inset-y-0 left-0 w-[62%]"
+		class="pointer-events-none absolute inset-y-0 left-0 w-[56%]"
 		style="background:linear-gradient(to right,rgb(0 0 0/0.72) 0%,rgb(0 0 0/0.58) 70%,rgb(0 0 0/0) 100%)"
 	></div>
 
@@ -226,10 +233,20 @@
 	</div>
 
 	<!-- Right: what's next, and the transport. -->
-	<div class="relative flex w-56 shrink-0 flex-col gap-2 py-3 pl-1 pr-3">
+	<div class="relative flex w-64 shrink-0 flex-col gap-2 py-3 pl-1 pr-3">
 		<!-- Takes whatever height is left above the controls, and the fourth row runs past that edge
 		     and dissolves into it: the queue should look like it continues, not like it ends at
 		     whatever happened to fit. Tuned by eye at 560x180. -->
+		{#if tab === 'lyrics'}
+			<!-- Faded top and bottom, unlike the queue: the active line is centred, so the lines
+			     running off both edges should dissolve the same way. -->
+			<div
+				class="flex min-h-0 flex-1 flex-col overflow-hidden pl-2"
+				style="mask-image:linear-gradient(to bottom,transparent 0,#000 20%,#000 80%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 20%,#000 80%,transparent 100%)"
+			>
+				<LyricsView compact />
+			</div>
+		{:else}
 		<div
 			class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden"
 			style="mask-image:linear-gradient(to bottom,#000 0,#000 78%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,#000 0,#000 78%,transparent 100%)"
@@ -260,8 +277,11 @@
 				<p class="px-1.5 py-0.5 text-xs text-muted-foreground">Nothing up next</p>
 			{/each}
 		</div>
+		{/if}
 
-		<div class="flex shrink-0 items-center justify-center gap-2.5">
+		<!-- The lyrics toggle rides the transport row absolutely rather than in a header of its
+		     own: at 180px tall, a row for it would cost the queue a track and a half. -->
+		<div class="relative flex shrink-0 items-center justify-center gap-2.5">
 			<button
 				class="{panelBtn} {shuffleOn ? 'text-primary' : 'text-muted-foreground'}"
 				onclick={() => api.toggleShuffle()}
@@ -291,6 +311,16 @@
 					showAlt={repeat === 'one'}
 					class="h-4 w-4"
 				/>
+			</button>
+			<button
+				class="{panelBtn} absolute right-0 {tab === 'lyrics'
+					? 'text-primary'
+					: 'text-muted-foreground'}"
+				onclick={() => (tab = tab === 'lyrics' ? 'queue' : 'lyrics')}
+				aria-label={tab === 'lyrics' ? 'Show queue' : 'Show lyrics'}
+				aria-pressed={tab === 'lyrics'}
+			>
+				<HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" />
 			</button>
 		</div>
 	</div>
