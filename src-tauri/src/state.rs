@@ -19,7 +19,7 @@ use crate::db::{now_secs, Db};
 use crate::discord::DiscordHandle;
 use crate::listentogether::{LtSession, SyncCommand};
 use crate::media::MediaHandle;
-use crate::orchestrator::{Orchestrator, PlaybackData, ResolveError};
+use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError};
 
 /// Synthetic browseId for the On Repeat playlist. Not a YouTube id: `get_playlist` intercepts it
 /// and builds the page from local play counts, so it must never collide with a real browseId
@@ -274,10 +274,10 @@ struct QueueState {
     /// Loudness gain (dB) for the primed lookahead. mpv's `af` is global, so this can't ride along
     /// with the appended entry — it's applied when the gapless advance is observed.
     lookahead_gain: Option<Option<f64>>,
-    /// Watch-history tracking URL for the current track + the primed lookahead's (promoted on a
-    /// gapless advance, mirroring current/lookahead_client). context/01 §registerPlayback.
-    playback_url: Option<String>,
-    lookahead_playback_url: Option<String>,
+    /// Watch-history ping for the current track + the primed lookahead's (promoted on a gapless
+    /// advance, mirroring current/lookahead_client). context/01 §registerPlayback.
+    playback_ping: Option<PlaybackPing>,
+    lookahead_playback_ping: Option<PlaybackPing>,
     /// Content Playback Nonce for the current play + whether we've already fired the history ping
     /// for it (latched so the frequent position events fire it exactly once). context/01.
     cpn: String,
@@ -729,8 +729,15 @@ impl AppState {
                 headers: Default::default(),
                 expires_in_seconds: c.expires_at - now,
                 loudness_db: c.loudness_db,
-                // Not cached — a replay from cache doesn't re-register watch history (best-effort).
-                playback_url: None,
+                // Cached alongside the URL: a hit skips `/player`, so without it a replay never
+                // registered in watch history — and neither did a first listen whose stream the
+                // gapless lookahead had already cached (issue #83). `None` on rows written before
+                // the column, and on whatever YouTube declines a stale `ei` for; the ping is
+                // best-effort either way.
+                playback_ping: c
+                    .ping_url
+                    .zip(c.ping_client)
+                    .map(|(url, client)| PlaybackPing { url, client }),
                 title: None,
                 artists: None,
                 duration: None,
@@ -749,11 +756,15 @@ impl AppState {
         if data.stream_client != "rustypipe" {
             self.db.put_stream(
                 video_id,
-                &data.stream_url,
-                data.itag,
-                now + data.expires_in_seconds.max(0),
-                data.loudness_db,
-                data.is_video,
+                &crate::db::CachedStream {
+                    url: data.stream_url.clone(),
+                    itag: data.itag,
+                    expires_at: now + data.expires_in_seconds.max(0),
+                    loudness_db: data.loudness_db,
+                    is_video: data.is_video,
+                    ping_url: data.playback_ping.as_ref().map(|p| p.url.clone()),
+                    ping_client: data.playback_ping.as_ref().map(|p| p.client.clone()),
+                },
                 now,
             );
         }
@@ -1272,7 +1283,7 @@ impl AppState {
             q.lookahead_loaded = None;
             q.current_client = q.lookahead_client.take();
             // New track is now playing → fresh history state (mirrors start_current).
-            q.playback_url = q.lookahead_playback_url.take();
+            q.playback_ping = q.lookahead_playback_ping.take();
             q.cpn = innertube::generate_cpn();
             q.history_pinged = false;
             q.duration = 0.0;
@@ -1442,7 +1453,7 @@ impl AppState {
             let mut q = self.queue.lock().await;
             q.current_client = Some(data.stream_client.clone());
             // Fresh play → fresh history state (context/01 §registerPlayback).
-            q.playback_url = data.playback_url.clone();
+            q.playback_ping = data.playback_ping.clone();
             q.cpn = innertube::generate_cpn();
             q.history_pinged = false;
             q.duration = 0.0;
@@ -1571,7 +1582,7 @@ impl AppState {
         q.lookahead_loaded = Some(next_idx);
         q.lookahead_client = Some(data.stream_client.clone());
         q.lookahead_gain = Some(loudness_gain(data.loudness_db));
-        q.lookahead_playback_url = data.playback_url.clone();
+        q.lookahead_playback_ping = data.playback_ping.clone();
         // Same backfill as start_current: a gapless advance emits this item straight from the
         // queue, so the repair has to land before it becomes the current track.
         if let Some(qi) = q.items.get_mut(next_idx) {
@@ -1806,15 +1817,14 @@ impl AppState {
                 // Threshold: halfway, capped at 30s (default 30s until mpv reports duration).
                 let threshold = if q.duration > 1.0 { (q.duration / 2.0).min(30.0) } else { 30.0 };
                 if pos >= threshold {
-                    q.history_pinged = true; // latch even if the URL is missing — never retry
-                    let ping = q.playback_url.clone().map(|url| (url, q.cpn.clone()));
-                    Some((ping, q.items.get(q.current).cloned()))
+                    q.history_pinged = true; // latch even if the ping is missing — never retry
+                    Some((q.playback_ping.clone(), q.cpn.clone(), q.items.get(q.current).cloned()))
                 } else {
                     None
                 }
             }
         };
-        let Some((ping, played)) = crossed else { return };
+        let Some((ping, cpn, played)) = crossed else { return };
 
         // Local play count, on the same threshold. Deliberately not gated on `enable_history` or
         // sign-in: that setting is about registering plays with YouTube, while this never leaves
@@ -1831,15 +1841,28 @@ impl AppState {
             }
         }
 
-        let Some((url, cpn)) = ping else { return };
         if !self.history_enabled() || !self.it.is_logged_in() {
             return;
         }
-        let Some(client) = self.clients.get(innertube::METADATA_CLIENT).cloned() else { return };
+        // Say so when there's nothing to ping. This used to be a silent `return`, which is why
+        // issue #83 could only be diagnosed by reading the source: the play was dropped with no
+        // trace anywhere. Anything above `debug` is noise on a working install, but the line
+        // exists now.
+        let Some(ping) = ping else {
+            tracing::info!(
+                "no watch-history ping for this play (no client returned a tracking URL)"
+            );
+            return;
+        };
+        // Ping as the client that was issued the URL, not always the metadata one.
+        let Some(client) = self.clients.get(&ping.client).cloned() else {
+            tracing::warn!(client = %ping.client, "watch-history ping: unknown client");
+            return;
+        };
         let it = self.it.clone();
         tauri::async_runtime::spawn(async move {
-            match it.register_playback(&client, &url, &cpn, None).await {
-                Ok(()) => tracing::debug!("watch-history ping sent"),
+            match it.register_playback(&client, &ping.url, &cpn, None).await {
+                Ok(()) => tracing::debug!(client = %ping.client, "watch-history ping sent"),
                 Err(e) => tracing::warn!(error = %e, "watch-history ping failed"),
             }
         });

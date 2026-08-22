@@ -27,6 +27,12 @@ pub struct CachedStream {
     /// without it a replay inside the cache window can't tell the player view whether the track
     /// has a music video. `None` on rows written before the column existed.
     pub is_video: Option<bool>,
+    /// The watch-history ping (`videostatsPlaybackUrl` + the client that was issued it), cached for
+    /// the same reason again: a hit skips `/player`, and without it every replay inside the cache
+    /// window went unregistered. That included plenty of *first* listens, because the gapless
+    /// lookahead caches the next track and a non-gapless advance then re-resolves it. Issue #83.
+    pub ping_url: Option<String>,
+    pub ping_client: Option<String>,
 }
 
 impl Db {
@@ -52,7 +58,9 @@ impl Db {
                 itag        INTEGER NOT NULL,
                 expires_at  INTEGER NOT NULL,
                 loudness_db REAL,
-                is_video    INTEGER
+                is_video    INTEGER,
+                ping_url    TEXT,
+                ping_client TEXT
             );
             CREATE TABLE IF NOT EXISTS lyrics_cache (
                 video_id   TEXT PRIMARY KEY,
@@ -96,6 +104,10 @@ impl Db {
         if conn.execute("ALTER TABLE stream_url_cache ADD COLUMN is_video INTEGER", []).is_ok() {
             let _ = conn.execute("DELETE FROM stream_url_cache", []);
         }
+        // The watch-history ping, added for the same reason (issue #83). No wipe: a NULL here just
+        // means that one replay goes unregistered, which is exactly what every row did before.
+        let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_url TEXT", []);
+        let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_client TEXT", []);
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
         let _ = conn.execute("DELETE FROM plays WHERE video_id LIKE 'LOCAL:%'", []);
@@ -218,7 +230,7 @@ impl Db {
     pub fn get_stream(&self, video_id: &str, now: i64) -> Option<CachedStream> {
         let conn = self.0.lock().unwrap();
         conn.query_row(
-            "SELECT url, itag, expires_at, loudness_db, is_video FROM stream_url_cache WHERE video_id = ?1 AND expires_at > ?2",
+            "SELECT url, itag, expires_at, loudness_db, is_video, ping_url, ping_client FROM stream_url_cache WHERE video_id = ?1 AND expires_at > ?2",
             rusqlite::params![video_id, now],
             |r| {
                 Ok(CachedStream {
@@ -227,6 +239,8 @@ impl Db {
                     expires_at: r.get(2)?,
                     loudness_db: r.get(3)?,
                     is_video: r.get(4)?,
+                    ping_url: r.get(5)?,
+                    ping_client: r.get(6)?,
                 })
             },
         )
@@ -245,21 +259,21 @@ impl Db {
     /// else ever deleted a dead row: `get_stream` filters them out but leaves them, so the table
     /// only ever grew. Measured on a real install before this: 1803 rows / 2.5 MB, nearly all of
     /// them URLs that expired hours or weeks ago.
-    pub fn put_stream(
-        &self,
-        video_id: &str,
-        url: &str,
-        itag: i64,
-        expires_at: i64,
-        loudness_db: Option<f64>,
-        is_video: Option<bool>,
-        now: i64,
-    ) {
+    pub fn put_stream(&self, video_id: &str, row: &CachedStream, now: i64) {
         let conn = self.0.lock().unwrap();
         let _ = conn.execute(
-            "INSERT INTO stream_url_cache(video_id, url, itag, expires_at, loudness_db, is_video) VALUES(?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(video_id) DO UPDATE SET url = excluded.url, itag = excluded.itag, expires_at = excluded.expires_at, loudness_db = excluded.loudness_db, is_video = excluded.is_video",
-            rusqlite::params![video_id, url, itag, expires_at, loudness_db, is_video],
+            "INSERT INTO stream_url_cache(video_id, url, itag, expires_at, loudness_db, is_video, ping_url, ping_client) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(video_id) DO UPDATE SET url = excluded.url, itag = excluded.itag, expires_at = excluded.expires_at, loudness_db = excluded.loudness_db, is_video = excluded.is_video, ping_url = excluded.ping_url, ping_client = excluded.ping_client",
+            rusqlite::params![
+                video_id,
+                row.url,
+                row.itag,
+                row.expires_at,
+                row.loudness_db,
+                row.is_video,
+                row.ping_url,
+                row.ping_client
+            ],
         );
         let _ = conn.execute("DELETE FROM stream_url_cache WHERE expires_at <= ?1", [now]);
     }
@@ -668,15 +682,28 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
+    /// A cache row with only the fields a test cares about; the rest are the boring defaults.
+    fn row(url: &str, expires_at: i64) -> CachedStream {
+        CachedStream {
+            url: url.to_owned(),
+            itag: 251,
+            expires_at,
+            loudness_db: None,
+            is_video: None,
+            ping_url: None,
+            ping_client: None,
+        }
+    }
+
     #[test]
     fn put_stream_drops_entries_that_have_already_expired() {
         let d = db();
-        d.put_stream("stale", "https://x/1", 251, 1_000, None, None, 900);
-        d.put_stream("live", "https://x/2", 251, 9_000, None, None, 900);
+        d.put_stream("stale", &row("https://x/1", 1_000), 900);
+        d.put_stream("live", &row("https://x/2", 9_000), 900);
         assert!(d.get_stream("stale", 900).is_some(), "not expired yet at t=900");
 
         // t=2000: "stale" expired at 1_000, so writing anything now sweeps it.
-        d.put_stream("fresh", "https://x/3", 251, 8_000, None, None, 2_000);
+        d.put_stream("fresh", &row("https://x/3", 8_000), 2_000);
         assert!(d.get_stream("stale", 2_000).is_none());
         assert!(d.get_stream("live", 2_000).is_some(), "unexpired rows survive the sweep");
         assert!(d.get_stream("fresh", 2_000).is_some(), "the row just written survives it");
@@ -687,12 +714,47 @@ mod tests {
     #[test]
     fn put_stream_round_trips_the_music_video_verdict() {
         let d = db();
-        d.put_stream("mv", "https://x/1", 251, 9_000, None, Some(true), 900);
-        d.put_stream("song", "https://x/2", 251, 9_000, None, Some(false), 900);
-        d.put_stream("unknown", "https://x/3", 251, 9_000, None, None, 900);
+        d.put_stream(
+            "mv",
+            &CachedStream { is_video: Some(true), ..row("https://x/1", 9_000) },
+            900,
+        );
+        d.put_stream(
+            "song",
+            &CachedStream { is_video: Some(false), ..row("https://x/2", 9_000) },
+            900,
+        );
+        d.put_stream("unknown", &row("https://x/3", 9_000), 900);
         assert_eq!(d.get_stream("mv", 900).unwrap().is_video, Some(true));
         assert_eq!(d.get_stream("song", 900).unwrap().is_video, Some(false));
         assert_eq!(d.get_stream("unknown", 900).unwrap().is_video, None);
+    }
+
+    /// The watch-history ping has to survive the cache the same way (issue #83): a hit skips
+    /// `/player`, and the gapless lookahead means a track's *first* play is often a cache hit.
+    #[test]
+    fn put_stream_round_trips_the_watch_history_ping() {
+        let d = db();
+        d.put_stream(
+            "pinged",
+            &CachedStream {
+                ping_url: Some("https://s.youtube.com/api/stats/playback?docid=x".to_owned()),
+                ping_client: Some("ANDROID_VR_1_65_10".to_owned()),
+                ..row("https://x/1", 9_000)
+            },
+            900,
+        );
+        d.put_stream("unpinged", &row("https://x/2", 9_000), 900);
+
+        let hit = d.get_stream("pinged", 900).unwrap();
+        assert_eq!(
+            hit.ping_url.as_deref(),
+            Some("https://s.youtube.com/api/stats/playback?docid=x")
+        );
+        assert_eq!(hit.ping_client.as_deref(), Some("ANDROID_VR_1_65_10"));
+
+        let none = d.get_stream("unpinged", 900).unwrap();
+        assert!(none.ping_url.is_none() && none.ping_client.is_none());
     }
 
     #[test]

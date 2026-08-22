@@ -599,7 +599,7 @@ pub fn playback_data(video_id: &str, path: &str) -> Result<crate::orchestrator::
         expires_in_seconds: i64::MAX / 2,
         // No loudness metadata in the general case; mpv plays the file as mastered.
         loudness_db: None,
-        playback_url: None,
+        playback_ping: None,
         title: None,
         artists: None,
         duration: None,

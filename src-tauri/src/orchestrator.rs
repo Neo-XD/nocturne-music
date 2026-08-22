@@ -30,9 +30,9 @@ pub struct PlaybackData {
     pub headers: std::collections::HashMap<String, String>,
     pub expires_in_seconds: i64,
     pub loudness_db: Option<f64>,
-    /// `playbackTracking.videostatsPlaybackUrl.baseUrl` from the MAIN response — the URL to GET to
-    /// register the play in watch history (context/01). `None` when main didn't return it.
-    pub playback_url: Option<String>,
+    /// Where to register this play in watch history (context/01). `None` when no client that
+    /// answered carried the tracking block.
+    pub playback_ping: Option<PlaybackPing>,
     pub title: Option<String>,
     pub artists: Option<String>,
     pub duration: Option<String>,
@@ -44,6 +44,18 @@ pub struct PlaybackData {
     pub is_video: Option<bool>,
     /// Which client produced the stream (diagnostics). context/06.
     pub stream_client: String,
+}
+
+/// The watch-history ping for one play: `playbackTracking.videostatsPlaybackUrl.baseUrl` plus the
+/// registry key of the client whose `/player` response carried it (context/01 §registerPlayback).
+///
+/// The two travel together because the ping's `c=` param, and its headers, have to be the client
+/// that was issued the URL. Reading the URL off one client's response and sending it as another's
+/// is what YouTube sees as a mismatch.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PlaybackPing {
+    pub url: String,
+    pub client: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -66,6 +78,7 @@ struct Candidate {
     url: String,
     expires: i64,
     client: String,
+    ping: Option<PlaybackPing>,
 }
 
 pub struct Orchestrator {
@@ -135,6 +148,10 @@ impl Orchestrator {
             _ => None,
         };
 
+        // Which client `main_resp` actually came from — WEB_CREATOR can replace it just below, and
+        // a tracking URL has to be pinged as the client that was issued it.
+        let mut main_key = MAIN_CLIENT;
+
         // Age/login gate on WEB_REMIX → retry with WEB_CREATOR (login-only). context/06 §4, seam #7.
         // ponytail: metadata + structure are correct now, but WEB_CREATOR streams are ciphered, so
         // this only becomes *audible* once KI-1 (sig/n extraction) is solved. Until then it degrades
@@ -146,6 +163,7 @@ impl Orchestrator {
                 tracing::info!(video_id, "WEB_REMIX age/login-gated → retrying WEB_CREATOR");
                 if let Ok(r) = self.it.player(cc, video_id, None, cc_sts, cc_pot).await {
                     main_resp = Some(r);
+                    main_key = "WEB_CREATOR";
                 }
             }
         }
@@ -156,6 +174,12 @@ impl Orchestrator {
             .and_then(|r| r.streaming_data.as_ref())
             .is_some_and(|s| s.adaptive_formats.iter().any(is_high));
         let mut audio_config_loudness = main_resp.as_ref().and_then(main_loudness);
+        // Prefer main's tracking block: a ping sent as WEB_REMIX is what registers the play as a
+        // YouTube *Music* one. But `playbackTracking` is only present on an OK response, so when
+        // main degraded (no PoToken, age gate, a stale cipher) it isn't there at all and the play
+        // would go unregistered even though a fallback client streamed it fine. Take that client's
+        // block instead — it carries the same `docid`/`ei`/`of` for this videoId. Issue #83.
+        let main_ping = main_resp.as_ref().and_then(|r| playback_ping(r, main_key));
 
         // 4. Fallback loop. idx == -1 reuses the main response; 0.. are the fallback clients.
         let mut best: Option<Candidate> = None;
@@ -227,7 +251,9 @@ impl Orchestrator {
             // HIGH two-pass: remember the best non-HIGH and keep looking if a HIGH exists elsewhere.
             if prefer_high && !is_high(format) && has_high {
                 if better(format, best.as_ref().map(|c| &c.format)) {
-                    best = Some(Candidate { format: format.clone(), url, expires, client: key });
+                    let ping = main_ping.clone().or_else(|| playback_ping(&resp, &key));
+                    best =
+                        Some(Candidate { format: format.clone(), url, expires, client: key, ping });
                 }
                 continue;
             }
@@ -251,6 +277,7 @@ impl Orchestrator {
             // It also stays correct if a valid PoToken lifts the cap on those videos: then HEAD
             // passes and WEB_REMIX is used. Nothing here has to know which way that goes.
             if self.validate_head(&url, client.map(|c| c.user_agent.as_str())).await {
+                let ping = main_ping.clone().or_else(|| playback_ping(&resp, &key));
                 return Ok(self.build(
                     video_id,
                     format,
@@ -259,6 +286,7 @@ impl Orchestrator {
                     &key,
                     audio_config_loudness,
                     &main_resp,
+                    ping,
                 ));
             } else if needs_n {
                 // A cipher client that fails validation may have a stale config → self-heal off
@@ -289,6 +317,7 @@ impl Orchestrator {
                 &c.client,
                 audio_config_loudness,
                 &main_resp,
+                c.ping,
             ));
         }
 
@@ -302,7 +331,7 @@ impl Orchestrator {
                 headers: std::collections::HashMap::new(),
                 expires_in_seconds: c.expires_in_seconds as i64,
                 loudness_db: c.loudness_db.map(|f| f as f64),
-                playback_url: None,
+                playback_ping: None,
                 title: c.title,
                 artists: None,
                 duration: c.duration_secs.map(|s| s.to_string()),
@@ -382,6 +411,7 @@ impl Orchestrator {
         client: &str,
         loudness: Option<f64>,
         main_resp: &Option<PlayerResponse>,
+        ping: Option<PlaybackPing>,
     ) -> PlaybackData {
         let ua = self.clients.get(client).map(|c| c.user_agent.clone());
         let mut headers = std::collections::HashMap::new();
@@ -397,7 +427,7 @@ impl Orchestrator {
             headers,
             expires_in_seconds: expires,
             loudness_db: format.loudness_db.or(loudness),
-            playback_url: main_resp.as_ref().and_then(main_playback_url),
+            playback_ping: ping,
             title: vd.and_then(|v| v.title.clone()),
             artists: vd.and_then(|v| v.author.clone()),
             duration: vd.and_then(|v| v.length_seconds.clone()),
@@ -439,11 +469,13 @@ fn main_loudness(resp: &PlayerResponse) -> Option<f64> {
     resp.player_config.as_ref().and_then(|c| c.audio_config.as_ref()).and_then(|a| a.loudness_db)
 }
 
-fn main_playback_url(resp: &PlayerResponse) -> Option<String> {
-    resp.playback_tracking
+fn playback_ping(resp: &PlayerResponse, client: &str) -> Option<PlaybackPing> {
+    let url = resp
+        .playback_tracking
         .as_ref()
         .and_then(|t| t.videostats_playback_url.as_ref())
-        .and_then(|b| b.base_url.clone())
+        .and_then(|b| b.base_url.clone())?;
+    Some(PlaybackPing { url, client: client.to_owned() })
 }
 
 fn best_thumbnail(resp: &PlayerResponse) -> Option<String> {
