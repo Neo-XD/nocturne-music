@@ -116,8 +116,15 @@ export function suppressNative(e: MouseEvent) {
 
 /**
  * Attachment for a ⋯ trigger: right-clicking anywhere inside its nearest `[data-ctx]` ancestor
- * opens the same menu at the pointer. The host marks the region (a row, a card, the now-playing
- * block); the menu that lives inside it does the wiring, so a host only ever grows one attribute.
+ * opens the same menu at the pointer. The host marks the region; the menu that lives inside it does
+ * the wiring, so a host only ever grows one attribute.
+ *
+ * A host is *an item* — a track row, a card, a library row, the now-playing block. Page headers,
+ * toolbars and hero artwork are not: they carry a ⋯ button of their own in plain sight, and making
+ * half a page right-clickable only makes it unclear what the menu is even about.
+ *
+ * Buttons inside an item are their own thing too, so right-clicking Like does nothing rather than
+ * opening the row's menu. The ⋯ trigger is the exception, since this menu is what it is for.
  *
  * Nested hosts are fine: the innermost one wins, because `open` stops the event.
  */
@@ -127,6 +134,9 @@ export function ctxHost(open: (e: MouseEvent) => void) {
 		if (!host) return;
 		const onContextMenu = (e: Event) => {
 			if (wantsNative(e as MouseEvent)) return; // let the field keep its paste menu
+			const t = e.target;
+			const button = t instanceof Element ? t.closest('button') : null;
+			if (button && button !== trigger) return;
 			open(e as MouseEvent);
 		};
 		host.addEventListener('contextmenu', onContextMenu);

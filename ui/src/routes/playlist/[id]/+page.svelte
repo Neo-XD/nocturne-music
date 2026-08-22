@@ -33,7 +33,7 @@
 	import type { BrowseItem, PlaylistPage, SongItem } from '$lib/api';
 	import { getCached, putCached, invalidateCached } from '$lib/pagecache';
 	import { thumb } from '$lib/thumb';
-	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR } from '$lib/menu';
+	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 	import { rowWindow } from '$lib/rows';
 	import { rowScroller } from '$lib/rows.svelte';
 	import {
@@ -619,10 +619,7 @@
 		playFrom(asItem(), pl.items, null, isOnRepeat ? undefined : id, true, pl.continuation);
 	}
 
-	// Click on the ⋯ opens under the button; right-click on the header opens at the pointer.
 	function openMenu(e: MouseEvent) {
-		e.preventDefault(); // a right-click must not also raise WebKit's own menu
-		e.stopPropagation();
 		anchor = anchorMenu(e);
 		menuOpen = true;
 	}
@@ -717,10 +714,7 @@
 		<!-- One scroller for the whole page: the header scrolls away above the rows, same as the
 		     album page. -->
 		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
-			<div
-				class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden border-b p-6"
-				data-ctx
-			>
+			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden border-b p-6">
 				{#if bgImage}
 					<img
 						src={bgImage}
@@ -791,7 +785,6 @@
 									size="icon"
 									aria-label="Playlist options"
 									onclick={openMenu}
-									{@attach ctxHost(openMenu)}
 								>
 									<HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5 text-muted-foreground" />
 								</Button>

@@ -42,21 +42,18 @@
     } from "$lib/player.svelte";
     import { getCached, putCached } from "$lib/pagecache";
     import { thumb } from "$lib/thumb";
-    import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from "$lib/menu";
+    import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from "$lib/menu";
 
     let album = $state<AlbumPage | null>(null);
     let artistHero = $state<string | null>(null);
     let loading = $state(true);
     let error = $state<string | null>(null);
     let expanded = $state(false);
-    // ⋯ options menu. `fixed` and anchored at whatever opened it: the ⋯ button on a click, the
-    // pointer on a right-click anywhere in the header (`ctxHost`).
+    // ⋯ options menu, `fixed` and anchored under the button so the header can't clip it.
     let menuOpen = $state(false);
     let anchor = $state(NO_ANCHOR);
 
     function openMenu(e: MouseEvent) {
-        e.preventDefault(); // a right-click must not also raise WebKit's own menu
-        e.stopPropagation();
         anchor = anchorMenu(e);
         menuOpen = true;
     }
@@ -249,7 +246,7 @@
     <div class="p-6"><ErrorState message={error} onRetry={() => load(id)} /></div>
 {:else if album}
     <!-- Header with the artist image as a hero backdrop -->
-    <div class="content-in relative overflow-hidden" data-ctx>
+    <div class="content-in relative overflow-hidden">
         {#if artistHero}
             <img
                 src={artistHero}
@@ -390,7 +387,6 @@
                     class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border text-muted-foreground transition hover:bg-accent/10 hover:text-foreground"
                     onclick={openMenu}
                     aria-label="More options"
-                    {@attach ctxHost(openMenu)}
                 >
                     <HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5" />
                 </button>

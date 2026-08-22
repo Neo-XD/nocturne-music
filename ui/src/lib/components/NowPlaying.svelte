@@ -16,11 +16,10 @@
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
-	import { np, openAddToPlaylist, playback, prefs, ui } from '$lib/player.svelte';
+	import { np, playback, prefs, ui } from '$lib/player.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
 	import QueueList from './QueueList.svelte';
-	import TrackMenu from './TrackMenu.svelte';
 	import LyricsView from './LyricsView.svelte';
 
 	// Off in settings, this view drops its tabs and the queue/lyrics panels stay in charge of both
@@ -36,13 +35,6 @@
 	// Going somewhere means the user wants that page, not this one: minimise. The player bar brings
 	// it back. beforeNavigate (not a pathname effect) so clicking the tab you're already on counts.
 	beforeNavigate(() => (np.open = false));
-
-	// The playing track as a queue row, for the right-click menu on the artwork below. Null while
-	// the queue and the player disagree about what is playing (mid-skip), same guard as PlayerBar.
-	const currentSong = $derived.by(() => {
-		const cur = playback.queue.items[playback.queue.currentIndex];
-		return cur?.video_id === playback.now?.videoId ? cur : null;
-	});
 
 	// Enlarged lyrics take the whole view, artwork column and tab strip included. A class swap
 	// rather than unmounting the tabs: LyricsView must survive it or it refetches and loses its
@@ -287,11 +279,7 @@
 				<!-- A div, not a button: the video-mode toggle has to be a sibling of the play/pause
 				     button rather than nested inside it (nested buttons are invalid HTML and the
 				     inner one never reliably gets the click). -->
-				<!-- data-ctx: right-clicking the artwork opens the track menu at the pointer. -->
-				<div
-					class="relative w-full {showVideo ? 'max-w-[var(--vid)]' : 'max-w-[var(--art)]'}"
-					data-ctx
-				>
+				<div class="relative w-full {showVideo ? 'max-w-[var(--vid)]' : 'max-w-[var(--art)]'}">
 					<button
 						type="button"
 						onclick={toggle}
@@ -374,18 +362,6 @@
 								class="h-4 w-4"
 							/>
 						</button>
-					{/if}
-					{#if currentSong}
-						<!-- Menu with no ⋯ of its own: the cover already carries play/pause and the video
-						     toggle, and this view has nowhere sensible to put a third button. It exists for
-						     the right-click.
-						     ponytail: `hidden` on the trigger rather than a no-trigger prop — display:none
-						     keeps it out of the layout and the a11y tree, and ctxHost still finds the host. -->
-						<TrackMenu
-							song={currentSong}
-							triggerClass="hidden"
-							onAdd={() => openAddToPlaylist(currentSong!)}
-						/>
 					{/if}
 				</div>
 			</div>
