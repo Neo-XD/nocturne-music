@@ -30,10 +30,12 @@
 	import LinkDialog from '$lib/components/LinkDialog.svelte';
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
+	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
+	import { initShortcuts } from '$lib/shortcuts';
 	import {
 		updateState,
 		installUpdate,
@@ -74,10 +76,12 @@
 		checkForUpdatesQuiet();
 		const teardownApp = initApp();
 		const teardownZoom = initZoom();
+		const teardownShortcuts = initShortcuts();
 		return () => {
 			teardownApp();
 			teardownWin();
 			teardownZoom();
+			teardownShortcuts();
 		};
 	});
 </script>
@@ -140,6 +144,7 @@
 		{/if}
 	</div>
 
+	<CommandPalette />
 	<AddToPlaylist />
 	<ShareDialog />
 	<SettingsDialog />

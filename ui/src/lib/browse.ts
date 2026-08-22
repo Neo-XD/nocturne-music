@@ -3,7 +3,8 @@
 // thing" can never drift apart between two components.
 import { goto } from '$app/navigation';
 import * as api from './api';
-import type { BrowseItem, SongItem } from './api';
+import type { BrowseItem, SearchResults, SongItem } from './api';
+import { getCached, putCached } from './pagecache';
 import { enqueue, playFrom, playSong, toast, touchPick } from './player.svelte';
 
 /**
@@ -105,4 +106,36 @@ export async function enqueueItem(item: BrowseItem, next: boolean): Promise<void
 	} catch {
 		toast.error('Could not queue that — try opening it instead');
 	}
+}
+
+/**
+ * The handful of rows a typeahead shows for a query: one top hit, then a spread across the
+ * categories rather than six songs. Cache-first, and it writes the same `search:<q>` key the search
+ * page reads, so previewing a query and then running it doesn't search twice. Shared by the search
+ * field (SearchSuggest) and the Ctrl+K palette, which is what keeps the two showing the same rows.
+ */
+export async function searchPreview(q: string): Promise<BrowseItem[]> {
+	const key = `search:${q}`;
+	let res = getCached<SearchResults>(key);
+	if (!res) {
+		res = await api.searchAll(q);
+		putCached(key, res);
+	}
+	const out: BrowseItem[] = [];
+	const seen = new Set<string>();
+	const take = (from: BrowseItem[], n: number) => {
+		for (const i of from) {
+			if (n <= 0) break;
+			if (seen.has(i.id)) continue;
+			seen.add(i.id);
+			out.push(i);
+			n--;
+		}
+	};
+	take(res.top, 1);
+	take(res.songs, 3);
+	take(res.artists, 1);
+	take(res.albums, 1);
+	take(res.playlists, 1);
+	return out;
 }

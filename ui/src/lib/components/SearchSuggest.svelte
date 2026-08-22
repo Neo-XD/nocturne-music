@@ -11,10 +11,8 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import ExplicitIcon from './ExplicitIcon.svelte';
-	import * as api from '$lib/api';
-	import type { BrowseItem, SearchResults } from '$lib/api';
-	import { getCached, putCached } from '$lib/pagecache';
-	import { openItem } from '$lib/browse';
+	import type { BrowseItem } from '$lib/api';
+	import { openItem, searchPreview } from '$lib/browse';
 	import { thumb } from '$lib/thumb';
 
 	let {
@@ -42,43 +40,13 @@
 
 	const KIND = { song: 'Song', album: 'Album', artist: 'Artist', playlist: 'Playlist' };
 
-	/** A few rows across the categories rather than six songs: one top hit, then the mix. */
-	function preview(r: SearchResults): BrowseItem[] {
-		const out: BrowseItem[] = [];
-		const seen = new Set<string>();
-		const take = (from: BrowseItem[], n: number) => {
-			for (const i of from) {
-				if (n <= 0) break;
-				if (seen.has(i.id)) continue;
-				seen.add(i.id);
-				out.push(i);
-				n--;
-			}
-		};
-		take(r.top, 1);
-		take(r.songs, 3);
-		take(r.artists, 1);
-		take(r.albums, 1);
-		take(r.playlists, 1);
-		return out;
-	}
-
 	async function load(q: string) {
 		loadedFor = q;
 		active = -1;
-		const key = `search:${q}`;
-		const hit = getCached<SearchResults>(key);
-		if (hit) {
-			items = preview(hit);
-			loading = false;
-			return;
-		}
 		loading = true;
 		try {
-			const fresh = await api.searchAll(q);
-			if (loadedFor !== q) return;
-			putCached(key, fresh);
-			items = preview(fresh);
+			const next = await searchPreview(q);
+			if (loadedFor === q) items = next;
 		} catch {
 			if (loadedFor === q) items = [];
 		} finally {

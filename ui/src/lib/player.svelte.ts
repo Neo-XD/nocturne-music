@@ -521,6 +521,19 @@ export function commitVolume(v: number) {
 }
 
 /**
+ * One keyboard step of volume (Ctrl+> / Ctrl+<). Live like a drag, so a held key gets one IPC per
+ * frame instead of one per repeat, and persisted only once the presses stop: a settings write is an
+ * fsync, and a run of taps is one gesture the same way a drag is.
+ */
+let volSettle: ReturnType<typeof setTimeout> | undefined;
+
+export function nudgeVolume(delta: number) {
+	dragVolume(Math.min(100, Math.max(0, playback.volume + delta)));
+	clearTimeout(volSettle);
+	volSettle = setTimeout(() => commitVolume(playback.volume), 400);
+}
+
+/**
  * Tempo + pitch (the "Advanced" dialog). Applied live, reverted if mpv rejects it: the pitch
  * filter needs a libmpv built with librubberband, and Rust applies pitch first so a rejection
  * leaves neither of them set.
@@ -661,6 +674,7 @@ export const ui = $state({
 	settingsOpen: false, // the settings modal
 	ltOpen: false, // the Listen Together modal
 	linkOpen: false, // the "open a pasted link" modal
+	paletteOpen: false, // the Ctrl+K search palette
 	channelPickerOpen: false,
 	channelPickerRequired: false, // true while a multi-channel login is not finalized yet
 	channelIdentities: [] as AccountIdentity[],
