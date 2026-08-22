@@ -989,7 +989,7 @@ fn shelf_continuation(root: &Value) -> Option<String> {
 }
 
 /// Paging token, modern (`continuationCommand.token`) or legacy (`nextContinuationData`). context/08.
-fn continuation_token(root: &Value) -> Option<String> {
+pub(crate) fn continuation_token(root: &Value) -> Option<String> {
     if let Some(t) = find_all(root, "continuationCommand")
         .into_iter()
         .find_map(|c| c.get("token").and_then(Value::as_str))

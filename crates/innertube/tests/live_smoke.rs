@@ -102,6 +102,43 @@ async fn owned_continuation_not_doubled() {
     eprintln!("verified {checked} track continuations, no doubling");
 }
 
+/// Issue #72: the library grids come back ~25 at a time, so a single browse truncated any bigger
+/// library. Asserts the grids page past one response, on an account that has more than one page.
+///   LIMUSIC_COOKIE=… LIMUSIC_VISITOR=… cargo test -p innertube --features integration-tests library_grids_page -- --ignored --nocapture
+#[tokio::test]
+#[ignore]
+async fn library_grids_page_past_the_first_response() {
+    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
+        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
+        return;
+    };
+    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
+    let it = InnerTube::new(
+        Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
+        None,
+    )
+    .unwrap();
+    let clients = Clients::bundled();
+    let client = clients.get("WEB_REMIX").expect("WEB_REMIX client");
+
+    let mut paged = 0;
+    for (name, items) in [
+        ("playlists", it.library_playlists(client).await.expect("library playlists")),
+        ("albums", it.library_albums(client).await.expect("library albums")),
+        ("artists", it.library_artists(client).await.expect("library artists")),
+    ] {
+        eprintln!("{name}: {} items", items.len());
+        let mut seen = std::collections::HashSet::new();
+        for i in &items {
+            assert!(seen.insert(i.id.clone()), "{name} grid repeated {} across pages", i.id);
+        }
+        if items.len() > 25 {
+            paged += 1;
+        }
+    }
+    assert!(paged > 0, "no library grid exceeded one page — test this on a fuller account");
+}
+
 /// The playlist sort is YouTube's, not ours: the app asks for an order and renders what comes back
 /// (`PlaylistSort::params`). Those params are a protobuf literal copied out of YouTube's own menu,
 /// so this pins the half that moves under us — that they still sort, and that the menu still says

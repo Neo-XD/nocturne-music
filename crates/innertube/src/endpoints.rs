@@ -256,6 +256,62 @@ impl InnerTube {
         Ok(value)
     }
 
+    /// POST a paging token. The ctoken is carried in the query, matching Metrolist's
+    /// browse-continuation call; every paged surface (home, playlist tracks, library grids) uses
+    /// this same carrier.
+    async fn browse_continuation(
+        &self,
+        client: &YouTubeClient,
+        token: &str,
+    ) -> Result<serde_json::Value, Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ContinuationBody {
+            context: Context,
+        }
+        let body = ContinuationBody { context: self.context_for(client) };
+        let enc = urlencoding::encode(token);
+        let path = format!("browse?ctoken={enc}&continuation={enc}&type=next");
+        self.post(&path, client, &body, true).await
+    }
+
+    /// A library grid, paged to the end. YouTube hands these out ~25 at a time, so a single browse
+    /// silently truncated anyone's bigger library (issue #72).
+    ///
+    /// Library grids only. `browse_grid`'s "More" targets deliberately do NOT page: they are read
+    /// as cards, and some of them (an album's `VL…` shelf) are really 100-track pages, so paging
+    /// one would spend a dozen sequential requests building a card wall nobody asked for. The
+    /// card grids behind those buttons come back whole anyway (a 91-album discography arrived in
+    /// one response, no token).
+    async fn library_grid(
+        &self,
+        client: &YouTubeClient,
+        browse_id: &str,
+    ) -> Result<Vec<BrowseItem>, Error> {
+        let value = self.browse(client, Some(browse_id), None).await?;
+        let mut items = browse::parse_library(&value);
+        let mut token = browse::continuation_token(&value);
+        // ponytail: page cap, so a token that never resolves can't spin forever. Raise it if
+        // anyone turns up with a library past ~500 entries.
+        for _ in 0..20 {
+            let Some(t) = token else { break };
+            // A failed page must not throw away the ones that worked: a short library beats an
+            // error where the grid should be.
+            let Ok(value) = self.browse_continuation(client, &t).await.inspect_err(|e| {
+                tracing::warn!(error = %e, browse_id, "grid continuation failed; keeping what loaded")
+            }) else {
+                break;
+            };
+            let page = browse::parse_library(&value);
+            if page.is_empty() {
+                break; // a spurious token (some grids carry one that resolves to nothing)
+            }
+            items.extend(page);
+            token = browse::continuation_token(&value).filter(|next| *next != t);
+        }
+        Ok(items)
+    }
+
     /// Home feed (`FEmusic_home`). `params` is a mood/genre chip token from a previous home
     /// response — pass it to get that chip's filtered feed. context/08.
     pub async fn home(
@@ -281,15 +337,7 @@ impl InnerTube {
         client: &YouTubeClient,
         token: &str,
     ) -> Result<HomePage, Error> {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct ContinuationBody {
-            context: Context,
-        }
-        let body = ContinuationBody { context: self.context_for(client) };
-        let enc = urlencoding::encode(token);
-        let path = format!("browse?ctoken={enc}&continuation={enc}&type=next");
-        let value = self.post(&path, client, &body, true).await?;
+        let value = self.browse_continuation(client, token).await?;
         let mut page = browse::parse_home(&value);
         for s in &mut page.sections {
             self.drop_video_cards(&mut s.items);
@@ -303,22 +351,19 @@ impl InnerTube {
         &self,
         client: &YouTubeClient,
     ) -> Result<Vec<BrowseItem>, Error> {
-        let value = self.browse(client, Some("FEmusic_liked_playlists"), None).await?;
-        Ok(browse::parse_library(&value))
+        self.library_grid(client, "FEmusic_liked_playlists").await
     }
 
     /// Saved albums grid (`FEmusic_liked_albums`). context/08. Needs login.
     pub async fn library_albums(&self, client: &YouTubeClient) -> Result<Vec<BrowseItem>, Error> {
-        let value = self.browse(client, Some("FEmusic_liked_albums"), None).await?;
-        Ok(browse::parse_library(&value))
+        self.library_grid(client, "FEmusic_liked_albums").await
     }
 
     /// Library artists (`FEmusic_library_corpus_track_artists`) — the artists behind the songs and
     /// albums in your library, which is what YouTube Music's own Artists tab shows (subscriptions
     /// live under `FEmusic_library_corpus_artists`). context/08. Needs login.
     pub async fn library_artists(&self, client: &YouTubeClient) -> Result<Vec<BrowseItem>, Error> {
-        let value = self.browse(client, Some("FEmusic_library_corpus_track_artists"), None).await?;
-        Ok(browse::parse_library(&value))
+        self.library_grid(client, "FEmusic_library_corpus_track_artists").await
     }
 
     /// A playlist or album page by browseId (`VL…` / `MPRE…`). context/08.
@@ -419,16 +464,7 @@ impl InnerTube {
         client: &YouTubeClient,
         token: &str,
     ) -> Result<PlaylistContinuation, Error> {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct ContinuationBody {
-            context: Context,
-        }
-        let body = ContinuationBody { context: self.context_for(client) };
-        // Continuation is carried in the query, matching Metrolist's browse-continuation call.
-        let enc = urlencoding::encode(token);
-        let path = format!("browse?ctoken={enc}&continuation={enc}&type=next");
-        let value = self.post(&path, client, &body, true).await?;
+        let value = self.browse_continuation(client, token).await?;
         Ok(browse::parse_playlist_continuation(&value))
     }
 
