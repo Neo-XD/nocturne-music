@@ -31,6 +31,7 @@
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
+	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
@@ -145,6 +146,7 @@
 	</div>
 
 	<CommandPalette />
+	<KeyboardShortcuts />
 	<AddToPlaylist />
 	<ShareDialog />
 	<SettingsDialog />

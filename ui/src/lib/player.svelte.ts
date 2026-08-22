@@ -675,6 +675,7 @@ export const ui = $state({
 	ltOpen: false, // the Listen Together modal
 	linkOpen: false, // the "open a pasted link" modal
 	paletteOpen: false, // the Ctrl+K search palette
+	shortcutsOpen: false, // the Ctrl+H keyboard-shortcuts list
 	channelPickerOpen: false,
 	channelPickerRequired: false, // true while a multi-channel login is not finalized yet
 	channelIdentities: [] as AccountIdentity[],

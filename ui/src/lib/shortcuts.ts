@@ -1,7 +1,12 @@
 // App-wide keyboard shortcuts. One window listener, gated on Ctrl/Cmd before anything else, so a
 // key typed into a field costs a single boolean check and falls straight through. Zoom keeps its
 // own listener (zoom.ts) because it also owns the ctrl+wheel gesture.
+import { browser } from '$app/environment';
 import { np, nudgeVolume, playback, ui } from './player.svelte';
+
+/** How this machine writes the modifier these shortcuts hang off, for anything that shows a key
+ *  hint. Mac takes the bare glyph; everywhere else the `+` is part of the spelling. */
+export const MOD = browser && navigator.platform.startsWith('Mac') ? '⌘' : 'Ctrl+';
 
 /** Percent per press, matching a step of the volume slider's arrow keys. */
 const VOLUME_STEP = 5;
@@ -14,6 +19,10 @@ export function initShortcuts() {
 			case 'k':
 			case 'K':
 				ui.paletteOpen = !ui.paletteOpen;
+				break;
+			case 'h':
+			case 'H':
+				ui.shortcutsOpen = !ui.shortcutsOpen;
 				break;
 			case 'e':
 			case 'E':
