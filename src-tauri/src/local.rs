@@ -456,6 +456,7 @@ fn albums_of(tracks: &[LocalTrack]) -> Vec<BrowseItem> {
                 artist_runs: Vec::new(),
                 play_count: None,
                 is_video: false,
+                is_upload: false,
                 // Nothing on disk says explicit: no tag carries it and there is no row to badge.
                 explicit: false,
             }
@@ -507,6 +508,7 @@ fn artists_of(tracks: &[LocalTrack]) -> Vec<BrowseItem> {
                 artist_runs: Vec::new(),
                 play_count: None,
                 is_video: false,
+                is_upload: false,
                 explicit: false,
             }
         })

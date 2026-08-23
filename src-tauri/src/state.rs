@@ -704,7 +704,9 @@ impl AppState {
         v
     }
 
-    async fn resolve(&self, video_id: &str) -> Result<PlaybackData, ResolveError> {
+    /// `is_upload` comes off the queue row, never off `/player`: the response that has to be
+    /// handled here (LOGIN_REQUIRED) carries no `videoDetails` to read it from. Issue #71.
+    async fn resolve(&self, video_id: &str, is_upload: bool) -> Result<PlaybackData, ResolveError> {
         // A local file is its own "stream": no network, no cache, no extraction (local.rs).
         if let Some(path) = crate::local::song_path(video_id) {
             return crate::local::playback_data(video_id, path).map_err(|_| {
@@ -749,11 +751,16 @@ impl AppState {
                 stream_client: "cache".to_owned(),
             });
         }
-        let data =
-            self.orchestrator.resolve(video_id, self.quality(), &self.disabled_clients()).await?;
+        let data = self
+            .orchestrator
+            .resolve(video_id, is_upload, self.quality(), &self.disabled_clients())
+            .await?;
         // Never cache rustypipe URLs: googlevideo serves them only for bounded-Range requests,
         // which mpv doesn't send → LOADING_FAILED(-13). Caching one poisons the videoId for ~6h.
-        if data.stream_client != "rustypipe" {
+        //
+        // Nor upload URLs: they expire in minutes (32 seconds without the MLPT context), and the
+        // read above only accepts a row with 60s of life left, so the write is dead on arrival.
+        if data.stream_client != "rustypipe" && !is_upload {
             self.db.put_stream(
                 video_id,
                 &crate::db::CachedStream {
@@ -1358,7 +1365,7 @@ impl AppState {
                 return false; // user moved on
             }
             let Some(item) = self.current_item().await else { return false };
-            let resolved = self.resolve(&item.video_id).await;
+            let resolved = self.resolve(&item.video_id, item.is_upload).await;
             // A resolve takes seconds; a skip during it bumps the generation. Re-check before
             // acting on the result: an abandoned failure would otherwise move `current` under the
             // track that's already playing and leave a stale error banner (nothing clears it, the
@@ -1410,7 +1417,7 @@ impl AppState {
                     q.current += 1;
                     q.lookahead_loaded = None;
                     drop(q);
-                    self.emit_skip(&item.title);
+                    self.emit_skip(&item.title, skip_reason(&e));
                     self.emit_queue().await;
                 }
             }
@@ -1506,14 +1513,14 @@ impl AppState {
                 }
                 next
             };
-            let (next_video, next_title) = {
+            let (next_video, next_title, next_upload) = {
                 let q = self.queue.lock().await;
                 match q.items.get(next_idx) {
-                    Some(item) => (item.video_id.clone(), item.title.clone()),
+                    Some(item) => (item.video_id.clone(), item.title.clone(), item.is_upload),
                     None => return,
                 }
             };
-            match self.resolve(&next_video).await {
+            match self.resolve(&next_video, next_upload).await {
                 Ok(d) => {
                     self.enqueue_lookahead(gen, next_idx, &next_video, d).await;
                     return;
@@ -1535,7 +1542,7 @@ impl AppState {
                     }
                     // Box::pin: remove_from_queue can itself re-prime (async recursion).
                     Box::pin(self.remove_from_queue(next_idx)).await;
-                    self.emit_skip(&next_title);
+                    self.emit_skip(&next_title, skip_reason(&e));
                 }
             }
         }
@@ -1783,11 +1790,13 @@ impl AppState {
 
     /// A track was auto-skipped because no client could resolve it — a transient toast, not the
     /// persistent error banner: the queue keeps playing, so this shouldn't read as a failure.
-    fn emit_skip(&self, title: &str) {
-        tracing::warn!(title, "skipping unplayable track");
+    /// `reason` is the parenthetical the toast shows. "unavailable" for anything YouTube simply
+    /// would not serve; an upload gets its own, because the song is not gone, the session is.
+    fn emit_skip(&self, title: &str, reason: &str) {
+        tracing::warn!(title, reason, "skipping unplayable track");
         let _ = self.app.emit(
             "playback-notice",
-            serde_json::json!({ "message": format!("Skipped (unavailable): {title}") }),
+            serde_json::json!({ "message": format!("Skipped ({reason}): {title}") }),
         );
     }
 
@@ -2221,7 +2230,9 @@ impl AppState {
             q.radio_seed = None; // guests never autoplay — the host drives
             q.source_name = None; // the host's context isn't known — header falls back
         }
-        let data = match self.resolve(&track.id).await {
+        // A Listen Together track is the host's; `Track` carries no upload flag and a guest could
+        // not stream someone else's upload anyway.
+        let data = match self.resolve(&track.id, false).await {
             Ok(d) => d,
             Err(e) => {
                 self.emit_error(&track.id, &e.to_string());
@@ -2780,6 +2791,9 @@ fn track_to_song(t: &Track) -> SongItem {
         queued_from: None,
         autoplay: false,
         is_video: false,
+        // The Listen Together wire shape carries no upload flag either; a guest could not stream
+        // the host's upload anyway, so false is the right answer, not a lossy one.
+        is_upload: false,
         // The Listen Together wire shape carries no badge, so a mirrored guest queue shows none.
         explicit: false,
     }
@@ -2906,6 +2920,15 @@ fn merge_radio(
         added += 1;
     }
     added
+}
+
+/// What the skip toast blames. "unavailable" is right for a video YouTube would not serve, and
+/// wrong for an upload: the file is still there, the session is what failed. Issue #71.
+fn skip_reason(e: &ResolveError) -> &'static str {
+    match e {
+        ResolveError::UploadUnavailable(_) => "sign-in needed",
+        _ => "unavailable",
+    }
 }
 
 /// The queue index that plays after `current`, honoring repeat-all wrap. `None` at the tail
@@ -3272,23 +3295,9 @@ mod tests {
         innertube::SongItem {
             video_id: id.into(),
             title: id.into(),
-            artists: String::new(),
-            artist_id: None,
-            artist_runs: Vec::new(),
-            album: None,
-            album_id: None,
-            duration: None,
-            play_count: None,
-            thumbnail: None,
-            set_video_id: None,
-            rating: None,
             queued: by.is_some(),
-            queued_end: false,
-            queued_from: None,
             queued_by: by.map(Into::into),
-            autoplay: false,
-            is_video: false,
-            explicit: false,
+            ..Default::default()
         }
     }
 

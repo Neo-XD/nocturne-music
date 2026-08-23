@@ -95,6 +95,19 @@ pub const MAIN_CLIENT: &str = "WEB_REMIX";
 pub const STREAM_FALLBACK_ORDER: [&str; 3] =
     ["VISIONOS", "ANDROID_VR_1_65_10", "ANDROID_VR_1_43_32"];
 
+/// The fallback order for one of the user's own uploads (issue #71). YouTube only streams a
+/// privately-owned track to an authenticated client, so every anonymous client in
+/// [`STREAM_FALLBACK_ORDER`] (and rustypipe behind it) is a guaranteed miss: each one costs a
+/// round trip and the user still gets a skip toast.
+///
+/// The effective chain is WEB_REMIX -> TVHTML5 -> WEB_CREATOR. WEB_REMIX is not listed here
+/// because the orchestrator has already fetched its response for metadata and tries it in the
+/// `idx == -1` slot; when it comes back LOGIN_REQUIRED/UNPLAYABLE that slot skips itself, which
+/// leaves Metrolist's own TVHTML5-first order (its `ContentAwareFallbackStrategy`, PR #3517).
+/// (A LOGIN_REQUIRED main response is also what promotes WEB_CREATOR into that first slot, so
+/// WEB_CREATOR at the tail here is a second attempt, not the only one.)
+pub const UPLOAD_FALLBACK_ORDER: [&str; 2] = ["TVHTML5", "WEB_CREATOR"];
+
 /// The metadata client for search/next (renderer shape only comes back as WEB_REMIX).
 pub const METADATA_CLIENT: &str = "WEB_REMIX";
 
@@ -111,6 +124,10 @@ mod tests {
         let clients = Clients::bundled();
         for key in STREAM_FALLBACK_ORDER {
             assert!(clients.get(key).is_some(), "missing stream client {key}");
+        }
+        for key in UPLOAD_FALLBACK_ORDER {
+            assert!(clients.get(key).is_some(), "missing upload client {key}");
+            assert!(clients.get(key).unwrap().login_supported, "upload client {key} is anonymous");
         }
         assert!(clients.get(METADATA_CLIENT).is_some());
         assert!(clients.get(LYRICS_TIMED_CLIENT).is_some());

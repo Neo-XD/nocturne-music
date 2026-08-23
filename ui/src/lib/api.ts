@@ -51,6 +51,9 @@ export interface SongItem {
 	explicit?: boolean;
 	/** This row links a music video rather than the audio track. */
 	is_video?: boolean;
+	/** One of the user's own YouTube Music uploads. Set by Rust and passed straight back on play:
+	 *  only an authenticated client can stream one, and the row is where that is known. */
+	is_upload?: boolean;
 }
 
 export interface NowPlaying {
@@ -122,6 +125,9 @@ export interface BrowseItem {
 	playCount?: string;
 	/** YouTube flags this track/album explicit. */
 	explicit?: boolean;
+	/** Song cards only: one of the user's own uploads. Carried into the SongItem `asSong` builds,
+	 *  because that flag is what picks the login-only client chain when it plays. */
+	isUpload?: boolean;
 }
 
 export interface HomeSection {

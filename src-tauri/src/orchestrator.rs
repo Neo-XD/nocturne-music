@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use innertube::{
     find_format, find_video_format, rustypipe_fallback, AudioQuality, Clients, Format, InnerTube,
-    PlayerResponse, MAIN_CLIENT, STREAM_FALLBACK_ORDER,
+    PlayerResponse, MAIN_CLIENT, STREAM_FALLBACK_ORDER, UPLOAD_FALLBACK_ORDER,
 };
 use tokio::sync::Mutex;
 
@@ -62,6 +62,11 @@ pub struct PlaybackPing {
 pub enum ResolveError {
     #[error("no client could resolve a playable stream for {0}")]
     AllClientsFailed(String),
+    /// One of the user's own uploads that no authenticated client would stream. Distinct from
+    /// `AllClientsFailed` because "unavailable" reads as "the song is gone", and the likely cause
+    /// here is a session that needs signing in again. Issue #71.
+    #[error("this upload could not be played. Try signing in to YouTube Music again ({0})")]
+    UploadUnavailable(String),
     /// A local file that was in the library but is no longer on disk (context: local.rs).
     #[error("this file is no longer on your disk: {0}")]
     LocalMissing(String),
@@ -118,12 +123,20 @@ impl Orchestrator {
     pub async fn resolve(
         &self,
         video_id: &str,
+        is_upload: bool,
         quality: AudioQuality,
         disabled: &HashSet<String>,
     ) -> Result<PlaybackData, ResolveError> {
         let prefer_high = matches!(quality, AudioQuality::High | AudioQuality::Auto);
         let logged_in = self.it.is_logged_in();
         let visitor = self.it.visitor_data();
+        // An upload only streams to an authenticated client, so it gets its own chain and never
+        // falls through to the anonymous ones (context: clients::UPLOAD_FALLBACK_ORDER, issue #71).
+        let order: &[&str] =
+            if is_upload { &UPLOAD_FALLBACK_ORDER } else { &STREAM_FALLBACK_ORDER };
+        // Without the uploads-playlist context YouTube hands back upload URLs that expire in about
+        // 32 seconds (Metrolist PR #3857). Harmless for ordinary tracks, so scoped to uploads.
+        let playlist_id = is_upload.then_some("MLPT");
 
         // 1. Signature timestamp from the deciphering player.js (context/05).
         let sts = self.cipher.signature_timestamp().await;
@@ -143,7 +156,7 @@ impl Orchestrator {
         // 3. Main request as WEB_REMIX (metadata source even when a fallback wins the stream).
         let mut main_resp = match main_client {
             Some(c) if !disabled.contains(MAIN_CLIENT) => {
-                self.it.player(c, video_id, None, sts, session_pot).await.ok()
+                self.it.player(c, video_id, playlist_id, sts, session_pot).await.ok()
             }
             _ => None,
         };
@@ -161,7 +174,7 @@ impl Orchestrator {
                 let cc_pot = if cc.use_web_po_tokens { session_pot } else { None };
                 let cc_sts = if cc.use_signature_timestamp { sts } else { None };
                 tracing::info!(video_id, "WEB_REMIX age/login-gated → retrying WEB_CREATOR");
-                if let Ok(r) = self.it.player(cc, video_id, None, cc_sts, cc_pot).await {
+                if let Ok(r) = self.it.player(cc, video_id, playlist_id, cc_sts, cc_pot).await {
                     main_resp = Some(r);
                     main_key = "WEB_CREATOR";
                 }
@@ -183,21 +196,24 @@ impl Orchestrator {
 
         // 4. Fallback loop. idx == -1 reuses the main response; 0.. are the fallback clients.
         let mut best: Option<Candidate> = None;
-        let last_idx = STREAM_FALLBACK_ORDER.len() as isize - 1;
+        let last_idx = order.len() as isize - 1;
 
         for idx in -1..=last_idx {
             let (key, resp): (String, PlayerResponse) = if idx == -1 {
                 // A WEB_REMIX stream that already died in the player is not retried for this
                 // video: it passed HEAD and failed anyway, so validation has nothing left to say.
+                // Not for an upload: WEB_REMIX and WEB_CREATOR are the only login clients that
+                // can serve one, and both hang off this slot (WEB_CREATOR via the gate retry
+                // above). Honouring the memory here would leave attempt two with nothing at all.
                 if !main_ok
                     || disabled.contains(MAIN_CLIENT)
-                    || self.web_remix_failed.lock().await.contains(video_id)
+                    || (!is_upload && self.web_remix_failed.lock().await.contains(video_id))
                 {
                     continue;
                 }
                 (MAIN_CLIENT.to_owned(), main_resp.clone().unwrap())
             } else {
-                let key = STREAM_FALLBACK_ORDER[idx as usize];
+                let key = order[idx as usize];
                 if disabled.contains(key) {
                     continue;
                 }
@@ -207,7 +223,7 @@ impl Orchestrator {
                 }
                 let client_pot = if client.use_web_po_tokens { session_pot } else { None };
                 let client_sts = if client.use_signature_timestamp { sts } else { None };
-                match self.it.player(client, video_id, None, client_sts, client_pot).await {
+                match self.it.player(client, video_id, playlist_id, client_sts, client_pot).await {
                     Ok(r) if r.playability_status.is_ok() => (key.to_owned(), r),
                     Ok(r) => {
                         tracing::debug!(client = key, status = %r.playability_status.status, "not OK");
@@ -287,6 +303,7 @@ impl Orchestrator {
                     audio_config_loudness,
                     &main_resp,
                     ping,
+                    is_upload,
                 ));
             } else if needs_n {
                 // A cipher client that fails validation may have a stale config → self-heal off
@@ -318,10 +335,17 @@ impl Orchestrator {
                 audio_config_loudness,
                 &main_resp,
                 c.ping,
+                is_upload,
             ));
         }
 
         // 7. Net: rustypipe whole-videoId resolution (last-ditch). context/06, seam #11.
+        // rustypipe is anonymous, so it can never see a privately-owned track: skip the round trip
+        // and say what actually went wrong instead of "unavailable". Issue #71.
+        if is_upload {
+            tracing::warn!(video_id, "no authenticated client could stream this upload");
+            return Err(ResolveError::UploadUnavailable(video_id.to_owned()));
+        }
         tracing::info!(video_id, "all InnerTube clients exhausted → rustypipe fallback");
         match rustypipe_fallback::resolve(video_id, prefer_high).await {
             Ok(c) => Ok(PlaybackData {
@@ -412,11 +436,25 @@ impl Orchestrator {
         loudness: Option<f64>,
         main_resp: &Option<PlayerResponse>,
         ping: Option<PlaybackPing>,
+        is_upload: bool,
     ) -> PlaybackData {
         let ua = self.clients.get(client).map(|c| c.user_agent.clone());
         let mut headers = std::collections::HashMap::new();
         if let Some(ua) = ua {
             headers.insert("User-Agent".to_owned(), ua);
+        }
+        // A privately-owned track's googlevideo URL is only served to the session that owns it, so
+        // mpv's GET has to carry the cookie too. `validate_head` already sends it, which is how an
+        // upload could pass HEAD and then 403 on the real open. Uploads only: this is the hot path
+        // and there is no evidence an ordinary stream wants a cookie. Issue #71.
+        //
+        // mpv's header properties are global (crates/player: `http-header-fields`), so a track
+        // appended for gapless playback inherits whatever the current one set. Same host either
+        // way, so it is harmless, but it means the cookie can outlive the upload that needed it.
+        if is_upload {
+            if let Some(cookie) = self.it.cookie() {
+                headers.insert("Cookie".to_owned(), cookie.to_string());
+            }
         }
         let vd = main_resp.as_ref().and_then(|r| r.video_details.as_ref());
         tracing::info!(client, itag = format.itag, "resolved stream");

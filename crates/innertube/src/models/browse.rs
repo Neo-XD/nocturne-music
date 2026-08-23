@@ -12,9 +12,9 @@ use serde_json::Value;
 
 use super::metadata::{
     artist_runs, artists_from_runs, duration_from_runs, find_all, find_all_shallow, find_first_str,
-    first_artist_id, flex_column_text, flex_runs, is_explicit, is_video_endpoint, is_video_row,
-    last_thumbnail, list_item_video_id, parse_list_item, play_count, runs_text, runs_text_opt,
-    ArtistRun, SongItem,
+    first_artist_id, flex_column_text, flex_runs, is_explicit, is_upload_endpoint, is_upload_row,
+    is_video_endpoint, is_video_row, last_thumbnail, list_item_video_id, parse_list_item,
+    play_count, runs_text, runs_text_opt, ArtistRun, SongItem,
 };
 
 /// One clickable card in a home carousel or library grid. Flat + `kind`-tagged so the UI can
@@ -49,6 +49,10 @@ pub struct BrowseItem {
     /// "hide music videos" setting.
     #[serde(default)]
     pub is_video: bool,
+    /// Song cards only: one of the user's own uploads, which only an authenticated client can
+    /// stream. Carried so a card played from a shelf reaches the orchestrator with the flag set.
+    #[serde(default)]
+    pub is_upload: bool,
     /// YouTube marks this card explicit ([`is_explicit`]) — a track, or an album whose tracks are.
     #[serde(default)]
     pub explicit: bool,
@@ -521,6 +525,7 @@ fn list_item_to_browse_item(node: &Value) -> Option<BrowseItem> {
             artist_runs: Vec::new(),
             play_count: None,
             is_video: false,
+            is_upload: false,
             explicit: is_explicit(node),
         });
     }
@@ -539,6 +544,7 @@ fn list_item_to_browse_item(node: &Value) -> Option<BrowseItem> {
         artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
         play_count: play_count(node),
         is_video: is_video_row(node),
+        is_upload: is_upload_row(node),
         explicit: is_explicit(node),
     })
 }
@@ -574,6 +580,7 @@ fn card_shelf_main(card: &Value) -> Option<BrowseItem> {
             artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
             play_count: None,
             is_video: nav.is_some_and(is_video_endpoint),
+            is_upload: nav.is_some_and(is_upload_endpoint),
             explicit: is_explicit(card),
         });
     }
@@ -592,6 +599,7 @@ fn card_shelf_main(card: &Value) -> Option<BrowseItem> {
         artist_runs: Vec::new(),
         play_count: None,
         is_video: false,
+        is_upload: false,
         explicit: is_explicit(card),
     })
 }
@@ -877,6 +885,7 @@ fn parse_carousel_item(node: &Value) -> Option<BrowseItem> {
             artist_runs: song.artist_runs,
             play_count: song.play_count,
             is_video: song.is_video,
+            is_upload: song.is_upload,
             explicit: song.explicit,
         });
     }
@@ -912,6 +921,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
             artist_runs: runs.map(|r| artist_runs(r)).unwrap_or_default(),
             play_count: None,
             is_video: is_video_row(node),
+            is_upload: is_upload_row(node),
             explicit: is_explicit(node),
         });
     }
@@ -931,6 +941,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
             artist_runs: Vec::new(),
             play_count: None,
             is_video: false,
+            is_upload: false,
             explicit: is_explicit(node),
         });
     }
@@ -950,6 +961,7 @@ fn parse_two_row_item(node: &Value) -> Option<BrowseItem> {
         artist_runs: Vec::new(),
         play_count: None,
         is_video: false,
+        is_upload: false,
         explicit: is_explicit(node),
     })
 }

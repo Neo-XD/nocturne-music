@@ -434,6 +434,7 @@ pub async fn get_library(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
                 artist_runs: Vec::new(),
                 play_count: None,
                 is_video: false,
+                is_upload: false,
                 explicit: false,
             },
         );

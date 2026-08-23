@@ -79,6 +79,10 @@ pub struct SongItem {
     /// "hide music videos" setting; computed once here, never re-derived downstream.
     #[serde(default)]
     pub is_video: bool,
+    /// One of the signed-in user's own uploads ([`is_upload_row`]). Only an authenticated client
+    /// can stream these, so the orchestrator swaps in a login-only fallback chain. Issue #71.
+    #[serde(default)]
+    pub is_upload: bool,
     /// YouTube marks this track explicit ([`is_explicit`]). Only browse/search rows carry the
     /// badge: `/next` panel rows and `/player` don't, so a radio- or autoplay-appended track
     /// reads false even when the same song shows the badge on an album page.
@@ -128,6 +132,11 @@ pub(crate) fn is_video_endpoint(endpoint: &Value) -> bool {
     matches!(endpoint_video_type(endpoint), Some(t) if is_video_type(t))
 }
 
+/// True when a watch endpoint points at one of the user's own uploads.
+pub(crate) fn is_upload_endpoint(endpoint: &Value) -> bool {
+    endpoint_video_type(endpoint) == Some(UPLOADED_TRACK_TYPE)
+}
+
 /// True when a renderer row (list row, two-row card, or queue panel row) links a music video.
 ///
 /// The authoritative tag sits on the thumbnail overlay's play button (`overlay` on list rows,
@@ -135,16 +144,27 @@ pub(crate) fn is_video_endpoint(endpoint: &Value) -> bool {
 /// endpoint is the fallback. Absent ⇒ we can't tell ⇒ audio, so a parse that misses the tag
 /// degrades to "keep everything" rather than hiding the library.
 pub(crate) fn is_video_row(node: &Value) -> bool {
+    matches!(row_video_type(node), Some(t) if is_video_type(t))
+}
+
+/// True when a renderer row links one of the user's own uploads. Same lookup as [`is_video_row`].
+pub(crate) fn is_upload_row(node: &Value) -> bool {
+    row_video_type(node) == Some(UPLOADED_TRACK_TYPE)
+}
+
+/// The `musicVideoType` a row claims, from the overlay play button when it carries one.
+fn row_video_type(node: &Value) -> Option<&str> {
     let overlay = node
         .get("overlay")
         .or_else(|| node.get("thumbnailOverlay"))
         .and_then(|o| o.get("musicItemThumbnailOverlayRenderer"))
         .and_then(|o| o.get("content"))
         .and_then(|c| c.get("musicPlayButtonRenderer"))
-        .and_then(|p| p.get("playNavigationEndpoint"));
+        .and_then(|p| p.get("playNavigationEndpoint"))
+        .filter(|ep| endpoint_video_type(ep).is_some());
     match overlay {
-        Some(ep) if endpoint_video_type(ep).is_some() => is_video_endpoint(ep),
-        _ => node.get("navigationEndpoint").is_some_and(is_video_endpoint),
+        Some(ep) => endpoint_video_type(ep),
+        None => node.get("navigationEndpoint").and_then(endpoint_video_type),
     }
 }
 
@@ -477,6 +497,7 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
         queued_from: None,
         autoplay: false,
         is_video: is_video_row(node),
+        is_upload: is_upload_row(node),
         explicit: is_explicit(node),
     })
 }
@@ -609,6 +630,7 @@ fn parse_panel_video(node: &Value) -> Option<SongItem> {
         queued_from: None,
         autoplay: false,
         is_video: is_video_row(node),
+        is_upload: is_upload_row(node),
         // Queue-panel rows carry no badges today; asking anyway costs a map lookup and picks the
         // flag up for free if YouTube ever adds one.
         explicit: is_explicit(node),
@@ -904,6 +926,39 @@ mod tests {
         let up = "MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK";
         assert!(!is_video_row(&json!({ "navigationEndpoint": cfg(up) })));
         assert!(!is_video_row(&json!({ "overlay": overlay(up) })));
+    }
+
+    // The upload flag picks the orchestrator's login-only client chain (issue #71), so it has to
+    // come off the same lookup `is_video_row` uses: overlay first, row endpoint as the fallback.
+    #[test]
+    fn upload_rows_are_recognised_in_every_renderer_shape() {
+        let cfg = |t: &str| {
+            json!({ "watchEndpoint": { "videoId": "v",
+                "watchEndpointMusicSupportedConfigs": {
+                    "watchEndpointMusicConfig": { "musicVideoType": t } } } })
+        };
+        let overlay = |t: &str| {
+            json!({ "musicItemThumbnailOverlayRenderer": { "content": {
+                "musicPlayButtonRenderer": { "playNavigationEndpoint": cfg(t) } } } })
+        };
+        let up = "MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK";
+
+        assert!(is_upload_row(&json!({ "navigationEndpoint": cfg(up) })));
+        assert!(is_upload_row(&json!({ "overlay": overlay(up) })));
+        assert!(is_upload_row(&json!({ "thumbnailOverlay": overlay(up) })));
+        // The overlay wins over the row endpoint, the same way round as for videos.
+        assert!(is_upload_row(&json!({
+            "overlay": overlay(up),
+            "navigationEndpoint": cfg("MUSIC_VIDEO_TYPE_ATV"),
+        })));
+        assert!(!is_upload_row(&json!({
+            "overlay": overlay("MUSIC_VIDEO_TYPE_ATV"),
+            "navigationEndpoint": cfg(up),
+        })));
+
+        // Fail closed: no tag means an ordinary track, so the normal client chain still runs.
+        assert!(!is_upload_row(&json!({ "navigationEndpoint": cfg("MUSIC_VIDEO_TYPE_OMV") })));
+        assert!(!is_upload_row(&json!({})));
     }
 
     // The rating drives both thumbs on every row, and the third state is new: `DISLIKE` used to
