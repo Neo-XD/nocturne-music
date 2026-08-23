@@ -32,7 +32,8 @@
 		openAddToPlaylist,
 		openMiniPlayer,
 		toggleMute,
-		toggleNowPlayingLike
+		toggleNowPlayingLike,
+		wheelVolume
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import ArtistLine from './ArtistLine.svelte';
@@ -329,6 +330,7 @@
 				value={playback.volume}
 				oninput={onVolume}
 				onchange={onVolumeCommit}
+				onwheel={wheelVolume}
 				aria-label="Volume"
 			/>
 		</div>

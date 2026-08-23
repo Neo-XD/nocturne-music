@@ -534,6 +534,16 @@ export function nudgeVolume(delta: number) {
 }
 
 /**
+ * Mouse wheel over the volume slider. Same gesture as a run of key presses, so it reuses the nudge
+ * path (live per frame, persisted once the scrolling stops). preventDefault keeps the page from
+ * scrolling underneath: Svelte only forces passive listeners on touch events, not wheel.
+ */
+export function wheelVolume(e: WheelEvent) {
+	e.preventDefault();
+	nudgeVolume(e.deltaY < 0 ? 5 : -5);
+}
+
+/**
  * Tempo + pitch (the "Advanced" dialog). Applied live, reverted if mpv rejects it: the pitch
  * filter needs a libmpv built with librubberband, and Rust applies pitch first so a rejection
  * leaves neither of them set.

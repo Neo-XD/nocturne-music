@@ -31,7 +31,8 @@
 		cycleRepeat,
 		dragVolume,
 		toggleMute,
-		toggleNowPlayingLike
+		toggleNowPlayingLike,
+		wheelVolume
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import LyricsView from './LyricsView.svelte';
@@ -166,6 +167,7 @@
 					onpointerdown={() => (volDragging = true)}
 					oninput={(e) => dragVolume(Number(e.currentTarget.value))}
 					onchange={(e) => commitVolume(Number(e.currentTarget.value))}
+					onwheel={wheelVolume}
 					aria-label="Volume"
 				/>
 				<button

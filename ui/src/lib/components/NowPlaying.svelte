@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fly, scale } from 'svelte/transition';
+	import { fade, fly, scale } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { beforeNavigate } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -12,11 +12,13 @@
 		PauseIcon,
 		Queue01Icon,
 		Video01Icon,
-		VideoOffIcon
+		VideoOffIcon,
+		VolumeHighIcon,
+		VolumeMute02Icon
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
-	import { np, playback, prefs, ui } from '$lib/player.svelte';
+	import { np, playback, prefs, ui, wheelVolume } from '$lib/player.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
 	import QueueList from './QueueList.svelte';
@@ -69,6 +71,17 @@
 		clearTimeout(flashTimer);
 		flashTimer = setTimeout(() => (flash = null), 220);
 		api.togglePause();
+	}
+
+	// Scrolling the artwork is the volume, same step as the slider. The level only draws while the
+	// gesture is live (plus a second to read it) so the artwork is otherwise untouched.
+	let volFlash = $state(false);
+	let volTimer: ReturnType<typeof setTimeout>;
+	function onWheel(e: WheelEvent) {
+		wheelVolume(e);
+		volFlash = true;
+		clearTimeout(volTimer);
+		volTimer = setTimeout(() => (volFlash = false), 1000);
 	}
 
 	// --- Music videos (plan 031) -------------------------------------------------------------
@@ -279,7 +292,33 @@
 				<!-- A div, not a button: the video-mode toggle has to be a sibling of the play/pause
 				     button rather than nested inside it (nested buttons are invalid HTML and the
 				     inner one never reliably gets the click). -->
-				<div class="relative w-full {showVideo ? 'max-w-[var(--vid)]' : 'max-w-[var(--art)]'}">
+				<div
+					class="relative w-full {showVideo ? 'max-w-[var(--vid)]' : 'max-w-[var(--art)]'}"
+					onwheel={onWheel}
+				>
+					{#if volFlash}
+						<!-- Middle left of the artwork, on a plate: it sits over whatever the picture is,
+						     so it needs its own background to stay readable. Theme tokens, same
+						     primary-on-muted as the volume slider in the player bar. -->
+						<div
+							transition:fade={{ duration: 120 }}
+							class="pointer-events-none absolute left-3 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full border bg-popover/90 px-2 py-3 text-popover-foreground"
+						>
+							<HugeiconsIcon
+								icon={VolumeHighIcon}
+								altIcon={VolumeMute02Icon}
+								showAlt={playback.volume === 0}
+								class="h-4 w-4"
+							/>
+							<div class="relative h-24 w-1 overflow-hidden rounded-full bg-muted">
+								<div
+									class="absolute inset-x-0 bottom-0 rounded-full bg-primary"
+									style="height:{playback.volume}%"
+								></div>
+							</div>
+							<span class="text-[10px] tabular-nums">{playback.volume}</span>
+						</div>
+					{/if}
 					<button
 						type="button"
 						onclick={toggle}
