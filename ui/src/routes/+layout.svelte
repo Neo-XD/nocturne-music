@@ -13,7 +13,8 @@
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
-	import { appearance, initTheme } from '$lib/theme.svelte';
+	import { appearance, applyArtworkAccent, initTheme } from '$lib/theme.svelte';
+	import { thumb } from '$lib/thumb';
 	import { blockForeignDrag, dragScroll } from '$lib/dnd';
 	import { suppressNative } from '$lib/menu';
 	import Sidebar from '$lib/components/Sidebar.svelte';
@@ -58,6 +59,14 @@
 	const tabbed = $derived(np.open && appearance.tabbedPlayer);
 	$effect(() => {
 		if (tabbed) queueOpen = lyricsOpen = false;
+	});
+
+	// "Adapt colors to artwork": re-run on every track change and on the toggle itself. The 120px
+	// cover is the one the player bar has already loaded, so this costs no extra request.
+	$effect(() => {
+		applyArtworkAccent(
+			appearance.artworkAccent ? thumb(playback.now?.thumbnail, 120) : null
+		);
 	});
 
 	// The mini player runs this same SPA in a second window (Rust `mini.rs`), so the window label is

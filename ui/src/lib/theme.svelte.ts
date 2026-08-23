@@ -11,7 +11,8 @@
 // through — the customization is a set of overrides, not a rival theme to maintain.
 
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { isLight } from './color';
+import { hexToHsv, hsvToHex, isLight, lerpHue, type Hsv } from './color';
+import { artworkAccent } from './artcolor';
 import { allowFontFile } from './api';
 
 export type ThemeId = 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze';
@@ -61,6 +62,8 @@ const CUSTOM_KEY = 'custom-theme';
 const APPEARANCE_KEY = 'appearance';
 const PALETTE_CLASSES = THEMES.filter((t) => t.kind === 'palette').map((t) => `theme-${t.id}`);
 const ACCENT_VARS = ['--primary', '--primary-foreground', '--accent', '--accent-foreground'];
+/** Set on <html> while the artwork tint is live; the surface rules in layout.css hang off it. */
+const TINT_CLASS = 'art-tint';
 const CUSTOM_VARS = ['--hue', '--radius', '--font-sans', '--font-heading'];
 // Same two neutrals the preset accent themes pick between.
 const ON_DARK = 'oklch(0.985 0 0)';
@@ -92,7 +95,9 @@ export const appearance = $state({
 	 */
 	tabbedPlayer: true,
 	/** Starting playback opens the now-playing view. Off, it plays and leaves you where you are (#64). */
-	openPlayerOnPlay: true
+	openPlayerOnPlay: true,
+	/** Take the accent colour from the playing track's cover, crossfading on each change. */
+	artworkAccent: false
 });
 
 export function setAppearance(patch: Partial<typeof appearance>): void {
@@ -138,13 +143,23 @@ export function readBack(): void {
 	effective.fontHeading = g('--font-heading');
 }
 
+/** Write the accent quartet as inline vars on <html>, foreground picked for legibility on it. */
+function setAccentVars(color: string): void {
+	const fg = isLight(color) ? ON_LIGHT : ON_DARK;
+	const root = document.documentElement;
+	root.style.setProperty('--primary', color);
+	root.style.setProperty('--primary-foreground', fg);
+	root.style.setProperty('--accent', color);
+	root.style.setProperty('--accent-foreground', fg);
+}
+
 function apply(): void {
 	const t = THEMES.find((x) => x.id === theme.id) ?? THEMES[0];
 	const root = document.documentElement;
 	// Reset every mechanism first, so switching between an accent and a palette (or clearing a
 	// custom override) never leaves the previous choice's inline vars or class behind.
-	[...ACCENT_VARS, ...CUSTOM_VARS].forEach((v) => root.style.removeProperty(v));
-	root.classList.remove(...PALETTE_CLASSES);
+	[...ACCENT_VARS, ...CUSTOM_VARS, '--art-h'].forEach((v) => root.style.removeProperty(v));
+	root.classList.remove(...PALETTE_CLASSES, TINT_CLASS);
 
 	if (t.kind === 'accent') {
 		root.style.setProperty('--primary', t.color);
@@ -155,13 +170,9 @@ function apply(): void {
 		root.classList.add(`theme-${t.id}`);
 	}
 
-	if (custom.accent) {
-		const fg = isLight(custom.accent) ? ON_LIGHT : ON_DARK;
-		root.style.setProperty('--primary', custom.accent);
-		root.style.setProperty('--primary-foreground', fg);
-		root.style.setProperty('--accent', custom.accent);
-		root.style.setProperty('--accent-foreground', fg);
-	}
+	if (custom.accent) setAccentVars(custom.accent);
+	// Last, so the artwork wins while it's on and the user's own theme is back the moment it isn't.
+	if (art) setArtVars(art);
 	if (custom.hue !== null) root.style.setProperty('--hue', String(custom.hue));
 	if (custom.radius !== null) root.style.setProperty('--radius', `${custom.radius}rem`);
 	if (custom.fontSans) root.style.setProperty('--font-sans', custom.fontSans);
@@ -295,6 +306,73 @@ export function fontAvailable(name: string): boolean {
 	return ctx.measureText(probe).width !== base;
 }
 
+// --- Artwork colours --------------------------------------------------------------------------
+// The playing cover's colour, layered on top of the preset and the custom accent, so switching it
+// off puts the user's own theme straight back. Not persisted: it's derived from whatever is
+// playing, and the next track overwrites it.
+//
+// Two things come out of one colour: the accent quartet (inline vars, as everywhere else) and
+// --art-h, the hue every surface in the `.art-tint` rules is derived from (layout.css). That's why
+// the crossfade runs in HSV rather than mixing two hex values: the hue has to travel the short way
+// round the wheel, and sRGB mixing would take the whole palette through grey on the way.
+
+let art: Hsv | null = null;
+let frame = 0;
+let wanted = '';
+
+/** Push the current artwork colour into the accent vars and the tint hue. */
+function setArtVars(c: Hsv): void {
+	setAccentVars(hsvToHex(c));
+	document.documentElement.style.setProperty('--art-h', c.h.toFixed(1));
+	document.documentElement.classList.add(TINT_CLASS);
+}
+
+/** Crossfade to `to` over ~450 ms. A snap between two palettes is the thing this setting would
+ *  otherwise be judged on. */
+function fadeTo(to: Hsv): void {
+	const from = art ?? hexToHsv(effective.accent) ?? to;
+	cancelAnimationFrame(frame);
+	const t0 = performance.now();
+	const step = (now: number) => {
+		const k = Math.min(1, (now - t0) / 450);
+		const e = k * k * (3 - 2 * k); // smoothstep
+		art = {
+			h: lerpHue(from.h, to.h, e),
+			s: from.s + (to.s - from.s) * e,
+			v: from.v + (to.v - from.v) * e
+		};
+		if (k < 1) {
+			setArtVars(art);
+			frame = requestAnimationFrame(step);
+		} else {
+			art = to;
+			apply(); // land through the normal path so `effective` (and the pickers) agree
+		}
+	};
+	frame = requestAnimationFrame(step);
+}
+
+/**
+ * Point the theme at a cover URL. `null`/undefined (setting off, nothing playing) drops the layer
+ * immediately; an unreadable or colourless image leaves the current colours alone rather than
+ * flashing to grey.
+ */
+export function applyArtworkAccent(url: string | undefined | null): void {
+	wanted = url ?? '';
+	if (!url) {
+		cancelAnimationFrame(frame);
+		if (art) {
+			art = null;
+			apply();
+		}
+		return;
+	}
+	artworkAccent(url).then((hex) => {
+		const hsv = hex && hexToHsv(hex);
+		if (hsv && wanted === url) fadeTo(hsv); // a faster track change already won
+	});
+}
+
 /** Apply the stored theme + customization on startup (defaults to rose, no overrides). */
 export function initTheme(): void {
 	const stored = localStorage.getItem(KEY) as ThemeId | null;
@@ -317,7 +395,7 @@ export function initTheme(): void {
 	}
 	try {
 		const saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) ?? '{}');
-		for (const k of ['artworkBackground', 'tabbedPlayer', 'openPlayerOnPlay'] as const) {
+		for (const k of ['artworkBackground', 'tabbedPlayer', 'openPlayerOnPlay', 'artworkAccent'] as const) {
 			if (typeof saved?.[k] === 'boolean') appearance[k] = saved[k];
 		}
 	} catch {

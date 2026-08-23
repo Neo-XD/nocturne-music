@@ -593,6 +593,27 @@
 						/>
 					</div>
 
+					<div class="flex items-start justify-between gap-4 border-b py-3">
+						<div class="min-w-0">
+							<div class="flex items-center gap-2">
+								<span class="font-medium">Adapt colors to artwork</span>
+								<span
+									class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
+								>
+									Experimental
+								</span>
+							</div>
+							<p class="mt-0.5 text-sm text-muted-foreground">
+								Recolor the app from the playing track's cover: accent, surfaces and borders, fading
+								between tracks. Off keeps the selected theme's own colors.
+							</p>
+						</div>
+						<Switch
+							checked={appearance.artworkAccent}
+							onCheckedChange={(on) => setAppearance({ artworkAccent: on })}
+						/>
+					</div>
+
 					<div class="flex items-center justify-between gap-4 py-3">
 						<div class="min-w-0">
 							<div class="font-medium">Reset customization</div>

@@ -52,3 +52,8 @@ export function isLight(hex: string): boolean {
 	const [r, g, b] = rgb;
 	return Math.sqrt(0.299 * r * r + 0.587 * g * g + 0.114 * b * b) > 0.6;
 }
+
+/** Lerp a hue, shortest way round the wheel: 350 -> 10 goes forward through 0, not back through 180. */
+export function lerpHue(a: number, b: number, t: number): number {
+	return (a + (((b - a + 540) % 360) - 180) * clamp01(t) + 360) % 360;
+}

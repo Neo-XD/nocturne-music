@@ -21,6 +21,9 @@
 	   number. Tokens at chroma 0 are pure white/black by design and stay that way. Preset palettes
 	   hardcode their own oklch values, so the tint only applies to this default set. */
 	--hue: 326;
+	/* Hue of the artwork tint, written by theme.svelte.ts. Only the `.art-tint` rules read it; the
+	   default here just keeps those rules valid if the class ever outlives the variable. */
+	--art-h: 326;
 	--background: oklch(1 0 0);
 	--foreground: oklch(0.145 0.008 var(--hue));
 	--card: oklch(1 0 0);
@@ -410,6 +413,62 @@
 	--sidebar-accent-foreground: oklch(0.7118 0.0129 286.0665);
 	--sidebar-border: oklch(0.4461 0.0263 256.8018);
 	--sidebar-ring: oklch(0.7729 0.1535 163.2231);
+}
+
+/* --- Artwork tint ---
+   "Adapt colors to artwork" (Themes tab). `theme.svelte.ts` puts the playing cover's hue in
+   --art-h and toggles .art-tint on <html>; every surface below is derived from that one number, so
+   the whole UI drifts with the cover instead of only the accent. Written as static CSS rather than
+   generated in JS because the light/dark split has to stay a CSS concern.
+
+   These override whichever palette is selected, so the selectors have to outrank `.dark.theme-x`
+   (0,2,0): `html.art-tint:not(.dark)` and `html.art-tint.dark` are both (0,2,1). --primary /
+   --accent are not here — they stay inline styles on <html>, which beat any of this.
+
+   Chroma is what makes it visible: the default palette's neutrals sit at 0.003–0.034, which reads
+   as grey. Turn the numbers here down together if a saturated cover is too much. */
+html.art-tint:not(.dark) {
+	--background: oklch(0.985 0.014 var(--art-h));
+	--foreground: oklch(0.17 0.03 var(--art-h));
+	--card: oklch(0.995 0.01 var(--art-h));
+	--card-foreground: oklch(0.17 0.03 var(--art-h));
+	--popover: oklch(0.995 0.01 var(--art-h));
+	--popover-foreground: oklch(0.17 0.03 var(--art-h));
+	--secondary: oklch(0.945 0.03 var(--art-h));
+	--secondary-foreground: oklch(0.25 0.04 var(--art-h));
+	--muted: oklch(0.945 0.028 var(--art-h));
+	--muted-foreground: oklch(0.53 0.055 var(--art-h));
+	--border: oklch(0.9 0.032 var(--art-h));
+	--input: oklch(0.9 0.032 var(--art-h));
+	--ring: oklch(0.7 0.06 var(--art-h));
+	--sidebar: oklch(0.965 0.022 var(--art-h));
+	--sidebar-foreground: oklch(0.17 0.03 var(--art-h));
+	--sidebar-accent: oklch(0.935 0.035 var(--art-h));
+	--sidebar-accent-foreground: oklch(0.25 0.04 var(--art-h));
+	--sidebar-border: oklch(0.9 0.032 var(--art-h));
+	--sidebar-ring: oklch(0.7 0.06 var(--art-h));
+}
+
+html.art-tint.dark {
+	--background: oklch(0.165 0.028 var(--art-h));
+	--foreground: oklch(0.97 0.012 var(--art-h));
+	--card: oklch(0.225 0.038 var(--art-h));
+	--card-foreground: oklch(0.97 0.012 var(--art-h));
+	--popover: oklch(0.225 0.038 var(--art-h));
+	--popover-foreground: oklch(0.97 0.012 var(--art-h));
+	--secondary: oklch(0.285 0.04 var(--art-h));
+	--secondary-foreground: oklch(0.97 0.012 var(--art-h));
+	--muted: oklch(0.275 0.042 var(--art-h));
+	--muted-foreground: oklch(0.72 0.045 var(--art-h));
+	--border: oklch(0.33 0.04 var(--art-h));
+	--input: oklch(0.37 0.04 var(--art-h));
+	--ring: oklch(0.55 0.06 var(--art-h));
+	--sidebar: oklch(0.195 0.032 var(--art-h));
+	--sidebar-foreground: oklch(0.97 0.012 var(--art-h));
+	--sidebar-accent: oklch(0.275 0.042 var(--art-h));
+	--sidebar-accent-foreground: oklch(0.97 0.012 var(--art-h));
+	--sidebar-border: oklch(0.33 0.04 var(--art-h));
+	--sidebar-ring: oklch(0.55 0.06 var(--art-h));
 }
 
 @theme inline {
