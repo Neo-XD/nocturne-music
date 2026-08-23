@@ -1,8 +1,15 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { Cancel01Icon } from '@hugeicons/core-free-icons';
+	import {
+		Cancel01Icon,
+		Settings02Icon,
+		PaintBoardIcon,
+		PlayCircleIcon,
+		Database02Icon,
+		InformationCircleIcon
+	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
@@ -46,13 +53,20 @@
 	import { getVersion } from '@tauri-apps/api/app';
 
 	type TabId = 'general' | 'themes' | 'playback' | 'data' | 'about';
-	const TABS: { id: TabId; label: string }[] = [
-		{ id: 'general', label: 'General' },
-		{ id: 'themes', label: 'Themes' },
-		{ id: 'playback', label: 'Playback' },
-		{ id: 'data', label: 'Data & storage' },
-		{ id: 'about', label: 'About' }
+	const TABS: { id: TabId; label: string; hint: string; icon: typeof Settings02Icon }[] = [
+		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
+		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
+		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and lyrics.', icon: PlayCircleIcon },
+		{ id: 'data', label: 'Data & storage', hint: 'Network and cached files.', icon: Database02Icon },
+		{ id: 'about', label: 'About', hint: 'Version, updates and what changed.', icon: InformationCircleIcon }
 	];
+
+	// Shared shapes for the settings rows. Kept as strings so the markup below stays readable and
+	// every group looks identical without a wrapper component per row.
+	const GROUP = 'mb-7 last:mb-1';
+	const LABEL =
+		'mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground';
+	const CARD = 'divide-y divide-border/60 overflow-hidden rounded-xl border bg-card';
 
 	const ACCENT_THEMES = THEMES.filter((t) => t.kind === 'accent');
 	const PALETTE_THEMES = THEMES.filter((t) => t.kind === 'palette');
@@ -103,6 +117,7 @@
 	}
 
 	let tab = $state<TabId>('general');
+	const currentTab = $derived(TABS.find((t) => t.id === tab) ?? TABS[0]);
 	let settings = $state<Record<string, string>>({});
 	let clients = $state<string[]>([]);
 	let proxyInput = $state('');
@@ -268,556 +283,626 @@
 	}
 </script>
 
+<!-- One row shape for the whole modal: label and description on the left, the control on the right,
+     and an optional block underneath for the things that expand (color picker, font input, lists). -->
+{#snippet row(o: {
+	title: string;
+	desc?: string;
+	badge?: string;
+	control?: Snippet;
+	below?: Snippet;
+	tall?: boolean;
+})}
+	<div class="px-4 py-3.5">
+		<div class="flex {o.tall ? 'items-start' : 'items-center'} justify-between gap-6">
+			<div class="min-w-0">
+				<div class="flex items-center gap-2">
+					<span class="text-sm font-medium">{o.title}</span>
+					{#if o.badge}
+						<span
+							class="rounded-full bg-primary/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
+						>
+							{o.badge}
+						</span>
+					{/if}
+				</div>
+				{#if o.desc}
+					<p class="mt-1 max-w-prose text-xs leading-relaxed text-muted-foreground">{o.desc}</p>
+				{/if}
+			</div>
+			{#if o.control}
+				<div class="shrink-0">{@render o.control()}</div>
+			{/if}
+		</div>
+		{#if o.below}
+			<div class="mt-3">{@render o.below()}</div>
+		{/if}
+	</div>
+{/snippet}
+
 <Dialog.Root bind:open={ui.settingsOpen}>
 	<Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-3xl">
-		<div class="flex items-center border-b px-6 py-4">
-			<Dialog.Title class="text-lg font-semibold">Settings</Dialog.Title>
-			<Dialog.Description class="sr-only">Application settings</Dialog.Description>
-		</div>
+		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
-		<div class="flex h-[28rem]">
+		<div class="flex h-[min(34rem,72vh)]">
 			<!-- Tab rail -->
-			<nav class="w-48 shrink-0 border-r p-2">
-				{#each TABS as t (t.id)}
-					<button
-						onclick={() => (tab = t.id)}
-						class="w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors {tab ===
-						t.id
-							? 'bg-accent text-accent-foreground'
-							: 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'}"
-					>
-						{t.label}
-					</button>
-				{/each}
+			<nav class="flex w-52 shrink-0 flex-col border-r bg-muted/40 p-3">
+				<Dialog.Title class="px-3 pt-1 pb-4 font-heading text-base font-semibold">
+					Settings
+				</Dialog.Title>
+				<div class="flex flex-col gap-0.5">
+					{#each TABS as t (t.id)}
+						<button
+							onclick={() => (tab = t.id)}
+							aria-current={tab === t.id}
+							class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors {tab ===
+							t.id
+								? 'bg-background text-foreground shadow-sm ring-1 ring-border/70'
+								: 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}"
+						>
+							<HugeiconsIcon
+								icon={t.icon}
+								size={17}
+								strokeWidth={2}
+								class={tab === t.id ? 'text-primary' : ''}
+							/>
+							<span class="truncate">{t.label}</span>
+						</button>
+					{/each}
+				</div>
+				{#if version}
+					<span class="mt-auto px-3 pb-1 text-[11px] text-muted-foreground">v{version}</span>
+				{/if}
 			</nav>
 
 			<!-- Content pane. min-w-0: a flex child's min-width is auto, so without it one wide row
 			     (a long font name, a long path) widens the pane and pushes every tab off the modal. -->
-			<div class="min-w-0 flex-1 overflow-y-auto px-6 py-4">
-				{#if !loaded}
-					<p class="text-sm text-muted-foreground">Loading…</p>
-				{:else if tab === 'general'}
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Watch history</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Register plays in your YouTube Music history. Needs sign-in.
-							</p>
-						</div>
-						<Switch checked={historyOn} onCheckedChange={setHistory} />
-					</div>
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Discord rich presence</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Show what you're listening to on your Discord profile. Needs the Discord desktop app
-								running — no login here.
-							</p>
-						</div>
-						<Switch checked={discordOn} onCheckedChange={setDiscord} />
-					</div>
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Close to tray</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Closing the window keeps music playing in the background. Restore or quit from the
-								tray icon.
-							</p>
-						</div>
-						<Switch checked={trayOn} onCheckedChange={setTray} />
-					</div>
-					<div class="flex items-start justify-between gap-4 py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Start on login</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Launch Limusic automatically when you log in.
-							</p>
-						</div>
-						<Switch checked={autostartOn} onCheckedChange={setAutostart} />
-					</div>
-				{:else if tab === 'themes'}
-					<div class="flex items-center justify-between gap-8 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Preset</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Accent colors tint the default look; palettes swap every color.
-							</p>
-						</div>
-						<Select.Root
-							type="single"
-							value={theme.id}
-							onValueChange={(v) => applyTheme(v as ThemeId)}
-						>
-							<Select.Trigger class="w-44 shrink-0" aria-label="Theme">
-								<span class="size-4 shrink-0 rounded-full ring-1 ring-black/10" style="background:{currentTheme.color}"></span>
-								<span class="flex-1 text-left">{currentTheme.label}</span>
-							</Select.Trigger>
-							<Select.Content>
-								<Select.Group>
-									<Select.GroupHeading>Accent colors</Select.GroupHeading>
-									{#each ACCENT_THEMES as t (t.id)}
-										<Select.Item value={t.id} label={t.label}>
-											<span class="size-4 shrink-0 rounded-full ring-1 ring-black/10" style="background:{t.color}"></span>
-											{t.label}
-										</Select.Item>
-									{/each}
-								</Select.Group>
-								<Select.Group>
-									<Select.GroupHeading>Palettes</Select.GroupHeading>
-									{#each PALETTE_THEMES as t (t.id)}
-										<Select.Item value={t.id} label={t.label}>
-											<span class="size-4 shrink-0 rounded-full ring-1 ring-black/10" style="background:{t.color}"></span>
-											{t.label}
-										</Select.Item>
-									{/each}
-								</Select.Group>
-							</Select.Content>
-						</Select.Root>
-					</div>
+			<div class="flex min-w-0 flex-1 flex-col">
+				<!-- h-14 also keeps the dialog's close button clear of the first row. -->
+				<header class="flex h-14 shrink-0 flex-col justify-center border-b px-6 pr-14">
+					<h2 class="text-sm font-semibold">{currentTab.label}</h2>
+					<p class="truncate text-xs text-muted-foreground">{currentTab.hint}</p>
+				</header>
 
-					<div class="border-b py-3">
-						<div class="flex items-center justify-between gap-8">
-							<div class="min-w-0">
-								<div class="font-medium">Accent color</div>
-								<p class="mt-0.5 text-sm text-muted-foreground">
-									Buttons, highlights and the progress bar. Applies over any preset.
-								</p>
+				<div class="min-w-0 flex-1 overflow-y-auto px-6 py-5">
+					{#if !loaded}
+						<p class="text-sm text-muted-foreground">Loading…</p>
+					{:else if tab === 'general'}
+						<section class={GROUP}>
+							<h3 class={LABEL}>Activity</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Watch history',
+									desc: 'Register plays in your YouTube Music history. Needs sign-in.',
+									control: historySwitch
+								})}
+								{@render row({
+									title: 'Discord rich presence',
+									desc: "Show what you're listening to on your Discord profile. Needs the Discord desktop app running, no login here.",
+									control: discordSwitch
+								})}
 							</div>
-							<button
-								type="button"
-								onclick={() => (pickerOpen = !pickerOpen)}
-								aria-label="Choose accent color"
-								aria-expanded={pickerOpen}
-								class="size-8 shrink-0 rounded-md ring-1 ring-black/10 transition-transform hover:scale-105"
-								style="background:{effective.accent}"
-							></button>
-						</div>
-						{#if pickerOpen}
-							<div class="mt-3">
-								<ColorPicker
-									value={effective.accent}
-									onchange={(hex) => setCustom({ accent: hex })}
-								/>
+						</section>
+						<section class={GROUP}>
+							<h3 class={LABEL}>System</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Close to tray',
+									desc: 'Closing the window keeps music playing in the background. Restore or quit from the tray icon.',
+									control: traySwitch
+								})}
+								{@render row({
+									title: 'Start on login',
+									desc: 'Launch Limusic automatically when you log in.',
+									control: autostartSwitch
+								})}
 							</div>
-						{/if}
-					</div>
-
-					<div class="flex items-center justify-between gap-8 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Background tint</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								{#if currentTheme.kind === 'palette'}
-									Only shades the default palette — {currentTheme.label} brings its own colors.
-								{:else}
-									Shades the greys: surfaces, borders and secondary text.
-								{/if}
-							</p>
-						</div>
-						<Slider
-							type="single"
-							aria-label="Background tint"
-							max={360}
-							step={1}
-							disabled={currentTheme.kind === 'palette'}
-							value={effective.hue}
-							onValueChange={(hue) => setCustom({ hue })}
-							class="w-44 shrink-0 [&_[data-slot=slider-range]]:bg-transparent [&_[data-slot=slider-track]]:bg-[linear-gradient(to_right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)]"
-						/>
-					</div>
-
-					<div class="flex items-center justify-between gap-8 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Roundness</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Corner radius of cards, buttons and artwork.
-							</p>
-						</div>
-						<div class="flex w-44 shrink-0 items-center gap-3">
-							<Slider
-								type="single"
-								aria-label="Roundness"
-								max={1.5}
-								step={0.05}
-								value={effective.radius}
-								onValueChange={(radius) => setCustom({ radius })}
-							/>
-							<span class="w-10 shrink-0 text-right font-mono text-xs text-muted-foreground">
-								{effective.radius.toFixed(2)}
-							</span>
-						</div>
-					</div>
-
-					{#each FONT_ROWS as row (row.key)}
-						<div class="border-b py-3">
-							<div class="flex items-center justify-between gap-8">
-								<div class="min-w-0">
-									<div class="font-medium">{row.label}</div>
-									<p class="mt-0.5 text-sm text-muted-foreground">{row.hint}</p>
-								</div>
-								<Select.Root
-									type="single"
-									value={isCustomFont[row.key] ? 'custom' : matchFont(effective[row.key])}
-									onValueChange={(v) => chooseFont(row.key, v)}
-								>
-									<Select.Trigger class="w-44 shrink-0" aria-label={row.label}>
-										<span
-											class="min-w-0 flex-1 truncate text-left"
-											style="font-family:{effective[row.key]}"
-										>
-											{isCustomFont[row.key] ? 'Custom' : familyName(effective[row.key])}
-										</span>
-									</Select.Trigger>
-									<!-- max-w: a loaded font's name is whatever the file was called, and the
-									     dropdown grows to its widest item. -->
-									<Select.Content class="max-w-64">
-										{#each FONTS as f (f.value)}
-											<Select.Item value={f.value} label={f.label}>
-												<span class="block truncate" style="font-family:{f.value}">{f.label}</span>
-											</Select.Item>
-										{/each}
-										{#if custom.fontFiles.length}
-											<Select.Group>
-												<Select.GroupHeading>Your fonts</Select.GroupHeading>
-												{#each fileFonts() as f (f.value)}
-													<Select.Item value={f.value} label={f.label}>
-														<span class="block truncate" style="font-family:{f.value}">
-															{f.label}
-														</span>
-													</Select.Item>
-												{/each}
-											</Select.Group>
-										{/if}
-										<Select.Item value="custom" label="Custom">Custom…</Select.Item>
-									</Select.Content>
-								</Select.Root>
+						</section>
+					{:else if tab === 'themes'}
+						<section class={GROUP}>
+							<h3 class={LABEL}>Theme</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Preset',
+									desc: 'Accent colors tint the default look; palettes swap every color.',
+									control: presetSelect
+								})}
+								{@render row({
+									title: 'Accent color',
+									desc: 'Buttons, highlights and the progress bar. Applies over any preset.',
+									control: accentSwatch,
+									below: pickerOpen ? accentPicker : undefined
+								})}
+								{@render row({
+									title: 'Background tint',
+									desc:
+										currentTheme.kind === 'palette'
+											? `Only shades the default palette, ${currentTheme.label} brings its own colors.`
+											: 'Shades the greys: surfaces, borders and secondary text.',
+									control: tintSlider
+								})}
+								{@render row({
+									title: 'Roundness',
+									desc: 'Corner radius of cards, buttons and artwork.',
+									control: radiusSlider
+								})}
 							</div>
-							{#if isCustomFont[row.key]}
-								<div class="mt-3">
-									<Input
-										value={fontName[row.key]}
-										oninput={(e) => typeFont(row.key, e.currentTarget.value)}
-										placeholder="Font installed on this computer, e.g. Inter"
-										aria-label="{row.label} family name"
-										spellcheck={false}
-										style="font-family:{effective[row.key]}"
-									/>
-									{#if fontName[row.key].trim() && !fontAvailable(fontName[row.key])}
-										<p class="mt-1.5 text-sm text-muted-foreground">
-											Not installed — install the font, then reopen settings.
-										</p>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					{/each}
+						</section>
 
-					<div class="border-b py-3">
-						<div class="flex items-center justify-between gap-8">
-							<div class="min-w-0">
-								<div class="font-medium">Font files</div>
-								<p class="mt-0.5 text-sm text-muted-foreground">
-									Load a .ttf, .otf or .woff from anywhere on this computer. It joins both dropdowns
-									above.
-								</p>
-							</div>
-							<Button variant="outline" size="sm" class="shrink-0" onclick={pickFontFiles}>
-								Add font…
-							</Button>
-						</div>
-						{#if custom.fontFiles.length}
-							<div class="mt-3 flex flex-col gap-1.5">
-								{#each custom.fontFiles as path (path)}
-									<div class="flex items-center gap-3 rounded-md bg-secondary/50 py-1.5 pr-1.5 pl-3">
-										<!-- The name is the identity; the path only earns a tooltip. A font called
-										     BigBlueTerm437NerdFontMono-Regular is wider than the modal. -->
-										<span
-											class="min-w-0 flex-1 truncate"
-											style="font-family:'{fileFamily(path)}'"
-											title={path}
-										>
-											{fileFamily(path)}
-										</span>
-										<button
-											type="button"
-											onclick={() => removeFontFile(path)}
-											aria-label="Remove {fileFamily(path)}"
-											class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-										>
-											<HugeiconsIcon icon={Cancel01Icon} size={14} />
-										</button>
-									</div>
+						<section class={GROUP}>
+							<h3 class={LABEL}>Typography</h3>
+							<div class={CARD}>
+								{#each FONT_ROWS as fr (fr.key)}
+									<!-- Zero-arg wrappers: a snippet passed as a value can't carry arguments. -->
+									{#snippet pick()}{@render fontSelect(fr.key, fr.label)}{/snippet}
+									{#snippet type()}{@render fontInput(fr.key, fr.label)}{/snippet}
+									{@render row({
+										title: fr.label,
+										desc: fr.hint,
+										control: pick,
+										below: isCustomFont[fr.key] ? type : undefined
+									})}
 								{/each}
+								{@render row({
+									title: 'Font files',
+									desc: 'Load a .ttf, .otf or .woff from anywhere on this computer. It joins both dropdowns above.',
+									control: addFontButton,
+									below: custom.fontFiles.length ? fontFileList : undefined
+								})}
 							</div>
-						{/if}
-					</div>
+						</section>
 
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Open the player when you press play</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								On, playing a song, album or playlist brings up the full player view. Off, it starts
-								playing and leaves you on the page you were browsing.
-							</p>
-						</div>
-						<Switch
-							checked={appearance.openPlayerOnPlay}
-							onCheckedChange={(on) => setAppearance({ openPlayerOnPlay: on })}
-						/>
-					</div>
-
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Queue and lyrics in the player view</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								On, the player view carries them as tabs and the bar's two buttons switch between
-								them. Off, those buttons only ever open the side panels, which stay open over the
-								player view so you can see both at once.
-							</p>
-						</div>
-						<Switch
-							checked={appearance.tabbedPlayer}
-							onCheckedChange={(on) => setAppearance({ tabbedPlayer: on })}
-						/>
-					</div>
-
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Artwork background</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Tint the player view with the playing track's cover, blurred. Off leaves it plain.
-							</p>
-						</div>
-						<Switch
-							checked={appearance.artworkBackground}
-							onCheckedChange={(on) => setAppearance({ artworkBackground: on })}
-						/>
-					</div>
-
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="flex items-center gap-2">
-								<span class="font-medium">Adapt colors to artwork</span>
-								<span
-									class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
-								>
-									Experimental
-								</span>
+						<section class={GROUP}>
+							<h3 class={LABEL}>Player view</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Open the player when you press play',
+									desc: 'On, playing a song, album or playlist brings up the full player view. Off, it starts playing and leaves you on the page you were browsing.',
+									control: openPlayerSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Queue and lyrics in the player view',
+									desc: "On, the player view carries them as tabs and the bar's two buttons switch between them. Off, those buttons only ever open the side panels, which stay open over the player view so you can see both at once.",
+									control: tabbedSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Artwork background',
+									desc: "Tint the player view with the playing track's cover, blurred. Off leaves it plain.",
+									control: artworkBgSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Adapt colors to artwork',
+									badge: 'Experimental',
+									desc: "Recolor the app from the playing track's cover: accent, surfaces and borders, fading between tracks. Off keeps the selected theme's own colors.",
+									control: artworkAccentSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Reset customization',
+									desc: 'Drop the color, roundness and font overrides. Keeps the preset.',
+									control: resetButton
+								})}
 							</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Recolor the app from the playing track's cover: accent, surfaces and borders, fading
-								between tracks. Off keeps the selected theme's own colors.
-							</p>
-						</div>
-						<Switch
-							checked={appearance.artworkAccent}
-							onCheckedChange={(on) => setAppearance({ artworkAccent: on })}
-						/>
-					</div>
-
-					<div class="flex items-center justify-between gap-4 py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Reset customization</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Drop the color, roundness and font overrides. Keeps the preset.
-							</p>
-						</div>
-						<Button
-							variant="outline"
-							size="sm"
-							disabled={isDefaultCustom()}
-							onclick={() => {
-								resetCustom();
-								isCustomFont = { fontSans: false, fontHeading: false };
-								fontName = { fontSans: '', fontHeading: '' };
-							}}
+						</section>
+					{:else if tab === 'playback'}
+						<section class={GROUP}>
+							<h3 class={LABEL}>Audio</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Audio quality',
+									desc: 'Preferred stream quality when resolving a track.',
+									control: qualityPicker
+								})}
+								{@render row({
+									title: 'Autoplay',
+									desc: 'Keep the music going with similar songs when your queue ends.',
+									control: autoplaySwitch
+								})}
+								{@render row({
+									title: 'Prevent duplicate tracks in queue',
+									desc: "Adding a track that's already in the queue moves it from its old position instead of adding a second copy.",
+									control: dupSwitch,
+									tall: true
+								})}
+							</div>
+						</section>
+						<section class={GROUP}>
+							<h3 class={LABEL}>Video</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Play music videos',
+									badge: 'Experimental',
+									desc: 'When a track is a music video, the player shows the video instead of the artwork. Uses noticeably more data and battery than audio alone.',
+									control: musicVideoSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Hide music videos',
+									desc: "Keep only the audio version of a track, so the official video doesn't turn up beside it. Applies to newly loaded content.",
+									control: hideVideoSwitch,
+									tall: true
+								})}
+							</div>
+						</section>
+						<section class={GROUP}>
+							<h3 class={LABEL}>Lyrics</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Word-by-word lyrics',
+									desc: "Asks lyrics-api.boidu.dev first, the only source here with per-word timings, so lyrics can highlight as they're sung. It's checked for every track, so turning this off keeps your listening off that service. Other sources still provide line-by-line lyrics.",
+									control: boiduSwitch,
+									tall: true
+								})}
+							</div>
+						</section>
+						<section class={GROUP}>
+							<h3 class={LABEL}>Advanced</h3>
+							<div class={CARD}>
+								{@render row({ title: 'Stream clients', below: clientList })}
+							</div>
+						</section>
+					{:else if tab === 'data'}
+						<section class={GROUP}>
+							<h3 class={LABEL}>Network</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Proxy',
+									desc: 'HTTP/SOCKS proxy for all YouTube traffic. Takes effect on restart.',
+									below: proxyForm
+								})}
+							</div>
+						</section>
+						<section class={GROUP}>
+							<h3 class={LABEL}>Storage</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Cache',
+									desc: 'Clear cached stream URLs and downloaded audio bytes.',
+									control: clearButton
+								})}
+							</div>
+						</section>
+					{:else if tab === 'about'}
+						<div
+							class="mb-7 rounded-xl border bg-gradient-to-br from-primary/8 to-transparent px-4 py-4"
 						>
-							Reset
-						</Button>
-					</div>
-				{:else if tab === 'playback'}
-					<div class="border-b py-3">
-						<div class="font-medium">Audio quality</div>
-						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
-							Preferred stream quality when resolving a track.
-						</p>
-						<div class="flex gap-2">
-							{#each QUALITIES as q (q.id)}
-								<Button
-									variant={quality === q.id ? 'default' : 'outline'}
-									size="sm"
-									onclick={() => setQuality(q.id)}
-								>
-									{q.label}
-								</Button>
-							{/each}
-						</div>
-					</div>
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Autoplay</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Keep the music going with similar songs when your queue ends.
-							</p>
-						</div>
-						<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />
-					</div>
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Prevent duplicate tracks in queue</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Adding a track that's already in the queue moves it from its old position instead of
-								adding a second copy.
-							</p>
-						</div>
-						<Switch checked={preventDuplicatesOn} onCheckedChange={setPreventDuplicates} />
-					</div>
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
 							<div class="flex items-center gap-2">
-								<span class="font-medium">Play music videos</span>
-								<span
-									class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
-								>
-									Experimental
-								</span>
-							</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								When a track is a music video, the player shows the video instead of the artwork.
-								Uses noticeably more data and battery than audio alone.
-							</p>
-						</div>
-						<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />
-					</div>
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Hide music videos</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Keep only the audio version of a track, so the official video doesn't turn up
-								beside it. Applies to newly loaded content.
-							</p>
-						</div>
-						<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />
-					</div>
-					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Word-by-word lyrics</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Asks lyrics-api.boidu.dev first, the only source here with per-word timings, so
-								lyrics can highlight as they're sung. It's checked for every track, so turning
-								this off keeps your listening off that service. Other sources still provide
-								line-by-line lyrics.
-							</p>
-						</div>
-						<Switch checked={boiduOn} onCheckedChange={setBoidu} />
-					</div>
-					<div class="py-3">
-						<div class="font-medium">Stream clients</div>
-						<p class="mt-0.5 mb-2 text-sm text-muted-foreground">
-							Advanced — turn a client off to skip it when resolving streams. Overridden by the
-							<span class="font-mono text-xs">LIMUSIC_DISABLED_CLIENTS</span> env var.
-						</p>
-						<div class="flex flex-col gap-2">
-							{#each clients as name (name)}
-								<div class="flex items-center justify-between">
-									<span class="font-mono text-sm">{name}</span>
-									<Switch
-										checked={!disabled.has(name)}
-										onCheckedChange={() => toggleClient(name)}
-									/>
-								</div>
-							{/each}
-						</div>
-					</div>
-				{:else if tab === 'data'}
-					<div class="border-b py-3">
-						<div class="font-medium">Proxy</div>
-						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
-							HTTP/SOCKS proxy for all YouTube traffic. Takes effect on restart.
-						</p>
-						<form
-							class="flex gap-2"
-							onsubmit={(e) => {
-								e.preventDefault();
-								saveProxy();
-							}}
-						>
-							<Input bind:value={proxyInput} placeholder="http://host:port (blank = none)" />
-							<Button type="submit" variant="outline">Save</Button>
-						</form>
-					</div>
-					<div class="py-3">
-						<div class="font-medium">Cache</div>
-						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
-							Clear cached stream URLs and downloaded audio bytes.
-						</p>
-						<Button variant="destructive" size="sm" onclick={doClearCaches} disabled={clearing}>
-							{clearing ? 'Clearing…' : 'Clear caches'}
-						</Button>
-					</div>
-				{:else if tab === 'about'}
-					<div class="border-b py-3">
-						<div class="font-heading text-lg font-bold">Limusic</div>
-						<p class="mt-1 text-sm text-muted-foreground">
-							A cross-platform desktop YouTube Music client — ad-free playback straight from
-							YouTube's private API, with your real library and OS media keys.
-						</p>
-						{#if version}<p class="mt-2 text-sm text-muted-foreground">Version {version}</p>{/if}
-					</div>
-					<div class="flex items-center justify-between gap-4 border-b py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Updates</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								{#if updateState.available && !updateState.canInstall}
-									Version {updateState.available.version} is available. This build was installed by a
-									package manager, so update it the same way.
-								{:else if updateState.available}
-									Version {updateState.available.version} is available.
-								{:else}
-									Check GitHub for a newer release.
+								<span class="font-heading text-lg font-bold">Limusic</span>
+								{#if version}
+									<span
+										class="rounded-full bg-primary/12 px-2 py-0.5 text-[11px] font-semibold text-primary"
+									>
+										v{version}
+									</span>
 								{/if}
+							</div>
+							<p class="mt-1.5 max-w-prose text-xs leading-relaxed text-muted-foreground">
+								A cross-platform desktop YouTube Music client. Ad-free playback straight from
+								YouTube's private API, with your real library and OS media keys.
 							</p>
 						</div>
-						{#if updateState.available && !updateState.canInstall}
-							<Button size="sm" onclick={openDownloadPage}>Download</Button>
-						{:else if updateState.available}
-							<Button size="sm" onclick={installUpdate} disabled={updateState.installing}>
-								{updateState.installing ? 'Updating…' : 'Update now'}
-							</Button>
-						{:else}
-							<Button
-								variant="outline"
-								size="sm"
-								onclick={checkUpdates}
-								disabled={updateState.checking}
-							>
-								{updateState.checking ? 'Checking…' : 'Check for updates'}
-							</Button>
-						{/if}
-					</div>
-					{#if updateResult && !updateState.available}
-						<Alert variant={updateResult.error ? 'destructive' : 'default'}>
-							<AlertDescription>{updateResult.message}</AlertDescription>
-						</Alert>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>Updates</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Updates',
+									desc: updateState.available && !updateState.canInstall
+										? `Version ${updateState.available.version} is available. This build was installed by a package manager, so update it the same way.`
+										: updateState.available
+											? `Version ${updateState.available.version} is available.`
+											: 'Check GitHub for a newer release.',
+									control: updateButton,
+									below: updateResult && !updateState.available ? updateAlert : undefined
+								})}
+								{@render row({
+									title: 'Tell me about new versions',
+									desc: 'Check on launch and show a banner when a newer version is out. Off means no check and no banner, so use the button above to look.',
+									control: bannerSwitch,
+									tall: true
+								})}
+							</div>
+						</section>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>What's new</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Release notes',
+									desc: 'What changed in this version and the ones before it.',
+									below: changelog
+								})}
+							</div>
+						</section>
 					{/if}
-					<div class="flex items-start justify-between gap-4 py-3">
-						<div class="min-w-0">
-							<div class="font-medium">Tell me about new versions</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">
-								Check on launch and show a banner when a newer version is out. Off means no check
-								and no banner, so use the button above to look.
-							</p>
-						</div>
-						<Switch checked={updateBannerOn} onCheckedChange={setUpdateBanner} />
-					</div>
-					<div class="border-t py-3">
-						<div class="font-medium">What's new</div>
-						<p class="mt-0.5 mb-1 text-sm text-muted-foreground">
-							What changed in this version and the ones before it.
-						</p>
-						<Changelog current={version} />
-					</div>
-				{/if}
+				</div>
 			</div>
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
+
+<!-- Controls. Split out so the rows above read as a list of settings rather than a wall of markup. -->
+{#snippet historySwitch()}<Switch checked={historyOn} onCheckedChange={setHistory} />{/snippet}
+{#snippet discordSwitch()}<Switch checked={discordOn} onCheckedChange={setDiscord} />{/snippet}
+{#snippet traySwitch()}<Switch checked={trayOn} onCheckedChange={setTray} />{/snippet}
+{#snippet autostartSwitch()}<Switch checked={autostartOn} onCheckedChange={setAutostart} />{/snippet}
+{#snippet autoplaySwitch()}<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />{/snippet}
+{#snippet dupSwitch()}<Switch
+		checked={preventDuplicatesOn}
+		onCheckedChange={setPreventDuplicates}
+	/>{/snippet}
+{#snippet musicVideoSwitch()}<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />{/snippet}
+{#snippet hideVideoSwitch()}<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />{/snippet}
+{#snippet boiduSwitch()}<Switch checked={boiduOn} onCheckedChange={setBoidu} />{/snippet}
+{#snippet bannerSwitch()}<Switch checked={updateBannerOn} onCheckedChange={setUpdateBanner} />{/snippet}
+{#snippet openPlayerSwitch()}<Switch
+		checked={appearance.openPlayerOnPlay}
+		onCheckedChange={(on) => setAppearance({ openPlayerOnPlay: on })}
+	/>{/snippet}
+{#snippet tabbedSwitch()}<Switch
+		checked={appearance.tabbedPlayer}
+		onCheckedChange={(on) => setAppearance({ tabbedPlayer: on })}
+	/>{/snippet}
+{#snippet artworkBgSwitch()}<Switch
+		checked={appearance.artworkBackground}
+		onCheckedChange={(on) => setAppearance({ artworkBackground: on })}
+	/>{/snippet}
+{#snippet artworkAccentSwitch()}<Switch
+		checked={appearance.artworkAccent}
+		onCheckedChange={(on) => setAppearance({ artworkAccent: on })}
+	/>{/snippet}
+
+{#snippet presetSelect()}
+	<Select.Root type="single" value={theme.id} onValueChange={(v) => applyTheme(v as ThemeId)}>
+		<Select.Trigger class="w-44 shrink-0" aria-label="Theme">
+			<span
+				class="size-4 shrink-0 rounded-full ring-1 ring-black/10"
+				style="background:{currentTheme.color}"
+			></span>
+			<span class="flex-1 truncate text-left">{currentTheme.label}</span>
+		</Select.Trigger>
+		<Select.Content>
+			<Select.Group>
+				<Select.GroupHeading>Accent colors</Select.GroupHeading>
+				{#each ACCENT_THEMES as t (t.id)}
+					<Select.Item value={t.id} label={t.label}>
+						<span
+							class="size-4 shrink-0 rounded-full ring-1 ring-black/10"
+							style="background:{t.color}"
+						></span>
+						{t.label}
+					</Select.Item>
+				{/each}
+			</Select.Group>
+			<Select.Group>
+				<Select.GroupHeading>Palettes</Select.GroupHeading>
+				{#each PALETTE_THEMES as t (t.id)}
+					<Select.Item value={t.id} label={t.label}>
+						<span
+							class="size-4 shrink-0 rounded-full ring-1 ring-black/10"
+							style="background:{t.color}"
+						></span>
+						{t.label}
+					</Select.Item>
+				{/each}
+			</Select.Group>
+		</Select.Content>
+	</Select.Root>
+{/snippet}
+
+{#snippet accentSwatch()}
+	<button
+		type="button"
+		onclick={() => (pickerOpen = !pickerOpen)}
+		aria-label="Choose accent color"
+		aria-expanded={pickerOpen}
+		class="size-8 cursor-pointer rounded-lg ring-1 ring-black/10 transition-transform hover:scale-105 {pickerOpen
+			? 'ring-2 ring-primary/60'
+			: ''}"
+		style="background:{effective.accent}"
+	></button>
+{/snippet}
+
+{#snippet accentPicker()}
+	<ColorPicker value={effective.accent} onchange={(hex) => setCustom({ accent: hex })} />
+{/snippet}
+
+{#snippet tintSlider()}
+	<Slider
+		type="single"
+		aria-label="Background tint"
+		max={360}
+		step={1}
+		disabled={currentTheme.kind === 'palette'}
+		value={effective.hue}
+		onValueChange={(hue) => setCustom({ hue })}
+		class="w-44 shrink-0 [&_[data-slot=slider-range]]:bg-transparent [&_[data-slot=slider-track]]:bg-[linear-gradient(to_right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)]"
+	/>
+{/snippet}
+
+{#snippet radiusSlider()}
+	<div class="flex w-44 shrink-0 items-center gap-3">
+		<Slider
+			type="single"
+			aria-label="Roundness"
+			max={1.5}
+			step={0.05}
+			value={effective.radius}
+			onValueChange={(radius) => setCustom({ radius })}
+		/>
+		<span class="w-10 shrink-0 text-right font-mono text-xs text-muted-foreground">
+			{effective.radius.toFixed(2)}
+		</span>
+	</div>
+{/snippet}
+
+{#snippet fontSelect(key: FontKey, label: string)}
+	<Select.Root
+		type="single"
+		value={isCustomFont[key] ? 'custom' : matchFont(effective[key])}
+		onValueChange={(v) => chooseFont(key, v)}
+	>
+		<Select.Trigger class="w-44 shrink-0" aria-label={label}>
+			<span class="min-w-0 flex-1 truncate text-left" style="font-family:{effective[key]}">
+				{isCustomFont[key] ? 'Custom' : familyName(effective[key])}
+			</span>
+		</Select.Trigger>
+		<!-- max-w: a loaded font's name is whatever the file was called, and the dropdown grows to
+		     its widest item. -->
+		<Select.Content class="max-w-64">
+			{#each FONTS as f (f.value)}
+				<Select.Item value={f.value} label={f.label}>
+					<span class="block truncate" style="font-family:{f.value}">{f.label}</span>
+				</Select.Item>
+			{/each}
+			{#if custom.fontFiles.length}
+				<Select.Group>
+					<Select.GroupHeading>Your fonts</Select.GroupHeading>
+					{#each fileFonts() as f (f.value)}
+						<Select.Item value={f.value} label={f.label}>
+							<span class="block truncate" style="font-family:{f.value}">{f.label}</span>
+						</Select.Item>
+					{/each}
+				</Select.Group>
+			{/if}
+			<Select.Item value="custom" label="Custom">Custom…</Select.Item>
+		</Select.Content>
+	</Select.Root>
+{/snippet}
+
+{#snippet fontInput(key: FontKey, label: string)}
+	<Input
+		value={fontName[key]}
+		oninput={(e) => typeFont(key, e.currentTarget.value)}
+		placeholder="Font installed on this computer, e.g. Inter"
+		aria-label="{label} family name"
+		spellcheck={false}
+		style="font-family:{effective[key]}"
+	/>
+	{#if fontName[key].trim() && !fontAvailable(fontName[key])}
+		<p class="mt-1.5 text-xs text-muted-foreground">
+			Not installed — install the font, then reopen settings.
+		</p>
+	{/if}
+{/snippet}
+
+{#snippet addFontButton()}
+	<Button variant="outline" size="sm" class="shrink-0" onclick={pickFontFiles}>Add font…</Button>
+{/snippet}
+
+{#snippet fontFileList()}
+	<div class="flex flex-col gap-1.5">
+		{#each custom.fontFiles as path (path)}
+			<div class="flex items-center gap-3 rounded-lg bg-secondary/60 py-1.5 pr-1.5 pl-3 text-sm">
+				<!-- The name is the identity; the path only earns a tooltip. A font called
+				     BigBlueTerm437NerdFontMono-Regular is wider than the modal. -->
+				<span class="min-w-0 flex-1 truncate" style="font-family:'{fileFamily(path)}'" title={path}>
+					{fileFamily(path)}
+				</span>
+				<button
+					type="button"
+					onclick={() => removeFontFile(path)}
+					aria-label="Remove {fileFamily(path)}"
+					class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+				>
+					<HugeiconsIcon icon={Cancel01Icon} size={14} />
+				</button>
+			</div>
+		{/each}
+	</div>
+{/snippet}
+
+{#snippet resetButton()}
+	<Button
+		variant="outline"
+		size="sm"
+		disabled={isDefaultCustom()}
+		onclick={() => {
+			resetCustom();
+			isCustomFont = { fontSans: false, fontHeading: false };
+			fontName = { fontSans: '', fontHeading: '' };
+		}}
+	>
+		Reset
+	</Button>
+{/snippet}
+
+<!-- Segmented, not three buttons: the options are one exclusive choice and should look like it. -->
+{#snippet qualityPicker()}
+	<div class="flex rounded-lg bg-muted p-0.5">
+		{#each QUALITIES as q (q.id)}
+			<button
+				type="button"
+				onclick={() => setQuality(q.id)}
+				aria-pressed={quality === q.id}
+				class="cursor-pointer rounded-md px-3.5 py-1.5 text-xs font-medium transition-colors {quality ===
+				q.id
+					? 'bg-background text-foreground shadow-sm'
+					: 'text-muted-foreground hover:text-foreground'}"
+			>
+				{q.label}
+			</button>
+		{/each}
+	</div>
+{/snippet}
+
+{#snippet clientList()}
+	<p class="mb-3 max-w-prose text-xs leading-relaxed text-muted-foreground">
+		Turn a client off to skip it when resolving streams. Overridden by the
+		<span class="font-mono">LIMUSIC_DISABLED_CLIENTS</span> env var.
+	</p>
+	<div class="flex flex-col gap-2">
+		{#each clients as name (name)}
+			<div class="flex items-center justify-between rounded-lg bg-muted/60 py-1.5 pr-2 pl-3">
+				<span class="font-mono text-xs">{name}</span>
+				<Switch checked={!disabled.has(name)} onCheckedChange={() => toggleClient(name)} />
+			</div>
+		{/each}
+	</div>
+{/snippet}
+
+{#snippet proxyForm()}
+	<form
+		class="flex gap-2"
+		onsubmit={(e) => {
+			e.preventDefault();
+			saveProxy();
+		}}
+	>
+		<Input bind:value={proxyInput} placeholder="http://host:port (blank = none)" />
+		<Button type="submit" variant="outline">Save</Button>
+	</form>
+{/snippet}
+
+{#snippet clearButton()}
+	<Button variant="destructive" size="sm" onclick={doClearCaches} disabled={clearing}>
+		{clearing ? 'Clearing…' : 'Clear caches'}
+	</Button>
+{/snippet}
+
+{#snippet updateButton()}
+	{#if updateState.available && !updateState.canInstall}
+		<Button size="sm" onclick={openDownloadPage}>Download</Button>
+	{:else if updateState.available}
+		<Button size="sm" onclick={installUpdate} disabled={updateState.installing}>
+			{updateState.installing ? 'Updating…' : 'Update now'}
+		</Button>
+	{:else}
+		<Button variant="outline" size="sm" onclick={checkUpdates} disabled={updateState.checking}>
+			{updateState.checking ? 'Checking…' : 'Check for updates'}
+		</Button>
+	{/if}
+{/snippet}
+
+{#snippet updateAlert()}
+	<Alert variant={updateResult?.error ? 'destructive' : 'default'}>
+		<AlertDescription>{updateResult?.message}</AlertDescription>
+	</Alert>
+{/snippet}
+
+{#snippet changelog()}
+	<Changelog current={version} />
+{/snippet}
