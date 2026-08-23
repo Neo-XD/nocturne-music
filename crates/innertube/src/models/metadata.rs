@@ -99,8 +99,18 @@ pub enum Rating {
 }
 
 /// `MUSIC_VIDEO_TYPE_ATV` — the audio track YouTube Music generates for a release. Anything else
-/// (`_OMV`, `_UGC`) is a video upload.
+/// (`_OMV`, `_UGC`) is a video upload, except [`UPLOADED_TRACK_TYPE`].
 pub(crate) const AUDIO_TRACK_TYPE: &str = "MUSIC_VIDEO_TYPE_ATV";
+
+/// A track the signed-in user uploaded to their own library. Audio, not a music video: counting
+/// it as one hid every upload under the "hide music videos" setting, and put the player view into
+/// video mode on a track that has no video at all. Issue #71.
+pub(crate) const UPLOADED_TRACK_TYPE: &str = "MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK";
+
+/// True for a `musicVideoType` that means "a music video", i.e. neither of the two audio kinds.
+pub(crate) fn is_video_type(t: &str) -> bool {
+    t != AUDIO_TRACK_TYPE && t != UPLOADED_TRACK_TYPE
+}
 
 /// The `musicVideoType` a watch endpoint carries, if any.
 fn endpoint_video_type(endpoint: &Value) -> Option<&str> {
@@ -115,7 +125,7 @@ fn endpoint_video_type(endpoint: &Value) -> Option<&str> {
 
 /// True when a watch endpoint points at a music video rather than the audio track.
 pub(crate) fn is_video_endpoint(endpoint: &Value) -> bool {
-    matches!(endpoint_video_type(endpoint), Some(t) if t != AUDIO_TRACK_TYPE)
+    matches!(endpoint_video_type(endpoint), Some(t) if is_video_type(t))
 }
 
 /// True when a renderer row (list row, two-row card, or queue panel row) links a music video.
@@ -888,6 +898,12 @@ mod tests {
             &json!({ "navigationEndpoint": { "watchEndpoint": { "videoId": "v" } } })
         ));
         assert!(!is_video_row(&json!({})));
+
+        // A personal upload is audio, so it must not read as a music video. Issue #71: with
+        // "hide music videos" on, treating it as one dropped every upload out of the library.
+        let up = "MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK";
+        assert!(!is_video_row(&json!({ "navigationEndpoint": cfg(up) })));
+        assert!(!is_video_row(&json!({ "overlay": overlay(up) })));
     }
 
     // The rating drives both thumbs on every row, and the third state is new: `DISLIKE` used to

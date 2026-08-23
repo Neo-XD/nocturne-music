@@ -293,7 +293,7 @@ impl VideoDetails {
     /// must not be read as "not a video". Authoritative for the player view's music-video mode,
     /// where the queue row's flag is only as good as the parse that built it.
     pub fn is_music_video(&self) -> Option<bool> {
-        Some(self.music_video_type.as_deref()? != super::metadata::AUDIO_TRACK_TYPE)
+        Some(super::metadata::is_video_type(self.music_video_type.as_deref()?))
     }
 }
 
@@ -402,6 +402,9 @@ mod tests {
         assert_eq!(omv.is_music_video(), Some(true));
         assert_eq!(ugc.is_music_video(), Some(true));
         assert_eq!(bare.is_music_video(), None);
+        // A personal upload is audio, not a music video (issue #71).
+        let upload = details("MUSIC_VIDEO_TYPE_PRIVATELY_OWNED_TRACK");
+        assert_eq!(upload.is_music_video(), Some(false));
     }
 }
 
