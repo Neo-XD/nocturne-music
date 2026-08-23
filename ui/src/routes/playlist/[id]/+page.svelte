@@ -740,7 +740,15 @@
 					<div class="relative h-40 w-40 rounded-xl bg-muted"></div>
 				{/if}
 				<div class="relative min-w-0 flex-1">
-					<div class="text-xs font-medium uppercase text-muted-foreground">Playlist</div>
+					<div class="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
+						Playlist
+						{#if pl.collaborative}
+							<span
+								class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
+								title="Others can add to this playlist">Collab</span
+							>
+						{/if}
+					</div>
 					<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow-lg">
 						{pl.title ?? 'Playlist'}
 					</h1>
@@ -839,7 +847,7 @@
 									active={item.video_id === nowId}
 									onplay={() => playAll(n)}
 									onAdd={() => openAddToPlaylist(item)}
-									onRemove={isLiked || (editable && item.set_video_id)
+									onRemove={isLiked || item.set_video_id
 										? () => removeTrack(item)
 										: undefined}
 								/>

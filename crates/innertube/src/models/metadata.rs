@@ -42,6 +42,13 @@ pub struct SongItem {
     /// edit_playlist). Only present when the item came from a playlist page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub set_video_id: Option<String>,
+    /// Who put this track in the playlist, on a collaborative one: the contributor's name and
+    /// avatar off the row's `contributorsAvatars`. `None` everywhere else, since an ordinary
+    /// playlist has one contributor and YouTube doesn't send the stack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_by_avatar: Option<String>,
     /// The signed-in user's rating of this track, from the row's `likeStatus`. `None` when the
     /// response didn't carry one, which the UI treats the same as [`Rating::Indifferent`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -422,11 +429,23 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
     // …and the album in a column of its own rather than in the subtitle runs.
     let album = album.or_else(|| album_column(node));
     let artist_id = subtitle_runs.and_then(|r| first_artist_id(r));
-    let set_video_id = node
-        .get("playlistItemData")
-        .and_then(|d| d.get("playlistSetVideoId"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    // Only when this row's own menu offers the remove action. Every playlist row carries a
+    // playlistSetVideoId, including rows on a playlist you can't edit (live-checked 2026-08-23),
+    // so the id alone is not permission. The menu is: a collaborative playlist gives the remove
+    // action on the rows you added and withholds it on everyone else's, which is exactly what
+    // YouTube Music itself shows.
+    let set_video_id = removable(node)
+        .then(|| {
+            node.get("playlistItemData")
+                .and_then(|d| d.get("playlistSetVideoId"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .flatten();
+    let (added_by, added_by_avatar) = match contributor(node) {
+        Some((name, avatar)) => (Some(name), Some(avatar)),
+        None => (None, None),
+    };
     Some(SongItem {
         video_id,
         title,
@@ -439,6 +458,8 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
         play_count: play_count(node),
         thumbnail: last_thumbnail(node),
         set_video_id,
+        added_by,
+        added_by_avatar,
         rating: like_status(node),
         queued_by: None,
         queued: false,
@@ -522,6 +543,23 @@ pub(crate) fn first_artist_id(runs: &[Value]) -> Option<String> {
 /// The track's rating from its menu's `likeStatus` (`LIKE` / `INDIFFERENT` / `DISLIKE`).
 /// Tolerant: grabs the first `likeStatus` anywhere in the node, and reads anything it doesn't
 /// recognise as unrated rather than dropping the row. context/08.
+/// The contributor who added this row, on a collaborative playlist: their display name and avatar
+/// URL. One avatar per row (whoever added it), in a stack renderer YouTube only sends there.
+fn contributor(node: &Value) -> Option<(String, String)> {
+    let stack = find_all(node, "contributorsAvatars").into_iter().next()?;
+    let avatar = find_all(stack, "avatarViewModel").into_iter().next()?;
+    let name = avatar.get("accessibilityText").and_then(Value::as_str)?;
+    let url = avatar.pointer("/image/sources/0/url").and_then(Value::as_str)?;
+    Some((name.to_owned(), url.to_owned()))
+}
+
+/// Does this row's menu carry "Remove from playlist"? The menu item is a `playlistEditEndpoint`
+/// whose action is `ACTION_REMOVE_VIDEO`; YouTube only sends it where the account may remove that
+/// item, so it is the per-row edit permission (owner, or collaborator on their own additions).
+fn removable(node: &Value) -> bool {
+    find_all(node, "action").iter().any(|a| a.as_str() == Some("ACTION_REMOVE_VIDEO"))
+}
+
 fn like_status(node: &Value) -> Option<Rating> {
     find_first_str(node, "likeStatus").map(|s| match s.as_str() {
         "LIKE" => Rating::Like,
@@ -552,6 +590,8 @@ fn parse_panel_video(node: &Value) -> Option<SongItem> {
         play_count: None,
         thumbnail: last_thumbnail(node),
         set_video_id: None,
+        added_by: None,
+        added_by_avatar: None,
         rating: like_status(node),
         queued_by: None,
         queued: false,
@@ -1183,6 +1223,55 @@ mod tests {
                 "responseContext": { "mainAppWebResponseContext": { "datasyncId": "||" } }
             }))
             .data_sync_id,
+            None
+        );
+    }
+
+    /// A row on a playlist you can't edit still carries a playlistSetVideoId, so the remove action
+    /// in its own menu is what decides whether the row can be removed (issue #86: a collaborator
+    /// can remove the tracks they added, and only those).
+    #[test]
+    fn set_video_id_only_comes_from_a_row_that_may_be_removed() {
+        let row = |menu: serde_json::Value| {
+            json!({
+                "playlistItemData": { "playlistSetVideoId": "SVID", "videoId": "vid1" },
+                "flexColumns": [{ "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": { "runs": [{ "text": "Alpha" }] } } }],
+                "menu": menu
+            })
+        };
+        let remove = json!({ "menuRenderer": { "items": [{ "menuServiceItemRenderer": {
+            "serviceEndpoint": { "playlistEditEndpoint": {
+                "actions": [{ "setVideoId": "SVID", "action": "ACTION_REMOVE_VIDEO" }] } } } }] } });
+        let share = json!({ "menuRenderer": { "items": [{ "menuNavigationItemRenderer": {} }] } });
+        assert_eq!(parse_list_item(&row(remove)).unwrap().set_video_id.as_deref(), Some("SVID"));
+        assert_eq!(parse_list_item(&row(share)).unwrap().set_video_id, None);
+    }
+
+    /// A collaborative playlist stamps each row with whoever added it.
+    #[test]
+    fn a_row_carries_the_contributor_who_added_it() {
+        let node = json!({
+            "playlistItemData": { "videoId": "vid1" },
+            "flexColumns": [{ "musicResponsiveListItemFlexColumnRenderer": {
+                "text": { "runs": [{ "text": "Alpha" }] } } }],
+            "contributorsAvatars": { "avatarStackViewModel": { "avatars": [{ "avatarViewModel": {
+                "image": { "sources": [{ "url": "https://yt3.ggpht.com/abc=s48" }] },
+                "accessibilityText": "Rajat"
+            } }] } }
+        });
+        let item = parse_list_item(&node).unwrap();
+        assert_eq!(item.added_by.as_deref(), Some("Rajat"));
+        assert_eq!(item.added_by_avatar.as_deref(), Some("https://yt3.ggpht.com/abc=s48"));
+        // An ordinary playlist row has no stack, so no name to draw.
+        assert_eq!(
+            parse_list_item(&json!({
+                "playlistItemData": { "videoId": "vid1" },
+                "flexColumns": [{ "musicResponsiveListItemFlexColumnRenderer": {
+                    "text": { "runs": [{ "text": "Alpha" }] } } }]
+            }))
+            .unwrap()
+            .added_by,
             None
         );
     }

@@ -192,6 +192,17 @@
 	{/if}
 
 	<div class="flex shrink-0 items-center {compact ? 'gap-0.5' : 'gap-2'}">
+		<!-- Collaborative playlists only: who put this track in the list. Every row on such a page
+		     carries one, so it can't leave a hole on its neighbours. -->
+		{#if song.added_by_avatar && !compact}
+			<img
+				src={song.added_by_avatar}
+				alt=""
+				title="Added by {song.added_by}"
+				class="h-5 w-5 shrink-0 rounded-full object-cover"
+				loading="lazy"
+			/>
+		{/if}
 		<!-- Both marks are always on, unlike the thumbs beside them: they are properties of the song,
 		     not actions, so hiding either until the pointer arrives would hide half of what it's for.
 		     Each also keeps its slot when it has nothing to show, or a track without an explicit tag

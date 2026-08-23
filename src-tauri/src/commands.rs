@@ -491,6 +491,7 @@ pub async fn get_playlist(
             items,
             continuation: None,
             owned: false, // nothing to rename or delete; it rebuilds itself from what you play
+            collaborative: false,
             sort_menu: None, // built from local history, so YouTube has no order to give
         });
     }
@@ -551,6 +552,8 @@ fn shed_queue_context(s: SongItem) -> SongItem {
         queued_by: None,
         autoplay: false,
         set_video_id: None,
+        added_by: None,
+        added_by_avatar: None,
         ..s
     }
 }
@@ -754,7 +757,9 @@ pub async fn sync_playlist_index(
             indexed.push(item.id);
             continue;
         };
-        if !page.owned {
+        // A collaborative playlist reads `owned: false` (YouTube drops the editable header on it)
+        // but is one you add to and remove from, so the membership index has to cover it too.
+        if !page.owned && !page.collaborative {
             continue;
         }
         let mut video_ids: Vec<String> = page.items.into_iter().map(|song| song.video_id).collect();

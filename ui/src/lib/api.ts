@@ -31,6 +31,9 @@ export interface SongItem {
 	thumbnail?: string;
 	/** Item id within a playlist — present only on playlist tracks; needed to remove them. */
 	set_video_id?: string;
+	/** Collaborative playlists only: who added this track, and their avatar. */
+	added_by?: string;
+	added_by_avatar?: string;
 	/** The signed-in user's rating (absent when the response didn't say — same as 'indifferent'). */
 	rating?: Rating;
 	/** Listen Together: name of the guest who added this queue item (session adds only). */
@@ -211,6 +214,8 @@ export interface PlaylistPage {
 	continuation?: string;
 	/** True only when the signed-in user owns this playlist (rename/delete allowed). */
 	owned: boolean;
+	/** Collaboration is on: others can add to it, and each person may remove only what they added. */
+	collaborative: boolean;
 	/** Absent on lists YouTube will not reorder: albums, its own radio mixes, On Repeat. */
 	sortMenu?: SortMenu;
 }

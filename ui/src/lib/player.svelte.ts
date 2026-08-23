@@ -740,6 +740,8 @@ export function notePlaylistAdd(playlistId: string, songs: SongItem[]) {
 	lastPlaylistAdd.songs = songs.map((s) => ({
 		...s,
 		set_video_id: undefined,
+		added_by: undefined,
+		added_by_avatar: undefined,
 		autoplay: undefined,
 		queued: undefined,
 		queued_end: undefined,

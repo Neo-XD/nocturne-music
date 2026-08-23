@@ -2771,6 +2771,8 @@ fn track_to_song(t: &Track) -> SongItem {
         play_count: None,
         thumbnail: t.thumbnail.clone(),
         set_video_id: None,
+        added_by: None,
+        added_by_avatar: None,
         rating: None,
         queued_by: t.queued_by.clone(),
         queued: false,

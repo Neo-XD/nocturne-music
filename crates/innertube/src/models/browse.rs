@@ -203,6 +203,10 @@ pub struct PlaylistPage {
     /// True only when the signed-in user owns this playlist (rename/delete allowed). YouTube wraps
     /// the header in `musicEditablePlaylistDetailHeaderRenderer` exactly for owned playlists.
     pub owned: bool,
+    /// Collaboration is on: other people can add to this playlist, and each of you may remove only
+    /// what you added (which is per row, see `SongItem::set_video_id`). YouTube says so by turning
+    /// the header's facepile into the "Collaborate" panel's button.
+    pub collaborative: bool,
     /// Absent on lists YouTube will not reorder at all: albums and its own radio mixes.
     pub sort_menu: Option<SortMenu>,
 }
@@ -361,6 +365,12 @@ pub fn parse_playlist(root: &Value) -> PlaylistPage {
         .collect();
     // Present only for playlists the signed-in user owns — the sole reliable ownership signal.
     let owned = !find_all(root, "musicEditablePlaylistDetailHeaderRenderer").is_empty();
+    // The facepile is on every playlist header (the owner's avatar); only a collaborative one taps
+    // through to the Collaborate panel, and it also carries an avatar per contributor. Note a
+    // collaborative playlist you own has no editable header at all, so `owned` reads false on it.
+    let collaborative = find_all(root, "facepile")
+        .iter()
+        .any(|f| find_all(f, "tag").iter().any(|t| t.as_str() == Some("PAplaylist_collaborate")));
     PlaylistPage {
         title,
         subtitle,
@@ -371,6 +381,7 @@ pub fn parse_playlist(root: &Value) -> PlaylistPage {
         items,
         continuation: shelf_continuation(root),
         owned,
+        collaborative,
         sort_menu: sort_menu(root),
     }
 }
@@ -1283,6 +1294,26 @@ mod tests {
         assert_eq!(p.continuation.as_deref(), Some("MORE_TOKEN"));
         // A plain header (someone else's playlist) is not editable.
         assert!(!p.owned);
+        assert!(!p.collaborative);
+    }
+
+    /// Every playlist header has a facepile (the owner's avatar). Only a collaborative one makes it
+    /// the button for the Collaborate panel, and that is the one signal for the badge: a
+    /// collaborative playlist you own carries no editable header, so `owned` cannot stand in.
+    #[test]
+    fn a_facepile_that_opens_the_collaborate_panel_marks_the_playlist_collaborative() {
+        let page = |facepile: serde_json::Value| {
+            json!({ "contents": { "sectionListRenderer": { "contents": [
+                { "musicResponsiveHeaderRenderer": { "facepile": facepile } }
+            ] } } })
+        };
+        let owner_only =
+            json!({ "avatarStackViewModel": { "avatars": [{ "avatarViewModel": {} }] } });
+        let collab = json!({ "avatarStackViewModel": { "rendererContext": { "commandContext": {
+            "onTap": { "innertubeCommand": { "showEngagementPanelEndpoint": {
+                "identifier": { "tag": "PAplaylist_collaborate" } } } } } } } });
+        assert!(!parse_playlist(&page(owner_only)).collaborative);
+        assert!(parse_playlist(&page(collab)).collaborative);
     }
 
     /// An owned playlist's page carries a suggestions section ("add more to this playlist") with a
