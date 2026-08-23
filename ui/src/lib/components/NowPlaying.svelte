@@ -205,7 +205,9 @@
 		const paused = playback.paused;
 		const el = videoEl;
 		if (!el || !showVideo) return;
-		if (paused) el.pause();
+		// document.hidden for the same reason: unpausing from the mini player must not start a
+		// hidden window decoding again. The visibilitychange handler picks it up on the way back.
+		if (paused || document.hidden) el.pause();
 		else el.play().catch(() => {});
 	});
 
@@ -221,7 +223,9 @@
 			// Seconds out by definition: the picture stood still while the music carried on, so let
 			// it seek straight away rather than sitting out the cooldown.
 			lastSeek = 0;
-			videoEl?.play().catch(() => {});
+			// Only if mpv is still going: pausing from the mini player while this window is hidden
+			// leaves nothing to resume, and playing here would run the picture against silence.
+			if (!playback.paused) videoEl?.play().catch(() => {});
 			syncVideo();
 		};
 		document.addEventListener('visibilitychange', onVisibility);
