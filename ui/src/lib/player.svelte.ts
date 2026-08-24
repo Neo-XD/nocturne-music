@@ -45,18 +45,14 @@ export const playback = $state({
  * "play this" path already goes through this module. The open has to happen at the click: a
  * gapless advance looks exactly like a user play from the `now-playing` event alone.
  */
-export const np = $state({ open: false, tab: 'queue' as 'queue' | 'lyrics' });
+export const np = $state({ open: false, sidebarOpen: true, tab: 'queue' as 'queue' | 'lyrics' });
 
-/**
- * Backend settings the app has to know outside the settings modal (which holds the rest in its own
- * local state). Hydrated once in `initApp`; the modal writes here too, so a toggle takes effect
- * without a reload.
- */
 export const prefs = $state({ musicVideos: false });
 
-/** No-op when the user has turned the auto-open off (#64): playback starts, the view stays put. */
+/** Show the right Now Playing sidebar when playback starts. */
 export const openPlayer = () => {
-	if (appearance.openPlayerOnPlay) np.open = true;
+	np.sidebarOpen = true;
+	np.open = false;
 };
 
 /** Play one track (a search row, a song card, a shelf), and show it. */

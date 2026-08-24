@@ -17,6 +17,7 @@
 		InfinityIcon,
 		MinimizeScreenIcon,
 		MusicNote01Icon,
+		InformationCircleIcon,
 		ArrowUp01Icon,
 		ArrowDown01Icon
 	} from '@hugeicons/core-free-icons';
@@ -336,6 +337,18 @@
 		</div>
 		<!-- One cluster, so they sit tighter to each other than to the volume slider. -->
 		<div class="flex items-center gap-0.5">
+			<Button
+				variant={np.sidebarOpen ? 'secondary' : 'ghost'}
+				size="icon-sm"
+				onclick={() => {
+					np.sidebarOpen = !np.sidebarOpen;
+					if (np.sidebarOpen) np.open = false;
+				}}
+				aria-label="Now playing view"
+				title="Now playing view"
+			>
+				<HugeiconsIcon icon={InformationCircleIcon} class="h-5 w-5" />
+			</Button>
 			<Button variant="ghost" size="icon-sm" onclick={openMiniPlayer} aria-label="Mini player">
 				<HugeiconsIcon icon={MinimizeScreenIcon} class="h-5 w-5" />
 			</Button>
@@ -360,7 +373,10 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				onclick={() => (np.open = !np.open)}
+				onclick={() => {
+					np.open = !np.open;
+					if (np.open) np.sidebarOpen = false;
+				}}
 				aria-label={np.open ? 'Minimise player' : 'Open player'}
 				aria-expanded={np.open}
 			>

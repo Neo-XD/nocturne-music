@@ -1,7 +1,31 @@
-// The UI's only door to Rust. context/11 UI contract — commands in, events out. The UI never
-// touches YouTube; everything here is a Tauri command or event payload.
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+import { listen as tauriListen, type UnlistenFn } from '@tauri-apps/api/event';
+
+export const isTauri = () =>
+	typeof window !== 'undefined' &&
+	('__TAURI_INTERNALS__' in window || '__TAURI_IPC__' in window || '__TAURI__' in window);
+
+function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+	if (!isTauri()) {
+		return Promise.reject(new Error(`Tauri IPC unavailable in browser mode (${cmd})`));
+	}
+	try {
+		return tauriInvoke<T>(cmd, args);
+	} catch (e) {
+		return Promise.reject(e);
+	}
+}
+
+function listen<T>(event: string, handler: (e: { payload: T }) => void): Promise<UnlistenFn> {
+	if (!isTauri()) {
+		return Promise.resolve(() => {});
+	}
+	try {
+		return tauriListen<T>(event, handler);
+	} catch {
+		return Promise.resolve(() => {});
+	}
+}
 
 /** How the signed-in user rated a track (innertube `Rating`). The three states are mutually
  *  exclusive: liking a disliked track clears the dislike, and vice versa. */

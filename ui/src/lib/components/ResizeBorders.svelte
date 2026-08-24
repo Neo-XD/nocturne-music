@@ -16,12 +16,12 @@
 		| 'SouthEast'
 		| 'SouthWest';
 
-	const w = getCurrentWindow();
-
 	function start(e: MouseEvent, dir: Dir) {
-		if (e.button !== 0) return;
+		if (e.button !== 0 || typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
 		e.preventDefault();
-		w.startResizeDragging(dir).catch(() => {});
+		try {
+			getCurrentWindow().startResizeDragging(dir).catch(() => {});
+		} catch {}
 	}
 
 	// Edges are 4px, corners 8px (corners win by being later in the DOM at the overlap).

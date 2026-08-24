@@ -31,6 +31,7 @@
 	import LinkDialog from '$lib/components/LinkDialog.svelte';
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
+	import NowPlayingSidebar from '$lib/components/NowPlayingSidebar.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -79,7 +80,15 @@
 	// The mini player runs this same SPA in a second window (Rust `mini.rs`), so the window label is
 	// what tells the two apart: `mini` gets the widget instead of the app chrome, and none of the
 	// routes below it are ever rendered. Constant for the window's lifetime.
-	const isMini = browser && getCurrentWindow().label === 'mini';
+	const isMini =
+		browser &&
+		(() => {
+			try {
+				return getCurrentWindow().label === 'mini';
+			} catch {
+				return false;
+			}
+		})();
 
 	// Apply the saved accent color before the first paint (ssr=false → nothing renders until now).
 	if (browser) initTheme();
@@ -144,6 +153,19 @@
 			<!-- Lyrics before queue: side by side over the page, lyrics on the left, queue on the right. -->
 			{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} {queueOpen} />{/if}
 			{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
+			{#if np.sidebarOpen && playback.now && !np.open}
+				<NowPlayingSidebar
+					onClose={() => (np.sidebarOpen = false)}
+					onOpenQueue={() => {
+						queueOpen = true;
+						np.sidebarOpen = false;
+					}}
+					onOpenLyrics={() => {
+						lyricsOpen = true;
+						np.sidebarOpen = false;
+					}}
+				/>
+			{/if}
 		</div>
 		{#if playback.now}
 			<!-- Slides up from its own height on first play; leaves instantly (bar removal is rare).

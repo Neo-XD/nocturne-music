@@ -30,7 +30,12 @@
 	import { lt } from '$lib/lt.svelte';
 	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 
-	const win = getCurrentWindow();
+	function getWin() {
+		if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+			return getCurrentWindow();
+		}
+		return null;
+	}
 
 	// Back/forward. `depth` is how many history entries deep the session is, `deepest` how far it
 	// has ever been, so both buttons grey out instead of doing nothing. popstate carries a signed
@@ -271,21 +276,21 @@
 
 		<button
 			class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
-			onclick={() => win.minimize()}
+			onclick={() => getWin()?.minimize()}
 			aria-label="Minimize"
 		>
 			<HugeiconsIcon icon={MinusSignIcon} class="h-4 w-4" />
 		</button>
 		<button
 			class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
-			onclick={() => win.toggleMaximize()}
+			onclick={() => getWin()?.toggleMaximize()}
 			aria-label="Maximize"
 		>
 			<HugeiconsIcon icon={SquareIcon} class="h-3.5 w-3.5" />
 		</button>
 		<button
 			class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:text-destructive"
-			onclick={() => win.close()}
+			onclick={() => getWin()?.close()}
 			aria-label="Close"
 		>
 			<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
