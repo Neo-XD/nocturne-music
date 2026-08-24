@@ -54,6 +54,31 @@ export const np = $state({
 
 export const prefs = $state({ musicVideos: false });
 
+/** videoId → the in-flight or settled loopback URL for its music video (null when it has none).
+ * It is shared outside the player component so closing and reopening it does not resolve a video
+ * stream again. */
+const videoUrls = new Map<string, Promise<string | null>>();
+
+export function wantedVideoHeight() {
+	const px = (window.innerHeight - 176) * 0.85;
+	return [360, 480, 720].find((h) => h >= px) ?? 720;
+}
+
+export function videoUrlFor(videoId: string): Promise<string | null> {
+	let p = videoUrls.get(videoId);
+	if (!p) {
+		p = api.videoStream(videoId, wantedVideoHeight()).catch(() => null);
+		if (videoUrls.size >= 8) videoUrls.delete(videoUrls.keys().next().value!);
+		videoUrls.set(videoId, p);
+	}
+	return p;
+}
+
+export function forgetVideoUrl(videoId: string) {
+	videoUrls.delete(videoId);
+	api.forgetVideoStream(videoId).catch(() => {});
+}
+
 /** Show the right Now Playing sidebar when playback starts. */
 export const openPlayer = () => {
 	np.sidebarOpen = true;
@@ -785,6 +810,10 @@ export function initApp(mini = false): () => void {
 			pl.touchPick(personal, n.videoId);
 			if (n.artists) pl.noteArtist(personal, n.artistId ?? n.artists, pl.firstArtist(n.artists));
 			savePersonal();
+			// Warm the music video now rather than when the view opens: the resolve is a round trip
+			// to YouTube, and paid here it overlaps the track starting instead of the user's click.
+			// Not in the mini player, which has no player view to show it in.
+			if (!mini && prefs.musicVideos && n.isVideo) videoUrlFor(n.videoId);
 		}),
 		// YouTube's own answer for a track whose row never stated one (issue #93). Into the
 		// override map as well as the player bar: the same song is on screen as a list row too,
