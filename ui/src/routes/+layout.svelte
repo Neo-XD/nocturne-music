@@ -33,6 +33,7 @@
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
 	import NowPlayingSidebar from '$lib/components/NowPlayingSidebar.svelte';
 	import FullscreenPlayer from '$lib/components/FullscreenPlayer.svelte';
+	import VideoSurface from '$lib/components/VideoSurface.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -189,6 +190,10 @@
 					{@render children()}
 				{/key}
 			</main>
+			<!-- Always mounted, unlike the player view below it: it owns the one <video> element, which
+			     has to keep playing while the view is closed. It renders nothing but a zero-sized
+			     parking container until the view borrows the picture. -->
+			<VideoSurface />
 			{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
 			{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} {queueOpen} />{/if}
 			{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
