@@ -21,6 +21,7 @@
 	import { thumb } from '$lib/thumb';
 	import { setDragItem } from '$lib/dnd';
 	import { openItem, playItem } from '$lib/browse';
+	import ItemMenu from './ItemMenu.svelte';
 
 	let { items }: { items: BrowseItem[] } = $props();
 
@@ -51,6 +52,7 @@
 			{@const round = item.kind === 'artist'}
 			<div
 				class="group/row flex break-inside-avoid cursor-pointer items-center gap-3 rounded-lg p-1.5 text-left transition-colors hover:bg-accent/10"
+				data-ctx
 				role="button"
 				tabindex="0"
 				draggable="true"
@@ -106,6 +108,10 @@
 						{item.subtitle || item.kind}
 					</div>
 				</div>
+				<ItemMenu
+					{item}
+					triggerClass="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+				/>
 				{#if !round}
 					<button
 						class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-md transition-opacity hover:brightness-110 focus-visible:opacity-100 group-hover/row:opacity-100"

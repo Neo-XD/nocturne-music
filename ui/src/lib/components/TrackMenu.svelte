@@ -26,7 +26,16 @@
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
 	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
-	import { addPick, enqueue, openShare, ratingOf, startRadio, toggleRating } from '$lib/player.svelte';
+	import {
+		addPick,
+		enqueue,
+		openShare,
+		personal,
+		ratingOf,
+		removePick,
+		startRadio,
+		toggleRating
+	} from '$lib/player.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
 
 	let {
@@ -49,6 +58,9 @@
 		    have their own buttons there). */
 		linksOnly?: boolean;
 	} = $props();
+
+	// Already on the home grid: the menu offers the way out rather than a second copy.
+	const isPick = $derived(personal.picks.some((p) => p.id === song.video_id));
 
 	let menuOpen = $state(false);
 	// Player-bar only: tempo/pitch belong to playback, not to a row you happen to be pointing at.
@@ -187,16 +199,19 @@
 			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 			onclick={(e) =>
 				run(e, () =>
-					addPick({
-						kind: 'song',
-						id: song.video_id,
-						title: song.title,
-						subtitle: song.artists,
-						thumbnail: song.thumbnail
-					})
+					isPick
+						? removePick(song.video_id)
+						: addPick({
+								kind: 'song',
+								id: song.video_id,
+								title: song.title,
+								subtitle: song.artists,
+								thumbnail: song.thumbnail
+							})
 				)}
 		>
-			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Add to shortcuts
+			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" />
+			{isPick ? 'Remove from shortcuts' : 'Add to shortcuts'}
 		</button>
 		{#if !isLocal}
 			<button
