@@ -1,2 +1,0 @@
-﻿[build]
-rustflags = ["-L", "native=C:/Users/Amritanshu Praveen/nocturne-music/.libmpv"]
