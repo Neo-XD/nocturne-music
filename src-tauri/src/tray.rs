@@ -73,15 +73,15 @@ mod imp {
 
     /// `Handle` isn't `Clone`, so it lives here rather than in Tauri's managed state — that also
     /// keeps [`set_playing`] callable without borrowing across an await.
-    static HANDLE: OnceLock<Handle<LimusicTray>> = OnceLock::new();
+    static HANDLE: OnceLock<Handle<NocturneTray>> = OnceLock::new();
 
-    struct LimusicTray {
+    struct NocturneTray {
         app: AppHandle,
         playing: bool,
         icon: Vec<Icon>,
     }
 
-    impl Tray for LimusicTray {
+    impl Tray for NocturneTray {
         fn id(&self) -> String {
             "nocturne".into()
         }
@@ -130,7 +130,7 @@ mod imp {
     }
 
     pub fn init(app: &AppHandle) -> tauri::Result<()> {
-        let tray = LimusicTray { app: app.clone(), playing: false, icon: icon_pixmap(app) };
+        let tray = NocturneTray { app: app.clone(), playing: false, icon: icon_pixmap(app) };
         // Registering with the StatusNotifierWatcher is async and can outlive setup(); a failure
         // here costs the tray, not the app, so it's logged rather than propagated.
         tauri::async_runtime::spawn(async move {

@@ -32,6 +32,7 @@
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
 	import NowPlayingSidebar from '$lib/components/NowPlayingSidebar.svelte';
+	import FullscreenPlayer from '$lib/components/FullscreenPlayer.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -220,6 +221,10 @@
 	<ChannelPicker />
 	<ListenTogether />
 	<LinkDialog />
+
+	{#if np.fullscreenOpen && playback.now}
+		<FullscreenPlayer />
+	{/if}
 
 	<!-- The two notification banners below run at z-[100]. Dialogs and menus sit at z-50 and portal to
 	     <body>, so a z-50 banner loses the tie on DOM order and hides behind an open modal. -->

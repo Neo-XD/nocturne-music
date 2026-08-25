@@ -86,6 +86,19 @@
 {#await load}
 	<p class="py-2 text-sm text-muted-foreground">Loading…</p>
 {:then releases}
+	<div class="mb-3 rounded-lg border border-border/70 bg-muted/40 p-3 text-xs text-muted-foreground">
+		<p>
+			<strong class="text-foreground">Upstream Attribution:</strong> Nocturne Music v0.6.0+ builds on Limusic. All official releases prior to v0.6.0 are available on the official upstream repository.
+		</p>
+		<button
+			type="button"
+			onclick={() => openExternal('https://github.com/SimoHypers/limusic')}
+			class="mt-1.5 inline-flex items-center gap-1 font-semibold text-primary hover:underline cursor-pointer"
+		>
+			View upstream repository (SimoHypers/limusic) →
+		</button>
+	</div>
+
 	{#each releases as r, i (r.version)}
 		<details class="border-b last:border-b-0" open={i === 0}>
 			<summary class="flex cursor-pointer items-center gap-2 py-2 text-sm marker:text-muted-foreground">

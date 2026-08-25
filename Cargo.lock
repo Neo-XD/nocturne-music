@@ -2416,50 +2416,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "limusic-app"
-version = "0.6.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "discord-rich-presence",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "innertube",
- "ksni",
- "libc",
- "listen-protocol",
- "lofty",
- "md-5",
- "player",
- "rand 0.8.6",
- "regex",
- "reqwest 0.12.28",
- "rusqlite",
- "rustls",
- "serde",
- "serde_json",
- "souvlaki",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-subscriber",
- "urlencoding",
- "webkit2gtk",
- "windows 0.61.3",
-]
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2705,6 +2661,50 @@ dependencies = [
  "cfg-if",
  "libc",
  "memoffset 0.7.1",
+]
+
+[[package]]
+name = "nocturne-app"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "discord-rich-presence",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "innertube",
+ "ksni",
+ "libc",
+ "listen-protocol",
+ "lofty",
+ "md-5",
+ "player",
+ "rand 0.8.6",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "rustls",
+ "serde",
+ "serde_json",
+ "souvlaki",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "urlencoding",
+ "webkit2gtk",
+ "windows 0.61.3",
 ]
 
 [[package]]

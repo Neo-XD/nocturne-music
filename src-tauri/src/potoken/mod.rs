@@ -28,7 +28,7 @@ const GOOGLE_API_KEY: &str = "AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw";
 const REQUEST_KEY: &str = "O43z0dpjhgX20SCx4KAo";
 const CREATE: &str = "https://www.youtube.com/api/jnn/v1/Create";
 const GENERATE_IT: &str = "https://www.youtube.com/api/jnn/v1/GenerateIT";
-const POTOKEN_LABEL: &str = "limusic-potoken";
+const POTOKEN_LABEL: &str = "nocturne-potoken";
 /// Per-BotGuard-call budget — the webview's sandbox can be culled and hang forever (context/04).
 const CALL_TIMEOUT: Duration = Duration::from_secs(8);
 /// Overall budget for a full mint (webview build + page-load + BotGuard bootstrap + token). Loose

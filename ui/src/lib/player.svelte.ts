@@ -45,7 +45,12 @@ export const playback = $state({
  * "play this" path already goes through this module. The open has to happen at the click: a
  * gapless advance looks exactly like a user play from the `now-playing` event alone.
  */
-export const np = $state({ open: false, sidebarOpen: true, tab: 'queue' as 'queue' | 'lyrics' });
+export const np = $state({
+	open: false,
+	sidebarOpen: true,
+	fullscreenOpen: false,
+	tab: 'queue' as 'queue' | 'lyrics'
+});
 
 export const prefs = $state({ musicVideos: false });
 
@@ -298,13 +303,14 @@ export const removeLocalFolder = (path: string) => runLocal(() => api.removeLoca
 // `UI_SETTINGS` allowlist entry would buy nothing. Loaded at module scope (guarded like the layout's
 // `initTheme`) so the sidebar and home grid render sorted on the very first paint.
 // ponytail: move to db.rs if it ever needs to be account-scoped or readable outside the webview.
-const PERSONAL_KEY = 'limusic:personal';
+const PERSONAL_KEY = 'nocturne:personal';
 
 export const personal = $state<Personal>(pl.empty());
 
 if (browser) {
 	try {
-		Object.assign(personal, pl.hydrate(JSON.parse(localStorage.getItem(PERSONAL_KEY) ?? 'null')));
+		const raw = localStorage.getItem(PERSONAL_KEY) || localStorage.getItem('limusic:personal');
+		Object.assign(personal, pl.hydrate(JSON.parse(raw ?? 'null')));
 	} catch {
 		// Unreadable blob — start clean rather than break startup.
 	}

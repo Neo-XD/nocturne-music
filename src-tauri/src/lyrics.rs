@@ -74,13 +74,16 @@ pub struct LyricsRequest {
     pub duration: Option<f64>,
 }
 
-/// `LIMUSIC_LYRICS_ONLY=<boidu|netease|qq|kugou>` pins the chain to that one provider and bypasses
+/// `NOCTURNE_LYRICS_ONLY` / `LIMUSIC_LYRICS_ONLY=<boidu|netease|qq|kugou>` pins the chain to that one provider and bypasses
 /// the cache both ways. The last three sit below Boidu, LRCLIB and YouTube Music, so on a normal
 /// catalogue nothing ever reaches them and they cannot be exercised by just playing tracks.
 ///
 /// Unset (the default) leaves the chain exactly as it ships. Testing aid, not a user setting.
 fn forced_provider() -> Option<String> {
-    std::env::var("LIMUSIC_LYRICS_ONLY").ok().filter(|s| !s.is_empty())
+    std::env::var("NOCTURNE_LYRICS_ONLY")
+        .or_else(|_| std::env::var("LIMUSIC_LYRICS_ONLY"))
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 /// Cache-through entry point for the `get_lyrics` command.
@@ -287,7 +290,7 @@ struct LrclibTrack {
 
 /// LRCLIB asks integrations to identify themselves via User-Agent.
 const LRCLIB_UA: &str =
-    concat!("Limusic v", env!("CARGO_PKG_VERSION"), " (https://github.com/SimoHypers/limusic)");
+    concat!("Nocturne v", env!("CARGO_PKG_VERSION"), " (https://github.com/Neo-XD/nocturne-music)");
 
 /// A GET to LRCLIB, carrying the two things this API wants from us: who we are, and a bound on how
 /// long we will wait. Both used to be baked into a client of our own.

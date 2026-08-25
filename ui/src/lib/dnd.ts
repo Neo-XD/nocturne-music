@@ -3,21 +3,22 @@
 // spec forbids reading the data itself — only the type list is visible until the drop lands.
 import type { BrowseItem } from './api';
 
-export const ITEM_MIME = 'application/x-limusic-item';
+export const ITEM_MIME = 'application/x-nocturne-item';
 /** A queue row being dragged to a new position (`QueueList`), carrying its queue index. */
-export const QUEUE_ROW_MIME = 'application/x-limusic-queue-row';
+export const QUEUE_ROW_MIME = 'application/x-nocturne-queue-row';
 
 export function setDragItem(e: DragEvent, item: BrowseItem): void {
 	e.dataTransfer?.setData(ITEM_MIME, JSON.stringify(item));
 }
 
 /** True during dragover when this drag is one of ours (a file or a link is not). */
-export const isDragItem = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes(ITEM_MIME);
+export const isDragItem = (e: DragEvent): boolean =>
+	!!(e.dataTransfer?.types.includes(ITEM_MIME) || e.dataTransfer?.types.includes('application/x-limusic-item'));
 
 /** The dropped item, or null when the payload isn't ours or is malformed. */
 export function getDragItem(e: DragEvent): BrowseItem | null {
 	try {
-		const raw = e.dataTransfer?.getData(ITEM_MIME);
+		const raw = e.dataTransfer?.getData(ITEM_MIME) || e.dataTransfer?.getData('application/x-limusic-item');
 		if (!raw) return null;
 		const item = JSON.parse(raw) as BrowseItem;
 		return typeof item?.id === 'string' && typeof item?.title === 'string' ? item : null;
@@ -116,5 +117,10 @@ export function dragScroll(el: HTMLElement, mime: string = ITEM_MIME) {
  * untouched, so the "no drop" cursor still shows where a card can't land.
  */
 export function blockForeignDrag(e: DragEvent): void {
-	if (!e.dataTransfer?.types.some((t) => t.startsWith('application/x-limusic'))) e.preventDefault();
+	if (
+		!e.dataTransfer?.types.some(
+			(t) => t.startsWith('application/x-nocturne') || t.startsWith('application/x-limusic')
+		)
+	)
+		e.preventDefault();
 }

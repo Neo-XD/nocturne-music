@@ -26,6 +26,7 @@
 	import {
 		playback,
 		prefs,
+		np,
 		toggleNowPlayingLike,
 		openAddToPlaylist,
 		wheelVolume
@@ -96,6 +97,11 @@
 		const id = (requestedLyricsId = now.videoId);
 		loadingLyrics = true;
 		lyrics = null;
+		hasScrolledLyrics = false;
+		userScrollUntil = 0;
+		if (lyricsScroller) {
+			lyricsScroller.scrollTo({ top: 0, behavior: 'instant' });
+		}
 		const album = playback.queue.items[playback.queue.currentIndex]?.album;
 		api.getLyrics({
 			videoId: id,
@@ -109,6 +115,10 @@
 				lyrics = l;
 				loadingLyrics = false;
 				hasScrolledLyrics = false;
+				userScrollUntil = 0;
+				if (lyricsScroller) {
+					lyricsScroller.scrollTo({ top: 0, behavior: 'instant' });
+				}
 			})
 			.catch(() => {
 				if (requestedLyricsId !== id) return;
@@ -167,10 +177,25 @@
 
 	$effect(() => {
 		const i = activeIndex;
-		if (i < 0 || !lyricsScroller || Date.now() < userScrollUntil) return;
-		lyricsScroller.querySelector(`[data-line="${i}"]`)?.scrollIntoView({
-			behavior: hasScrolledLyrics ? 'smooth' : 'instant',
-			block: 'center'
+		if (!lyricsScroller || Date.now() < userScrollUntil) return;
+		if (i < 0) return;
+		if (i === 0) {
+			lyricsScroller.scrollTo({
+				top: 0,
+				behavior: hasScrolledLyrics ? 'smooth' : 'instant'
+			});
+			hasScrolledLyrics = true;
+			return;
+		}
+		const lineEl = lyricsScroller.querySelector(`[data-line="${i}"]`) as HTMLElement | null;
+		if (!lineEl) return;
+		const scrollerRect = lyricsScroller.getBoundingClientRect();
+		const lineRect = lineEl.getBoundingClientRect();
+		const lineRelativeTop = lineRect.top - scrollerRect.top + lyricsScroller.scrollTop;
+		const targetTop = lineRelativeTop - (lyricsScroller.clientHeight / 2) + (lineRect.height / 2);
+		lyricsScroller.scrollTo({
+			top: Math.max(0, targetTop),
+			behavior: hasScrolledLyrics ? 'smooth' : 'instant'
 		});
 		hasScrolledLyrics = true;
 	});
@@ -256,6 +281,10 @@
 		else el.play().catch(() => {});
 	});
 
+	function openFullscreen() {
+		np.fullscreenOpen = true;
+	}
+
 	const sourceTitle = $derived(playback.queue.sourceName || 'Now Playing');
 </script>
 
@@ -279,15 +308,28 @@
 				{sourceTitle}
 			</div>
 		</div>
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			onclick={onClose}
-			aria-label="Close sidebar"
-			class="hover:text-foreground"
-		>
-			<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
-		</Button>
+		<div class="flex items-center gap-1">
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={openFullscreen}
+				aria-label="Open fullscreen player"
+				title="Fullscreen player"
+				class="cursor-pointer hover:text-foreground"
+			>
+				<HugeiconsIcon icon={Maximize01Icon} class="h-4 w-4" />
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={onClose}
+				aria-label="Close sidebar"
+				title="Close"
+				class="cursor-pointer hover:text-foreground"
+			>
+				<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
+			</Button>
+		</div>
 	</div>
 
 	<!-- Scrollable Body -->

@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use crate::webview::Bridge;
 use fetcher::PlayerJsFetcher;
 
-const CIPHER_LABEL: &str = "limusic-cipher";
+const CIPHER_LABEL: &str = "nocturne-cipher";
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(15);
 

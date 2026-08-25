@@ -53,7 +53,7 @@ use innertube::SongItem;
 const APP_ID: &str = "1525891596804161727";
 
 const SONG_URL: &str = "https://music.youtube.com/watch?v=";
-const REPO_URL: &str = "https://github.com/SimoHypers/limusic";
+const REPO_URL: &str = "https://github.com/Neo-XD/nocturne-music";
 
 /// Reconnect backoff while enabled but unconnected (Discord not running, or it quit). Starts short
 /// — Discord may simply be slower to start than we are — and eases off so a permanently-absent

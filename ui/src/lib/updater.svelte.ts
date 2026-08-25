@@ -7,7 +7,7 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { toast } from './player.svelte';
 import { canSelfUpdate, getSettings, openExternal } from './api';
 
-const RELEASES_URL = 'https://github.com/SimoHypers/limusic/releases/latest';
+const RELEASES_URL = 'https://github.com/Neo-XD/nocturne-music/releases/latest';
 
 export const updateState = $state({
 	available: null as { version: string } | null, // set when a newer version is waiting

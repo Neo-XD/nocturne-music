@@ -1209,6 +1209,23 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     if let Some(cached) = CACHE.get() {
         return Ok(cached.clone());
     }
+
+    let v06_note = ReleaseNote {
+        version: "0.6.0".to_string(),
+        date: "2026-08-25".to_string(),
+        body: r#"### Nocturne Music v0.6.0
+
+- **Rebrand to Nocturne Music**: Full brand identity overhaul with modern assets, updated system tray, window controls, and Discord Rich Presence.
+- **Docked Now Playing Sidebar**: Added a Spotify-style in-flow right sidebar displaying artwork, video playback, artist profiles, listener stats, and next track preview.
+- **Live Synced Lyrics**: Real-time synchronized lyrics with word-by-word karaoke highlighting and interactive click-to-seek inside the Now Playing sidebar.
+- **Single Sidebar Focus**: Clean workspace layout where only one sidebar (Now Playing, Queue, or Lyrics) is displayed at a time, smoothly reflowing the content.
+- **Clean Monochrome Theme**: Sleek, distraction-free neutral monochrome color scheme configured as the new default.
+- **Immersive Full-Screen Player**: Automatically hides the left navigation bar and provides an auto-hiding bottom controls bar on hover.
+- **Enhanced Last.fm Support**: Dynamic API credential configuration and robust background scrobbler sync.
+
+> *Note: Nocturne Music is a fork of Limusic. Official releases prior to v0.6.0 are available on the upstream repository: https://github.com/SimoHypers/limusic*"#.to_string(),
+    };
+
     #[derive(serde::Deserialize)]
     struct GhRelease {
         tag_name: String,
@@ -1217,31 +1234,36 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         draft: bool,
         prerelease: bool,
     }
-    let releases: Vec<GhRelease> = crate::http::client()
+
+    let mut notes: Vec<ReleaseNote> = Vec::new();
+    notes.push(v06_note);
+
+    let res = crate::http::client()
         .get("https://api.github.com/repos/SimoHypers/limusic/releases?per_page=20")
-        .header("User-Agent", concat!("Limusic/", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", concat!("Nocturne/", env!("CARGO_PKG_VERSION")))
         .header("Accept", "application/vnd.github+json")
         .timeout(std::time::Duration::from_secs(15))
         .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
-    let notes: Vec<ReleaseNote> = releases
-        .into_iter()
-        .filter(|r| !r.draft && !r.prerelease)
-        .map(|r| ReleaseNote {
-            version: r.tag_name.trim_start_matches('v').to_string(),
-            date: r
-                .published_at
-                .and_then(|d| d.split('T').next().map(str::to_string))
-                .unwrap_or_default(),
-            body: r.body.unwrap_or_default(),
-        })
-        .collect();
+        .await;
+
+    if let Ok(resp) = res {
+        if let Ok(releases) = resp.json::<Vec<GhRelease>>().await {
+            for r in releases.into_iter().filter(|r| !r.draft && !r.prerelease) {
+                let ver = r.tag_name.trim_start_matches('v').to_string();
+                if ver != "0.6.0" {
+                    notes.push(ReleaseNote {
+                        version: ver,
+                        date: r
+                            .published_at
+                            .and_then(|d| d.split('T').next().map(str::to_string))
+                            .unwrap_or_default(),
+                        body: r.body.unwrap_or_default(),
+                    });
+                }
+            }
+        }
+    }
+
     Ok(CACHE.get_or_init(|| notes).clone())
 }
 

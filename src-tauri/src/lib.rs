@@ -163,6 +163,7 @@ pub fn run() {
         if std::env::var_os("APPIMAGE").is_some()
             && std::path::Path::new("/dev/nvidiactl").exists()
             && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+            && std::env::var_os("NOCTURNE_FORCE_GPU").is_none()
             && std::env::var_os("LIMUSIC_FORCE_GPU").is_none()
         {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -172,7 +173,7 @@ pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,limusic_app=debug".into()),
+                .unwrap_or_else(|_| "info,nocturne_app=debug,limusic_app=debug".into()),
         )
         .init();
 
@@ -216,7 +217,12 @@ pub fn run() {
 
             // Shared: the PoToken generator persists its session token through the same file,
             // and it is built before AppState takes ownership of everything else.
-            let db = Arc::new(Db::open(&data_dir.join("limusic.sqlite")).expect("open sqlite"));
+            let db_file = data_dir.join("nocturne.sqlite");
+            let old_db = data_dir.join("limusic.sqlite");
+            if !db_file.exists() && old_db.exists() {
+                let _ = std::fs::copy(&old_db, &db_file);
+            }
+            let db = Arc::new(Db::open(&db_file).expect("open sqlite"));
 
             // Session bootstrap (context/15 startup ordering): load the persisted login session
             // (cookie/dataSyncId/visitorData) from settings; fetch visitorData anonymously
@@ -268,8 +274,7 @@ pub fn run() {
             let discord = discord::spawn(db.get_setting("discord_rpc").as_deref() == Some("true"));
 
             // Last.fm scrobbler — parks until a session key exists (titlebar connect flow).
-            let lastfm =
-                lastfm::spawn(db.get_setting("lastfm_session_key").filter(|s| !s.is_empty()));
+            let lastfm = lastfm::spawn(&db);
 
             // Listen Together session (context/19). Server URL is a DB setting so "home PC → VPS" is
             // config, not a rebuild. The sync channel feeds the guest-playback bridge below.

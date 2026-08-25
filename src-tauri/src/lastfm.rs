@@ -4,18 +4,12 @@
 //! has played half its length or 4 minutes, whichever comes first (Last.fm's official rule;
 //! tracks under 30s never scrobble).
 //!
-//! Everything is best-effort (context/16 fail-soft, same as Discord/media): a failed scrobble is
-//! a `debug!` line, never a user-facing error. No offline queue — Last.fm accepts scrobbles up to
-//! two weeks late, but a queue is complexity we add only if dropped scrobbles ever show up.
-//! ponytail: no offline queue; add one if scrobbles visibly go missing.
+//! Everything is best-effort (fail-soft, same as Discord/media): a failed scrobble is
+//! a `debug!` line, never a user-facing error.
 //!
 //! Auth is the desktop flow: `auth.getToken` → open the user's browser on the authorize page →
 //! poll `auth.getSession` until they approve. Session keys never expire, so the key + username in
 //! settings (`lastfm_session_key` / `lastfm_username`) are the whole persistent state.
-//!
-//! The scrobble threshold runs off mpv's *position*, not accumulated play time — seeking forward
-//! can technically trigger it early, which is how most desktop scrobblers behave anyway.
-//! ponytail: position-based threshold; track real played-time if cheating ever matters.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -28,24 +22,33 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use crate::state::AppState;
 
-/// Last.fm API credentials. Baked in at compile time from the gitignored `src-tauri/lastfm.keys`
-/// (via build.rs) — never from source, the repo is public. Registered at
-/// <https://www.last.fm/api/account/create>. Without them the titlebar button errors out with a
-/// clear message instead of silently doing nothing.
-const API_KEY: &str = match option_env!("LIMUSIC_LASTFM_API_KEY") {
+/// Last.fm API credentials baked in at compile time from `lastfm.keys` / `.env`.
+const COMPILED_API_KEY: &str = match option_env!("NOCTURNE_LASTFM_API_KEY") {
     Some(v) => v,
-    None => "",
+    None => match option_env!("LIMUSIC_LASTFM_API_KEY") {
+        Some(v) => v,
+        None => match option_env!("LASTFM_API_KEY") {
+            Some(v) => v,
+            None => "",
+        },
+    },
 };
-const API_SECRET: &str = match option_env!("LIMUSIC_LASTFM_API_SECRET") {
+
+const COMPILED_API_SECRET: &str = match option_env!("NOCTURNE_LASTFM_API_SECRET") {
     Some(v) => v,
-    None => "",
+    None => match option_env!("LIMUSIC_LASTFM_API_SECRET") {
+        Some(v) => v,
+        None => match option_env!("LASTFM_API_SECRET") {
+            Some(v) => v,
+            None => "",
+        },
+    },
 };
 
 const API_ROOT: &str = "https://ws.audioscrobbler.com/2.0/";
 const AUTH_URL: &str = "https://www.last.fm/api/auth/";
 
 /// How long the user gets to approve the app in their browser: 60 polls × 5s = 5 minutes.
-/// (The token itself is valid for 60 minutes — the UI spinner is the real constraint.)
 const AUTH_POLL_EVERY: Duration = Duration::from_secs(5);
 const AUTH_POLL_TRIES: u32 = 60;
 
@@ -54,12 +57,26 @@ const ERR_TOKEN_PENDING: i64 = 14;
 /// Last.fm error 16: service temporarily unavailable — retryable, same as pending.
 const ERR_TEMP_UNAVAILABLE: i64 = 16;
 
+pub fn resolve_api_key(db: &crate::db::Db) -> String {
+    if let Some(k) = db.get_setting("lastfm_api_key").filter(|s| !s.trim().is_empty()) {
+        return k.trim().to_string();
+    }
+    COMPILED_API_KEY.to_string()
+}
+
+pub fn resolve_api_secret(db: &crate::db::Db) -> String {
+    if let Some(s) = db.get_setting("lastfm_api_secret").filter(|s| !s.trim().is_empty()) {
+        return s.trim().to_string();
+    }
+    COMPILED_API_SECRET.to_string()
+}
+
 enum Msg {
     Track(Box<Track>),
     Duration(f64),
     Position(f64),
-    /// Session key set (connect) or cleared (disconnect).
     Session(Option<String>),
+    Keys { key: String, secret: String },
 }
 
 struct Track {
@@ -71,8 +88,6 @@ struct Track {
 /// App-side handle to the scrobbler task.
 pub struct LastfmHandle {
     tx: UnboundedSender<Msg>,
-    /// Bumped by every connect/disconnect; in-flight auth polls compare against it and bail when
-    /// superseded, so a stale poll can never overwrite a newer session (or a disconnect).
     auth_gen: AtomicU64,
 }
 
@@ -93,8 +108,12 @@ impl LastfmHandle {
         let _ = self.tx.send(Msg::Position(pos));
     }
 
-    fn set_session(&self, key: Option<String>) {
+    pub fn set_session(&self, key: Option<String>) {
         let _ = self.tx.send(Msg::Session(key));
+    }
+
+    pub fn set_keys(&self, key: String, secret: String) {
+        let _ = self.tx.send(Msg::Keys { key, secret });
     }
 
     fn bump_gen(&self) -> u64 {
@@ -106,12 +125,14 @@ impl LastfmHandle {
     }
 }
 
-/// Spawn the scrobbler task. `session_key` is the persisted login; `None` parks the task until
-/// the user connects.
-pub fn spawn(session_key: Option<String>) -> LastfmHandle {
+/// Spawn the scrobbler task.
+pub fn spawn(db: &crate::db::Db) -> LastfmHandle {
+    let session_key = db.get_setting("lastfm_session_key").filter(|s| !s.is_empty());
+    let api_key = resolve_api_key(db);
+    let api_secret = resolve_api_secret(db);
     let (tx, mut rx) = unbounded_channel::<Msg>();
     tauri::async_runtime::spawn(async move {
-        let mut s = Scrobbler::new(session_key);
+        let mut s = Scrobbler::new(session_key, api_key, api_secret);
         while let Some(msg) = rx.recv().await {
             s.apply(msg).await;
         }
@@ -121,16 +142,25 @@ pub fn spawn(session_key: Option<String>) -> LastfmHandle {
 
 struct Scrobbler {
     session: Option<String>,
+    api_key: String,
+    api_secret: String,
     track: Option<Track>,
-    /// Epoch secs when the current track started — the scrobble's `timestamp`.
     started_at: u64,
     duration: f64,
     scrobbled: bool,
 }
 
 impl Scrobbler {
-    fn new(session: Option<String>) -> Self {
-        Scrobbler { session, track: None, started_at: 0, duration: 0.0, scrobbled: false }
+    fn new(session: Option<String>, api_key: String, api_secret: String) -> Self {
+        Scrobbler {
+            session,
+            api_key,
+            api_secret,
+            track: None,
+            started_at: 0,
+            duration: 0.0,
+            scrobbled: false,
+        }
     }
 
     async fn apply(&mut self, msg: Msg) {
@@ -145,17 +175,21 @@ impl Scrobbler {
             Msg::Duration(secs) => self.duration = secs,
             Msg::Position(pos) => {
                 if !self.scrobbled && crosses_threshold(pos, self.duration) {
-                    self.scrobbled = true; // latch even on failure — never re-fire per tick
+                    self.scrobbled = true;
                     self.scrobble().await;
                 }
             }
             Msg::Session(key) => self.session = key,
+            Msg::Keys { key, secret } => {
+                self.api_key = key;
+                self.api_secret = secret;
+            }
         }
     }
 
     async fn now_playing(&self) {
         let (Some(sk), Some(t)) = (&self.session, &self.track) else { return };
-        if !scrobbleable(t) {
+        if !scrobbleable(t) || self.api_key.is_empty() || self.api_secret.is_empty() {
             return;
         }
         let mut params = vec![
@@ -166,7 +200,7 @@ impl Scrobbler {
         if let Some(album) = t.album.as_ref().filter(|a| !a.is_empty()) {
             params.push(("album".to_string(), album.clone()));
         }
-        match call("track.updateNowPlaying", params, true).await {
+        match call("track.updateNowPlaying", params, true, &self.api_key, &self.api_secret).await {
             Ok(_) => tracing::debug!(track = %t.title, "last.fm now playing sent"),
             Err(e) => tracing::debug!(error = %e.message, "last.fm now playing failed"),
         }
@@ -174,7 +208,7 @@ impl Scrobbler {
 
     async fn scrobble(&self) {
         let (Some(sk), Some(t)) = (&self.session, &self.track) else { return };
-        if !scrobbleable(t) {
+        if !scrobbleable(t) || self.api_key.is_empty() || self.api_secret.is_empty() {
             return;
         }
         let mut params = vec![
@@ -189,24 +223,19 @@ impl Scrobbler {
         if self.duration > 0.0 {
             params.push(("duration".to_string(), (self.duration as i64).to_string()));
         }
-        match call("track.scrobble", params, true).await {
+        match call("track.scrobble", params, true, &self.api_key, &self.api_secret).await {
             Ok(_) => tracing::info!(track = %t.title, "scrobbled to last.fm"),
             Err(e) => tracing::warn!(error = %e.message, "last.fm scrobble failed"),
         }
     }
 }
 
-/// Whether a track is worth sending to Last.fm at all. An untagged local file has a filename for a
-/// title and no artist behind it; submitting that writes "Unknown artist" into the user's public
-/// profile, which is worse than not scrobbling it.
 fn scrobbleable(t: &Track) -> bool {
     !t.title.trim().is_empty()
         && !t.artists.trim().is_empty()
         && t.artists != crate::local::UNKNOWN_ARTIST
 }
 
-/// Last.fm's scrobble rule: half the track or 4 minutes, whichever comes first; tracks under 30s
-/// never scrobble. Unknown duration (mpv hasn't reported yet) leaves only the 4-minute rule.
 fn crosses_threshold(pos: f64, duration: f64) -> bool {
     if duration > 0.0 && duration < 30.0 {
         return false;
@@ -215,10 +244,9 @@ fn crosses_threshold(pos: f64, duration: f64) -> bool {
     pos >= half.min(240.0)
 }
 
-// --- API plumbing ---------------------------------------------------------------------------
+// --- API plumbing ---
 
 struct ApiError {
-    /// Last.fm's numeric error code, when the response carried one (vs a transport failure).
     code: Option<i64>,
     message: String,
 }
@@ -232,17 +260,16 @@ impl ApiError {
     }
 }
 
-/// One signed API call. `params` are method-specific; `api_key`, `method`, `api_sig`, and
-/// `format=json` are added here (`format` is excluded from the signature, per the docs). Write
-/// methods POST; auth reads GET.
 async fn call(
     method: &str,
     mut params: Vec<(String, String)>,
     post: bool,
+    api_key: &str,
+    api_secret: &str,
 ) -> Result<serde_json::Value, ApiError> {
-    params.push(("api_key".to_string(), API_KEY.to_string()));
+    params.push(("api_key".to_string(), api_key.to_string()));
     params.push(("method".to_string(), method.to_string()));
-    params.push(("api_sig".to_string(), sign(&params)));
+    params.push(("api_sig".to_string(), sign(&params, api_secret)));
     params.push(("format".to_string(), "json".to_string()));
 
     let http = crate::http::client();
@@ -261,8 +288,7 @@ async fn call(
     Ok(body)
 }
 
-/// The `api_sig`: md5 over the params sorted by name, concatenated as `namevalue`, + the secret.
-fn sign(params: &[(String, String)]) -> String {
+pub fn sign(params: &[(String, String)], secret: &str) -> String {
     let mut sorted: Vec<_> = params.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     let mut s = String::new();
@@ -270,11 +296,11 @@ fn sign(params: &[(String, String)]) -> String {
         s.push_str(k);
         s.push_str(v);
     }
-    s.push_str(API_SECRET);
+    s.push_str(secret);
     format!("{:x}", Md5::digest(s.as_bytes()))
 }
 
-// --- auth flow (connect / disconnect / status) ----------------------------------------------
+// --- auth flow (connect / disconnect / status) ---
 
 fn emit_state(
     app: &tauri::AppHandle,
@@ -288,17 +314,15 @@ fn emit_state(
     );
 }
 
-/// Start the connect flow: fetch a request token, open the authorize page in the user's browser,
-/// and poll `auth.getSession` in the background until they approve (or the poll times out /
-/// is superseded). Resolution arrives via the `lastfm-state` event, not this command.
 pub async fn connect(state: Arc<AppState>) -> Result<(), String> {
-    if API_KEY.is_empty() || API_SECRET.is_empty() {
-        return Err("Last.fm isn't configured in this build — paste an API key into lastfm.rs \
-                    (see https://www.last.fm/api/account/create)."
-            .into());
+    let api_key = resolve_api_key(&state.db);
+    let api_secret = resolve_api_secret(&state.db);
+    if api_key.is_empty() || api_secret.is_empty() {
+        return Err("Last.fm API key or secret not found. Add them in lastfm.keys or Settings > Last.fm (https://www.last.fm/api/account/create).".into());
     }
+
     let gen = state.lastfm.bump_gen();
-    let token = call("auth.getToken", vec![], false)
+    let token = call("auth.getToken", vec![], false, &api_key, &api_secret)
         .await
         .map_err(|e| format!("Last.fm: {}", e.message))?
         .get("token")
@@ -306,16 +330,18 @@ pub async fn connect(state: Arc<AppState>) -> Result<(), String> {
         .ok_or("Last.fm returned no token")?
         .to_string();
 
-    open_browser(&format!("{AUTH_URL}?api_key={API_KEY}&token={token}"))?;
+    open_browser(&format!("{AUTH_URL}?api_key={api_key}&token={token}"))?;
 
+    let key_clone = api_key.clone();
+    let secret_clone = api_secret.clone();
     tauri::async_runtime::spawn(async move {
         for _ in 0..AUTH_POLL_TRIES {
             tokio::time::sleep(AUTH_POLL_EVERY).await;
             if state.lastfm.gen() != gen {
-                return; // superseded by a newer connect, or a disconnect
+                return;
             }
             let params = vec![("token".to_string(), token.clone())];
-            match call("auth.getSession", params, false).await {
+            match call("auth.getSession", params, false, &key_clone, &secret_clone).await {
                 Ok(body) => {
                     let name = body.pointer("/session/name").and_then(|v| v.as_str());
                     let key = body.pointer("/session/key").and_then(|v| v.as_str());
@@ -331,11 +357,12 @@ pub async fn connect(state: Arc<AppState>) -> Result<(), String> {
                     state.db.set_setting("lastfm_session_key", key);
                     state.db.set_setting("lastfm_username", name);
                     state.lastfm.set_session(Some(key.to_string()));
+                    state.lastfm.set_keys(key_clone.clone(), secret_clone.clone());
                     tracing::info!(user = name, "last.fm connected");
                     emit_state(&state.app, true, Some(name), None);
                     return;
                 }
-                Err(e) if e.retryable() => continue, // not approved yet (or transient) — keep polling
+                Err(e) if e.retryable() => continue,
                 Err(e) => {
                     emit_state(&state.app, false, None, Some(&format!("Last.fm: {}", e.message)));
                     return;
@@ -348,7 +375,7 @@ pub async fn connect(state: Arc<AppState>) -> Result<(), String> {
 }
 
 pub fn disconnect(state: &AppState) {
-    state.lastfm.bump_gen(); // cancels any in-flight auth poll
+    state.lastfm.bump_gen();
     state.db.set_setting("lastfm_session_key", "");
     state.db.set_setting("lastfm_username", "");
     state.lastfm.set_session(None);
@@ -358,11 +385,14 @@ pub fn disconnect(state: &AppState) {
 pub fn status(state: &AppState) -> serde_json::Value {
     let key = state.db.get_setting("lastfm_session_key").filter(|s| !s.is_empty());
     let username = state.db.get_setting("lastfm_username").filter(|s| !s.is_empty());
-    serde_json::json!({ "connected": key.is_some(), "username": username })
+    let has_keys = !resolve_api_key(&state.db).is_empty() && !resolve_api_secret(&state.db).is_empty();
+    serde_json::json!({
+        "connected": key.is_some(),
+        "username": username,
+        "configured": has_keys
+    })
 }
 
-/// Open a URL in the user's default browser. No opener plugin in the app; three lines cover the
-/// three platforms.
 pub(crate) fn open_browser(url: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let cmd = {
@@ -373,10 +403,6 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
     };
     #[cfg(target_os = "macos")]
     let cmd = std::process::Command::new("open").arg(url).spawn();
-    // cmd.exe re-parses its own command line, and `Command::arg` only quotes args containing
-    // spaces — so an unquoted `&` in the URL split it into a second command and the browser got
-    // `…/auth?api_key=X` with the token chopped off ("Invalid API key" once the user clicks Allow).
-    // raw_arg passes the quoted URL through verbatim.
     #[cfg(target_os = "windows")]
     let cmd = {
         use std::os::windows::process::CommandExt;
@@ -385,23 +411,6 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
     cmd.map(|_| ()).map_err(|e| format!("Couldn't open the browser: {e}"))
 }
 
-/// Undo the AppImage's environment for a child process.
-///
-/// Inside an AppImage the AppDir is first on `LD_LIBRARY_PATH` (plus `GTK_PATH`, `GIO_MODULE_DIR`,
-/// `XDG_DATA_DIRS`, …) and every child inherits it. `xdg-open` immediately hands off to a *host*
-/// binary (`kde-open`, `gio`), which then links the host's libcurl against our bundled libssl,
-/// built on Ubuntu 24.04 (OpenSSL 3.0) and missing every symbol version added since:
-///
-/// ```text
-/// kde-open: /tmp/.mount_limusiXXXXXX/usr/lib/libssl.so.3: version `OPENSSL_3.5.0' not found
-///           (required by /lib64/libcurl.so.4)
-/// ```
-///
-/// The opener dies before the browser ever starts, and since `spawn` itself succeeded, Last.fm's
-/// connect flow just sat there polling forever (issue #50, Fedora 44 / KDE).
-///
-/// Same bug class as the bundled-libwayland breakage: our libs shadowing the host's for code we
-/// don't control. Fixed the same way, by scope: strip AppDir paths from the child, keep the user's.
 #[cfg(target_os = "linux")]
 fn unappimage(cmd: &mut std::process::Command) {
     let Some(appdir) = std::env::var("APPDIR").ok().filter(|d| !d.is_empty()) else { return };
@@ -417,9 +426,6 @@ fn unappimage(cmd: &mut std::process::Command) {
     }
 }
 
-/// Drop AppDir-rooted entries from a colon-separated env value. `None` means nothing survived, so
-/// the variable should be unset rather than set to an empty string (an empty `LD_LIBRARY_PATH`
-/// entry means "current directory").
 #[cfg(target_os = "linux")]
 fn strip_appdir(value: &str, appdir: &str) -> Option<String> {
     let kept: Vec<&str> =
@@ -435,8 +441,6 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
 
-    /// The signature is the auth-critical path: params sorted by name, `namevalue` concat, secret
-    /// appended, md5 hex. Verified against a hand-computed digest (secret is "" in test builds).
     #[test]
     fn api_sig_is_sorted_concat_md5() {
         let params = vec![
@@ -444,29 +448,24 @@ mod tests {
             ("api_key".to_string(), "abc".to_string()),
             ("token".to_string(), "xyz".to_string()),
         ];
-        // Sorted: api_key abc, method auth.getSession, token xyz
+        let secret = "secret123";
         let expected = format!(
             "{:x}",
-            Md5::digest(format!("api_keyabcmethodauth.getSessiontokenxyz{API_SECRET}").as_bytes())
+            Md5::digest(format!("api_keyabcmethodauth.getSessiontokenxyz{secret}").as_bytes())
         );
-        assert_eq!(sign(&params), expected);
+        assert_eq!(sign(&params, secret), expected);
     }
 
-    /// Issue #50: what the child of `xdg-open` must not inherit.
     #[cfg(target_os = "linux")]
     #[test]
     fn strip_appdir_keeps_host_paths_and_drops_the_var_when_nothing_is_left() {
         let dir = "/tmp/.mount_limusiNnkaBP";
-        // LD_LIBRARY_PATH as AppRun.wrapped writes it: AppDir dirs first, user's value appended.
         assert_eq!(
             strip_appdir(&format!("{dir}/usr/lib/:{dir}/usr/lib64/:/opt/mine/lib"), dir),
             Some("/opt/mine/lib".to_string())
         );
-        // Nothing but AppDir dirs (the usual case): unset it, don't leave "" behind.
         assert_eq!(strip_appdir(&format!("{dir}/usr/lib:{dir}/usr/lib64"), dir), None);
-        // A lone AppDir value, e.g. GSETTINGS_SCHEMA_DIR.
         assert_eq!(strip_appdir(dir, dir), None);
-        // XDG_DATA_DIRS keeps the host's dirs, which is how xdg-open finds the .desktop handlers.
         assert_eq!(
             strip_appdir(&format!("{dir}/usr/share:/usr/share:/usr/local/share"), dir),
             Some("/usr/share:/usr/local/share".to_string())
@@ -475,15 +474,11 @@ mod tests {
 
     #[test]
     fn scrobble_threshold_follows_lastfm_rules() {
-        // Half the track wins for short tracks…
         assert!(!crosses_threshold(89.0, 180.0));
         assert!(crosses_threshold(90.0, 180.0));
-        // …4 minutes wins for long ones.
         assert!(!crosses_threshold(239.0, 1200.0));
         assert!(crosses_threshold(240.0, 1200.0));
-        // Under 30s never scrobbles.
         assert!(!crosses_threshold(29.0, 20.0));
-        // Unknown duration: only the 4-minute rule applies.
         assert!(!crosses_threshold(120.0, 0.0));
         assert!(crosses_threshold(240.0, 0.0));
     }

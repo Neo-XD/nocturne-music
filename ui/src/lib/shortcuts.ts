@@ -31,6 +31,11 @@ export function initShortcuts() {
 				if (!playback.now) return;
 				np.open = !np.open;
 				break;
+			case 'f':
+			case 'F':
+				if (!playback.now) return;
+				np.fullscreenOpen = !np.fullscreenOpen;
+				break;
 			// Shift+. and Shift+, on a US layout. The unshifted keys are accepted too, so the
 			// shortcut still works on layouts that put > and < somewhere else.
 			case '>':

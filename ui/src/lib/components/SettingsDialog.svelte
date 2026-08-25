@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack, type Snippet } from 'svelte';
+	import { untrack, onMount, type Snippet } from 'svelte';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
@@ -164,9 +164,69 @@
 		updateResult = await checkForUpdatesInteractive();
 	}
 
+	let lastfmConnected = $state(false);
+	let lastfmUser = $state<string | null>(null);
+	let lastfmConnecting = $state(false);
+	let showLastfmKeys = $state(false);
+
+	async function loadLastfm() {
+		try {
+			const s = await api.lastfmStatus();
+			lastfmConnected = s.connected;
+			lastfmUser = s.username ?? null;
+		} catch {}
+	}
+
+	async function connectLastfm() {
+		lastfmConnecting = true;
+		try {
+			await api.lastfmConnect();
+			toast('Approve Nocturne in your browser');
+		} catch (e) {
+			lastfmConnecting = false;
+			toast.error(String(e));
+		}
+	}
+
+	async function disconnectLastfm() {
+		try {
+			await api.lastfmDisconnect();
+			lastfmConnected = false;
+			lastfmUser = null;
+			toast.success('Last.fm disconnected');
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	async function saveLastfmKey(val: string) {
+		settings.lastfm_api_key = val;
+		await api.setSetting('lastfm_api_key', val);
+	}
+
+	async function saveLastfmSecret(val: string) {
+		settings.lastfm_api_secret = val;
+		await api.setSetting('lastfm_api_secret', val);
+	}
+
+	onMount(() => {
+		const sub = api.onLastfmState((s) => {
+			lastfmConnecting = false;
+			lastfmConnected = s.connected;
+			lastfmUser = s.username ?? null;
+		});
+		return () => {
+			sub.then((u) => u());
+		};
+	});
+
 	async function load() {
 		try {
-			const [s, c] = await Promise.all([api.getSettings(), api.getStreamClients()]);
+			const [s, c] = await Promise.all([
+				api.getSettings(),
+				api.getStreamClients(),
+				loadLastfm()
+			]);
 			settings = s;
 			clients = c;
 			proxyInput = s.proxy ?? '';
@@ -392,6 +452,14 @@
 									title: 'Discord rich presence',
 									desc: "Show what you're listening to on your Discord profile. Needs the Discord desktop app running, no login here.",
 									control: discordSwitch
+								})}
+								{@render row({
+									title: 'Last.fm scrobbling',
+									desc: lastfmConnected
+										? `Connected and scrobbling as ${lastfmUser}.`
+										: 'Connect your Last.fm account to scrobble songs and update now playing.',
+									control: lastfmButton,
+									below: lastfmConfig
 								})}
 							</div>
 						</section>
@@ -639,6 +707,52 @@
 <!-- Controls. Split out so the rows above read as a list of settings rather than a wall of markup. -->
 {#snippet historySwitch()}<Switch checked={historyOn} onCheckedChange={setHistory} />{/snippet}
 {#snippet discordSwitch()}<Switch checked={discordOn} onCheckedChange={setDiscord} />{/snippet}
+{#snippet lastfmButton()}
+	{#if lastfmConnected}
+		<Button size="sm" variant="outline" onclick={disconnectLastfm}>Disconnect</Button>
+	{:else}
+		<Button size="sm" onclick={connectLastfm} disabled={lastfmConnecting}>
+			{lastfmConnecting ? 'Connecting…' : 'Connect'}
+		</Button>
+	{/if}
+{/snippet}
+{#snippet lastfmConfig()}
+	<div class="mt-2 space-y-2 pt-1">
+		<button
+			type="button"
+			onclick={() => (showLastfmKeys = !showLastfmKeys)}
+			class="cursor-pointer text-xs text-muted-foreground transition hover:text-foreground hover:underline"
+		>
+			{showLastfmKeys ? 'Hide custom API credentials' : 'Configure custom Last.fm API keys (optional)'}
+		</button>
+		{#if showLastfmKeys}
+			<div class="grid gap-2 pt-1 sm:grid-cols-2">
+				<div>
+					<label for="lastfm-api-key" class="text-[11px] font-medium text-muted-foreground">API Key</label>
+					<input
+						id="lastfm-api-key"
+						type="text"
+						value={settings.lastfm_api_key ?? ''}
+						placeholder="Last.fm API Key"
+						class="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 font-mono text-xs"
+						oninput={(e) => saveLastfmKey(e.currentTarget.value)}
+					/>
+				</div>
+				<div>
+					<label for="lastfm-api-secret" class="text-[11px] font-medium text-muted-foreground">Shared Secret</label>
+					<input
+						id="lastfm-api-secret"
+						type="password"
+						value={settings.lastfm_api_secret ?? ''}
+						placeholder="Last.fm Shared Secret"
+						class="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 font-mono text-xs"
+						oninput={(e) => saveLastfmSecret(e.currentTarget.value)}
+					/>
+				</div>
+			</div>
+		{/if}
+	</div>
+{/snippet}
 {#snippet traySwitch()}<Switch checked={trayOn} onCheckedChange={setTray} />{/snippet}
 {#snippet autostartSwitch()}<Switch checked={autostartOn} onCheckedChange={setAutostart} />{/snippet}
 {#snippet autoplaySwitch()}<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />{/snippet}
@@ -866,7 +980,7 @@
 {#snippet clientList()}
 	<p class="mb-3 max-w-prose text-xs leading-relaxed text-muted-foreground">
 		Turn a client off to skip it when resolving streams. Overridden by the
-		<span class="font-mono">LIMUSIC_DISABLED_CLIENTS</span> env var.
+		<span class="font-mono">NOCTURNE_DISABLED_CLIENTS</span> env var.
 	</p>
 	<div class="flex flex-col gap-2">
 		{#each clients as name (name)}
