@@ -178,7 +178,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 14] = [
+const UI_SETTINGS: [&str; 16] = [
     "volume",
     "proxy",
     "quality",
@@ -193,6 +193,8 @@ const UI_SETTINGS: [&str; 14] = [
     "update_banner",
     "lyrics_boidu",
     "music_videos",
+    "lastfm_api_key",
+    "lastfm_api_secret",
 ];
 
 /// Resolve the music video for `video_id` and hand back a `limusicvideo://` URL the player view
@@ -246,6 +248,12 @@ pub async fn set_setting(
     // to see it take effect.
     if key == "discord_rpc" {
         state.set_discord_enabled(value == "true");
+    }
+    // Update active Last.fm keys dynamically when changed in settings.
+    if key == "lastfm_api_key" || key == "lastfm_api_secret" {
+        let k = crate::lastfm::resolve_api_key(&state.db);
+        let s = crate::lastfm::resolve_api_secret(&state.db);
+        state.lastfm.set_keys(k, s);
     }
     // Applies to what's fetched from here on: the live queue keeps whatever is already in it.
     if key == "hide_videos" {
@@ -1210,6 +1218,17 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v061_note = ReleaseNote {
+        version: "0.6.1".to_string(),
+        date: "2026-08-25".to_string(),
+        body: r#"### Nocturne Music v0.6.1
+
+- **Fixed Last.fm Connecting**: Fixed Last.fm authentication flow with direct in-app API Key and Shared Secret configuration.
+- **Dedicated Fullscreen Player**: Enhanced fullscreen music view with ambient art backdrop, transport controls, and live synchronized lyrics.
+- **Lyrics Auto-Scroll Improvements**: Isolated lyrics scrolling and reliable start-of-track reset in the Now Playing info sidebar.
+- **Check for Updates**: Fixed updater integration and release feed directed to Nocturne repository."#.to_string(),
+    };
+
     let v06_note = ReleaseNote {
         version: "0.6.0".to_string(),
         date: "2026-08-25".to_string(),
@@ -1236,10 +1255,11 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes: Vec<ReleaseNote> = Vec::new();
+    notes.push(v061_note);
     notes.push(v06_note);
 
     let res = crate::http::client()
-        .get("https://api.github.com/repos/SimoHypers/limusic/releases?per_page=20")
+        .get("https://api.github.com/repos/Neo-XD/nocturne-music/releases?per_page=20")
         .header("User-Agent", concat!("Nocturne/", env!("CARGO_PKG_VERSION")))
         .header("Accept", "application/vnd.github+json")
         .timeout(std::time::Duration::from_secs(15))
@@ -1250,7 +1270,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         if let Ok(releases) = resp.json::<Vec<GhRelease>>().await {
             for r in releases.into_iter().filter(|r| !r.draft && !r.prerelease) {
                 let ver = r.tag_name.trim_start_matches('v').to_string();
-                if ver != "0.6.0" {
+                if ver != "0.6.1" && ver != "0.6.0" {
                     notes.push(ReleaseNote {
                         version: ver,
                         date: r

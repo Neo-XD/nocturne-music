@@ -8,7 +8,10 @@
 		PaintBoardIcon,
 		PlayCircleIcon,
 		Database02Icon,
-		InformationCircleIcon
+		InformationCircleIcon,
+		ViewIcon,
+		ViewOffSlashIcon,
+		Link04Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -167,7 +170,9 @@
 	let lastfmConnected = $state(false);
 	let lastfmUser = $state<string | null>(null);
 	let lastfmConnecting = $state(false);
-	let showLastfmKeys = $state(false);
+	let lastfmKeyInput = $state('');
+	let lastfmSecretInput = $state('');
+	let showSecret = $state(false);
 
 	async function loadLastfm() {
 		try {
@@ -177,9 +182,29 @@
 		} catch {}
 	}
 
+	async function updateLastfmKey(val: string) {
+		lastfmKeyInput = val;
+		settings.lastfm_api_key = val;
+		await api.setSetting('lastfm_api_key', val);
+	}
+
+	async function updateLastfmSecret(val: string) {
+		lastfmSecretInput = val;
+		settings.lastfm_api_secret = val;
+		await api.setSetting('lastfm_api_secret', val);
+	}
+
 	async function connectLastfm() {
+		const key = (lastfmKeyInput || settings.lastfm_api_key || '').trim();
+		const secret = (lastfmSecretInput || settings.lastfm_api_secret || '').trim();
+		if (!key || !secret) {
+			toast.error('Please enter both your Last.fm API Key and Shared Secret below.');
+			return;
+		}
 		lastfmConnecting = true;
 		try {
+			await updateLastfmKey(key);
+			await updateLastfmSecret(secret);
 			await api.lastfmConnect();
 			toast('Approve Nocturne in your browser');
 		} catch (e) {
@@ -197,16 +222,6 @@
 		} catch (e) {
 			toast.error(String(e));
 		}
-	}
-
-	async function saveLastfmKey(val: string) {
-		settings.lastfm_api_key = val;
-		await api.setSetting('lastfm_api_key', val);
-	}
-
-	async function saveLastfmSecret(val: string) {
-		settings.lastfm_api_secret = val;
-		await api.setSetting('lastfm_api_secret', val);
 	}
 
 	onMount(() => {
@@ -230,6 +245,8 @@
 			settings = s;
 			clients = c;
 			proxyInput = s.proxy ?? '';
+			lastfmKeyInput = s.lastfm_api_key ?? '';
+			lastfmSecretInput = s.lastfm_api_secret ?? '';
 		} catch (e) {
 			toast.error(String(e));
 		}
@@ -712,45 +729,63 @@
 		<Button size="sm" variant="outline" onclick={disconnectLastfm}>Disconnect</Button>
 	{:else}
 		<Button size="sm" onclick={connectLastfm} disabled={lastfmConnecting}>
-			{lastfmConnecting ? 'Connecting…' : 'Connect'}
+			{lastfmConnecting ? 'Connecting…' : 'Connect Last.fm'}
 		</Button>
 	{/if}
 {/snippet}
 {#snippet lastfmConfig()}
-	<div class="mt-2 space-y-2 pt-1">
-		<button
-			type="button"
-			onclick={() => (showLastfmKeys = !showLastfmKeys)}
-			class="cursor-pointer text-xs text-muted-foreground transition hover:text-foreground hover:underline"
-		>
-			{showLastfmKeys ? 'Hide custom API credentials' : 'Configure custom Last.fm API keys (optional)'}
-		</button>
-		{#if showLastfmKeys}
-			<div class="grid gap-2 pt-1 sm:grid-cols-2">
-				<div>
-					<label for="lastfm-api-key" class="text-[11px] font-medium text-muted-foreground">API Key</label>
-					<input
-						id="lastfm-api-key"
-						type="text"
-						value={settings.lastfm_api_key ?? ''}
-						placeholder="Last.fm API Key"
-						class="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 font-mono text-xs"
-						oninput={(e) => saveLastfmKey(e.currentTarget.value)}
-					/>
-				</div>
-				<div>
-					<label for="lastfm-api-secret" class="text-[11px] font-medium text-muted-foreground">Shared Secret</label>
-					<input
-						id="lastfm-api-secret"
-						type="password"
-						value={settings.lastfm_api_secret ?? ''}
-						placeholder="Last.fm Shared Secret"
-						class="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 font-mono text-xs"
-						oninput={(e) => saveLastfmSecret(e.currentTarget.value)}
-					/>
-				</div>
+	<div class="mt-2.5 space-y-2.5 rounded-xl border border-border/60 bg-muted/30 p-3">
+		<div class="flex items-center justify-between gap-2">
+			<div>
+				<span class="text-xs font-semibold text-foreground">API Credentials</span>
+				<p class="text-[11px] text-muted-foreground">
+					Type your Last.fm API Key and Shared Secret to authorize scrobbling directly in the app.
+				</p>
 			</div>
-		{/if}
+			<button
+				type="button"
+				onclick={() => api.openExternal('https://www.last.fm/api/account/create')}
+				class="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline cursor-pointer"
+			>
+				<span>Get keys</span>
+				<HugeiconsIcon icon={Link04Icon} class="h-3 w-3" />
+			</button>
+		</div>
+
+		<div class="grid gap-2.5 sm:grid-cols-2">
+			<div class="space-y-1">
+				<label for="lastfm-api-key" class="text-[11px] font-medium text-muted-foreground">API Key</label>
+				<input
+					id="lastfm-api-key"
+					type="text"
+					bind:value={lastfmKeyInput}
+					oninput={(e) => updateLastfmKey(e.currentTarget.value)}
+					placeholder="Paste Last.fm API key"
+					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
+				/>
+			</div>
+			<div class="space-y-1">
+				<div class="flex items-center justify-between">
+					<label for="lastfm-api-secret" class="text-[11px] font-medium text-muted-foreground">Shared Secret</label>
+					<button
+						type="button"
+						onclick={() => (showSecret = !showSecret)}
+						class="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1"
+					>
+						<HugeiconsIcon icon={showSecret ? ViewOffSlashIcon : ViewIcon} class="h-3 w-3" />
+						<span>{showSecret ? 'Hide' : 'Show'}</span>
+					</button>
+				</div>
+				<input
+					id="lastfm-api-secret"
+					type={showSecret ? 'text' : 'password'}
+					bind:value={lastfmSecretInput}
+					oninput={(e) => updateLastfmSecret(e.currentTarget.value)}
+					placeholder="Paste Shared Secret"
+					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
+				/>
+			</div>
+		</div>
 	</div>
 {/snippet}
 {#snippet traySwitch()}<Switch checked={trayOn} onCheckedChange={setTray} />{/snippet}

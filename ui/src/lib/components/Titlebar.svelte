@@ -112,7 +112,13 @@
 			toast('Approve Nocturne in your browser');
 		} catch (err) {
 			connecting = false;
-			toast.error(String(err));
+			const msg = String(err);
+			if (msg.includes('API key') || msg.includes('not configured') || msg.includes('not found')) {
+				ui.settingsOpen = true;
+				toast.error('Please enter your Last.fm API Key and Secret in Settings.');
+			} else {
+				toast.error(msg);
+			}
 		}
 	}
 

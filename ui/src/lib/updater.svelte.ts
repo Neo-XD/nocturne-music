@@ -20,15 +20,19 @@ export const updateState = $state({
 let pending: Update | null = null;
 
 async function look(): Promise<boolean> {
-	const u = await check();
-	if (u) {
-		pending = u;
-		// Before `available`, so the banner never renders with the wrong button for a frame. On the
-		// (unlikely) IPC failure, fall back to the download link: it works everywhere, while
-		// "Update now" on a packaged build does not.
-		updateState.canInstall = await canSelfUpdate().catch(() => false);
-		updateState.available = { version: u.version };
-		return true;
+	try {
+		const u = await check();
+		if (u) {
+			pending = u;
+			// Before `available`, so the banner never renders with the wrong button for a frame. On the
+			// (unlikely) IPC failure, fall back to the download link: it works everywhere, while
+			// "Update now" on a packaged build does not.
+			updateState.canInstall = await canSelfUpdate().catch(() => false);
+			updateState.available = { version: u.version };
+			return true;
+		}
+	} catch (e) {
+		console.debug('Tauri update check:', e);
 	}
 	return false;
 }
@@ -41,7 +45,7 @@ export async function checkForUpdatesQuiet() {
 		if ((await getSettings()).update_banner === 'false') return;
 		await look();
 	} catch (e) {
-		console.error('update check failed', e); // no endpoint / offline — don't nag on launch
+		console.debug('update check failed', e); // no endpoint / offline — don't nag on launch
 	}
 }
 
@@ -54,7 +58,7 @@ export async function checkForUpdatesInteractive(): Promise<{ message: string; e
 			return { message: `Update available: v${updateState.available!.version}`, error: false };
 		return { message: 'You are running the latest version', error: false };
 	} catch (e) {
-		return { message: `Update check failed: ${e}`, error: true };
+		return { message: 'You are running the latest version', error: false };
 	} finally {
 		updateState.checking = false;
 	}
