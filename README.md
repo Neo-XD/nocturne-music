@@ -2,7 +2,7 @@
 
 <img src="./assets/docs/limusic-github-image.png" alt="Limusic Banner" width="100%">
 
-# Limusic
+# Nocturne Music
 
 **A native desktop YouTube Music client — Rust + Tauri, ad-free, no Electron.**
 
@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white">
 </p>
 
-**Limusic** talks directly to YouTube's internal API and plays audio through libmpv — no bundled
+**Nocturne Music** talks directly to YouTube's internal API and plays audio through libmpv — no bundled
 browser runtime, no backend server, no ads in the audio. It started as a desktop rebuild of the
 playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android
 YouTube Music client, and grew from there.
