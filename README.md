@@ -165,6 +165,10 @@ Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLAT
 
 ---
 
+## Note for Contributors
+
+This project relies heavily on "vibe coding". As a result, the underlying codebase might be unoptimized, and some features may have bugs or break randomly. I spent a lot of time tweaking the AI output to make it work, but the code architecture might not be perfect. Pull Requests to fix bugs, optimize the code, or enhance features are incredibly welcome! Please be kind and constructive with your feedback or criticism.
+
 ## Disclaimer
 
 This project is not affiliated with, funded, authorized, endorsed by, or in
