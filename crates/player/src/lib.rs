@@ -414,7 +414,7 @@ mod tests {
         use super::{Error, Player, NO_RUBBERBAND};
         use std::sync::atomic::Ordering;
 
-        let dir = std::env::temp_dir().join("limusic-af-test");
+        let dir = std::env::temp_dir().join("nocturne-af-test");
         std::fs::create_dir_all(&dir).unwrap();
         let p = Player::new(dir.to_str().unwrap()).expect("libmpv");
         let af = || p.mpv.get_property::<String>("af").unwrap();

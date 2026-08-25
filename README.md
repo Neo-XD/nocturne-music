@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/docs/limusic-github-image.png" alt="Limusic Banner" width="100%">
+<img src="./assets/docs/Nocturne-github-image.png" alt="Nocturne Banner" width="100%">
 
 # Nocturne Music
 
@@ -14,9 +14,7 @@
 </p>
 
 **Nocturne Music** (short: **Nocturne**) talks directly to YouTube's internal API and plays audio through libmpv — no bundled
-browser runtime, no backend server, no ads in the audio. It started as a desktop rebuild of the
-playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android
-YouTube Music client, and grew from there.
+browser runtime, no backend server, no ads in the audio.Started as a fork of [Limusic](https://github.com/SimoHypers/limusic) and was built from that to my taste and hopefully others' tastes too. [Limusic](https://github.com/SimoHypers/limusic) itself started as a desktop rebuild of the playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android YouTube Music client, and grew from there.
 
 </div>
 
@@ -39,27 +37,26 @@ YouTube Music client, and grew from there.
 - **System tray** — close the window, keep the music; play/pause and skip from the tray, optional start-on-login
 - **Listen Together** — synced listening rooms over a small self-hosted relay
 - **Self-updating builds** (AppImage on Linux, setup.exe on Windows)
-- **Customization via Themes and Fonts** — Customize your music player to your hearts content
+- **Customization via Themes and Fonts** — Customize your music player to your heart's content
 
 ---
 
 <h2 align="center">Download & Install</h2>
 
 <p align="center">
-  <a href="https://github.com/SimoHypers/limusic/releases/latest">
+  <a href="https://github.com/Neo-XD/nocturne-music/releases/latest">
     <img src="https://img.shields.io/badge/GitHub_Releases-100000?style=for-the-badge&logo=github&logoColor=white" height="40">
   </a>
 </p>
 
-| Platform | File | Notes |
-|---|---|---|
-| Linux | `.AppImage` | Self-updating, libmpv bundled. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) |
-| Linux (Ubuntu/Debian) | `.deb` | No self-update. Needs Ubuntu 24.04+ / Debian 13+; apt pulls libmpv and webkit2gtk in for you |
-| Linux (Fedora/RHEL) | `.rpm` | Needs `mpv-libs` installed (`sudo dnf install mpv-libs`). Updates through dnf, not in-app |
-| Linux (Arch) | [AUR](https://aur.archlinux.org/packages/limusic-bin) | `yay -S limusic-bin`. Community-maintained by [@xiryuudev](https://github.com/xiryuudev), updates through pacman |
-| Windows | `-setup.exe` | Self-updating |
-| Windows | `.msi` | Plain installer, no auto-update |
-| macOS | none yet | Build from source, see [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md) |
+| Platform | File | Notes | Testing Status |
+|---|---|---|---|
+| Linux | `.AppImage` | Self-updating, libmpv bundled. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) | untested for nocturne |
+| Linux (Ubuntu/Debian) | `.deb` | No self-update. Needs Ubuntu 24.04+ / Debian 13+; apt pulls libmpv and webkit2gtk in for you | untested for nocturne |
+| Linux (Fedora/RHEL) | `.rpm` | Needs `mpv-libs` installed (`sudo dnf install mpv-libs`). Updates through dnf, not in-app | untested for nocturne |
+| Windows | `-setup.exe` | Self-updating | Tested and working as expected |
+| Windows | `.msi` | Plain installer, no auto-update | Tested and working as expected |
+| macOS | none yet | Build from source, see [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md) | untested for nocturne |
 
 ---
 
@@ -67,25 +64,19 @@ YouTube Music client, and grew from there.
 
 Both live in the title bar, next to the window controls.
 
-- **Last.fm** — click the Last.fm mark, approve Limusic in the browser tab that
-  opens, and you're connected for good. Tracks scrobble at the halfway point (or
-  four minutes, whichever comes first), which is Last.fm's own rule. Click again
-  to see the account or disconnect.
+- **Last.fm** — connect directly in **Settings > General > Last.fm** by typing your API Key & Shared Secret (or from the title bar icon), approve Nocturne in the browser tab that opens, and you're connected for good. Tracks scrobble at the halfway point (or four minutes, whichever comes first). Click again to see the account or disconnect.
 - **Discord** — click the Discord mark to toggle Rich Presence. Green dot means
   it's live. The card shows the track, artist, album art, and a progress bar, and
   it disappears when you pause.
 
-Building from source? Last.fm needs your own API credentials — they're not in the
-repo. Get a key at [last.fm/api/account/create](https://www.last.fm/api/account/create)
-and put it in `src-tauri/lastfm.keys`:
+Building from source? You can configure your Last.fm API credentials directly inside the app under **Settings > General > Last.fm**, or provide them at build time in `src-tauri/lastfm.keys`:
 
 ```
-LIMUSIC_LASTFM_API_KEY=your_key
-LIMUSIC_LASTFM_API_SECRET=your_secret
+NOCTURNE_LASTFM_API_KEY=your_key
+NOCTURNE_LASTFM_API_SECRET=your_secret
 ```
 
-Without that file everything else still builds and runs; the Last.fm button just
-reports that it isn't configured.
+Without that file everything else still builds and runs; credentials can simply be pasted into Settings.
 
 ---
 
@@ -151,7 +142,7 @@ Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLAT
 - A pure Rust crate speaks YouTube's InnerTube API, impersonating several
   official client identities and falling back between them when one fails.
 - YouTube's stream URLs are protected by obfuscated JavaScript (the signature
-  cipher and the `n` parameter) and by BotGuard attestation. Limusic runs that
+  cipher and the `n` parameter) and by BotGuard attestation. Nocturne runs that
   JavaScript where it expects to run, in a real webview, hidden, and never lets
   any of it touch the UI process.
 - Audio goes through libmpv: gapless transitions, an on-disk cache, and

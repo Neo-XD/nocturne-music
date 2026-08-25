@@ -1,4 +1,4 @@
-//! Listen Together client. Owns the WebSocket connection to a self-hosted `limusic-sync` server
+//! Listen Together client. Owns the WebSocket connection to a self-hosted `nocturne-sync` server
 //! (context/19), the room state, and reconnection. It knows nothing about mpv or the orchestrator:
 //! playback for guests is driven through an mpsc channel of [`SyncCommand`]s that a bridge task
 //! (in `lib.rs`) applies to `AppState`. The host's playback is broadcast by `AppState` calling

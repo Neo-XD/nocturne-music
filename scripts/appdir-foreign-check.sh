@@ -26,7 +26,7 @@
 set -uo pipefail
 
 APPDIR=/app
-BIN="$APPDIR/usr/bin/limusic-app"
+BIN="$(ls "$APPDIR"/usr/bin/nocturne* "$APPDIR"/usr/bin/limusic* 2>/dev/null | head -1 || echo "$APPDIR/usr/bin/nocturne-app")"
 FAIL=0
 step() { printf '\n── %s\n' "$1"; }
 bad()  { echo "   FAIL: $1"; FAIL=1; }

@@ -309,6 +309,7 @@ export const personal = $state<Personal>(pl.empty());
 
 if (browser) {
 	try {
+		// Read nocturne:personal first, falling back to legacy limusic:personal for one-time migration.
 		const raw = localStorage.getItem(PERSONAL_KEY) || localStorage.getItem('limusic:personal');
 		Object.assign(personal, pl.hydrate(JSON.parse(raw ?? 'null')));
 	} catch {

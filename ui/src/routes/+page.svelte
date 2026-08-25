@@ -43,7 +43,7 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	// The mood chips + which one is active. Kept out of `home` so the row survives a filter switch's
-	// loading state (every home response carries the same chips anyway). Limusic is music-only.
+	// loading state (every home response carries the same chips anyway). Nocturne is music-only.
 	let chips = $state<HomeChip[]>([]);
 	let selected = $state<string | null>(null);
 	let loadingMore = $state(false);
@@ -262,7 +262,7 @@
 
 	/**
 	 * YouTube's "From the community" shelf is already account-personalized, but it isn't tied to what
-	 * the user actually plays *in Limusic*. Swap its items for community playlists searched from
+	 * the user actually plays *in Nocturne*. Swap its items for community playlists searched from
 	 * their top artists, keeping the shelf's title and position. With no listening signal yet — or if
 	 * the searches fail — YouTube's own items are left exactly as they came. Best-effort: this can
 	 * never fail the page.

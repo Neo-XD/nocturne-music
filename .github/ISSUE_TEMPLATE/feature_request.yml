@@ -1,11 +1,11 @@
 name: Idea or request
-description: Something you wish Limusic did.
+description: Something you wish Nocturne did.
 labels: [enhancement]
 body:
   - type: textarea
     id: idea
     attributes:
-      label: What would you like Limusic to do?
+      label: What would you like Nocturne to do?
       description: >
         Rough is fine. If it is easier to say what annoys you today than to
         describe the fix, say that instead.

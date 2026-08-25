@@ -1,4 +1,4 @@
-//! Limusic Tauri app. Wires transport + player + db + orchestrator behind the command boundary.
+//! Nocturne Music Tauri app. Wires transport + player + db + orchestrator behind the command boundary.
 
 mod cipher;
 mod commands;

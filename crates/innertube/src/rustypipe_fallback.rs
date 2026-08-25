@@ -40,7 +40,7 @@ pub enum FallbackError {
 pub async fn resolve(video_id: &str, prefer_high: bool) -> Result<StreamCandidate, FallbackError> {
     // Keep rustypipe's cache out of the app CWD (it defaults to ./rustypipe_cache.json +
     // ./rustypipe_reports/, and an installed app's CWD may not be writable).
-    let storage = std::env::temp_dir().join("limusic-rustypipe");
+    let storage = std::env::temp_dir().join("nocturne-rustypipe");
     std::fs::create_dir_all(&storage).ok();
     let player = RustyPipe::builder()
         .storage_dir(storage)

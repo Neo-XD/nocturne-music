@@ -25,9 +25,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: Which version of Limusic?
+      label: Which version of Nocturne?
       description: Settings, About tab. Skip this if you cannot find it.
-      placeholder: "0.4.6"
+      placeholder: "0.6.1"
 
   - type: textarea
     id: extra
@@ -35,5 +35,5 @@ body:
       label: Anything else?
       description: >
         All optional, whatever you have. A screenshot or a screen recording, your
-        Linux distro, how you installed Limusic, or anything the app printed in a
+        Linux distro, how you installed Nocturne, or anything the app printed in a
         terminal. Drag images straight into this box.

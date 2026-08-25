@@ -10,7 +10,7 @@ async fn main() {
     let a = std::env::args().nth(1).unwrap_or_else(|| "spikes/tone_a.opus".into());
     let b = std::env::args().nth(2).unwrap_or_else(|| "spikes/tone_b.opus".into());
 
-    let cache = std::env::temp_dir().join("limusic-player-example");
+    let cache = std::env::temp_dir().join("nocturne-player-example");
     std::fs::create_dir_all(&cache).ok();
 
     let mut p = Player::new(cache.to_str().unwrap()).expect("player");

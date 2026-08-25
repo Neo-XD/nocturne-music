@@ -1,6 +1,6 @@
-# Building Limusic on each platform
+# Building Nocturne Music on each platform
 
-Limusic is a Tauri 2 app (Rust core + SvelteKit SPA) that dynamically links **libmpv** (mpv API
+Nocturne Music is a Tauri 2 app (Rust core + SvelteKit SPA) that dynamically links **libmpv** (mpv API
 2.x, i.e. mpv ≥ 0.35). Tauri does **not** cross-compile — build each OS on that OS. The Rust link
 step just emits `cargo:rustc-link-lib=mpv` (via `libmpv2-sys`), so "getting it to build" is really
 "putting libmpv's import library on the linker's search path"; "getting it to run" is "shipping the

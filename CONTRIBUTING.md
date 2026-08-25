@@ -36,7 +36,7 @@ buries the real change and makes review much harder.
 
 ```bash
 cargo test --all                                        # everything, no network
-cargo test -p limusic-app --lib -- --ignored --nocapture   # hits live lyrics APIs
+cargo test -p nocturne-app --lib -- --ignored --nocapture   # hits live lyrics APIs
 cd ui && pnpm check                                     # svelte-check + types
 ```
 

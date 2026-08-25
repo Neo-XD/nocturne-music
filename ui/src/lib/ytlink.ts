@@ -1,4 +1,4 @@
-// A pasted YouTube / YouTube Music link turned into something Limusic can open (#63). Some
+// A pasted YouTube / YouTube Music link turned into something Nocturne can open (#63). Some
 // playlists are only ever reachable by URL: they don't show up in search and aren't in the
 // library, so without this there is no way into them.
 //

@@ -45,7 +45,7 @@ use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use innertube::SongItem;
 
 /// Discord application id (a snowflake — digits only). **Must be set before rich presence does
-/// anything.** Register an app named "Limusic" at <https://discord.com/developers/applications> and
+/// anything.** Register an app named "Nocturne Music" at <https://discord.com/developers/applications> and
 /// paste its Application ID here — the app's *name* is what renders after "Listening to", and its
 /// icon is the fallback artwork. Nothing else in the portal needs configuring: no bot user, no
 /// OAuth redirect, no client secret. (Metrolist needs all of that only because Android has no

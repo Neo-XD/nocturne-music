@@ -152,7 +152,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
             "qq" => qqmusic_get(req).await,
             "kugou" => kugou_get(req).await,
             other => {
-                tracing::warn!(provider = other, "LIMUSIC_LYRICS_ONLY: unknown provider");
+                tracing::warn!(provider = other, "NOCTURNE_LYRICS_ONLY: unknown provider");
                 Ok(None)
             }
         };

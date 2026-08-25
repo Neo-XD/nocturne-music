@@ -8,6 +8,20 @@ use innertube::{
 
 const VIDEO_ID: &str = "xl9cFAOKg_Y"; // the id from the user's failing run
 
+fn test_cookie() -> Option<String> {
+    std::env::var("NOCTURNE_COOKIE")
+        .or_else(|_| std::env::var("LIMUSIC_COOKIE"))
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
+fn test_visitor() -> Option<String> {
+    std::env::var("NOCTURNE_VISITOR")
+        .or_else(|_| std::env::var("LIMUSIC_VISITOR"))
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
 /// GET the first KB with the given UA — what mpv effectively does on load.
 async fn probe(url: &str, ua: Option<&str>) -> reqwest::StatusCode {
     let client = reqwest::Client::new();
@@ -64,11 +78,11 @@ async fn direct_clients_resolve_and_stream() {
 #[tokio::test]
 #[ignore]
 async fn owned_continuation_not_doubled() {
-    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
-        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
+    let Some(cookie) = test_cookie() else {
+        eprintln!("skipped: set NOCTURNE_COOKIE (+NOCTURNE_VISITOR) to run");
         return;
     };
-    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
+    let visitor = test_visitor();
     let it = InnerTube::new(
         Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
         None,
@@ -108,11 +122,11 @@ async fn owned_continuation_not_doubled() {
 #[tokio::test]
 #[ignore]
 async fn library_grids_page_past_the_first_response() {
-    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
-        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
+    let Some(cookie) = test_cookie() else {
+        eprintln!("skipped: set NOCTURNE_COOKIE (+NOCTURNE_VISITOR) to run");
         return;
     };
-    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
+    let visitor = test_visitor();
     let it = InnerTube::new(
         Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
         None,
@@ -150,11 +164,11 @@ async fn library_grids_page_past_the_first_response() {
 #[tokio::test]
 #[ignore]
 async fn playlist_sort_params_still_order_the_server_side_list() {
-    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
-        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
+    let Some(cookie) = test_cookie() else {
+        eprintln!("skipped: set NOCTURNE_COOKIE (+NOCTURNE_VISITOR) to run");
         return;
     };
-    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
+    let visitor = test_visitor();
     let it = InnerTube::new(
         Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
         None,
@@ -346,11 +360,11 @@ async fn radio_seeds_resolve() {
 #[tokio::test]
 #[ignore]
 async fn library_songs_browse_returns_tracks() {
-    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
-        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
+    let Some(cookie) = test_cookie() else {
+        eprintln!("skipped: set NOCTURNE_COOKIE (+NOCTURNE_VISITOR) to run");
         return;
     };
-    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
+    let visitor = test_visitor();
     let it = InnerTube::new(
         Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
         None,

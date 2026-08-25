@@ -197,7 +197,7 @@ const UI_SETTINGS: [&str; 16] = [
     "lastfm_api_secret",
 ];
 
-/// Resolve the music video for `video_id` and hand back a `limusicvideo://` URL the player view
+/// Resolve the music video for `video_id` and hand back a proxy URL the player view
 /// can put in a `<video src>`. `None` when YouTube has no usable video stream for it, which is the
 /// ordinary answer for a song and leaves the artwork in place. The real googlevideo URL never
 /// leaves Rust (context/11).
@@ -391,7 +391,7 @@ pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 /// Swap back. Same path as the tray, so the widget and the tray can't disagree about what
-/// "show Limusic" means.
+/// "show Nocturne" means.
 #[tauri::command]
 pub async fn close_mini(app: tauri::AppHandle) -> Result<(), String> {
     crate::tray::show_main(&app);
@@ -477,7 +477,7 @@ pub async fn get_library_artists(state: St<'_>) -> Result<Vec<BrowseItem>, Strin
 }
 
 /// A playlist or album page. `id` is the browseId (`VL…` / `MPRE…`); Liked Songs is `VLLM`, and
-/// `LIMUSIC_ON_REPEAT` is the local auto-playlist rather than anything YouTube knows about.
+/// `ON_REPEAT_ID` is the local auto-playlist rather than anything YouTube knows about.
 ///
 /// `sort` asks YouTube for the tracks in a given order; `None` gets whatever order the account
 /// already has the list in, which is what a fresh visit wants (it matches YouTube Music).
@@ -1258,6 +1258,9 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     notes.push(v061_note);
     notes.push(v06_note);
 
+    let known_versions: std::collections::HashSet<String> =
+        notes.iter().map(|n| n.version.clone()).collect();
+
     let res = crate::http::client()
         .get("https://api.github.com/repos/Neo-XD/nocturne-music/releases?per_page=20")
         .header("User-Agent", concat!("Nocturne/", env!("CARGO_PKG_VERSION")))
@@ -1270,7 +1273,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         if let Ok(releases) = resp.json::<Vec<GhRelease>>().await {
             for r in releases.into_iter().filter(|r| !r.draft && !r.prerelease) {
                 let ver = r.tag_name.trim_start_matches('v').to_string();
-                if ver != "0.6.1" && ver != "0.6.0" {
+                if !known_versions.contains(&ver) {
                     notes.push(ReleaseNote {
                         version: ver,
                         date: r

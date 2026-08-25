@@ -1,4 +1,4 @@
-//! Limusic "Listen Together" sync server. A self-hosted WebSocket hub that relays small playback
+//! Nocturne "Listen Together" sync server. A self-hosted WebSocket hub that relays small playback
 //! control messages between a host and guests — audio never touches it; every client streams
 //! direct from YouTube (context/19). Host-authoritative, server-extrapolated position.
 //!
@@ -624,7 +624,7 @@ async fn main() {
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
     let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await.expect("bind");
-    tracing::info!(%addr, "limusic-sync listening (plain ws — front with Tailscale/Cloudflare for wss)");
+    tracing::info!(%addr, "nocturne-sync listening (plain ws — front with Tailscale/Cloudflare for wss)");
 
     let server = Arc::new(Server::default());
 

@@ -1,7 +1,7 @@
 //! Loopback HTTP proxy for the player view's music video: the `<video>` element fetches its bytes
 //! from here, never from googlevideo (context/11: no YouTube shapes past the command boundary).
 //!
-//! **Why a socket and not a `limusicvideo://` custom scheme.** The scheme was the plan, and it does
+//! **Why a socket and not a custom scheme.** The scheme was the plan, and it does
 //! work for `fetch`, XHR and an iframe: measured on WebKitGTK, a registered scheme answers a
 //! textbook `206` with `Content-Range: bytes 0-1445/35729196` and `Content-Type: video/webm`. A
 //! `<video>` still refuses it with `MEDIA_ERR_SRC_NOT_SUPPORTED` and never asks again, because the

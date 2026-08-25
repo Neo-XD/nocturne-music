@@ -24,6 +24,7 @@ use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError
 /// Synthetic browseId for the On Repeat playlist. Not a YouTube id: `get_playlist` intercepts it
 /// and builds the page from local play counts, so it must never collide with a real browseId
 /// (`VL…` / `MPRE…` / `RD…`).
+/// Note: Preserved as `"LIMUSIC_ON_REPEAT"` for seamless backward compatibility with existing user databases.
 pub const ON_REPEAT_ID: &str = "LIMUSIC_ON_REPEAT";
 /// How far back On Repeat looks. A month is long enough to survive a quiet week and short enough
 /// that the list still turns over with what you're actually playing.
@@ -229,6 +230,7 @@ pub(crate) fn persisted_data_sync_id(db: &Db) -> Option<String> {
 
 fn identity_selection_key(data_sync_id: &str) -> String {
     let mut hasher = DefaultHasher::new();
+    // Salt preserved for deterministic backward compatibility across database migrations.
     "limusic-account-identity-v1".hash(&mut hasher);
     data_sync_id.hash(&mut hasher);
     format!("identity-{:016x}", hasher.finish())

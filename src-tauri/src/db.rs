@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn opening_the_db_clears_local_files_out_of_on_repeat() {
         // 0.3.1 counted local plays before On Repeat excluded them; opening the db drops the rows.
-        let path = std::env::temp_dir().join("limusic-plays-purge-test.sqlite");
+        let path = std::env::temp_dir().join("nocturne-plays-purge-test.sqlite");
         std::fs::remove_file(&path).ok();
         {
             let d = Db::open(&path).unwrap();

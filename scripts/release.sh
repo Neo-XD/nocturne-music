@@ -27,8 +27,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-REPO="SimoHypers/limusic"
-KEY="${TAURI_SIGNING_PRIVATE_KEY_FILE:-$HOME/.tauri/limusic.key}"
+REPO="Neo-XD/nocturne-music"
+KEY="${TAURI_SIGNING_PRIVATE_KEY_FILE:-$HOME/.tauri/nocturne.key}"
 NOTES="${1:-See the commit history for changes.}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -173,13 +173,13 @@ if ! cargo tauri build --bundles rpm; then
   echo "ERROR: the rpm build failed, but $TAG is already published and CI is building the rest." >&2
   echo "       Fix it, then attach the rpm by hand:" >&2
   echo "         cargo tauri build --bundles rpm" >&2
-  echo "         gh release upload $TAG target/release/bundle/rpm/limusic-$VERSION-*.rpm --clobber --repo $REPO" >&2
+  echo "         gh release upload $TAG target/release/bundle/rpm/*$VERSION*.rpm --clobber --repo $REPO" >&2
   exit 1
 fi
 
 # Pin to $VERSION — a stale bundle from a previous build otherwise sorts first and gets shipped
 # (e.g. an old 0.1.1 rpm uploaded to the 0.1.2 release).
-RPM="$(ls target/release/bundle/rpm/limusic-${VERSION}-*.rpm 2>/dev/null | head -1)"
+RPM="$(ls target/release/bundle/rpm/*${VERSION}*.rpm 2>/dev/null | head -1)"
 [ -n "$RPM" ] || die "no rpm for $VERSION in target/release/bundle/rpm"
 gh release upload "$TAG" "$RPM" --clobber --repo "$REPO"
 echo "    attached $(basename "$RPM")"

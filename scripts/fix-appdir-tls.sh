@@ -73,11 +73,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BUNDLE="${1:-target/release/bundle/appimage}"
-APPDIR="$(readlink -f "$BUNDLE/limusic.AppDir" 2>/dev/null || true)"
+APPDIR="$(readlink -f "$(ls -d "$BUNDLE"/*.AppDir 2>/dev/null | head -1)" 2>/dev/null || true)"
 [ -n "$APPDIR" ] && [ -d "$APPDIR" ] || {
-  echo "no AppDir at $BUNDLE/limusic.AppDir — run \`cargo tauri build --bundles appimage\` first"; exit 1; }
-APPIMAGE="$(ls "$BUNDLE"/limusic_*.AppImage 2>/dev/null | head -1 || true)"
-[ -n "$APPIMAGE" ] || { echo "no limusic_*.AppImage in $BUNDLE"; exit 1; }
+  echo "no AppDir in $BUNDLE — run \`cargo tauri build --bundles appimage\` first"; exit 1; }
+APPIMAGE="$(ls "$BUNDLE"/*.AppImage 2>/dev/null | head -1 || true)"
+[ -n "$APPIMAGE" ] || { echo "no .AppImage in $BUNDLE"; exit 1; }
 APPIMAGE="$(readlink -f "$APPIMAGE")"
 
 # Libraries that must come from the HOST, never from us. Bundling one of these shadows the host's
@@ -264,7 +264,7 @@ export GST_PLUGIN_SCANNER_1_0="$APPDIR/usr/bin/gst-plugin-scanner"
 # The default registry is $XDG_CACHE_HOME/gstreamer-1.0/registry.<arch>.bin, shared with every other
 # GStreamer app on the machine. Ours describes a different plugin set to a different GStreamer, so
 # give it its own file rather than have the two rewrite each other's on every launch.
-export GST_REGISTRY_1_0="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/limusic/gstreamer-registry.bin"
+export GST_REGISTRY_1_0="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/nocturne/gstreamer-registry.bin"
 mkdir -p "$(dirname "$GST_REGISTRY_1_0")" 2>/dev/null || true
 EOF
 

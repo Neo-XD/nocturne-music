@@ -2,7 +2,7 @@
 //
 // YouTube sorts a playlist itself, and remembers the choice, so wherever it offers a sort menu the
 // page asks it for an ordered list instead of ordering one here (see `PlaylistPage.sortMenu`). The
-// list then reads the same way in Limusic, in YouTube Music, and in any other client on the
+// list then reads the same way in Nocturne, in YouTube Music, and in any other client on the
 // account. `sortSongs` below is the fallback for the two things YouTube cannot do — rank by our own
 // play counts, and reverse a playlist's stored order — plus lists it offers no menu for at all.
 import type { ServerSort, SongItem } from './api';
