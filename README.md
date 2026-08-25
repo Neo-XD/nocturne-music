@@ -14,7 +14,7 @@
 </p>
 
 **Nocturne Music** (short: **Nocturne**) talks directly to YouTube's internal API and plays audio through libmpv — no bundled
-browser runtime, no backend server, no ads in the audio.Started as a fork of [Limusic](https://github.com/SimoHypers/limusic) and was built from that to my taste and hopefully others' tastes too. [Limusic](https://github.com/SimoHypers/limusic) itself started as a desktop rebuild of the playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android YouTube Music client, and grew from there.
+browser runtime, no backend server, no ads in the audio. Started as a fork of [Limusic](https://github.com/SimoHypers/limusic) and was built from that to my taste and hopefully others' tastes too. [Limusic](https://github.com/SimoHypers/limusic) itself started as a desktop rebuild of the playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android YouTube Music client, and grew from there.
 
 </div>
 
