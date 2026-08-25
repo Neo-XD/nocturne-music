@@ -24,7 +24,7 @@
 	import LastFmIcon from './LastFmIcon.svelte';
 	import DiscordIcon from './DiscordIcon.svelte';
 	import AccountMenu from './AccountMenu.svelte';
-	import logo from '$lib/assets/favicon.svg';
+	import logo from '$lib/assets/icon.png';
 	import * as api from '$lib/api';
 	import { openMiniPlayer, toast, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
@@ -109,7 +109,7 @@
 		connecting = true;
 		try {
 			await api.lastfmConnect();
-			toast('Approve Limusic in your browser');
+			toast('Approve Nocturne in your browser');
 		} catch (err) {
 			connecting = false;
 			toast.error(String(err));
@@ -144,7 +144,7 @@
 	<span
 		class="pointer-events-none absolute inset-x-0 text-center text-xs font-medium tracking-wide text-muted-foreground"
 	>
-		Limusic
+		Nocturne
 	</span>
 
 	<div class="flex h-full items-center">

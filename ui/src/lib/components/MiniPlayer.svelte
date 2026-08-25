@@ -132,8 +132,8 @@
 	<button
 		class="absolute left-2 top-2 z-10 flex size-6 cursor-pointer items-center justify-center rounded-md text-white/60 opacity-0 transition hover:bg-white/15 hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
 		onclick={() => api.closeMini().catch(() => {})}
-		title="Back to Limusic"
-		aria-label="Back to Limusic"
+		title="Back to Nocturne"
+		aria-label="Back to Nocturne"
 	>
 		<HugeiconsIcon icon={MaximizeScreenIcon} class="h-3.5 w-3.5" />
 	</button>

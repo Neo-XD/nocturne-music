@@ -431,7 +431,7 @@ impl Presence {
                 format!("{SONG_URL}{}", track.video_id),
             ));
         }
-        buttons.push(activity::Button::new("Get Limusic", REPO_URL));
+        buttons.push(activity::Button::new("Get Nocturne", REPO_URL));
         act = act.buttons(buttons);
         if !track.artists.is_empty() {
             act = act.state(field(&track.artists));

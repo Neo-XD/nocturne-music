@@ -15,7 +15,7 @@ import { hexToHsv, isLight, nearestHue } from './color';
 import { artworkAccent, warmAccent } from './artcolor';
 import { allowFontFile } from './api';
 
-export type ThemeId = 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze';
+export type ThemeId = 'monochrome' | 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze';
 
 // `fg` (accent themes only) is the text/icon colour that sits ON the accent: light accents (lime,
 // teal) need a dark foreground; dark accents keep the light one. `color` is just the picker swatch.
@@ -24,6 +24,7 @@ type Theme =
 	| { id: ThemeId; label: string; kind: 'palette'; color: string };
 
 export const THEMES: Theme[] = [
+	{ id: 'monochrome', label: 'Monochrome', kind: 'palette', color: 'oklch(0.985 0 0)' },
 	{ id: 'rose', label: 'Rose', kind: 'accent', color: 'oklch(0.455 0.188 13.697)', fg: 'oklch(0.985 0 0)' },
 	{ id: 'blue', label: 'Blue', kind: 'accent', color: 'oklch(0.49 0.22 264)', fg: 'oklch(0.985 0 0)' },
 	{ id: 'lime', label: 'Lime', kind: 'accent', color: 'oklch(0.77 0.2 131)', fg: 'oklch(0.205 0 0)' },
@@ -70,7 +71,7 @@ const ON_DARK = 'oklch(0.985 0 0)';
 const ON_LIGHT = 'oklch(0.205 0 0)';
 
 /** Reactive current selection, so the picker reflects it. */
-export const theme = $state<{ id: ThemeId }>({ id: 'rose' });
+export const theme = $state<{ id: ThemeId }>({ id: 'monochrome' });
 export const custom = $state<Custom>({
 	accent: null,
 	hue: null,
@@ -111,9 +112,9 @@ export function setAppearance(patch: Partial<typeof appearance>): void {
  * hardcoded default that goes stale the moment a preset moves it.
  */
 export const effective = $state({
-	hue: 326,
+	hue: 0,
 	radius: 0.45,
-	accent: '#000000',
+	accent: '#ffffff',
 	fontSans: '',
 	fontHeading: ''
 });
@@ -371,10 +372,10 @@ export function prewarmArtworkAccent(url: string | undefined | null): void {
 	if (url) warmAccent(url);
 }
 
-/** Apply the stored theme + customization on startup (defaults to rose, no overrides). */
+/** Apply the stored theme + customization on startup (defaults to monochrome, no overrides). */
 export function initTheme(): void {
 	const stored = localStorage.getItem(KEY) as ThemeId | null;
-	theme.id = stored && THEMES.some((t) => t.id === stored) ? stored : 'rose';
+	theme.id = stored && THEMES.some((t) => t.id === stored) ? stored : 'monochrome';
 	try {
 		const saved = JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? '{}');
 		// Only keys we know about, only the shape we expect: a hand-edited or older localStorage

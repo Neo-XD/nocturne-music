@@ -405,7 +405,7 @@
 								})}
 								{@render row({
 									title: 'Start on login',
-									desc: 'Launch Limusic automatically when you log in.',
+									desc: 'Launch Nocturne automatically when you log in.',
 									control: autostartSwitch
 								})}
 							</div>
@@ -582,7 +582,7 @@
 							class="mb-7 rounded-xl border bg-gradient-to-br from-primary/8 to-transparent px-4 py-4"
 						>
 							<div class="flex items-center gap-2">
-								<span class="font-heading text-lg font-bold">Limusic</span>
+								<span class="font-heading text-lg font-bold">Nocturne Music</span>
 								{#if version}
 									<span
 										class="rounded-full bg-primary/12 px-2 py-0.5 text-[11px] font-semibold text-primary"

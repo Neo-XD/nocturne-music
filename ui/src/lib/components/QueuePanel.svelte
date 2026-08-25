@@ -1,25 +1,38 @@
 <script lang="ts">
 	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import { HugeiconsIcon } from '@hugeicons/svelte';
+	import { Cancel01Icon } from '@hugeicons/core-free-icons';
+	import { Button } from '$lib/components/ui/button';
 	import QueueList from './QueueList.svelte';
 
 	let { onClose }: { onClose: () => void } = $props();
 </script>
 
-<!-- The panel always floats over the content (see the `relative` wrapper in +layout) rather than
-     squeezing it into a column: two docked panels left the page too narrow to read, and a page you
-     can't use behind a panel you opened on purpose is the better trade. Below lg a scrim dismisses
-     it; at lg+ the content stays visible underneath and the player bar's button closes it. -->
+<!-- Below lg: Backdrop scrim dismisses the panel -->
 <button
-	class="absolute inset-0 z-20 cursor-default bg-black/40 lg:hidden"
+	class="fixed inset-0 z-40 cursor-default bg-black/40 lg:hidden"
 	onclick={onClose}
 	aria-label="Close queue"
 	transition:fade={{ duration: 150 }}
 ></button>
+
+<!-- Docked in-flow sidebar on lg+, overlay on smaller screens -->
 <aside
 	transition:fly={{ x: 32, duration: 220, easing: cubicOut }}
-	class="absolute inset-y-0 right-0 z-30 flex h-full w-80 max-w-[80vw] flex-col border-l bg-card shadow-2xl"
+	class="fixed inset-y-0 right-0 z-40 flex h-full w-80 max-w-[85vw] flex-col border-l bg-card shadow-2xl lg:relative lg:inset-auto lg:z-10 lg:w-80 lg:shrink-0 lg:shadow-none"
 >
-	<h2 class="border-b px-4 py-3 font-heading text-sm font-semibold">Queue</h2>
+	<div class="flex items-center justify-between border-b px-4 py-3">
+		<h2 class="font-heading text-sm font-semibold">Queue</h2>
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			onclick={onClose}
+			aria-label="Close queue"
+			class="hover:text-foreground"
+		>
+			<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
+		</Button>
+	</div>
 	<QueueList />
 </aside>

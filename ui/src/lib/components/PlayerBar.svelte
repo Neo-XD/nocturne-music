@@ -45,12 +45,14 @@
 		onToggleQueue,
 		queueOpen,
 		onToggleLyrics,
-		lyricsOpen
+		lyricsOpen,
+		onToggleNowPlayingSidebar
 	}: {
 		onToggleQueue: () => void;
 		queueOpen: boolean;
 		onToggleLyrics: () => void;
 		lyricsOpen: boolean;
+		onToggleNowPlayingSidebar?: () => void;
 	} = $props();
 
 	// Pop the heart once when the user favourites (not when un-favouriting). Reset on animation end
@@ -341,8 +343,12 @@
 				variant={np.sidebarOpen ? 'secondary' : 'ghost'}
 				size="icon-sm"
 				onclick={() => {
-					np.sidebarOpen = !np.sidebarOpen;
-					if (np.sidebarOpen) np.open = false;
+					if (onToggleNowPlayingSidebar) {
+						onToggleNowPlayingSidebar();
+					} else {
+						np.sidebarOpen = !np.sidebarOpen;
+						if (np.sidebarOpen) np.open = false;
+					}
 				}}
 				aria-label="Now playing view"
 				title="Now playing view"

@@ -7,17 +7,13 @@
 **A native desktop YouTube Music client — Rust + Tauri, ad-free, no Electron.**
 
 <p align="center">
-  <a href="https://github.com/SimoHypers/limusic/releases/latest"><img alt="GitHub Downloads" src="https://img.shields.io/github/downloads/SimoHypers/limusic/total?style=for-the-badge&label=DOWNLOADS&color=a4c400"></a>
-  <a href="https://github.com/SimoHypers/limusic/releases/latest"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/SimoHypers/limusic?display_name=release&style=for-the-badge&color=a10935"></a>
-  <img alt="License" src="https://img.shields.io/github/license/SimoHypers/limusic?style=for-the-badge&color=1881cc">
-  <br>
   <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black">
   <img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logoColor=white">
   <img src="https://img.shields.io/badge/Tauri_2-24C8D8?style=for-the-badge&logo=tauri&logoColor=white">
   <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white">
 </p>
 
-**Nocturne Music** talks directly to YouTube's internal API and plays audio through libmpv — no bundled
+**Nocturne Music** (short: **Nocturne**) talks directly to YouTube's internal API and plays audio through libmpv — no bundled
 browser runtime, no backend server, no ads in the audio. It started as a desktop rebuild of the
 playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android
 YouTube Music client, and grew from there.

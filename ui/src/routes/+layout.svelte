@@ -1,6 +1,6 @@
 <script lang="ts">
 	import './layout.css';
-	import favicon from '$lib/assets/favicon.svg';
+	import favicon from '$lib/assets/icon.png';
 	import { ModeWatcher } from 'mode-watcher';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
@@ -47,19 +47,58 @@
 	} from '$lib/updater.svelte';
 
 	let { children } = $props();
-	// Queue and lyrics toggle independently and both float over the page rather than docking into
-	// it — two docked columns squeezed the content down to an unusable strip. At lg+ they sit side
-	// by side over the content; narrower, they stack (see QueuePanel / LyricsPanel).
+	// Only 1 sidebar can be visible at a time:
 	let queueOpen = $state(false);
 	let lyricsOpen = $state(false);
-	// Two ways the now-playing view and these panels can divide the same two buttons, picked in
-	// settings (#62). Tabbed (the default): the view carries queue and lyrics itself, so the panels
-	// step aside for it and the bar's buttons switch its tabs. Off: these are the only owner, the
-	// buttons always mean the panels, and the panels float over that view like they float over a
-	// page, so opening it costs you nothing you had open.
+
+	function toggleQueue() {
+		if (tabbed) {
+			np.tab = 'queue';
+		} else {
+			if (queueOpen) {
+				queueOpen = false;
+			} else {
+				queueOpen = true;
+				lyricsOpen = false;
+				np.sidebarOpen = false;
+			}
+		}
+	}
+
+	function toggleLyrics() {
+		if (tabbed) {
+			np.tab = 'lyrics';
+		} else {
+			if (lyricsOpen) {
+				lyricsOpen = false;
+			} else {
+				lyricsOpen = true;
+				queueOpen = false;
+				np.sidebarOpen = false;
+			}
+		}
+	}
+
+	function toggleNowPlayingSidebar() {
+		if (np.sidebarOpen) {
+			np.sidebarOpen = false;
+		} else {
+			np.sidebarOpen = true;
+			queueOpen = false;
+			lyricsOpen = false;
+			np.open = false;
+		}
+	}
+
 	const tabbed = $derived(np.open && appearance.tabbedPlayer);
 	$effect(() => {
 		if (tabbed) queueOpen = lyricsOpen = false;
+	});
+	$effect(() => {
+		if (np.sidebarOpen) {
+			queueOpen = false;
+			lyricsOpen = false;
+		}
 	});
 
 	// "Adapt colors to artwork": re-run on every track change and on the toggle itself. The 120px
@@ -150,34 +189,24 @@
 				{/key}
 			</main>
 			{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
-			<!-- Lyrics before queue: side by side over the page, lyrics on the left, queue on the right. -->
 			{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} {queueOpen} />{/if}
 			{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
 			{#if np.sidebarOpen && playback.now && !np.open}
 				<NowPlayingSidebar
 					onClose={() => (np.sidebarOpen = false)}
-					onOpenQueue={() => {
-						queueOpen = true;
-						np.sidebarOpen = false;
-					}}
-					onOpenLyrics={() => {
-						lyricsOpen = true;
-						np.sidebarOpen = false;
-					}}
+					onOpenQueue={toggleQueue}
+					onOpenLyrics={toggleLyrics}
 				/>
 			{/if}
 		</div>
 		{#if playback.now}
-			<!-- Slides up from its own height on first play; leaves instantly (bar removal is rare).
-			     z-20 on the wrapper, not the bar: the intro's transform makes this a stacking context,
-			     so a z on the footer inside would be trapped under it. The now-playing view is z-20 and
-			     earlier in the DOM, which is what puts it behind the bar as it slides in and out. -->
 			<div class="relative z-20" in:fly={{ y: 64, duration: 250, easing: cubicOut }}>
 				<PlayerBar
-					onToggleQueue={() => (tabbed ? (np.tab = 'queue') : (queueOpen = !queueOpen))}
+					onToggleQueue={toggleQueue}
 					queueOpen={tabbed ? np.tab === 'queue' : queueOpen}
-					onToggleLyrics={() => (tabbed ? (np.tab = 'lyrics') : (lyricsOpen = !lyricsOpen))}
+					onToggleLyrics={toggleLyrics}
 					lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
+					onToggleNowPlayingSidebar={toggleNowPlayingSidebar}
 				/>
 			</div>
 		{/if}

@@ -3,7 +3,7 @@ name = "limusic-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Limusic — desktop YouTube Music client"
+description = "Nocturne Music — desktop YouTube Music client"
 rust-version = "1.80"
 
 [lib]
