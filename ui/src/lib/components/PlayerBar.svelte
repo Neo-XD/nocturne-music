@@ -22,6 +22,7 @@
 		ArrowDown01Icon
 	} from '@hugeicons/core-free-icons';
 	import { fade } from 'svelte/transition';
+	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import {
@@ -92,6 +93,12 @@
 		return cur?.video_id === playback.now?.videoId ? cur : null;
 	});
 
+	// The title links to the song's album (there is no per-song page). Local files carry no
+	// album_id, so their title stays plain text.
+	const albumId = $derived(
+		currentSong && !api.isLocalId(currentSong.video_id) ? currentSong.album_id : undefined
+	);
+
 	// Seek: while dragging, hold a local value so incoming mpv position ticks can't yank the thumb
 	// back under the pointer; only invoke the (expensive) seek on release.
 	let seekDrag = $state<number | null>(null);
@@ -160,7 +167,18 @@
 				<Marquee
 					text={playback.now?.title ?? 'Nothing playing'}
 					class="text-sm font-medium"
-				/>
+				>
+					{#if albumId}
+						<button
+							class="cursor-pointer text-left hover:underline"
+							onclick={() => goto(`/album/${encodeURIComponent(albumId!)}`)}
+						>
+							{playback.now?.title}
+						</button>
+					{:else}
+						{playback.now?.title ?? t('player.not_playing')}
+					{/if}
+				</Marquee>
 				{#if autoplayTrack}
 					<span
 						class="shrink-0 text-muted-foreground"
