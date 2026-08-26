@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
 		Cancel01Icon,
@@ -206,6 +208,31 @@
 
 	const bgSrc = $derived(thumb(playback.now?.thumbnail, 400));
 	const coverSrc = $derived(thumb(playback.now?.thumbnail, 720));
+
+	// This is intentionally the window's native fullscreen mode, not a larger in-app overlay. It
+	// removes the desktop chrome and fills the monitor like a borderless game view; returning to
+	// the normal player restores the state the window had before this view opened.
+	onMount(() => {
+		let windowWasFullscreen = false;
+		let disposed = false;
+		let appWindow: ReturnType<typeof getCurrentWindow> | null = null;
+		try {
+			appWindow = getCurrentWindow();
+			appWindow
+				.isFullscreen()
+				.then((wasFullscreen) => {
+					windowWasFullscreen = wasFullscreen;
+					if (!wasFullscreen && !disposed) return appWindow?.setFullscreen(true);
+				})
+				.catch(() => {});
+		} catch {
+			// Browser preview: the in-app fullscreen layout still works without Tauri's window API.
+		}
+		return () => {
+			disposed = true;
+			if (!windowWasFullscreen) appWindow?.setFullscreen(false).catch(() => {});
+		};
+	});
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -225,7 +252,7 @@
 	{/if}
 
 	<!-- Top Floating Header Bar with generous top distance -->
-	<header class="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-8 sm:px-16 lg:px-24 pt-20 sm:pt-24 lg:pt-28 pb-4">
+	<header class="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-8 pt-24 pb-4 sm:px-16 sm:pt-28 lg:px-24 lg:pt-32">
 		<div class="flex items-center gap-3.5">
 			<div class="flex h-9 w-9 items-center justify-center rounded-xl bg-foreground/10 text-foreground backdrop-blur-md shadow-sm">
 				<HugeiconsIcon icon={MusicNote01Icon} class="h-4.5 w-4.5" />
@@ -241,19 +268,19 @@
 			size="sm"
 			onclick={() => (np.fullscreenOpen = false)}
 			aria-label="Exit Fullscreen (Esc)"
-			class="gap-2 rounded-full border-border/70 bg-background/70 px-5 py-2 text-xs font-medium text-foreground backdrop-blur-md transition hover:bg-background cursor-pointer shadow-md"
+			class="gap-1.5 rounded-full border-border/70 bg-background/70 px-3 py-1.5 text-xs font-medium text-foreground backdrop-blur-md transition hover:bg-background cursor-pointer shadow-md"
 		>
 			<HugeiconsIcon icon={Cancel01Icon} class="h-3.5 w-3.5" />
 			<span>Exit</span>
-			<kbd class="ml-1 rounded bg-muted/80 px-1.5 py-0.5 text-[10px] text-muted-foreground">Esc</kbd>
+			<kbd class="ml-0.5 rounded bg-muted/80 px-1 py-0.5 text-[10px] text-muted-foreground">Esc</kbd>
 		</Button>
 	</header>
 
 	<!-- Main Two-Column View with spacious top clearance -->
-	<main class="relative z-10 mx-auto flex min-h-0 flex-1 w-full max-w-7xl items-center px-8 sm:px-16 lg:px-24 gap-12 lg:gap-20 pt-48 sm:pt-52 lg:pt-56 pb-12">
+	<main class="relative z-10 mx-auto flex min-h-0 w-full max-w-7xl flex-1 items-center gap-16 px-8 pt-52 pb-6 sm:gap-20 sm:px-16 sm:pt-56 lg:gap-28 lg:px-24 lg:pt-60 xl:gap-32">
 		<!-- Left Column: Album Artwork & Transport Controls (Middle-Left) -->
 		<section
-			class="flex flex-col items-center justify-center w-full max-w-sm sm:max-w-md xl:max-w-[26rem] 2xl:max-w-[28rem] shrink-0"
+			class="relative flex w-full max-w-sm shrink-0 self-stretch flex-col items-center justify-center sm:max-w-md xl:max-w-[26rem] 2xl:max-w-[28rem]"
 			onwheel={wheelVolume}
 		>
 			<!-- Artwork Card -->
@@ -355,7 +382,7 @@
 				</div>
 
 				<!-- Playback Transport Row -->
-				<div class="mt-4 flex items-center justify-center gap-4 sm:gap-6">
+				<div class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-4 sm:gap-6">
 					<Button
 						variant="ghost"
 						size="icon-sm"
