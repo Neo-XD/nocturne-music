@@ -1233,6 +1233,18 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v062_note = ReleaseNote {
+        version: "0.6.2".to_string(),
+        date: "2026-08-26".to_string(),
+        body: r#"### Nocturne Music v0.6.2
+
+- **Fullscreen Player**: F11 opens a borderless fullscreen player with refined spacing, a compact Exit control, bottom-anchored transport controls, and live lyrics.
+- **Keyboard & Playlist Polish**: Ctrl+F advances to the next track, and playlist headers now use their own artwork as a blurred backdrop.
+- **Music Videos**: Added resilient music-video playback with stream caching, smoother synchronization, and reliable background/visibility handling.
+- **Playlist Improvements**: Search your playlists when adding tracks, and use improved album-artist metadata for local music.
+- **Home Playback**: Playing from a home shelf now starts only the selected song."#.to_string(),
+    };
+
     let v061_note = ReleaseNote {
         version: "0.6.1".to_string(),
         date: "2026-08-25".to_string(),
@@ -1270,6 +1282,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes: Vec<ReleaseNote> = Vec::new();
+    notes.push(v062_note);
     notes.push(v061_note);
     notes.push(v06_note);
 
