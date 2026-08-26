@@ -40,10 +40,14 @@ export const playback = $state({
 });
 
 /**
- * The full-window now-playing view (NowPlaying.svelte): big artwork, plus the Queue/Lyrics tabs.
- * It lives here rather than in the layout because starting something playing opens it, and every
+ * `open` is the full-window now-playing view (NowPlaying.svelte): big artwork, plus the
+ * Queue/Lyrics tabs. `sidebarOpen` is the docked panel beside the page. Both can be true at once:
+ * the layout renders the sidebar only while `!open`, so the full view hides it rather than closing
+ * it, and dismissing the full view brings it back.
+ * This lives here rather than in the layout because starting something playing opens it, and every
  * "play this" path already goes through this module. The open has to happen at the click: a
  * gapless advance looks exactly like a user play from the `now-playing` event alone.
+ * `sidebarOpen` starts false so the auto-open preference decides the first one, not this default.
  */
 export const np = $state({
 	open: false,
