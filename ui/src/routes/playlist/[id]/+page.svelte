@@ -76,8 +76,9 @@
 	let moreError = $state(false);
 	let inflight: Promise<void> | null = null;
 	let confirmingDelete = $state(false);
-	// A random song's cover, used as a blurred hero backdrop (like the artist/album pages).
-	let bgImage = $state<string | null>(null);
+	// A song cover is only the fallback: a playlist's own artwork is always the hero backdrop when
+	// it has one. It also keeps auto-generated playlists from ending up with an empty header.
+	let fallbackImage = $state<string | null>(null);
 
 	// ⋯ options menu, positioned `fixed` at the button so it isn't clipped (matches TrackRow).
 	let menuOpen = $state(false);
@@ -93,6 +94,7 @@
 	const longDescription = $derived((pl?.description?.length ?? 0) > 120);
 	// The artwork on the page: whatever the user picked on this machine, else YouTube's own.
 	const art = $derived(thumb(pl?.cover ?? pl?.thumbnail, 400));
+	const headerImage = $derived(thumb(pl?.cover ?? pl?.thumbnail, 1200) ?? fallbackImage);
 
 	// Header filter box: matches title / artist / album over the rows loaded so far.
 	//
@@ -366,12 +368,12 @@
 		if (hit) {
 			pl = hit;
 			if (!saved) sort = hit.sortMenu?.selected ?? 'default';
-			bgImage = pickCover(hit.items);
+			fallbackImage = pickCover(hit.items);
 			loading = false;
 		} else {
 			loading = true;
 			pl = null;
-			bgImage = null;
+			fallbackImage = null;
 		}
 		error = null;
 		const [askedSort, askedDesc] = [sort, desc];
@@ -384,7 +386,7 @@
 			if (pid !== id || sort !== askedSort || desc !== askedDesc) return;
 			pl = fresh;
 			if (!saved) sort = fresh.sortMenu?.selected ?? 'default';
-			bgImage = pickCover(fresh.items);
+			fallbackImage = pickCover(fresh.items);
 			putCached(key, fresh);
 		} catch (e) {
 			if (pid !== id) return;
@@ -540,7 +542,7 @@
 		subtitle,
 		// On Repeat stays artwork-free wherever it's rendered (shortcuts, recents) so it always
 		// draws its icon rather than one of its songs' covers.
-		thumbnail: isOnRepeat ? undefined : (pl?.cover ?? pl?.thumbnail ?? bgImage ?? undefined)
+		thumbnail: isOnRepeat ? undefined : (pl?.cover ?? pl?.thumbnail ?? fallbackImage ?? undefined)
 	});
 
 	// `sourceId` points autoplay at that playlist's radio. On Repeat has no YouTube id, so pass
@@ -715,11 +717,11 @@
 		     album page. -->
 		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
 			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden border-b p-6">
-				{#if bgImage}
+				{#if headerImage}
 					<img
-						src={bgImage}
+						src={headerImage}
 						alt=""
-						class="pointer-events-none absolute inset-0 h-full w-full object-cover object-center"
+						class="pointer-events-none absolute -inset-6 h-[calc(100%+3rem)] w-[calc(100%+3rem)] max-w-none scale-105 object-cover object-center opacity-75 blur-2xl"
 					/>
 				{/if}
 				<!-- Fade the cover into the page so the text stays readable: solid at the bottom and on the

@@ -17,7 +17,8 @@
 				['Toggle repeat', `${MOD}R`],
 				['Mute or unmute', `${MOD}M`],
 				['Volume up', `${MOD}>`],
-				['Volume down', `${MOD}<`]
+				['Volume down', `${MOD}<`],
+				['Toggle fullscreen player', 'F11']
 			]
 		},
 		{

@@ -21,6 +21,14 @@ const typing = (t: EventTarget | null) =>
 export function initShortcuts() {
 	const onKey = (e: KeyboardEvent) => {
 		if (!e.ctrlKey && !e.metaKey) {
+			// Keep the app-level fullscreen player separate from the browser's fullscreen command.
+			// Preventing the native F11 action also keeps WebView from obscuring Nocturne's controls.
+			if (e.key === 'F11') {
+				if (!playback.now) return;
+				np.fullscreenOpen = !np.fullscreenOpen;
+				e.preventDefault();
+				return;
+			}
 			// Space also activates a focused button and scrolls the page, so it is swallowed either
 			// way once we know it isn't being typed.
 			if (e.key !== ' ' && e.key !== ';') return;
@@ -48,9 +56,6 @@ export function initShortcuts() {
 				break;
 			case 'f':
 			case 'F':
-				if (!playback.now) return;
-				np.fullscreenOpen = !np.fullscreenOpen;
-				break;
 				api.nextTrack();
 				break;
 			case 'd':
