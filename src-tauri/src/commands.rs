@@ -1241,6 +1241,20 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v064_note = ReleaseNote {
+        version: "0.6.4".to_string(),
+        date: "2026-08-28".to_string(),
+        body: r#"### Nocturne Music v0.6.4
+
+- **Nested Playlist Folders**: Organize your library with recursive subfolders, collapsible folder trees, and folder count badges.
+- **Library Drag & Drop**: Drop playlists onto each other to instantly make folders, drop playlists/folders into folder cards to nest them, or drag back out to unfile.
+- **Save Queue to Playlist**: Save your active playback queue directly to any playlist or create a new playlist on the fly from the queue panel.
+- **Customizable Shortcuts Editor**: Search is now bound to Ctrl+Space by default, with a keybind manager in Settings (General) to rebind or reset your shortcuts.
+- **Explicit Content Filter & Badges**: Added an explicit content filter toggle in Playback Settings, relocated the explicit song badge to the left of the artist's name across all views, and added the badge to the bottom player bar.
+- **Search Context Menus**: Added three-dot context menus to search suggestions and song results so you can save, queue, and manage songs right from search.
+- **Sidebar Folder Creation**: Quick "New folder" button next to "New playlist" in the sidebar."#.to_string(),
+    };
+
     let v063_note = ReleaseNote {
         version: "0.6.3".to_string(),
         date: "2026-08-27".to_string(),
@@ -1305,7 +1319,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         prerelease: bool,
     }
 
-    let mut notes = vec![v063_note, v062_note, v061_note, v06_note];
+    let mut notes = vec![v064_note, v063_note, v062_note, v061_note, v06_note];
 
     let known_versions: std::collections::HashSet<String> =
         notes.iter().map(|n| n.version.clone()).collect();
