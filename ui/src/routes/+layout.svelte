@@ -40,7 +40,7 @@
 	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
-	import { initShortcuts } from '$lib/shortcuts';
+	import { initShortcuts } from '$lib/shortcuts.svelte';
 	import {
 		updateState,
 		installUpdate,

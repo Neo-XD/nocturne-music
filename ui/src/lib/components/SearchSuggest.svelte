@@ -12,8 +12,10 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import ExplicitIcon from './ExplicitIcon.svelte';
 	import type { BrowseItem } from '$lib/api';
-	import { openItem, searchPreview } from '$lib/browse';
-	import { MOD } from '$lib/shortcuts';
+	import { asSong, openItem, searchPreview } from '$lib/browse';
+	import { openAddToPlaylist } from '$lib/player.svelte';
+	import TrackMenu from './TrackMenu.svelte';
+	import { formatKey, keybindings } from '$lib/shortcuts.svelte';
 	import { thumb } from '$lib/thumb';
 
 	let {
@@ -137,7 +139,7 @@
 		<kbd
 			class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-wide text-muted-foreground"
 		>
-			{MOD}K
+			{formatKey(keybindings.search)}
 		</kbd>
 	{/if}
 	{#if open}
@@ -162,17 +164,26 @@
 			{:else}
 				{#each items as item, i (item.id)}
 					{@const hero = i === 0}
-					<button
-						type="button"
+					<div
 						role="option"
+						data-ctx
+						tabindex="-1"
 						aria-selected={i === active}
-						class="flex w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors {i ===
+						class="group relative flex w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors {i ===
 						active
 							? 'bg-accent/60'
 							: 'hover:bg-accent/40'} {hero ? 'border-b py-2.5' : 'py-1.5'}"
-						onmousedown={(e) => e.preventDefault()}
 						onmouseenter={() => (active = i)}
-						onclick={() => choose(item)}
+						onclick={(e) => {
+							if (e.target instanceof Element && e.target.closest('button.track-menu-trigger, .track-menu-portal')) return;
+							choose(item);
+						}}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								choose(item);
+							}
+						}}
 					>
 						{#if item.thumbnail}
 							<!-- 400, the same size the cards ask for: the CDN doesn't serve every rewritten size,
@@ -204,7 +215,7 @@
 									<ExplicitIcon class="h-3 w-3 shrink-0" />
 								{/if}
 								<span class="truncate">
-									{KIND[item.kind]}{item.subtitle ? ` • ${item.subtitle}` : ''}
+									{KIND[item.kind as keyof typeof KIND] ?? item.kind}{item.subtitle ? ` • ${item.subtitle}` : ''}
 								</span>
 							</div>
 						</div>
@@ -215,7 +226,21 @@
 								Top result
 							</span>
 						{/if}
-					</button>
+						{#if item.kind === 'song'}
+							<div
+								class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 {i === active ? 'opacity-100' : ''}"
+							>
+								<TrackMenu
+									song={asSong(item)}
+									triggerClass="track-menu-trigger"
+									onAdd={() => {
+										close();
+										openAddToPlaylist(asSong(item));
+									}}
+								/>
+							</div>
+						{/if}
+					</div>
 				{/each}
 			{/if}
 			<!-- submit, so the enclosing form decides what "all results" does. -->

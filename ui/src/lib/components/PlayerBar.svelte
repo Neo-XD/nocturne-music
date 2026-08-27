@@ -38,6 +38,7 @@
 		wheelVolume
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
+	import ExplicitIcon from './ExplicitIcon.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
@@ -195,12 +196,17 @@
 					</span>
 				{/if}
 			</div>
-			<ArtistLine
-				runs={playback.now?.artistRuns}
-				text={playback.now?.artists ?? ''}
-				marquee
-				class="block max-w-full text-xs text-muted-foreground"
-			/>
+			<div class="flex items-center gap-1.5 min-w-0">
+				{#if playback.now?.explicit}
+					<ExplicitIcon class="h-3 w-3 shrink-0" />
+				{/if}
+				<ArtistLine
+					runs={playback.now?.artistRuns}
+					text={playback.now?.artists ?? ''}
+					marquee
+					class="block max-w-full text-xs text-muted-foreground"
+				/>
+			</div>
 		</div>
 		{#if playback.now}
 			<div class="flex items-center">

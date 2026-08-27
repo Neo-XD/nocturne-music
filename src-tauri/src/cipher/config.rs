@@ -197,7 +197,7 @@ impl PlayerConfigStore {
         let changed = {
             let mut entries = self.entries.write().unwrap();
             let changed = incoming.iter().any(|(k, v)| {
-                entries.get(k).is_none_or(|old| {
+                entries.get(k).map_or(true, |old| {
                     old.sig_expr != v.sig_expr || old.n_class != v.n_class || old.sts != v.sts
                 })
             });

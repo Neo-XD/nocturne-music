@@ -6,9 +6,26 @@ import type { BrowseItem } from './api';
 export const ITEM_MIME = 'application/x-nocturne-item';
 /** A queue row being dragged to a new position (`QueueList`), carrying its queue index. */
 export const QUEUE_ROW_MIME = 'application/x-nocturne-queue-row';
+/** A playlist being dragged in the sidebar or library */
+export const PLAYLIST_DND_MIME = 'application/x-nocturne-playlist';
+/** A playlist folder being dragged in the sidebar or library */
+export const FOLDER_DND_MIME = 'application/x-nocturne-folder';
 
 export function setDragItem(e: DragEvent, item: BrowseItem): void {
 	e.dataTransfer?.setData(ITEM_MIME, JSON.stringify(item));
+	if (item.kind === 'playlist') {
+		e.dataTransfer?.setData(PLAYLIST_DND_MIME, item.id);
+	}
+}
+
+export function setDragPlaylist(e: DragEvent, playlistId: string): void {
+	e.dataTransfer?.setData(PLAYLIST_DND_MIME, playlistId);
+	e.dataTransfer?.setData('text/plain', playlistId);
+}
+
+export function setDragFolder(e: DragEvent, folderId: string): void {
+	e.dataTransfer?.setData(FOLDER_DND_MIME, folderId);
+	e.dataTransfer?.setData('text/plain', folderId);
 }
 
 /** True during dragover when this drag is one of ours (a file or a link is not). */

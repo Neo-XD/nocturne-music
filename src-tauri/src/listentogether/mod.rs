@@ -56,8 +56,9 @@ pub enum SyncCommand {
     Release,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Role {
+    #[default]
     None,
     Host,
     Guest,
@@ -98,12 +99,6 @@ struct Inner {
     pending_joins: Vec<(String, String)>, // (user_id, username)
     suggestions: Vec<Suggestion>,
     outbound: Option<mpsc::UnboundedSender<ClientMessage>>,
-}
-
-impl Default for Role {
-    fn default() -> Self {
-        Role::None
-    }
 }
 
 impl Inner {

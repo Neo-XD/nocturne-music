@@ -349,7 +349,7 @@ pub fn generate_cpn() -> String {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
     let bump = COUNTER.fetch_add(1, Ordering::Relaxed).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    let mut state = (nanos ^ bump).wrapping_add(0x1234_567);
+    let mut state = (nanos ^ bump).wrapping_add(0x0123_4567);
     if state == 0 {
         state = 0xDEAD_BEEF;
     }

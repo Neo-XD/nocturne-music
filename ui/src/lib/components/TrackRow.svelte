@@ -173,7 +173,10 @@
 					</span>
 				{/if}
 			</div>
-			<div class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+			<div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+				{#if song.explicit}
+					<ExplicitIcon class="h-3 w-3 shrink-0" />
+				{/if}
 				<ArtistLine runs={song.artist_runs} text={song.artists} />
 				{#if compact && duration}
 					<span class="shrink-0">· {duration}</span>
@@ -213,13 +216,6 @@
 			<span class="flex h-7 w-7 shrink-0 items-center justify-center">
 				{#if inPlaylists.length}
 					<SavedInPlaylists playlists={inPlaylists} />
-				{/if}
-			</span>
-		{/if}
-		{#if !hideRating}
-			<span class="flex h-3.5 w-3.5 shrink-0 items-center">
-				{#if song.explicit}
-					<ExplicitIcon class="h-3.5 w-3.5 text-muted-foreground" />
 				{/if}
 			</span>
 		{/if}

@@ -33,6 +33,7 @@
 		wheelVolume
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
+	import ExplicitIcon from './ExplicitIcon.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
@@ -388,12 +389,17 @@
 						text={playback.now?.title ?? 'Nothing playing'}
 						class="text-base font-bold tracking-tight text-foreground"
 					/>
-					<ArtistLine
-						runs={playback.now?.artistRuns}
-						text={playback.now?.artists ?? ''}
-						marquee
-						class="block max-w-full text-sm text-muted-foreground hover:text-foreground"
-					/>
+					<div class="flex items-center gap-1.5 min-w-0">
+						{#if playback.now?.explicit}
+							<ExplicitIcon class="h-3.5 w-3.5 shrink-0" />
+						{/if}
+						<ArtistLine
+							runs={playback.now?.artistRuns}
+							text={playback.now?.artists ?? ''}
+							marquee
+							class="block max-w-full text-sm text-muted-foreground hover:text-foreground"
+						/>
+					</div>
 				</div>
 
 				<!-- Track Action Buttons (Like, Add to playlist, Menu) -->

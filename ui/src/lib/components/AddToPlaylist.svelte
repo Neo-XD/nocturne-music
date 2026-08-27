@@ -2,12 +2,14 @@
 	import { fade, scale } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { Cancel01Icon } from '@hugeicons/core-free-icons';
+	import { Cancel01Icon, Add01Icon } from '@hugeicons/core-free-icons';
+	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import {
 		ui,
 		toast,
+		createLibraryPlaylist,
 		bumpLibraryTrackCount,
 		notePlaylistAdd,
 		noteSavedIn
@@ -17,6 +19,10 @@
 	let loading = $state(false);
 	let filter = $state('');
 	let box = $state<HTMLInputElement | null>(null);
+	let showNew = $state(false);
+	let newTitle = $state('');
+	let creating = $state(false);
+
 	// `autofocus` is unreliable on an element inserted after load (and mid-transition), so focus it
 	// ourselves the frame it exists: the modal opens ready to type.
 	$effect(() => {
@@ -36,6 +42,8 @@
 		if (ui.addSongs) {
 			loading = true;
 			filter = '';
+			showNew = false;
+			newTitle = '';
 			api
 				.getLibrary()
 				.then(
@@ -51,6 +59,24 @@
 
 	function close() {
 		ui.addSongs = null;
+		showNew = false;
+	}
+
+	async function createAndPick() {
+		const title = newTitle.trim();
+		const songs = ui.addSongs;
+		if (!title || !songs?.length || creating) return;
+		creating = true;
+		try {
+			const id = await createLibraryPlaylist(title);
+			newTitle = '';
+			showNew = false;
+			await pick({ id, title, kind: 'playlist' });
+		} catch (e) {
+			toast.error(String(e));
+		} finally {
+			creating = false;
+		}
 	}
 
 	async function pick(pl: BrowseItem) {
@@ -114,6 +140,51 @@
 					<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
 				</button>
 			</div>
+			<div class="mb-2 flex items-center justify-between gap-2 border-b border-border/40 pb-2">
+				{#if showNew}
+					<form
+						class="flex flex-1 items-center gap-1.5"
+						onsubmit={(e) => {
+							e.preventDefault();
+							createAndPick();
+						}}
+					>
+						<input
+							bind:value={newTitle}
+							placeholder="New playlist name..."
+							class="h-8 flex-1 rounded-md border border-border bg-background px-2.5 text-xs outline-none focus:ring-1 focus:ring-primary"
+						/>
+						<Button
+							size="sm"
+							type="submit"
+							disabled={creating || !newTitle.trim()}
+							class="h-8 px-2.5 text-xs cursor-pointer"
+						>
+							{creating ? 'Creating...' : 'Create'}
+						</Button>
+						<Button
+							size="sm"
+							variant="ghost"
+							type="button"
+							onclick={() => (showNew = false)}
+							class="h-8 px-2 text-xs cursor-pointer"
+						>
+							Cancel
+						</Button>
+					</form>
+				{:else}
+					<Button
+						variant="outline"
+						size="sm"
+						class="w-full justify-start gap-2 text-xs font-medium text-primary hover:text-primary cursor-pointer"
+						onclick={() => (showNew = true)}
+					>
+						<HugeiconsIcon icon={Add01Icon} class="h-3.5 w-3.5" />
+						<span>New playlist</span>
+					</Button>
+				{/if}
+			</div>
+
 			{#if playlists.length > 1}
 				<input
 					bind:this={box}

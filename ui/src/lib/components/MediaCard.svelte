@@ -9,8 +9,9 @@
 	import { ON_REPEAT_ID } from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
-	import { setDragItem } from '$lib/dnd';
+	import { setDragItem, PLAYLIST_DND_MIME } from '$lib/dnd';
 	import { openItem, playItem } from '$lib/browse';
+	import { createFolderFromPlaylists, toast } from '$lib/player.svelte';
 	import ItemMenu from './ItemMenu.svelte';
 	import ExplicitIcon from './ExplicitIcon.svelte';
 
@@ -46,6 +47,7 @@
 	const imgFailed = () => (attempt = attempt === 0 && sized !== item.thumbnail ? 1 : 2);
 
 	let playing = $state(false); // in-flight guard for the fetch-then-play path
+	let isDragOver = $state(false);
 
 	async function playNow() {
 		if (playing) return;
@@ -61,14 +63,35 @@
 <!-- data-ctx: right-clicking anywhere on the card opens the ⋯ menu below at the pointer. -->
 <div class="group relative flex w-full flex-col gap-2" data-ctx>
 	<!-- draggable: every card is a drag source for home's Shortcuts grid (the only drop target). -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="flex flex-col text-left transition-colors hover:bg-accent/10 {compact
+		class="flex flex-col text-left transition-all hover:bg-accent/10 {compact
 			? 'gap-1.5 rounded-lg p-1.5'
-			: 'gap-2 rounded-xl p-2'}"
+			: 'gap-2 rounded-xl p-2'} {isDragOver ? 'ring-2 ring-primary bg-primary/10' : ''}"
 		role="button"
 		tabindex="0"
 		draggable="true"
 		ondragstart={(e) => setDragItem(e, item)}
+		ondragover={(e) => {
+			if (item.kind === 'playlist' && e.dataTransfer?.types.includes(PLAYLIST_DND_MIME)) {
+				e.preventDefault();
+				isDragOver = true;
+				if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+			}
+		}}
+		ondragleave={() => (isDragOver = false)}
+		ondrop={(e) => {
+			if (item.kind === 'playlist') {
+				e.preventDefault();
+				isDragOver = false;
+				const sourceId = e.dataTransfer?.getData(PLAYLIST_DND_MIME);
+				if (sourceId && sourceId !== item.id) {
+					const folderName = item.title ? `${item.title} & more` : 'New Folder';
+					createFolderFromPlaylists(folderName, [sourceId, item.id]);
+					toast.success(`Created folder with 2 playlists`);
+				}
+			}
+		}}
 		onclick={() => openItem(item)}
 		onkeydown={(e) => {
 			if (e.target !== e.currentTarget) return;

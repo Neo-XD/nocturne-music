@@ -144,6 +144,15 @@ fn youtube_cookie_header(mut cookies: Vec<Cookie<'static>>) -> String {
     jar.into_iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; ")
 }
 
+fn close_login(app: &AppHandle) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = app2.get_webview_window(LOGIN_LABEL) {
+            let _ = w.destroy();
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,13 +185,4 @@ mod tests {
         ]);
         assert_eq!(header, "PREF=specific");
     }
-}
-
-fn close_login(app: &AppHandle) {
-    let app2 = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        if let Some(w) = app2.get_webview_window(LOGIN_LABEL) {
-            let _ = w.destroy();
-        }
-    });
 }

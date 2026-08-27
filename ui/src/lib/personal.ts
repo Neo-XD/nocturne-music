@@ -35,7 +35,9 @@ export type Saved = BrowseItem & { synced?: boolean };
 export type PlaylistFolder = {
 	id: string;
 	name: string;
+	parentId?: string | null;
 	playlistIds: string[];
+	collapsed?: boolean;
 	createdAt: number;
 };
 
@@ -110,9 +112,11 @@ export function hydrate(raw: unknown): Personal {
 			.map((f) => ({
 				id: f.id,
 				name: f.name,
+				parentId: typeof f.parentId === 'string' ? f.parentId : null,
 				playlistIds: Array.isArray(f.playlistIds)
 					? f.playlistIds.filter((id) => typeof id === 'string')
 					: [],
+				collapsed: Boolean(f.collapsed),
 				createdAt: typeof f.createdAt === 'number' ? f.createdAt : Date.now()
 			}));
 	}
@@ -456,13 +460,38 @@ export function interleave<T extends { id: string }>(lists: T[][], cap: number):
 
 // --- Playlist Folders -------------------------------------------------------------------------
 
-export function createFolder(p: Personal, name: string): PlaylistFolder {
+export function createFolder(p: Personal, name: string, parentId: string | null = null): PlaylistFolder {
 	if (!p.folders) p.folders = [];
 	const trimmed = name.trim();
 	const folder: PlaylistFolder = {
 		id: `folder_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
 		name: trimmed || 'New Folder',
+		parentId: parentId || null,
 		playlistIds: [],
+		collapsed: false,
+		createdAt: Date.now()
+	};
+	p.folders.push(folder);
+	return folder;
+}
+
+export function createFolderFromPlaylists(
+	p: Personal,
+	name: string,
+	playlistIds: string[],
+	parentId: string | null = null
+): PlaylistFolder {
+	if (!p.folders) p.folders = [];
+	for (const f of p.folders) {
+		f.playlistIds = f.playlistIds.filter((id) => !playlistIds.includes(id));
+	}
+	const trimmed = name.trim();
+	const folder: PlaylistFolder = {
+		id: `folder_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+		name: trimmed || 'New Folder',
+		parentId: parentId || null,
+		playlistIds: [...new Set(playlistIds)],
+		collapsed: false,
 		createdAt: Date.now()
 	};
 	p.folders.push(folder);
@@ -478,8 +507,39 @@ export function renameFolder(p: Personal, folderId: string, newName: string): vo
 	}
 }
 
+export function toggleFolderCollapsed(p: Personal, folderId: string): void {
+	if (!p.folders) return;
+	const folder = p.folders.find((f) => f.id === folderId);
+	if (folder) {
+		folder.collapsed = !folder.collapsed;
+	}
+}
+
+export function getFolderDescendantIds(p: Personal, folderId: string): Set<string> {
+	const descendants = new Set<string>();
+	if (!p.folders) return descendants;
+	const queue = [folderId];
+	while (queue.length) {
+		const current = queue.shift()!;
+		for (const f of p.folders) {
+			if (f.parentId === current && !descendants.has(f.id)) {
+				descendants.add(f.id);
+				queue.push(f.id);
+			}
+		}
+	}
+	return descendants;
+}
+
 export function deleteFolder(p: Personal, folderId: string): void {
 	if (!p.folders) return;
+	const target = p.folders.find((f) => f.id === folderId);
+	const parentId = target?.parentId ?? null;
+	for (const f of p.folders) {
+		if (f.parentId === folderId) {
+			f.parentId = parentId;
+		}
+	}
 	p.folders = p.folders.filter((f) => f.id !== folderId);
 }
 
@@ -502,7 +562,53 @@ export function removePlaylistFromFolder(p: Personal, folderId: string, playlist
 	}
 }
 
+export function movePlaylistToFolder(
+	p: Personal,
+	playlistId: string,
+	targetFolderId: string | null
+): void {
+	if (!p.folders) p.folders = [];
+	for (const f of p.folders) {
+		f.playlistIds = f.playlistIds.filter((id) => id !== playlistId);
+	}
+	if (targetFolderId) {
+		const target = p.folders.find((f) => f.id === targetFolderId);
+		if (target && !target.playlistIds.includes(playlistId)) {
+			target.playlistIds.push(playlistId);
+		}
+	}
+}
+
+export function moveFolderToFolder(
+	p: Personal,
+	sourceFolderId: string,
+	targetFolderId: string | null
+): boolean {
+	if (!p.folders) return false;
+	if (sourceFolderId === targetFolderId) return false;
+	const source = p.folders.find((f) => f.id === sourceFolderId);
+	if (!source) return false;
+
+	if (targetFolderId !== null) {
+		const descendants = getFolderDescendantIds(p, sourceFolderId);
+		if (descendants.has(targetFolderId)) return false;
+		const target = p.folders.find((f) => f.id === targetFolderId);
+		if (!target) return false;
+	}
+
+	source.parentId = targetFolderId;
+	return true;
+}
+
 export function findPlaylistFolder(p: Personal, playlistId: string): PlaylistFolder | undefined {
 	return p.folders?.find((f) => f.playlistIds.includes(playlistId));
+}
+
+export function getRootFolders(p: Personal): PlaylistFolder[] {
+	return (p.folders ?? []).filter((f) => !f.parentId);
+}
+
+export function getChildFolders(p: Personal, parentId: string): PlaylistFolder[] {
+	return (p.folders ?? []).filter((f) => f.parentId === parentId);
 }
 

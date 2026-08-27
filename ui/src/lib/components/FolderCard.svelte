@@ -11,6 +11,18 @@
 	import type { BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
+	import {
+		PLAYLIST_DND_MIME,
+		FOLDER_DND_MIME,
+		setDragFolder,
+		getDragItem
+	} from '$lib/dnd';
+	import {
+		movePlaylistToFolder,
+		moveFolderToFolder,
+		library,
+		toast
+	} from '$lib/player.svelte';
 
 	let {
 		folder,
@@ -36,6 +48,7 @@
 
 	let menuOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
+	let isDragOver = $state(false);
 
 	function openMenu(e: MouseEvent) {
 		e.preventDefault();
@@ -58,10 +71,49 @@
 </script>
 
 <div class="group relative flex w-full flex-col gap-2" data-ctx>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="flex flex-col text-left transition-colors hover:bg-accent/10 gap-2 rounded-xl p-2 cursor-pointer"
+		class="flex flex-col text-left transition-all hover:bg-accent/10 gap-2 rounded-xl p-2 cursor-pointer {isDragOver
+			? 'ring-2 ring-primary bg-primary/10'
+			: ''}"
 		role="button"
 		tabindex="0"
+		draggable="true"
+		ondragstart={(e) => {
+			if (e.dataTransfer) {
+				setDragFolder(e, folder.id);
+				e.dataTransfer.effectAllowed = 'move';
+			}
+		}}
+		ondragover={(e) => {
+			const hasPl = e.dataTransfer?.types.includes(PLAYLIST_DND_MIME);
+			const hasFolder = e.dataTransfer?.types.includes(FOLDER_DND_MIME);
+			if (hasPl || hasFolder) {
+				e.preventDefault();
+				isDragOver = true;
+				if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+			}
+		}}
+		ondragleave={() => (isDragOver = false)}
+		ondrop={(e) => {
+			e.preventDefault();
+			isDragOver = false;
+			const plId = e.dataTransfer?.getData(PLAYLIST_DND_MIME);
+			const fId = e.dataTransfer?.getData(FOLDER_DND_MIME);
+
+			if (plId) {
+				const pl = library.items.find((p) => p.id === plId);
+				movePlaylistToFolder(plId, folder.id);
+				toast.success(`Moved "${pl?.title ?? 'playlist'}" to "${folder.name}"`);
+			} else if (fId && fId !== folder.id) {
+				const moved = moveFolderToFolder(fId, folder.id);
+				if (moved) {
+					toast.success(`Moved folder into "${folder.name}"`);
+				} else {
+					toast.error('Cannot move folder inside itself or its subfolders');
+				}
+			}
+		}}
 		{onclick}
 		onkeydown={(e) => {
 			if (e.target !== e.currentTarget) return;

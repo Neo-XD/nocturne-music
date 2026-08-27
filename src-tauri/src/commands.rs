@@ -178,7 +178,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 19] = [
+const UI_SETTINGS: [&str; 21] = [
     "volume",
     "proxy",
     "quality",
@@ -198,6 +198,8 @@ const UI_SETTINGS: [&str; 19] = [
     "music_videos",
     "lastfm_api_key",
     "lastfm_api_secret",
+    "custom_keybindings",
+    "filter_explicit",
 ];
 
 /// Resolve the music video for `video_id` and hand back a proxy URL the player view
@@ -1303,11 +1305,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         prerelease: bool,
     }
 
-    let mut notes: Vec<ReleaseNote> = Vec::new();
-    notes.push(v063_note);
-    notes.push(v062_note);
-    notes.push(v061_note);
-    notes.push(v06_note);
+    let mut notes = vec![v063_note, v062_note, v061_note, v06_note];
 
     let known_versions: std::collections::HashSet<String> =
         notes.iter().map(|n| n.version.clone()).collect();

@@ -14,7 +14,8 @@
 		MusicNote01Icon,
 		ListRestartIcon,
 		SquareArrowLeft01Icon,
-		SquareArrowRight01Icon
+		SquareArrowRight01Icon,
+		FolderAddIcon
 	} from '@hugeicons/core-free-icons';
 	import { toggleMode } from 'mode-watcher';
 	import { Button } from '$lib/components/ui/button';
@@ -29,6 +30,7 @@
 		personal,
 		ui,
 		createLibraryPlaylist,
+		createPlaylistFolder,
 		toggleSidebar,
 		toast
 	} from '$lib/player.svelte';
@@ -84,6 +86,17 @@
 		} finally {
 			creating = false;
 		}
+	}
+
+	let folderDialogOpen = $state(false);
+	let newFolderName = $state('');
+	function handleCreateFolder() {
+		const name = newFolderName.trim();
+		if (!name) return;
+		const f = createPlaylistFolder(name);
+		toast.success(`Created folder "${f.name}"`);
+		newFolderName = '';
+		folderDialogOpen = false;
 	}
 
 	// Account lives in the titlebar now — see AccountMenu.svelte.
@@ -179,16 +192,31 @@
 	{#if auth.account?.signedIn || playlists.length}
 		<div class="mt-3 hidden min-h-0 flex-1 flex-col border-t pt-3 {wide('lg:flex')}">
 			<!-- Creating one is a YouTube write action, so it needs an account. -->
-			{#if auth.account?.signedIn}
+			<div class="mb-2 flex items-center gap-1.5">
+				{#if auth.account?.signedIn}
+					<Button
+						variant="outline"
+						size="sm"
+						class="h-8 flex-1 gap-1.5 text-xs cursor-pointer"
+						onclick={() => (dialogOpen = true)}
+					>
+						<HugeiconsIcon icon={Add01Icon} class="h-3.5 w-3.5" />
+						<span>New playlist</span>
+					</Button>
+				{/if}
 				<Button
-					variant="outline"
-					size="sm"
-					class="mb-2 w-full gap-2"
-					onclick={() => (dialogOpen = true)}
+					variant="ghost"
+					size="icon-sm"
+					class="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer"
+					onclick={() => {
+						newFolderName = '';
+						folderDialogOpen = true;
+					}}
+					title="New folder"
 				>
-					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
+					<HugeiconsIcon icon={FolderAddIcon} class="h-4 w-4" />
 				</Button>
-			{/if}
+			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto">
 				{#each playlists as pl, i (pl.id)}
 					<!-- The ⋯ is a sibling of the link, not a child: a <button> inside an <a> is invalid
@@ -274,6 +302,28 @@
 						<Button type="submit" disabled={creating || !newTitle.trim()}>
 							{creating ? 'Creating…' : 'Create'}
 						</Button>
+					</Dialog.Footer>
+				</form>
+			</Dialog.Content>
+		</Dialog.Root>
+
+		<Dialog.Root bind:open={folderDialogOpen}>
+			<Dialog.Content class="sm:max-w-md">
+				<Dialog.Header>
+					<Dialog.Title>New Folder</Dialog.Title>
+					<Dialog.Description>Organize your playlists in a folder.</Dialog.Description>
+				</Dialog.Header>
+				<form
+					class="flex flex-col gap-4"
+					onsubmit={(e) => {
+						e.preventDefault();
+						handleCreateFolder();
+					}}
+				>
+					<Input bind:value={newFolderName} placeholder="Folder name" autofocus />
+					<Dialog.Footer>
+						<Button type="button" variant="outline" onclick={() => (folderDialogOpen = false)}>Cancel</Button>
+						<Button type="submit" disabled={!newFolderName.trim()}>Create</Button>
 					</Dialog.Footer>
 				</form>
 			</Dialog.Content>

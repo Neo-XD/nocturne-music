@@ -15,7 +15,8 @@
 		KeyboardIcon,
 		ArrowUp01Icon,
 		ArrowDown01Icon,
-		Mic01Icon
+		Mic01Icon,
+		RotateLeft01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -26,7 +27,16 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as api from '$lib/api';
 	import { prefs, ui, toast } from '$lib/player.svelte';
-	import { MOD } from '$lib/shortcuts';
+	import {
+		formatKey,
+		keybindings,
+		setKeybinding,
+		resetKeybindings,
+		normalizeEvent,
+		SHORTCUT_DEFINITIONS,
+		type ShortcutAction,
+		MOD
+	} from '$lib/shortcuts.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import Changelog from '$lib/components/Changelog.svelte';
 	import {
@@ -60,12 +70,13 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'lyrics' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'lyrics' | 'keybindings' | 'data' | 'about';
 	const TABS: { id: TabId; label: string; hint: string; icon: typeof Settings02Icon }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
 		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and stream clients.', icon: PlayCircleIcon },
 		{ id: 'lyrics', label: 'Lyrics', hint: 'Provider priority, sources and synchronization.', icon: Mic01Icon },
+		{ id: 'keybindings', label: 'Keybindings', hint: 'Keyboard shortcuts and custom key mappings.', icon: KeyboardIcon },
 		{ id: 'data', label: 'Data & storage', hint: 'Network and cached files.', icon: Database02Icon },
 		{ id: 'about', label: 'About', hint: 'Version, updates and what changed.', icon: InformationCircleIcon }
 	];
@@ -243,6 +254,37 @@
 		};
 	});
 
+	// --- Keybindings tab ---
+	let recordingAction = $state<ShortcutAction | null>(null);
+
+	function startRecording(action: ShortcutAction) {
+		recordingAction = action;
+	}
+
+	function stopRecording() {
+		recordingAction = null;
+	}
+
+	function onKeyRecord(e: KeyboardEvent) {
+		if (!recordingAction) return;
+		e.preventDefault();
+		e.stopPropagation();
+
+		if (e.key === 'Escape') {
+			stopRecording();
+			return;
+		}
+
+		const combo = normalizeEvent(e);
+		if (combo) {
+			const targetAction = recordingAction;
+			setKeybinding(targetAction, combo);
+			const def = SHORTCUT_DEFINITIONS.find((d) => d.id === targetAction);
+			toast.success(`Updated shortcut for ${def?.label ?? targetAction}`);
+			stopRecording();
+		}
+	}
+
 	async function load() {
 		try {
 			const [s, c] = await Promise.all([
@@ -376,6 +418,7 @@
 	// for. Same test in `player.svelte.ts`, which hydrates `prefs` at launch.
 	const musicVideosOn = $derived(settings.music_videos === 'true');
 	const boiduOn = $derived(settings.lyrics_boidu !== 'false');
+	const filterExplicitOn = $derived(settings.filter_explicit === 'true');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const discordOn = $derived(settings.discord_rpc === 'true');
@@ -412,6 +455,12 @@
 	async function setAutoplay(on: boolean) {
 		settings.autoplay = on ? 'true' : 'false';
 		await api.setSetting('autoplay', settings.autoplay);
+	}
+
+	async function setFilterExplicit(on: boolean) {
+		settings.filter_explicit = on ? 'true' : 'false';
+		prefs.filterExplicit = on;
+		await api.setSetting('filter_explicit', settings.filter_explicit);
 	}
 
 	// Also lands in `prefs`, which is where the player view reads it: the switch has to take effect
@@ -523,6 +572,8 @@
 		{/if}
 	</div>
 {/snippet}
+
+<svelte:window onkeydown={recordingAction ? onKeyRecord : undefined} />
 
 <Dialog.Root bind:open={ui.settingsOpen}>
 	<Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl">
@@ -732,6 +783,12 @@
 									control: dupSwitch,
 									tall: true
 								})}
+								{@render row({
+									title: 'Explicit content filter',
+									desc: 'Filter and automatically skip tracks containing explicit lyrics or themes.',
+									control: filterExplicitSwitch,
+									tall: true
+								})}
 							</div>
 						</section>
 						<section class={GROUP}>
@@ -838,6 +895,107 @@
 								{/each}
 							</div>
 						</section>
+					{:else if tab === 'keybindings'}
+						<div class="mb-5 flex items-center justify-between px-1">
+							<div>
+								<h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									Keyboard Shortcuts & Keybindings
+								</h3>
+								<p class="text-xs text-muted-foreground mt-0.5">
+									Click any keybind badge to record a new key combination.
+								</p>
+							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								class="flex items-center gap-1.5 text-xs cursor-pointer text-muted-foreground hover:text-foreground"
+								onclick={resetKeybindings}
+							>
+								<HugeiconsIcon icon={RotateLeft01Icon} class="h-3.5 w-3.5" />
+								<span>Reset to defaults</span>
+							</Button>
+						</div>
+
+						{#if recordingAction}
+							<div class="mb-4 rounded-xl border border-primary/40 bg-primary/10 p-3.5 animate-in fade-in-0 duration-150">
+								<div class="flex items-center justify-between">
+									<div class="flex items-center gap-2">
+										<span class="relative flex h-2.5 w-2.5">
+											<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+											<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary"></span>
+										</span>
+										<span class="text-xs font-semibold text-primary">
+											Recording keybind for: {SHORTCUT_DEFINITIONS.find((d) => d.id === recordingAction)?.label}
+										</span>
+									</div>
+									<button
+										type="button"
+										onclick={stopRecording}
+										class="text-xs text-muted-foreground hover:text-foreground underline cursor-pointer"
+									>
+										Cancel (Esc)
+									</button>
+								</div>
+								<p class="mt-1 text-[11px] text-muted-foreground">
+									Press the desired key or combination (e.g. <kbd class="font-mono px-1 py-0.5 rounded border bg-background/50">Ctrl+Space</kbd>, <kbd class="font-mono px-1 py-0.5 rounded border bg-background/50">Ctrl+Alt+N</kbd>, <kbd class="font-mono px-1 py-0.5 rounded border bg-background/50">F9</kbd>).
+								</p>
+							</div>
+						{/if}
+
+						{#each (['Playback', 'Navigation', 'General'] as const) as groupName}
+							{@const groupDefs = SHORTCUT_DEFINITIONS.filter((d) => d.group === groupName)}
+							{#if groupDefs.length}
+								<section class={GROUP}>
+									<h3 class={LABEL}>{groupName}</h3>
+									<div class={CARD}>
+										{#each groupDefs as def (def.id)}
+											{@const currentKey = keybindings[def.id]}
+											{@const isDefault = currentKey === def.defaultKey}
+											{@const isRecordingThis = recordingAction === def.id}
+											<div class="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-muted/10">
+												<div class="min-w-0 flex-1">
+													<div class="flex items-center gap-2">
+														<span class="text-xs font-semibold text-foreground">{def.label}</span>
+														{#if !isDefault}
+															<span class="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+																Custom
+															</span>
+														{/if}
+													</div>
+													<p class="text-[11px] text-muted-foreground truncate">{def.description}</p>
+												</div>
+
+												<div class="flex items-center gap-2 shrink-0">
+													<button
+														type="button"
+														onclick={() => (isRecordingThis ? stopRecording() : startRecording(def.id))}
+														class="group/key min-w-[5.5rem] px-2.5 py-1.5 rounded-lg border text-center font-mono text-xs font-medium transition-all cursor-pointer {isRecordingThis
+															? 'border-primary bg-primary text-primary-foreground shadow-md ring-2 ring-primary/30'
+															: 'border-border/80 bg-muted/40 text-foreground hover:border-primary/50 hover:bg-accent/40'}"
+													>
+														{#if isRecordingThis}
+															<span class="animate-pulse">Press keys...</span>
+														{:else}
+															<span>{formatKey(currentKey)}</span>
+														{/if}
+													</button>
+													{#if !isDefault}
+														<button
+															type="button"
+															title="Reset to default ({formatKey(def.defaultKey)})"
+															onclick={() => setKeybinding(def.id, def.defaultKey)}
+															class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer transition-colors"
+														>
+															<HugeiconsIcon icon={RotateLeft01Icon} class="h-3.5 w-3.5" />
+														</button>
+													{/if}
+												</div>
+											</div>
+										{/each}
+									</div>
+								</section>
+							{/if}
+						{/each}
 					{:else if tab === 'data'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Network</h3>
@@ -991,6 +1149,10 @@
 {#snippet dupSwitch()}<Switch
 		checked={preventDuplicatesOn}
 		onCheckedChange={setPreventDuplicates}
+	/>{/snippet}
+{#snippet filterExplicitSwitch()}<Switch
+		checked={filterExplicitOn}
+		onCheckedChange={setFilterExplicit}
 	/>{/snippet}
 {#snippet musicVideoSwitch()}<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />{/snippet}
 {#snippet hideVideoSwitch()}<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />{/snippet}

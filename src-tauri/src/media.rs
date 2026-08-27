@@ -75,10 +75,7 @@ pub fn spawn(app: AppHandle) -> Option<MediaHandle> {
 fn run(app: AppHandle, rx: std::sync::mpsc::Receiver<MediaUpdate>) {
     // On Windows SMTC needs the main window handle; Linux/macOS ignore it.
     #[cfg(target_os = "windows")]
-    let hwnd = app
-        .get_webview_window("main")
-        .and_then(|w| w.hwnd().ok())
-        .map(|h| h.0 as *mut std::ffi::c_void);
+    let hwnd = app.get_webview_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0);
     #[cfg(not(target_os = "windows"))]
     let hwnd = None;
 

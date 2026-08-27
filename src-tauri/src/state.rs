@@ -1185,7 +1185,7 @@ impl AppState {
                 }
             }
             pages += 1;
-            if last_emit.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+            if last_emit.map_or(true, |t| t.elapsed() >= std::time::Duration::from_secs(1)) {
                 last_emit = Some(std::time::Instant::now());
                 self.emit_queue().await;
             }
@@ -1674,6 +1674,7 @@ impl AppState {
             // YouTube's own `musicVideoType` says this track is a video upload, not the generated
             // audio track, which is what the player view's music-video mode gates on (plan 031).
             "isVideo": item.is_video,
+            "explicit": item.explicit,
         })
     }
 

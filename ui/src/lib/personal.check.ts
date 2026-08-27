@@ -12,12 +12,15 @@ import {
 	arrangeSections,
 	addPlaylistToFolder,
 	createFolder,
+	createFolderFromPlaylists,
 	deleteFolder,
 	empty,
 	findPlaylistFolder,
 	firstArtist,
 	forgetIds,
 	freshen,
+	getChildFolders,
+	getRootFolders,
 	hiddenSections,
 	hydrate,
 	interleave,
@@ -25,6 +28,8 @@ import {
 	isSynced,
 	markSynced,
 	mergeSaved,
+	moveFolderToFolder,
+	movePlaylistToFolder,
 	noteRecent,
 	noteSections,
 	orderLibrary,
@@ -34,6 +39,7 @@ import {
 	removePlaylistFromFolder,
 	renameFolder,
 	seedPick,
+	toggleFolderCollapsed,
 	togglePin,
 	toggleSaved,
 	topArtistIds,
@@ -420,8 +426,41 @@ const range = (n: number, prefix: string) => Array.from({ length: n }, (_, i) =>
 	removePlaylistFromFolder(p, f2.id, 'VL1');
 	ok(f2.playlistIds.length === 0, 'playlist removed from folder');
 
+	// Nested folders test
+	const f3 = createFolder(p, 'Cardio', f2.id);
+	ok(f3.parentId === f2.id, 'subfolder parentId set');
+	ok(getRootFolders(p).map((f) => f.id).includes(f2.id), 'f2 is in root folders');
+	ok(!getRootFolders(p).map((f) => f.id).includes(f3.id), 'f3 is not in root folders');
+	ok(getChildFolders(p, f2.id).map((f) => f.id).includes(f3.id), 'f3 is child of f2');
+
+	// Create folder from playlists (Drag playlist onto playlist)
+	const f4 = createFolderFromPlaylists(p, 'Rock Mixes', ['VL3', 'VL4']);
+	ok(f4.playlistIds.includes('VL3') && f4.playlistIds.includes('VL4'), 'folder created with playlists');
+
+	// Move playlist
+	movePlaylistToFolder(p, 'VL3', f3.id);
+	ok(!f4.playlistIds.includes('VL3'), 'VL3 removed from f4');
+	ok(f3.playlistIds.includes('VL3'), 'VL3 moved to f3');
+	movePlaylistToFolder(p, 'VL3', null);
+	ok(!f3.playlistIds.includes('VL3'), 'VL3 unfiled to root');
+
+	// Move folder & circular dependency prevention
+	ok(moveFolderToFolder(p, f4.id, f2.id), 'moved f4 under f2');
+	ok(f4.parentId === f2.id, 'f4 parent is f2');
+	ok(!moveFolderToFolder(p, f2.id, f4.id), 'cannot move parent f2 into child f4 (circular)');
+	ok(moveFolderToFolder(p, f4.id, null), 'moved f4 back to root');
+	ok(f4.parentId === null, 'f4 parent is null (root)');
+
+	// Toggle collapse
+	ok(!f2.collapsed, 'initially expanded');
+	toggleFolderCollapsed(p, f2.id);
+	ok(Boolean(f2.collapsed), 'collapsed toggled');
+
+	// Delete folder moves children up
+	moveFolderToFolder(p, f3.id, f2.id);
+	deleteFolder(p, f2.id);
+	ok(f3.parentId === null, 'child f3 moved to root when parent f2 deleted');
 	deleteFolder(p, f1.id);
-	ok(p.folders.length === 1 && p.folders[0].id === f2.id, 'folder deleted');
 }
 
 console.log('ok');

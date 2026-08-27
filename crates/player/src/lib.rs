@@ -349,6 +349,7 @@ fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<Playe
                     }
                 }
             }
+            #[allow(clippy::collapsible_match)]
             Some(Err(e)) => {
                 // libmpv2 routes MPV_EVENT_END_FILE with an error (dead URL, 403, bad format)
                 // through here instead of Event::EndFile — in our usage (no async get/set/command

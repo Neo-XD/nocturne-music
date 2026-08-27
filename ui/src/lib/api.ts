@@ -95,6 +95,7 @@ export interface NowPlaying {
 	/** YouTube's `musicVideoType` says this is a video upload, not the generated audio track.
 	 *  Gates the player view's music-video mode. */
 	isVideo?: boolean;
+	explicit?: boolean;
 }
 
 export type RepeatMode = 'off' | 'all' | 'one';

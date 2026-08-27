@@ -361,7 +361,7 @@ async fn lrclib_search(req: &LyricsRequest) -> Result<Option<LrclibTrack>, reqwe
         }
         if synced(&t) {
             let d = dist(&t);
-            if best_synced.as_ref().is_none_or(|(bd, _)| d < *bd) {
+            if best_synced.as_ref().map_or(true, |(bd, _)| d < *bd) {
                 best_synced = Some((d, t));
             }
         } else if best_plain.is_none() {
@@ -498,35 +498,135 @@ fn now_secs() -> i64 {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
+/// Clean song titles of noisy YouTube metadata like (Official Video), (feat. ...), [Audio], etc.
+fn clean_lyrics_title(title: &str) -> String {
+    let mut s = title.to_string();
+    let noise_patterns = [
+        "(official music video)",
+        "(official video)",
+        "(official audio)",
+        "(official visualizer)",
+        "(official lyric video)",
+        "(official hd video)",
+        "(official 4k video)",
+        "(music video)",
+        "(lyric video)",
+        "(lyrics video)",
+        "(visualizer)",
+        "(audio visualizer)",
+        "(audio)",
+        "(lyrics)",
+        "(official)",
+        "[official music video]",
+        "[official video]",
+        "[official audio]",
+        "[official visualizer]",
+        "[official lyric video]",
+        "[music video]",
+        "[lyric video]",
+        "[visualizer]",
+        "[audio]",
+        "[lyrics]",
+        "[official]",
+        "(remastered)",
+        "[remastered]",
+        "(deluxe edition)",
+        "[deluxe edition]",
+        "(explicit)",
+        "[explicit]",
+        "(clean)",
+        "[clean]",
+    ];
+
+    let mut lower = s.to_lowercase();
+    for pat in noise_patterns {
+        if let Some(pos) = lower.find(pat) {
+            s.replace_range(pos..pos + pat.len(), "");
+            lower = s.to_lowercase();
+        }
+    }
+
+    // Strip feat / ft / with inside parentheses: e.g. "(feat. Drake)" or "(with Daft Punk)"
+    for prefix in
+        ["(feat.", "(feat ", "(ft.", "(ft ", "(with ", "[feat.", "[feat ", "[ft.", "[ft ", "[with "]
+    {
+        if let Some(pos) = lower.find(prefix) {
+            let closer = if prefix.starts_with('(') { ')' } else { ']' };
+            if let Some(end_rel) = s[pos..].find(closer) {
+                s.replace_range(pos..pos + end_rel + 1, "");
+                lower = s.to_lowercase();
+            }
+        }
+    }
+
+    // Strip trailing feat / ft / with outside parentheses if at the end
+    for prefix in [" feat. ", " feat ", " ft. ", " ft ", " with "] {
+        if let Some(pos) = lower.find(prefix) {
+            s.truncate(pos);
+            lower = s.to_lowercase();
+        }
+    }
+
+    s.trim().trim_matches(|c| c == '"' || c == '\'' || c == '-' || c == ':').trim().to_string()
+}
+
+/// Clean artist names of collaborations or delimiters (e.g. "The Weeknd, Daft Punk" -> "The Weeknd")
+fn clean_lyrics_artist(artist: &str) -> String {
+    let cut = artist.find(';').or_else(|| artist.find(',')).unwrap_or(artist.len());
+    let mut a = artist[..cut].trim().to_string();
+    let lower = a.to_lowercase();
+    for marker in [" feat.", " feat ", " ft.", " ft ", " featuring ", " with "] {
+        if let Some(i) = lower.find(marker) {
+            a.truncate(i);
+            break;
+        }
+    }
+    a.trim().to_string()
+}
 
 // --- Additional Providers (Better Lyrics & Asian Catalogues) ------------------------------
 
 /// Better Lyrics provider (Better Lyrics API / Boidu) - syllable-by-syllable & word-level sync
 async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
-    let mut q: Vec<(&str, String)> = vec![("s", req.title.clone()), ("a", req.artists.clone())];
-    if let Some(album) = &req.album {
-        q.push(("al", album.clone()));
-    }
-    if let Some(d) = req.duration.filter(|d| *d > 0.0) {
-        q.push(("d", format!("{}", d.round() as i64)));
+    let clean_title = clean_lyrics_title(&req.title);
+    let clean_artist = clean_lyrics_artist(&req.artists);
+
+    // Try queries in order of highest cache hit probability:
+    // 1. Cleaned title + cleaned artist
+    // 2. Raw title + raw artist (if different)
+    let mut query_variants: Vec<(String, String)> = Vec::new();
+    query_variants.push((
+        if clean_title.is_empty() { req.title.clone() } else { clean_title.clone() },
+        if clean_artist.is_empty() { req.artists.clone() } else { clean_artist.clone() },
+    ));
+    if clean_title != req.title || clean_artist != req.artists {
+        query_variants.push((req.title.clone(), req.artists.clone()));
     }
 
-    let endpoints =
-        ["https://lyrics-api.boidu.dev/getLyrics", "https://api.betterlyrics.org/getLyrics"];
+    const ENDPOINT: &str = "https://lyrics-api.boidu.dev/getLyrics";
+    const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
-    for url in endpoints {
-        tracing::debug!(title = %req.title, artist = %req.artists, %url, "lyrics: querying Better Lyrics provider");
+    for (title, artist) in query_variants {
+        let mut q: Vec<(&str, String)> = vec![("s", title.clone()), ("a", artist.clone())];
+        if let Some(album) = &req.album {
+            q.push(("al", album.clone()));
+        }
+        if let Some(d) = req.duration.filter(|d| *d > 0.0) {
+            q.push(("d", format!("{}", d.round() as i64)));
+        }
+
+        tracing::debug!(title = %title, artist = %artist, url = %ENDPOINT, "lyrics: querying Better Lyrics provider");
         let resp_opt: Option<serde_json::Value> = match crate::http::client()
-            .get(url)
+            .get(ENDPOINT)
             .query(&q)
-            .header("User-Agent", LRCLIB_UA)
-            .timeout(Duration::from_secs(8))
+            .header("User-Agent", BROWSER_UA)
+            .timeout(Duration::from_secs(5))
             .send()
             .await
         {
             Ok(r) => r.json().await.ok(),
             Err(e) => {
-                tracing::debug!(%url, error = %e, "lyrics: Better Lyrics request failed");
+                tracing::debug!(url = %ENDPOINT, error = %e, "lyrics: Better Lyrics request failed");
                 None
             }
         };

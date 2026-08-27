@@ -31,6 +31,7 @@
 		toggleMute
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
+	import ExplicitIcon from './ExplicitIcon.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 	import { Button } from '$lib/components/ui/button';
 
@@ -338,7 +339,10 @@
 								<h2 class="font-heading text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground truncate">
 									{playback.now?.title ?? 'Nothing playing'}
 								</h2>
-								<div class="mt-1 text-sm sm:text-base font-medium text-muted-foreground truncate">
+								<div class="mt-1 flex items-center gap-1.5 text-sm sm:text-base font-medium text-muted-foreground truncate">
+									{#if playback.now?.explicit}
+										<ExplicitIcon class="h-3.5 w-3.5 shrink-0" />
+									{/if}
 									<ArtistLine
 										runs={playback.now?.artistRuns}
 										text={playback.now?.artists ?? ''}

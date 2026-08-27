@@ -463,7 +463,7 @@ fn albums_of(tracks: &[LocalTrack]) -> Vec<BrowseItem> {
             }
         })
         .collect();
-    albums.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    albums.sort_by_key(|a| a.title.to_lowercase());
     albums
 }
 
@@ -514,7 +514,7 @@ fn artists_of(tracks: &[LocalTrack]) -> Vec<BrowseItem> {
             }
         })
         .collect();
-    artists.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    artists.sort_by_key(|a| a.title.to_lowercase());
     artists
 }
 
@@ -573,7 +573,7 @@ fn page_of(title: Option<String>, artist: Option<String>, tracks: &[LocalTrack])
         )),
         description: None,
         thumbnail: tracks.iter().find_map(|t| t.cover.clone()),
-        items: songs_of(&tracks),
+        items: songs_of(tracks),
         continuation: None,
         explicit: false,
         // No YouTube playlist behind it: no radio to seed, nothing to save to the library, and

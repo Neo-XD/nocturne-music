@@ -48,8 +48,11 @@
 		syncSavedToYouTube,
 		createPlaylistFolder,
 		renamePlaylistFolder,
-		deletePlaylistFolder
+		deletePlaylistFolder,
+		movePlaylistToFolder,
+		moveFolderToFolder
 	} from '$lib/player.svelte';
+	import { PLAYLIST_DND_MIME, FOLDER_DND_MIME } from '$lib/dnd';
 	import { mergeSaved, unsynced } from '$lib/personal';
 	import { reveal } from '$lib/reveal.svelte';
 
@@ -130,14 +133,23 @@
 	let activeFolderId = $state<string | null>(null);
 	let folderDialogOpen = $state(false);
 	let newFolderName = $state('');
+	let newFolderParentId = $state<string | null>(null);
 	let renameDialogOpen = $state(false);
 	let renameFolderId = $state<string | null>(null);
 	let renameFolderName = $state('');
 	let deleteDialogOpen = $state(false);
 	let deleteFolderId = $state<string | null>(null);
+	let dragOverBack = $state(false);
 
 	const folders = $derived(personal.folders ?? []);
+	const rootFolders = $derived(folders.filter((f) => !f.parentId));
 	const activeFolder = $derived(folders.find((f) => f.id === activeFolderId));
+	const parentFolderOfActive = $derived(
+		activeFolder?.parentId ? folders.find((f) => f.id === activeFolder.parentId) : null
+	);
+	const childFoldersInActive = $derived(
+		activeFolder ? folders.filter((f) => f.parentId === activeFolder.id) : []
+	);
 	const playlistsInActiveFolder = $derived(
 		activeFolder ? playlists.filter((p) => activeFolder.playlistIds.includes(p.id)) : []
 	);
@@ -150,9 +162,10 @@
 	function createFolder() {
 		const name = newFolderName.trim();
 		if (!name) return;
-		const f = createPlaylistFolder(name);
+		const f = createPlaylistFolder(name, newFolderParentId);
 		toast.success(`Created folder "${f.name}"`);
 		newFolderName = '';
+		newFolderParentId = null;
 		folderDialogOpen = false;
 	}
 
@@ -179,7 +192,7 @@
 	function confirmDelete() {
 		if (!deleteFolderId) return;
 		if (activeFolderId === deleteFolderId) {
-			activeFolderId = null;
+			activeFolderId = parentFolderOfActive?.id ?? null;
 		}
 		deletePlaylistFolder(deleteFolderId);
 		toast.success('Folder deleted');
@@ -452,10 +465,50 @@
 							<Button
 								variant="ghost"
 								size="sm"
-								class="gap-1.5 text-muted-foreground hover:text-foreground mb-4"
-								onclick={() => (activeFolderId = null)}
+								class="gap-1.5 text-muted-foreground hover:text-foreground mb-4 cursor-pointer {dragOverBack
+									? 'ring-2 ring-primary bg-primary/10 text-primary'
+									: ''}"
+								ondragover={(e) => {
+									if (
+										e.dataTransfer?.types.includes(PLAYLIST_DND_MIME) ||
+										e.dataTransfer?.types.includes(FOLDER_DND_MIME)
+									) {
+										e.preventDefault();
+										dragOverBack = true;
+										if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+									}
+								}}
+								ondragleave={() => (dragOverBack = false)}
+								ondrop={(e) => {
+									e.preventDefault();
+									dragOverBack = false;
+									const plId = e.dataTransfer?.getData(PLAYLIST_DND_MIME);
+									const fId = e.dataTransfer?.getData(FOLDER_DND_MIME);
+									const targetParentId = parentFolderOfActive?.id ?? null;
+									if (plId) {
+										movePlaylistToFolder(plId, targetParentId);
+										toast.success(
+											parentFolderOfActive
+												? `Moved to "${parentFolderOfActive.name}"`
+												: 'Moved to top level'
+										);
+									} else if (fId && fId !== targetParentId) {
+										const ok = moveFolderToFolder(fId, targetParentId);
+										if (ok) {
+											toast.success(
+												parentFolderOfActive
+													? `Moved to "${parentFolderOfActive.name}"`
+													: 'Moved to top level'
+											);
+										} else {
+											toast.error('Cannot move folder inside itself');
+										}
+									}
+								}}
+								onclick={() => (activeFolderId = parentFolderOfActive?.id ?? null)}
 							>
-								<HugeiconsIcon icon={ArrowLeft01Icon} class="h-4 w-4" /> Back to Playlists
+								<HugeiconsIcon icon={ArrowLeft01Icon} class="h-4 w-4" />
+								<span>{parentFolderOfActive ? `Back to ${parentFolderOfActive.name}` : 'Back to Playlists'}</span>
 							</Button>
 							<div class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border/60 bg-card/40 p-4 mb-6">
 								<div class="flex items-center gap-3">
@@ -465,7 +518,7 @@
 									<div>
 										<h2 class="font-heading text-xl font-bold">{activeFolder.name}</h2>
 										<p class="text-xs text-muted-foreground">
-											{playlistsInActiveFolder.length} {playlistsInActiveFolder.length === 1 ? 'playlist' : 'playlists'}
+											{playlistsInActiveFolder.length} {playlistsInActiveFolder.length === 1 ? 'playlist' : 'playlists'}{childFoldersInActive.length ? ` · ${childFoldersInActive.length} subfolders` : ''}
 										</p>
 									</div>
 								</div>
@@ -473,7 +526,19 @@
 									<Button
 										variant="outline"
 										size="sm"
-										class="gap-1.5"
+										class="gap-1.5 cursor-pointer"
+										onclick={() => {
+											newFolderParentId = activeFolder.id;
+											newFolderName = '';
+											folderDialogOpen = true;
+										}}
+									>
+										<HugeiconsIcon icon={FolderAddIcon} class="h-3.5 w-3.5" /> Subfolder
+									</Button>
+									<Button
+										variant="outline"
+										size="sm"
+										class="gap-1.5 cursor-pointer"
 										onclick={() => openRename(activeFolder.id, activeFolder.name)}
 									>
 										<HugeiconsIcon icon={Edit02Icon} class="h-3.5 w-3.5" /> Rename
@@ -481,7 +546,7 @@
 									<Button
 										variant="outline"
 										size="sm"
-										class="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+										class="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive cursor-pointer"
 										onclick={() => promptDelete(activeFolder.id)}
 									>
 										<HugeiconsIcon icon={Delete02Icon} class="h-3.5 w-3.5" /> Delete
@@ -489,25 +554,50 @@
 								</div>
 							</div>
 						</div>
+
+						{#if childFoldersInActive.length > 0}
+							<div class="mb-6">
+								<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									Subfolders
+								</h3>
+								<div class="card-grid content-in mb-6">
+									{#each childFoldersInActive as folder (folder.id)}
+										<FolderCard
+											{folder}
+											playlists={playlists.filter((p) => folder.playlistIds.includes(p.id))}
+											onclick={() => (activeFolderId = folder.id)}
+											onrename={() => openRename(folder.id, folder.name)}
+											ondelete={() => promptDelete(folder.id)}
+										/>
+									{/each}
+								</div>
+							</div>
+						{/if}
+
 						{#if playlistsInActiveFolder.length}
+							{#if childFoldersInActive.length > 0}
+								<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									Playlists
+								</h3>
+							{/if}
 							<div class="card-grid content-in">
 								{#each playlistsInActiveFolder as item (item.kind + item.id)}
 									<MediaCard {item} />
 								{/each}
 							</div>
-						{:else}
+						{:else if !childFoldersInActive.length}
 							<p class="text-sm text-muted-foreground">
-								No playlists in this folder yet. Click the ⋯ menu on any playlist and choose "Add to folder" to organize it here.
+								No playlists in this folder yet. Click the ⋯ menu on any playlist and choose "Add to folder" or drag and drop to organize it here.
 							</p>
 						{/if}
 					{:else}
-						{#if folders.length > 0}
+						{#if rootFolders.length > 0}
 							<div class="mb-8">
 								<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 									Folders
 								</h3>
 								<div class="card-grid content-in mb-8">
-									{#each folders as folder (folder.id)}
+									{#each rootFolders as folder (folder.id)}
 										<FolderCard
 											{folder}
 											playlists={playlists.filter((p) => folder.playlistIds.includes(p.id))}

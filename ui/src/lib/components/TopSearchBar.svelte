@@ -11,8 +11,10 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import ExplicitIcon from './ExplicitIcon.svelte';
 	import type { BrowseItem } from '$lib/api';
-	import { openItem, searchPreview } from '$lib/browse';
-	import { MOD } from '$lib/shortcuts';
+	import { asSong, openItem, searchPreview } from '$lib/browse';
+	import { openAddToPlaylist } from '$lib/player.svelte';
+	import TrackMenu from './TrackMenu.svelte';
+	import { formatKey, keybindings, registerSearchInput } from '$lib/shortcuts.svelte';
 	import { thumb } from '$lib/thumb';
 	import { onMount } from 'svelte';
 
@@ -24,6 +26,11 @@
 	let loadedFor = '';
 	let debounce: ReturnType<typeof setTimeout> | undefined;
 	let inputEl: HTMLInputElement | undefined = $state();
+
+	$effect(() => {
+		registerSearchInput(inputEl);
+		return () => registerSearchInput(undefined);
+	});
 
 	const KIND = { song: 'Song', album: 'Album', artist: 'Artist', playlist: 'Playlist' };
 
@@ -63,7 +70,7 @@
 			items = [];
 			loading = true;
 		}
-		debounce = setTimeout(() => load(q), 350);
+		debounce = setTimeout(() => load(q), 500);
 	}
 
 	function close() {
@@ -76,35 +83,40 @@
 	function choose(item: BrowseItem) {
 		close();
 		openItem(item);
-		inputEl?.blur();
 	}
 
 	function submitSearch() {
 		const q = query.trim();
 		if (!q) return;
 		close();
-		inputEl?.blur();
 		goto(`/search?q=${encodeURIComponent(q)}`);
 	}
 
 	function onKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
+		if (e.key === 'Escape' && open) {
 			e.preventDefault();
 			close();
-			inputEl?.blur();
 		} else if (e.key === 'Enter') {
 			if (active >= 0 && items[active]) {
 				e.preventDefault();
 				choose(items[active]);
 			} else {
-				e.preventDefault();
+				close();
 				submitSearch();
 			}
-		} else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && items.length) {
+		} else if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			open = true;
-			const n = items.length;
-			active = e.key === 'ArrowDown' ? (active + 1) % n : (active <= 0 ? n - 1 : active - 1);
+			if (!open && items.length) {
+				open = true;
+				active = 0;
+			} else if (items.length) {
+				active = (active + 1) % items.length;
+			}
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			if (items.length) {
+				active = active <= 0 ? items.length - 1 : active - 1;
+			}
 		}
 	}
 
@@ -115,22 +127,17 @@
 	}
 
 	onMount(() => {
-		function onGlobalKey(e: KeyboardEvent) {
-			// Ctrl+K / Cmd+K or "/" when not typing in another input
+		function onGlobalSlash(e: KeyboardEvent) {
 			const target = e.target as HTMLElement | null;
 			const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-				e.preventDefault();
-				inputEl?.focus();
-				inputEl?.select();
-			} else if (e.key === '/' && !isInput) {
+			if (e.key === '/' && !isInput) {
 				e.preventDefault();
 				inputEl?.focus();
 				inputEl?.select();
 			}
 		}
-		window.addEventListener('keydown', onGlobalKey);
-		return () => window.removeEventListener('keydown', onGlobalKey);
+		window.addEventListener('keydown', onGlobalSlash);
+		return () => window.removeEventListener('keydown', onGlobalSlash);
 	});
 </script>
 
@@ -157,7 +164,7 @@
 			bind:value={query}
 			type="text"
 			placeholder="Search songs, artists, albums..."
-			class="h-7.5 w-full rounded-full border border-border/60 bg-muted/40 pl-9 pr-16 text-xs text-foreground placeholder:text-muted-foreground/70 transition-all focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 hover:bg-muted/60"
+			class="h-7.5 w-full rounded-full border border-border/60 bg-muted/40 pl-9 pr-20 text-xs text-foreground placeholder:text-muted-foreground/70 transition-all focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 hover:bg-muted/60"
 			autocomplete="off"
 			spellcheck="false"
 			role="combobox"
@@ -179,9 +186,9 @@
 				</button>
 			{:else}
 				<kbd
-					class="pointer-events-none rounded border border-border/60 bg-muted/60 px-1 py-0.5 font-mono text-[9px] font-medium text-muted-foreground select-none"
+					class="pointer-events-none rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[9px] font-medium text-muted-foreground select-none"
 				>
-					{MOD}K
+					{formatKey(keybindings.search)}
 				</kbd>
 			{/if}
 		</div>
@@ -211,16 +218,25 @@
 			{:else}
 				{#each items as item, i (item.id)}
 					{@const hero = i === 0}
-					<button
-						type="button"
+					<div
 						role="option"
+						data-ctx
+						tabindex="-1"
 						aria-selected={i === active}
-						class="flex w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors {i === active
+						class="group relative flex w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors {i === active
 							? 'bg-accent/60'
 							: 'hover:bg-accent/40'} {hero ? 'border-b border-border/40 py-2.5' : 'py-1.5'}"
-						onmousedown={(e) => e.preventDefault()}
 						onmouseenter={() => (active = i)}
-						onclick={() => choose(item)}
+						onclick={(e) => {
+							if (e.target instanceof Element && e.target.closest('button.track-menu-trigger, .track-menu-portal')) return;
+							choose(item);
+						}}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								choose(item);
+							}
+						}}
 					>
 						{#if item.thumbnail}
 							<img
@@ -251,7 +267,7 @@
 									<ExplicitIcon class="h-2.5 w-2.5 shrink-0" />
 								{/if}
 								<span class="truncate">
-									{KIND[item.kind]}{item.subtitle ? ` • ${item.subtitle}` : ''}
+									{KIND[item.kind as keyof typeof KIND] ?? item.kind}{item.subtitle ? ` • ${item.subtitle}` : ''}
 								</span>
 							</div>
 						</div>
@@ -262,7 +278,21 @@
 								Top result
 							</span>
 						{/if}
-					</button>
+						{#if item.kind === 'song'}
+							<div
+								class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 {i === active ? 'opacity-100' : ''}"
+							>
+								<TrackMenu
+									song={asSong(item)}
+									triggerClass="track-menu-trigger"
+									onAdd={() => {
+										close();
+										openAddToPlaylist(asSong(item));
+									}}
+								/>
+							</div>
+						{/if}
+					</div>
 				{/each}
 			{/if}
 

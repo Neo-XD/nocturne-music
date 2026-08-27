@@ -56,7 +56,7 @@ export const np = $state({
 	tab: 'queue' as 'queue' | 'lyrics'
 });
 
-export const prefs = $state({ musicVideos: false });
+export const prefs = $state({ musicVideos: false, filterExplicit: false });
 
 /** videoId → the in-flight or settled loopback URL for its music video (null when it has none).
  * It is shared outside the player component so closing and reopening it does not resolve a video
@@ -179,12 +179,13 @@ export async function loadLibraryExtras(force = false) {
 }
 
 /** Create a playlist and optimistically prepend it so every view updates immediately. */
-export async function createLibraryPlaylist(title: string): Promise<void> {
+export async function createLibraryPlaylist(title: string): Promise<string> {
 	const id = await api.createPlaylist(title);
 	// YouTube's library browse is eventually-consistent and won't include a brand-new playlist for a
 	// few seconds, so surface it immediately instead of refetching.
 	const browseId = id.startsWith('VL') ? id : `VL${id}`;
 	library.items = [{ kind: 'playlist', id: browseId, title }, ...library.items];
+	return browseId;
 }
 
 /** Optimistically apply an edit to a library playlist's row (sidebar + Library grid), so a rename
@@ -435,14 +436,29 @@ export function toggleSaved(item: BrowseItem): boolean {
 
 export const isSaved = (id: string): boolean => pl.isSaved(personal, id);
 
-export function createPlaylistFolder(name: string): pl.PlaylistFolder {
-	const folder = pl.createFolder(personal, name);
+export function createPlaylistFolder(name: string, parentId: string | null = null): pl.PlaylistFolder {
+	const folder = pl.createFolder(personal, name, parentId);
+	savePersonal();
+	return folder;
+}
+
+export function createFolderFromPlaylists(
+	name: string,
+	playlistIds: string[],
+	parentId: string | null = null
+): pl.PlaylistFolder {
+	const folder = pl.createFolderFromPlaylists(personal, name, playlistIds, parentId);
 	savePersonal();
 	return folder;
 }
 
 export function renamePlaylistFolder(folderId: string, newName: string) {
 	pl.renameFolder(personal, folderId, newName);
+	savePersonal();
+}
+
+export function toggleFolderCollapsed(folderId: string) {
+	pl.toggleFolderCollapsed(personal, folderId);
 	savePersonal();
 }
 
@@ -459,6 +475,17 @@ export function addPlaylistToFolder(folderId: string, playlistId: string) {
 export function removePlaylistFromFolder(folderId: string, playlistId: string) {
 	pl.removePlaylistFromFolder(personal, folderId, playlistId);
 	savePersonal();
+}
+
+export function movePlaylistToFolder(playlistId: string, targetFolderId: string | null) {
+	pl.movePlaylistToFolder(personal, playlistId, targetFolderId);
+	savePersonal();
+}
+
+export function moveFolderToFolder(sourceFolderId: string, targetFolderId: string | null): boolean {
+	const ok = pl.moveFolderToFolder(personal, sourceFolderId, targetFolderId);
+	if (ok) savePersonal();
+	return ok;
 }
 
 export function findPlaylistFolder(playlistId: string): pl.PlaylistFolder | undefined {
@@ -807,8 +834,8 @@ export function openShare(item: BrowseItem) {
 	ui.share = item;
 }
 
-export function openAddToPlaylist(song: SongItem) {
-	ui.addSongs = [song];
+export function openAddToPlaylist(song: SongItem | SongItem[]) {
+	ui.addSongs = Array.isArray(song) ? (song.length ? song : null) : [song];
 }
 
 /** Open the picker to add several tracks at once (e.g. a whole album). */
@@ -853,6 +880,11 @@ export function initApp(mini = false): () => void {
 		api.onNowPlaying((n) => {
 			playback.now = n;
 			playback.rating = n.rating ?? 'indifferent'; // the track's real rating when known
+			if (prefs.filterExplicit && n?.explicit) {
+				toast('Skipped explicit song');
+				api.nextTrack().catch(() => {});
+				return;
+			}
 			// Feeds Shortcuts recency and the community shelf's artist seed. Every play lands here,
 			// gapless advances included, so it's the one hook that sees them all.
 			pl.touchPick(personal, n.videoId);
@@ -953,7 +985,10 @@ export function initApp(mini = false): () => void {
 		.catch(() => {});
 	if (mini) return teardown;
 	api.getSettings()
-		.then((s) => (prefs.musicVideos = s.music_videos === 'true'))
+		.then((s) => {
+			prefs.musicVideos = s.music_videos === 'true';
+			prefs.filterExplicit = s.filter_explicit === 'true';
+		})
 		.catch(() => {});
 	api.getAccount()
 		.then((a) => {
