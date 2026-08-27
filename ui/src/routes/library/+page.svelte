@@ -17,7 +17,13 @@
 		MusicNoteSquare02Icon,
 		Playlist02Icon,
 		SquareStackIcon,
-		UserSharingIcon
+		UserSharingIcon,
+		Folder01Icon,
+		FolderAddIcon,
+		FolderOpenIcon,
+		ArrowLeft01Icon,
+		Edit02Icon,
+		Delete02Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -28,6 +34,7 @@
 	import LocalMusic from '$lib/components/LocalMusic.svelte';
 	import MediaCard from '$lib/components/MediaCard.svelte';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
+	import FolderCard from '$lib/components/FolderCard.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import type { BrowseItem } from '$lib/api';
 	import {
@@ -38,7 +45,10 @@
 		loadLibrary,
 		loadLibraryExtras,
 		createLibraryPlaylist,
-		syncSavedToYouTube
+		syncSavedToYouTube,
+		createPlaylistFolder,
+		renamePlaylistFolder,
+		deletePlaylistFolder
 	} from '$lib/player.svelte';
 	import { mergeSaved, unsynced } from '$lib/personal';
 	import { reveal } from '$lib/reveal.svelte';
@@ -115,6 +125,66 @@
 			busy = false;
 		}
 	}
+
+	// Playlist folders state & actions
+	let activeFolderId = $state<string | null>(null);
+	let folderDialogOpen = $state(false);
+	let newFolderName = $state('');
+	let renameDialogOpen = $state(false);
+	let renameFolderId = $state<string | null>(null);
+	let renameFolderName = $state('');
+	let deleteDialogOpen = $state(false);
+	let deleteFolderId = $state<string | null>(null);
+
+	const folders = $derived(personal.folders ?? []);
+	const activeFolder = $derived(folders.find((f) => f.id === activeFolderId));
+	const playlistsInActiveFolder = $derived(
+		activeFolder ? playlists.filter((p) => activeFolder.playlistIds.includes(p.id)) : []
+	);
+	const unfiledPlaylists = $derived(
+		folders.length > 0
+			? playlists.filter((p) => !folders.some((f) => f.playlistIds.includes(p.id)))
+			: playlists
+	);
+
+	function createFolder() {
+		const name = newFolderName.trim();
+		if (!name) return;
+		const f = createPlaylistFolder(name);
+		toast.success(`Created folder "${f.name}"`);
+		newFolderName = '';
+		folderDialogOpen = false;
+	}
+
+	function openRename(id: string, currentName: string) {
+		renameFolderId = id;
+		renameFolderName = currentName;
+		renameDialogOpen = true;
+	}
+
+	function handleRename() {
+		if (!renameFolderId) return;
+		const name = renameFolderName.trim();
+		if (!name) return;
+		renamePlaylistFolder(renameFolderId, name);
+		toast.success('Folder renamed');
+		renameDialogOpen = false;
+	}
+
+	function promptDelete(id: string) {
+		deleteFolderId = id;
+		deleteDialogOpen = true;
+	}
+
+	function confirmDelete() {
+		if (!deleteFolderId) return;
+		if (activeFolderId === deleteFolderId) {
+			activeFolderId = null;
+		}
+		deletePlaylistFolder(deleteFolderId);
+		toast.success('Folder deleted');
+		deleteDialogOpen = false;
+	}
 </script>
 
 {#snippet grid(items: BrowseItem[], empty: string, rv: ReturnType<typeof reveal>)}
@@ -179,13 +249,23 @@
 						</Tooltip.Root>
 					</Tooltip.Provider>
 				{/if}
+				<Button variant="outline" size="sm" class="gap-2" onclick={() => (folderDialogOpen = true)}>
+					<HugeiconsIcon icon={FolderAddIcon} class="h-4 w-4" /> New folder
+				</Button>
 				<Button variant="outline" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
 					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
+				</Button>
+			</div>
+		{:else}
+			<div class="flex items-center gap-2">
+				<Button variant="outline" size="sm" class="gap-2" onclick={() => (folderDialogOpen = true)}>
+					<HugeiconsIcon icon={FolderAddIcon} class="h-4 w-4" /> New folder
 				</Button>
 			</div>
 		{/if}
 	</div>
 
+	<!-- Create Playlist Dialog -->
 	<Dialog.Root bind:open={dialogOpen}>
 		<Dialog.Content class="sm:max-w-md">
 			<Dialog.Header>
@@ -209,6 +289,80 @@
 					</Button>
 				</Dialog.Footer>
 			</form>
+		</Dialog.Content>
+	</Dialog.Root>
+
+	<!-- Create Folder Dialog -->
+	<Dialog.Root bind:open={folderDialogOpen}>
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title>New folder</Dialog.Title>
+				<Dialog.Description>Create a folder to group and organize your playlists.</Dialog.Description>
+			</Dialog.Header>
+			<form
+				class="flex flex-col gap-4"
+				onsubmit={(e) => {
+					e.preventDefault();
+					createFolder();
+				}}
+			>
+				<Input bind:value={newFolderName} placeholder="Folder name (e.g. Chill, Workout, Classics)" autofocus />
+				<Dialog.Footer>
+					<Button type="button" variant="outline" onclick={() => (folderDialogOpen = false)}>
+						Cancel
+					</Button>
+					<Button type="submit" disabled={!newFolderName.trim()}>
+						Create folder
+					</Button>
+				</Dialog.Footer>
+			</form>
+		</Dialog.Content>
+	</Dialog.Root>
+
+	<!-- Rename Folder Dialog -->
+	<Dialog.Root bind:open={renameDialogOpen}>
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title>Rename folder</Dialog.Title>
+				<Dialog.Description>Enter a new name for this folder.</Dialog.Description>
+			</Dialog.Header>
+			<form
+				class="flex flex-col gap-4"
+				onsubmit={(e) => {
+					e.preventDefault();
+					handleRename();
+				}}
+			>
+				<Input bind:value={renameFolderName} placeholder="Folder name" autofocus />
+				<Dialog.Footer>
+					<Button type="button" variant="outline" onclick={() => (renameDialogOpen = false)}>
+						Cancel
+					</Button>
+					<Button type="submit" disabled={!renameFolderName.trim()}>
+						Save
+					</Button>
+				</Dialog.Footer>
+			</form>
+		</Dialog.Content>
+	</Dialog.Root>
+
+	<!-- Delete Folder Confirmation Dialog -->
+	<Dialog.Root bind:open={deleteDialogOpen}>
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title>Delete folder?</Dialog.Title>
+				<Dialog.Description>
+					Deleting this folder will not delete your playlists. They will remain in your library as unfiled playlists.
+				</Dialog.Description>
+			</Dialog.Header>
+			<Dialog.Footer>
+				<Button type="button" variant="outline" onclick={() => (deleteDialogOpen = false)}>
+					Cancel
+				</Button>
+				<Button type="button" variant="destructive" onclick={confirmDelete}>
+					Delete
+				</Button>
+			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>
 
@@ -293,11 +447,87 @@
 			</Tabs.Content>
 			<Tabs.Content value="playlists">
 				{#if tab === 'playlists'}
-					{@render grid(
-						playlists,
-						'No playlists yet. Open one and hit Save to library to keep it here.',
-						rvPlaylists
-					)}
+					{#if activeFolder}
+						<div class="mb-4">
+							<Button
+								variant="ghost"
+								size="sm"
+								class="gap-1.5 text-muted-foreground hover:text-foreground mb-4"
+								onclick={() => (activeFolderId = null)}
+							>
+								<HugeiconsIcon icon={ArrowLeft01Icon} class="h-4 w-4" /> Back to Playlists
+							</Button>
+							<div class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border/60 bg-card/40 p-4 mb-6">
+								<div class="flex items-center gap-3">
+									<div class="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
+										<HugeiconsIcon icon={FolderOpenIcon} class="h-6 w-6" />
+									</div>
+									<div>
+										<h2 class="font-heading text-xl font-bold">{activeFolder.name}</h2>
+										<p class="text-xs text-muted-foreground">
+											{playlistsInActiveFolder.length} {playlistsInActiveFolder.length === 1 ? 'playlist' : 'playlists'}
+										</p>
+									</div>
+								</div>
+								<div class="flex items-center gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										class="gap-1.5"
+										onclick={() => openRename(activeFolder.id, activeFolder.name)}
+									>
+										<HugeiconsIcon icon={Edit02Icon} class="h-3.5 w-3.5" /> Rename
+									</Button>
+									<Button
+										variant="outline"
+										size="sm"
+										class="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+										onclick={() => promptDelete(activeFolder.id)}
+									>
+										<HugeiconsIcon icon={Delete02Icon} class="h-3.5 w-3.5" /> Delete
+									</Button>
+								</div>
+							</div>
+						</div>
+						{#if playlistsInActiveFolder.length}
+							<div class="card-grid content-in">
+								{#each playlistsInActiveFolder as item (item.kind + item.id)}
+									<MediaCard {item} />
+								{/each}
+							</div>
+						{:else}
+							<p class="text-sm text-muted-foreground">
+								No playlists in this folder yet. Click the ⋯ menu on any playlist and choose "Add to folder" to organize it here.
+							</p>
+						{/if}
+					{:else}
+						{#if folders.length > 0}
+							<div class="mb-8">
+								<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									Folders
+								</h3>
+								<div class="card-grid content-in mb-8">
+									{#each folders as folder (folder.id)}
+										<FolderCard
+											{folder}
+											playlists={playlists.filter((p) => folder.playlistIds.includes(p.id))}
+											onclick={() => (activeFolderId = folder.id)}
+											onrename={() => openRename(folder.id, folder.name)}
+											ondelete={() => promptDelete(folder.id)}
+										/>
+									{/each}
+								</div>
+								<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									All Playlists
+								</h3>
+							</div>
+						{/if}
+						{@render grid(
+							playlists,
+							'No playlists yet. Open one and hit Save to library to keep it here.',
+							rvPlaylists
+						)}
+					{/if}
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="albums">

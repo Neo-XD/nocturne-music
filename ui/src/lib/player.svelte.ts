@@ -435,6 +435,36 @@ export function toggleSaved(item: BrowseItem): boolean {
 
 export const isSaved = (id: string): boolean => pl.isSaved(personal, id);
 
+export function createPlaylistFolder(name: string): pl.PlaylistFolder {
+	const folder = pl.createFolder(personal, name);
+	savePersonal();
+	return folder;
+}
+
+export function renamePlaylistFolder(folderId: string, newName: string) {
+	pl.renameFolder(personal, folderId, newName);
+	savePersonal();
+}
+
+export function deletePlaylistFolder(folderId: string) {
+	pl.deleteFolder(personal, folderId);
+	savePersonal();
+}
+
+export function addPlaylistToFolder(folderId: string, playlistId: string) {
+	pl.addPlaylistToFolder(personal, folderId, playlistId);
+	savePersonal();
+}
+
+export function removePlaylistFromFolder(folderId: string, playlistId: string) {
+	pl.removePlaylistFromFolder(personal, folderId, playlistId);
+	savePersonal();
+}
+
+export function findPlaylistFolder(playlistId: string): pl.PlaylistFolder | undefined {
+	return pl.findPlaylistFolder(personal, playlistId);
+}
+
 /** Saved here and pushed to the account: while signed in, unsaving it belongs on the item's page,
  *  where the button knows which write to send. Signed out, this row is the only library there is. */
 export const isSynced = (id: string): boolean => pl.isSynced(personal, id);

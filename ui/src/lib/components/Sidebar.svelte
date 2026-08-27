@@ -36,7 +36,6 @@
 
 	const nav = [
 		{ href: '/', label: 'Home', icon: Home01Icon },
-		{ href: '/search', label: 'Search', icon: Search01Icon },
 		{ href: '/library', label: 'Library', icon: LibraryIcon }
 	];
 	const isActive = (href: string) =>

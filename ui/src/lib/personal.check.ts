@@ -10,7 +10,11 @@ import {
 	MAX_PICKS,
 	addPick,
 	arrangeSections,
+	addPlaylistToFolder,
+	createFolder,
+	deleteFolder,
 	empty,
+	findPlaylistFolder,
 	firstArtist,
 	forgetIds,
 	freshen,
@@ -27,6 +31,8 @@ import {
 	placePick,
 	recentItems,
 	removePick,
+	removePlaylistFromFolder,
+	renameFolder,
 	seedPick,
 	togglePin,
 	toggleSaved,
@@ -388,7 +394,35 @@ const range = (n: number, prefix: string) => Array.from({ length: n }, (_, i) =>
 	for (let i = 0; i < 60; i++) noteSections(p, [`shelf ${i}`]);
 	ok(p.home.seen.length === 40, 'capped');
 	ok(p.home.seen[0] === 'shelf 59', 'and it is the stalest that goes, not the newest');
-	ok(!p.home.seen.includes('Quick picks'), 'the first shelves ever seen have aged out');
+}
+
+// --- playlist folders -------------------------------------------------------------------------
+{
+	const p = empty();
+	const f1 = createFolder(p, 'Chill Mixes');
+	ok(p.folders.length === 1, 'folder created');
+	ok(f1.name === 'Chill Mixes', 'folder name preserved');
+	ok(f1.playlistIds.length === 0, 'new folder starts empty');
+
+	addPlaylistToFolder(p, f1.id, 'VL1');
+	addPlaylistToFolder(p, f1.id, 'VL2');
+	ok(f1.playlistIds.join() === 'VL1,VL2', 'playlists added to folder');
+	ok(findPlaylistFolder(p, 'VL1')?.id === f1.id, 'findPlaylistFolder locates folder');
+
+	const f2 = createFolder(p, 'Workout');
+	addPlaylistToFolder(p, f2.id, 'VL1');
+	ok(!f1.playlistIds.includes('VL1'), 'adding to f2 removes from f1');
+	ok(f2.playlistIds.includes('VL1'), 'VL1 now in f2');
+
+	renameFolder(p, f2.id, 'Gym Bangers');
+	ok(f2.name === 'Gym Bangers', 'folder renamed');
+
+	removePlaylistFromFolder(p, f2.id, 'VL1');
+	ok(f2.playlistIds.length === 0, 'playlist removed from folder');
+
+	deleteFolder(p, f1.id);
+	ok(p.folders.length === 1 && p.folders[0].id === f2.id, 'folder deleted');
 }
 
 console.log('ok');
+

@@ -13,7 +13,8 @@
 		ArrowDownWideNarrowIcon,
 		BookmarkMinus02Icon,
 		DashboardSquare02Icon,
-		Share08Icon
+		Share08Icon,
+		Folder01Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
@@ -30,8 +31,10 @@
 		startRadio,
 		toast,
 		togglePin,
-		toggleSaved
+		toggleSaved,
+		findPlaylistFolder
 	} from '$lib/player.svelte';
+	import AddToFolderDialog from './AddToFolderDialog.svelte';
 
 	let {
 		item,
@@ -80,6 +83,8 @@
 
 	let menuOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
+	let folderDialogOpen = $state(false);
+	const folderForPlaylist = $derived(item.kind === 'playlist' ? findPlaylistFolder(item.id) : undefined);
 
 	// Click on the ⋯ opens under the button; right-click on the host card or row opens at the pointer.
 	function openMenu(e: MouseEvent) {
@@ -187,6 +192,15 @@
 				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
 			</button>
 		{/if}
+		{#if item.kind === 'playlist'}
+			<button
+				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, () => (folderDialogOpen = true))}
+			>
+				<HugeiconsIcon icon={Folder01Icon} class="h-4 w-4" />
+				{folderForPlaylist ? `Folder (${folderForPlaylist.name})` : 'Add to folder'}
+			</button>
+		{/if}
 		<!-- Only for cards saved on this machine: YouTube's own library rows are unsaved from their
 		     page, where the button knows which write action to send. -->
 		{#if savedHere}
@@ -202,4 +216,8 @@
 			</button>
 		{/if}
 	</div>
+{/if}
+
+{#if item.kind === 'playlist'}
+	<AddToFolderDialog bind:open={folderDialogOpen} playlist={item} />
 {/if}

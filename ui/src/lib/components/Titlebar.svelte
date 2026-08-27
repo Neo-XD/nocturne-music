@@ -24,6 +24,7 @@
 	import LastFmIcon from './LastFmIcon.svelte';
 	import DiscordIcon from './DiscordIcon.svelte';
 	import AccountMenu from './AccountMenu.svelte';
+	import TopSearchBar from './TopSearchBar.svelte';
 	import logo from '$lib/assets/icon.png';
 	import * as api from '$lib/api';
 	import { openMiniPlayer, toast, ui } from '$lib/player.svelte';
@@ -145,40 +146,39 @@
      at this z — it must outrank the panels below (LyricsPanel/QueuePanel, z-30). -->
 <header
 	data-tauri-drag-region
-	class="relative z-50 flex h-9 shrink-0 select-none items-center justify-between border-b border-border/60 bg-background"
+	class="relative z-50 flex h-10.5 shrink-0 select-none items-center justify-between border-b border-border/60 bg-background px-1"
 >
-	<span
-		class="pointer-events-none absolute inset-x-0 text-center text-xs font-medium tracking-wide text-muted-foreground"
-	>
-		Nocturne
-	</span>
-
-	<div class="flex h-full items-center">
+	<div class="flex h-full items-center shrink-0">
 		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->
-		<img src={logo} alt="" class="pointer-events-none ml-3 mr-1 h-4 w-4" />
+		<img src={logo} alt="" class="pointer-events-none ml-2 mr-1 h-4 w-4" />
 		<!-- Bigger and heavier than the icons on the right: these are navigation, and at their
 		     weight the arrow read as decoration and got missed. -->
 		<button
-			class="flex h-full w-9 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+			class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
 			onclick={() => history.back()}
 			disabled={depth === 0}
 			title="Back"
 			aria-label="Back"
 		>
-			<HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2.5} class="h-5 w-5" />
+			<HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
 		</button>
 		<button
-			class="flex h-full w-9 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+			class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
 			onclick={() => history.forward()}
 			disabled={depth === deepest}
 			title="Forward"
 			aria-label="Forward"
 		>
-			<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2.5} class="h-5 w-5" />
+			<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
 		</button>
 	</div>
 
-	<div class="flex h-full items-center">
+	<!-- Centered sticky search bar -->
+	<div class="flex-1 max-w-sm md:max-w-md mx-2">
+		<TopSearchBar />
+	</div>
+
+	<div class="flex h-full items-center shrink-0">
 		<!-- Account first, then the integrations, then the window controls. The drag region lives on
 		     <header> only, so these children are ordinary buttons — don't add the attribute here. -->
 		<AccountMenu />

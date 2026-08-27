@@ -32,6 +32,13 @@ export type RecentEntry = BrowseItem & { at: number };
  */
 export type Saved = BrowseItem & { synced?: boolean };
 
+export type PlaylistFolder = {
+	id: string;
+	name: string;
+	playlistIds: string[];
+	createdAt: number;
+};
+
 export type Personal = {
 	picks: Pick[];
 	/**
@@ -56,6 +63,8 @@ export type Personal = {
 	 * every shelf home has ever shown, so Edit home can list the ones the feed hasn't reached yet.
 	 */
 	home: { order: string[]; hidden: string[]; seen: string[] };
+	/** User-created folders for organizing playlists in the Library tab. */
+	folders: PlaylistFolder[];
 };
 
 export function empty(): Personal {
@@ -66,7 +75,8 @@ export function empty(): Personal {
 		recent: {},
 		artists: {},
 		dismissedSeeds: [],
-		home: { order: [], hidden: [], seen: [] }
+		home: { order: [], hidden: [], seen: [] },
+		folders: []
 	};
 }
 
@@ -93,6 +103,18 @@ export function hydrate(raw: unknown): Personal {
 	if (o.artists && typeof o.artists === 'object') base.artists = o.artists;
 	if (Array.isArray(o.dismissedSeeds)) {
 		base.dismissedSeeds = o.dismissedSeeds.filter((id) => typeof id === 'string');
+	}
+	if (Array.isArray(o.folders)) {
+		base.folders = o.folders
+			.filter((f) => f && typeof f.id === 'string' && typeof f.name === 'string')
+			.map((f) => ({
+				id: f.id,
+				name: f.name,
+				playlistIds: Array.isArray(f.playlistIds)
+					? f.playlistIds.filter((id) => typeof id === 'string')
+					: [],
+				createdAt: typeof f.createdAt === 'number' ? f.createdAt : Date.now()
+			}));
 	}
 	if (o.home && typeof o.home === 'object') {
 		const h = o.home as Partial<Personal['home']>;
@@ -431,3 +453,56 @@ export function interleave<T extends { id: string }>(lists: T[][], cap: number):
 	}
 	return out;
 }
+
+// --- Playlist Folders -------------------------------------------------------------------------
+
+export function createFolder(p: Personal, name: string): PlaylistFolder {
+	if (!p.folders) p.folders = [];
+	const trimmed = name.trim();
+	const folder: PlaylistFolder = {
+		id: `folder_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+		name: trimmed || 'New Folder',
+		playlistIds: [],
+		createdAt: Date.now()
+	};
+	p.folders.push(folder);
+	return folder;
+}
+
+export function renameFolder(p: Personal, folderId: string, newName: string): void {
+	if (!p.folders) return;
+	const folder = p.folders.find((f) => f.id === folderId);
+	if (folder) {
+		const trimmed = newName.trim();
+		if (trimmed) folder.name = trimmed;
+	}
+}
+
+export function deleteFolder(p: Personal, folderId: string): void {
+	if (!p.folders) return;
+	p.folders = p.folders.filter((f) => f.id !== folderId);
+}
+
+export function addPlaylistToFolder(p: Personal, folderId: string, playlistId: string): void {
+	if (!p.folders) p.folders = [];
+	for (const f of p.folders) {
+		f.playlistIds = f.playlistIds.filter((id) => id !== playlistId);
+	}
+	const target = p.folders.find((f) => f.id === folderId);
+	if (target && !target.playlistIds.includes(playlistId)) {
+		target.playlistIds.push(playlistId);
+	}
+}
+
+export function removePlaylistFromFolder(p: Personal, folderId: string, playlistId: string): void {
+	if (!p.folders) return;
+	const target = p.folders.find((f) => f.id === folderId);
+	if (target) {
+		target.playlistIds = target.playlistIds.filter((id) => id !== playlistId);
+	}
+}
+
+export function findPlaylistFolder(p: Personal, playlistId: string): PlaylistFolder | undefined {
+	return p.folders?.find((f) => f.playlistIds.includes(playlistId));
+}
+
