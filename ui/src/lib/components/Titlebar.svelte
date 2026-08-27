@@ -15,6 +15,7 @@
 		SquareIcon,
 		Cancel01Icon,
 		MinimizeScreenIcon,
+		FullScreenIcon,
 		CheckmarkCircle01Icon,
 		Loading03Icon,
 		HotspotOfflineIcon,
@@ -27,7 +28,7 @@
 	import TopSearchBar from './TopSearchBar.svelte';
 	import logo from '$lib/assets/icon.png';
 	import * as api from '$lib/api';
-	import { openMiniPlayer, toast, ui } from '$lib/player.svelte';
+	import { np, openMiniPlayer, toast, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 
@@ -276,6 +277,18 @@
 			aria-label="Mini player"
 		>
 			<HugeiconsIcon icon={MinimizeScreenIcon} class="h-4 w-4" />
+		</button>
+
+		<!-- Fullscreen player (F11) -->
+		<button
+			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {np.fullscreenOpen
+				? 'text-primary'
+				: ''}"
+			onclick={() => (np.fullscreenOpen = !np.fullscreenOpen)}
+			title="Fullscreen player (F11)"
+			aria-label="Fullscreen player"
+		>
+			<HugeiconsIcon icon={FullScreenIcon} class="h-4 w-4" />
 		</button>
 
 		<div class="mx-1.5 h-4 w-px bg-border"></div>

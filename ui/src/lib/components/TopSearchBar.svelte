@@ -165,9 +165,6 @@
 			aria-controls="top-search-suggest"
 			oninput={onType}
 			onkeydown={onKeydown}
-			onfocus={() => {
-				if (items.length && query.trim() === loadedFor) open = true;
-			}}
 		/>
 
 		<div class="absolute right-2 flex items-center gap-1">
