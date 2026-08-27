@@ -385,7 +385,8 @@ pub fn disconnect(state: &AppState) {
 pub fn status(state: &AppState) -> serde_json::Value {
     let key = state.db.get_setting("lastfm_session_key").filter(|s| !s.is_empty());
     let username = state.db.get_setting("lastfm_username").filter(|s| !s.is_empty());
-    let has_keys = !resolve_api_key(&state.db).is_empty() && !resolve_api_secret(&state.db).is_empty();
+    let has_keys =
+        !resolve_api_key(&state.db).is_empty() && !resolve_api_secret(&state.db).is_empty();
     serde_json::json!({
         "connected": key.is_some(),
         "username": username,

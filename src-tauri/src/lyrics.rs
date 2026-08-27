@@ -85,7 +85,9 @@ fn forced_provider() -> Option<String> {
 pub const DEFAULT_PROVIDERS: [&str; 5] = ["betterlyrics", "lrclib", "ytm", "qq", "kugou"];
 
 pub fn resolve_providers(db: &crate::db::Db) -> Vec<String> {
-    if let Some(s) = db.get_setting("lyrics_providers").or_else(|| db.get_setting("lyrics_priority")) {
+    if let Some(s) =
+        db.get_setting("lyrics_providers").or_else(|| db.get_setting("lyrics_priority"))
+    {
         let list: Vec<String> = if s.trim().starts_with('[') {
             serde_json::from_str(&s).unwrap_or_default()
         } else {
@@ -509,10 +511,8 @@ async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest
         q.push(("d", format!("{}", d.round() as i64)));
     }
 
-    let endpoints = [
-        "https://lyrics-api.boidu.dev/getLyrics",
-        "https://api.betterlyrics.org/getLyrics",
-    ];
+    let endpoints =
+        ["https://lyrics-api.boidu.dev/getLyrics", "https://api.betterlyrics.org/getLyrics"];
 
     for url in endpoints {
         tracing::debug!(title = %req.title, artist = %req.artists, %url, "lyrics: querying Better Lyrics provider");
@@ -555,7 +555,11 @@ async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest
         if let Some(lrc) = lrc_str {
             let hit = from_parsed("Better Lyrics", parse_lrc_or_ttml(&lrc));
             if let Some(l) = hit {
-                tracing::debug!(count = l.lines.len(), synced = l.synced, "lyrics: Better Lyrics hit");
+                tracing::debug!(
+                    count = l.lines.len(),
+                    synced = l.synced,
+                    "lyrics: Better Lyrics hit"
+                );
                 return Ok(Some(l));
             }
         }
