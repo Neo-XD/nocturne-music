@@ -278,7 +278,7 @@
 	{:else}
 		<p class="text-sm text-muted-foreground">
 			{uploads
-				? t('library.no_uploads')
+				? 'No uploaded songs found on your YouTube Music account.'
 				: 'No songs in your library yet. Hit the ⋯ on a song and save it, or like it, and it lands here.'}
 		</p>
 	{/if}

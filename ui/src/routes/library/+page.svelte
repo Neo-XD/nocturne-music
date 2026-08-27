@@ -231,7 +231,7 @@
 				<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> Songs
 			</Tabs.Trigger>
 			<Tabs.Trigger value="uploads">
-				<HugeiconsIcon icon={CloudUploadIcon} class="h-4 w-4" /> {t('library.uploads_tab')}
+				<HugeiconsIcon icon={CloudUploadIcon} class="h-4 w-4" /> Uploads
 			</Tabs.Trigger>
 			<Tabs.Trigger value="local">
 				<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
@@ -258,7 +258,9 @@
 		<Tabs.Content value="uploads">
 			{#if tab === 'uploads'}
 				{#if signedOut}
-					<p class="text-sm text-muted-foreground">{t('library.uploads_signed_out')}</p>
+					<p class="text-sm text-muted-foreground">
+						Sign in to see the music you uploaded to YouTube Music. Local music on this machine is in the Local tab.
+					</p>
 				{:else}
 					<LibrarySongs uploads />
 				{/if}
