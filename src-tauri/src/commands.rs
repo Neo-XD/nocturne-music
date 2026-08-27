@@ -178,7 +178,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 17] = [
+const UI_SETTINGS: [&str; 20] = [
     "volume",
     "proxy",
     "quality",
@@ -193,6 +193,9 @@ const UI_SETTINGS: [&str; 17] = [
     "prevent_duplicates",
     "update_banner",
     "lyrics_boidu",
+    "lyrics_betterlyrics",
+    "lyrics_providers",
+    "lyrics_priority",
     "music_videos",
     "lastfm_api_key",
     "lastfm_api_secret",
@@ -283,9 +286,12 @@ pub async fn set_setting(
     if key == "hide_videos" {
         state.it.set_hide_videos(value == "true");
     }
-    // Cached lyrics outlive the setting that produced them, so a track fetched while Boidu was on
-    // would keep its word timings (and one fetched while off would never gain them) forever.
-    if key == "lyrics_boidu" {
+    // Cached lyrics outlive the setting that produced them, so changing provider preferences clears cache.
+    if key == "lyrics_boidu"
+        || key == "lyrics_betterlyrics"
+        || key == "lyrics_providers"
+        || key == "lyrics_priority"
+    {
         state.db.clear_lyrics_cache();
     }
     // Registers/removes the login autostart entry on toggle; the OS persists it from there.

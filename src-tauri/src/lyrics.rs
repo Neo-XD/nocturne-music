@@ -82,6 +82,22 @@ fn forced_provider() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+pub const DEFAULT_PROVIDERS: [&str; 5] = ["betterlyrics", "lrclib", "ytm", "qq", "kugou"];
+
+pub fn resolve_providers(db: &crate::db::Db) -> Vec<String> {
+    if let Some(s) = db.get_setting("lyrics_providers").or_else(|| db.get_setting("lyrics_priority")) {
+        let list: Vec<String> = if s.trim().starts_with('[') {
+            serde_json::from_str(&s).unwrap_or_default()
+        } else {
+            s.split(',').map(|p| p.trim().to_lowercase()).filter(|p| !p.is_empty()).collect()
+        };
+        if !list.is_empty() {
+            return list;
+        }
+    }
+    DEFAULT_PROVIDERS.iter().map(|s| s.to_string()).collect()
+}
+
 /// Cache-through entry point for the `get_lyrics` command.
 pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> {
     let now = now_secs();
@@ -100,10 +116,7 @@ pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> 
     lyrics
 }
 
-/// Run the provider chain. Second value: cache the outcome — true only when the track's duration
-/// was known (LRCLIB matching is loose without it and lands on wrong *cuts* of the song, lyrics
-/// seconds off the audio) AND some provider answered definitively (found / not-found) rather
-/// than merely erroring (offline must not poison the cache with a 24h "no lyrics").
+/// Run the provider chain in user-configured priority order.
 async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, bool) {
     let mut definitive = false;
 
@@ -152,104 +165,122 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         return (hit.ok().flatten(), false);
     }
 
-    // 1. Better Lyrics, ahead of LRCLIB because it returns syllable-by-syllable & word-level
-    //    timings for high-precision karaoke sweeps.
-    if state.db.get_setting("lyrics_boidu").as_deref() != Some("false")
-        && state.db.get_setting("lyrics_betterlyrics").as_deref() != Some("false")
-    {
-        if let Ok(Some(l)) = betterlyrics_get(req).await {
-            return (Some(l), req.duration.is_some());
+    let providers = resolve_providers(&state.db);
+    let mut lr: Option<Result<Option<LrclibTrack>, reqwest::Error>> = None;
+
+    for provider in &providers {
+        match provider.as_str() {
+            "betterlyrics" | "boidu" => {
+                if state.db.get_setting("lyrics_boidu").as_deref() != Some("false")
+                    && state.db.get_setting("lyrics_betterlyrics").as_deref() != Some("false")
+                {
+                    if let Ok(Some(l)) = betterlyrics_get(req).await {
+                        return (Some(l), req.duration.is_some());
+                    }
+                }
+            }
+            "lrclib" => {
+                let res = lrclib_get(req).await;
+                if let Ok(hit) = &res {
+                    definitive = true;
+                    if let Some(l) = hit.as_ref().and_then(lrclib_to_lyrics) {
+                        if l.synced || l.instrumental {
+                            return (Some(l), req.duration.is_some());
+                        }
+                    }
+                }
+                lr = Some(res);
+            }
+            "ytm" | "youtube" | "youtubemusic" => {
+                if next.is_some() {
+                    definitive = true;
+                }
+                if let (Some(bid), Some(client)) =
+                    (&browse_id, state.clients.get(innertube::LYRICS_TIMED_CLIENT))
+                {
+                    match state.it.lyrics_timed(client, bid).await {
+                        Ok(lines) if !lines.is_empty() => {
+                            return (
+                                Some(Lyrics {
+                                    source: "YouTube Music".into(),
+                                    synced: true,
+                                    instrumental: false,
+                                    lines: lines
+                                        .into_iter()
+                                        .map(|l| LyricLine::simple(Some(l.time_ms), l.text))
+                                        .collect(),
+                                }),
+                                true,
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => tracing::debug!(error = %e, "lyrics: timed browse failed"),
+                    }
+                }
+            }
+            "qq" | "qqmusic" => {
+                if let Ok(Some(l)) = qqmusic_get(req).await {
+                    return (Some(l), req.duration.is_some());
+                }
+            }
+            "kugou" => {
+                if let Ok(Some(l)) = kugou_get(req).await {
+                    return (Some(l), req.duration.is_some());
+                }
+            }
+            _ => {}
         }
     }
 
-    // 2. LRCLIB exact match.
-    let lr = lrclib_get(req).await;
-    if let Ok(hit) = &lr {
-        definitive = true;
-        if let Some(l) = hit.as_ref().and_then(lrclib_to_lyrics) {
-            if l.synced || l.instrumental {
+    // --- Fallbacks (fuzzy search & plain text) ---
+    let allows_lrclib = providers.iter().any(|p| p == "lrclib");
+    let allows_ytm = providers.iter().any(|p| p == "ytm" || p == "youtube" || p == "youtubemusic");
+
+    let mut searched: Option<Result<Option<LrclibTrack>, reqwest::Error>> = None;
+    if allows_lrclib {
+        let s = lrclib_search(req).await;
+        if let Ok(hit) = &s {
+            definitive = true;
+            if let Some(l) = hit.as_ref().and_then(lrclib_to_lyrics).filter(|l| l.synced) {
+                return (Some(l), req.duration.is_some());
+            }
+        }
+        searched = Some(s);
+    }
+
+    // Plain from LRCLIB exact match
+    if allows_lrclib {
+        if let Some(Ok(Some(hit))) = &lr {
+            if let Some(l) = plain_from_text(hit.plain_lyrics.as_deref(), "LRCLIB") {
                 return (Some(l), req.duration.is_some());
             }
         }
     }
 
-    // 3. YouTube Music timed lyrics.
-    if next.is_some() {
-        definitive = true; // a next() answer with no lyrics tab IS "YT has no lyrics"
-    }
-    if let (Some(bid), Some(client)) =
-        (&browse_id, state.clients.get(innertube::LYRICS_TIMED_CLIENT))
-    {
-        match state.it.lyrics_timed(client, bid).await {
-            Ok(lines) if !lines.is_empty() => {
-                return (
-                    Some(Lyrics {
-                        source: "YouTube Music".into(),
-                        synced: true,
-                        instrumental: false,
-                        lines: lines
-                            .into_iter()
-                            .map(|l| LyricLine::simple(Some(l.time_ms), l.text))
-                            .collect(),
-                    }),
-                    true,
-                );
-            }
-            Ok(_) => {}
-            Err(e) => tracing::debug!(error = %e, "lyrics: timed browse failed"),
-        }
-    }
-
-    // 4. QQ Music provider
-    if let Ok(Some(l)) = qqmusic_get(req).await {
-        return (Some(l), req.duration.is_some());
-    }
-
-    // 5. Kugou provider
-    if let Ok(Some(l)) = kugou_get(req).await {
-        return (Some(l), req.duration.is_some());
-    }
-
-    // 3. LRCLIB fuzzy search — a synced fuzzy match still beats any plain text, so it outranks
-    //    the plain tier below. (YT lyrics are region-licensed and can be entirely absent.)
-    let searched = lrclib_search(req).await;
-    if let Ok(hit) = &searched {
-        definitive = true;
-        if let Some(l) = hit.as_ref().and_then(lrclib_to_lyrics).filter(|l| l.synced) {
-            return (Some(l), req.duration.is_some());
-        }
-    }
-
-    // --- plain tier -------------------------------------------------------------------------
-
-    // 4a. Plain from LRCLIB's exact match.
-    if let Ok(Some(hit)) = &lr {
-        if let Some(l) = plain_from_text(hit.plain_lyrics.as_deref(), "LRCLIB") {
-            return (Some(l), req.duration.is_some());
-        }
-    }
-
-    // 4b. Plain from YT (WEB_REMIX).
-    if let Some(bid) = &browse_id {
-        if let Some(client) = state.clients.get(innertube::METADATA_CLIENT) {
-            match state.it.lyrics_plain(client, bid).await {
-                Ok(Some(p)) => {
-                    // Footer is YT's own attribution ("Source: Musixmatch") — surface it.
-                    let source = p.footer.unwrap_or_else(|| "YouTube Music".into());
-                    if let Some(l) = plain_from_text(Some(&p.text), &source) {
-                        return (Some(l), true);
+    // Plain from YouTube Music (WEB_REMIX)
+    if allows_ytm {
+        if let Some(bid) = &browse_id {
+            if let Some(client) = state.clients.get(innertube::METADATA_CLIENT) {
+                match state.it.lyrics_plain(client, bid).await {
+                    Ok(Some(p)) => {
+                        let source = p.footer.unwrap_or_else(|| "YouTube Music".into());
+                        if let Some(l) = plain_from_text(Some(&p.text), &source) {
+                            return (Some(l), true);
+                        }
                     }
+                    Ok(None) => {}
+                    Err(e) => tracing::debug!(error = %e, "lyrics: plain browse failed"),
                 }
-                Ok(None) => {}
-                Err(e) => tracing::debug!(error = %e, "lyrics: plain browse failed"),
             }
         }
     }
 
-    // 4c. Plain from the fuzzy search.
-    if let Ok(Some(hit)) = &searched {
-        if let Some(l) = lrclib_to_lyrics(hit) {
-            return (Some(l), req.duration.is_some());
+    // Plain from LRCLIB fuzzy search
+    if allows_lrclib {
+        if let Some(Ok(Some(hit))) = &searched {
+            if let Some(l) = lrclib_to_lyrics(hit) {
+                return (Some(l), req.duration.is_some());
+            }
         }
     }
 
@@ -1111,6 +1142,21 @@ mod tests {
         assert_eq!(words.len(), 2);
         assert_eq!(words[0].text, "Hello ");
         assert_eq!(words[1].text, "world");
+    }
+
+    #[test]
+    fn resolve_providers_handles_custom_priority_and_fallbacks() {
+        let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        // Default when unset
+        assert_eq!(resolve_providers(&db), vec!["betterlyrics", "lrclib", "ytm", "qq", "kugou"]);
+
+        // Comma separated list
+        db.set_setting("lyrics_providers", "lrclib, betterlyrics, kugou");
+        assert_eq!(resolve_providers(&db), vec!["lrclib", "betterlyrics", "kugou"]);
+
+        // JSON list
+        db.set_setting("lyrics_providers", "[\"ytm\", \"qq\"]");
+        assert_eq!(resolve_providers(&db), vec!["ytm", "qq"]);
     }
 
     #[test]

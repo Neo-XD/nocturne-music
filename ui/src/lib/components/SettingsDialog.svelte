@@ -12,7 +12,9 @@
 		ViewIcon,
 		ViewOffSlashIcon,
 		Link04Icon,
-		KeyboardIcon
+		KeyboardIcon,
+		ArrowUp01Icon,
+		ArrowDown01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -250,10 +252,117 @@
 			discordAppIdInput = s.discord_app_id ?? '';
 			lastfmKeyInput = s.lastfm_api_key ?? '';
 			lastfmSecretInput = s.lastfm_api_secret ?? '';
+			initLyricsProviders(s.lyrics_providers ?? s.lyrics_priority);
 		} catch (e) {
 			toast.error(String(e));
 		}
 		loaded = true;
+	}
+
+	interface LyricsProviderInfo {
+		id: string;
+		name: string;
+		description: string;
+		badge?: string;
+		enabled: boolean;
+	}
+
+	const ALL_PROVIDERS: Omit<LyricsProviderInfo, 'enabled'>[] = [
+		{
+			id: 'betterlyrics',
+			name: 'Better Lyrics',
+			description: 'High-precision syllable-by-syllable & word-level synchronized lyrics (TTML/eLRC).',
+			badge: 'Word Sync'
+		},
+		{
+			id: 'lrclib',
+			name: 'LRCLIB',
+			description: 'Open community database of synchronized and plain lyrics with wide global coverage.',
+			badge: 'Line Sync'
+		},
+		{
+			id: 'ytm',
+			name: 'YouTube Music',
+			description: 'Official real-time timed lyrics extracted directly from YouTube Music.',
+			badge: 'Official'
+		},
+		{
+			id: 'qq',
+			name: 'QQ Music',
+			description: 'Synchronized lyrics database with extensive Asian and international catalogue coverage.',
+			badge: 'LRC'
+		},
+		{
+			id: 'kugou',
+			name: 'Kugou',
+			description: 'High-coverage LRC lyrics archive matched by exact audio duration.',
+			badge: 'LRC'
+		}
+	];
+
+	let lyricsProviders = $state<LyricsProviderInfo[]>([]);
+
+	function initLyricsProviders(saved?: string) {
+		const defaultIds = ['betterlyrics', 'lrclib', 'ytm', 'qq', 'kugou'];
+		let enabledIds: string[] = defaultIds;
+		let savedOrder: string[] = [];
+		if (saved && saved.trim()) {
+			try {
+				if (saved.trim().startsWith('[')) {
+					savedOrder = JSON.parse(saved);
+				} else {
+					savedOrder = saved.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+				}
+			} catch {}
+		}
+		if (savedOrder.length > 0) {
+			enabledIds = savedOrder;
+		}
+
+		const map = new Map(ALL_PROVIDERS.map((p) => [p.id, p]));
+		const result: LyricsProviderInfo[] = [];
+
+		for (const id of enabledIds) {
+			const item = map.get(id);
+			if (item) {
+				result.push({ ...item, enabled: true });
+				map.delete(id);
+			}
+		}
+		for (const item of map.values()) {
+			result.push({ ...item, enabled: false });
+		}
+		lyricsProviders = result;
+	}
+
+	async function saveLyricsProviders() {
+		const enabledIds = lyricsProviders.filter((p) => p.enabled).map((p) => p.id);
+		const value = enabledIds.join(',');
+		settings.lyrics_providers = value;
+		await api.setSetting('lyrics_providers', value);
+		toast.success('Lyrics priority updated');
+	}
+
+	function moveProvider(index: number, direction: -1 | 1) {
+		const target = index + direction;
+		if (target < 0 || target >= lyricsProviders.length) return;
+		const item = lyricsProviders[index];
+		lyricsProviders.splice(index, 1);
+		lyricsProviders.splice(target, 0, item);
+		saveLyricsProviders();
+	}
+
+	function toggleProvider(id: string, on: boolean) {
+		const p = lyricsProviders.find((x) => x.id === id);
+		if (p) {
+			p.enabled = on;
+			saveLyricsProviders();
+		}
+	}
+
+	function resetLyricsProviders() {
+		initLyricsProviders();
+		saveLyricsProviders();
 	}
 
 	let discordAppIdInput = $state('');
@@ -651,14 +760,82 @@
 							</div>
 						</section>
 						<section class={GROUP}>
-							<h3 class={LABEL}>Lyrics</h3>
+							<div class="flex items-center justify-between px-1 mb-2">
+								<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+									Lyrics Providers & Priority
+								</h3>
+								<button
+									type="button"
+									onclick={resetLyricsProviders}
+									class="text-[11px] font-medium text-primary hover:underline cursor-pointer"
+								>
+									Reset priority
+								</button>
+							</div>
 							<div class={CARD}>
-								{@render row({
-									title: 'Word-by-word lyrics',
-									desc: "Asks lyrics-api.boidu.dev first, the only source here with per-word timings, so lyrics can highlight as they're sung. It's checked for every track, so turning this off keeps your listening off that service. Other sources still provide line-by-line lyrics.",
-									control: boiduSwitch,
-									tall: true
-								})}
+								<div class="p-3 bg-muted/20 border-b border-border/40 text-xs text-muted-foreground">
+									Nocturne queries lyrics providers in order from top to bottom. Use the arrows to set your preferred priority, and toggle any source on or off.
+								</div>
+								{#each lyricsProviders as p, idx (p.id)}
+									<div
+										class="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/10 {p.enabled
+											? ''
+											: 'opacity-50'}"
+									>
+										<div class="flex items-center gap-3 min-w-0 flex-1">
+											<span
+												class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground"
+											>
+												{idx + 1}
+											</span>
+											<div class="min-w-0 flex-1">
+												<div class="flex items-center gap-2">
+													<span class="text-xs font-semibold text-foreground">{p.name}</span>
+													{#if p.badge}
+														<span
+															class="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary"
+														>
+															{p.badge}
+														</span>
+													{/if}
+												</div>
+												<p class="text-[11px] text-muted-foreground truncate">{p.description}</p>
+											</div>
+										</div>
+
+										<div class="flex items-center gap-2 shrink-0">
+											<!-- Move Up / Down controls -->
+											<div class="flex items-center gap-0.5 mr-1">
+												<button
+													type="button"
+													disabled={idx === 0}
+													onclick={() => moveProvider(idx, -1)}
+													aria-label="Move {p.name} up"
+													title="Move up"
+													class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:pointer-events-none cursor-pointer transition-colors"
+												>
+													<HugeiconsIcon icon={ArrowUp01Icon} class="h-3.5 w-3.5" />
+												</button>
+												<button
+													type="button"
+													disabled={idx === lyricsProviders.length - 1}
+													onclick={() => moveProvider(idx, 1)}
+													aria-label="Move {p.name} down"
+													title="Move down"
+													class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:pointer-events-none cursor-pointer transition-colors"
+												>
+													<HugeiconsIcon icon={ArrowDown01Icon} class="h-3.5 w-3.5" />
+												</button>
+											</div>
+
+											<!-- Enable / Disable Switch -->
+											<Switch
+												checked={p.enabled}
+												onCheckedChange={(on) => toggleProvider(p.id, on)}
+											/>
+										</div>
+									</div>
+								{/each}
 							</div>
 						</section>
 						<section class={GROUP}>
