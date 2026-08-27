@@ -178,14 +178,13 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 20] = [
+const UI_SETTINGS: [&str; 19] = [
     "volume",
     "proxy",
     "quality",
     "enable_history",
     "disabled_stream_clients",
     "discord_rpc",
-    "discord_app_id",
     "close_to_tray",
     "autostart",
     "autoplay",
@@ -267,14 +266,6 @@ pub async fn set_setting(
     // to see it take effect.
     if key == "discord_rpc" {
         state.set_discord_enabled(value == "true");
-    }
-    if key == "discord_app_id" {
-        let id = if value.trim().is_empty() {
-            crate::discord::resolve_default_app_id()
-        } else {
-            value.trim().to_string()
-        };
-        state.set_discord_app_id(id);
     }
     // Update active Last.fm keys dynamically when changed in settings.
     if key == "lastfm_api_key" || key == "lastfm_api_secret" {

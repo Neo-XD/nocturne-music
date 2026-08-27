@@ -1806,13 +1806,6 @@ impl AppState {
         }
     }
 
-    /// Update Discord application id at runtime (the `discord_app_id` setting).
-    pub fn set_discord_app_id(&self, id: String) {
-        if let Some(d) = &self.discord {
-            d.set_app_id(id);
-        }
-    }
-
     /// Latest mpv position (secs) — for OS scrubber updates + relative media-key seeks.
     pub fn current_position(&self) -> f64 {
         f64::from_bits(self.latest_position.load(Ordering::SeqCst))

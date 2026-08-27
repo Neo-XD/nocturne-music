@@ -251,7 +251,6 @@
 			settings = s;
 			clients = c;
 			proxyInput = s.proxy ?? '';
-			discordAppIdInput = s.discord_app_id ?? '';
 			lastfmKeyInput = s.lastfm_api_key ?? '';
 			lastfmSecretInput = s.lastfm_api_secret ?? '';
 			initLyricsProviders(s.lyrics_providers ?? s.lyrics_priority);
@@ -365,15 +364,6 @@
 	function resetLyricsProviders() {
 		initLyricsProviders();
 		saveLyricsProviders();
-	}
-
-	let discordAppIdInput = $state('');
-
-	async function saveDiscordAppId() {
-		const val = discordAppIdInput.trim();
-		settings.discord_app_id = val;
-		await api.setSetting('discord_app_id', val);
-		toast.success('Discord Application ID saved');
 	}
 
 	const quality = $derived(settings.quality ?? 'HIGH');
@@ -604,8 +594,7 @@
 								{@render row({
 									title: 'Discord rich presence',
 									desc: "Show what you're listening to on your Discord profile. Needs the Discord desktop app running, no login here.",
-									control: discordSwitch,
-									below: discordConfig
+									control: discordSwitch
 								})}
 								{@render row({
 									title: 'Last.fm scrobbling',
@@ -930,42 +919,6 @@
 <!-- Controls. Split out so the rows above read as a list of settings rather than a wall of markup. -->
 {#snippet historySwitch()}<Switch checked={historyOn} onCheckedChange={setHistory} />{/snippet}
 {#snippet discordSwitch()}<Switch checked={discordOn} onCheckedChange={setDiscord} />{/snippet}
-{#snippet discordConfig()}
-	<div class="mt-2.5 space-y-2.5 rounded-xl border border-border/60 bg-muted/30 p-3">
-		<div class="flex items-center justify-between gap-2">
-			<div>
-				<span class="text-xs font-semibold text-foreground">Discord Application ID</span>
-				<p class="text-[11px] text-muted-foreground">
-					Custom Application ID from Discord Developer Portal. Sets the presence name to "Playing Nocturne".
-				</p>
-			</div>
-			<button
-				type="button"
-				onclick={() => api.openExternal('https://discord.com/developers/applications')}
-				class="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline cursor-pointer"
-			>
-				<span>Dev Portal</span>
-				<HugeiconsIcon icon={Link04Icon} class="h-3 w-3" />
-			</button>
-		</div>
-
-		<div class="flex gap-2 items-center">
-			<Input
-				bind:value={discordAppIdInput}
-				placeholder="Default Application ID"
-				class="h-8 flex-1 text-xs font-mono"
-			/>
-			<Button
-				size="sm"
-				class="h-8 text-xs cursor-pointer"
-				disabled={discordAppIdInput === (settings.discord_app_id ?? '')}
-				onclick={saveDiscordAppId}
-			>
-				Save ID
-			</Button>
-		</div>
-	</div>
-{/snippet}
 {#snippet lastfmButton()}
 	{#if lastfmConnected}
 		<Button size="sm" variant="outline" onclick={disconnectLastfm}>Disconnect</Button>

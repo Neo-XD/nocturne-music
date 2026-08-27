@@ -44,21 +44,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use innertube::SongItem;
 
-pub const DEFAULT_APP_ID: &str = "1525891596804161727";
-
-pub fn resolve_default_app_id() -> String {
-    std::env::var("NOCTURNE_DISCORD_APP_ID")
-        .ok()
-        .or_else(|| std::env::var("DISCORD_APP_ID").ok())
-        .or_else(|| option_env!("NOCTURNE_DISCORD_APP_ID").map(String::from))
-        .unwrap_or_else(|| DEFAULT_APP_ID.to_string())
-}
-
-pub fn resolve_app_id(db: &crate::db::Db) -> String {
-    db.get_setting("discord_app_id")
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(resolve_default_app_id)
-}
+/// Discord application id (a snowflake — digits only). **Must be set before rich presence does
+/// anything.** Register an app named "Nocturne" at <https://discord.com/developers/applications> and
+/// paste its Application ID here — the app's *name* is what renders after "Listening to", and its
+/// icon is the fallback artwork. Nothing else in the portal needs configuring: no bot user, no
+/// OAuth redirect, no client secret. (Metrolist needs all of that only because Android has no
+/// Discord client.)
+const APP_ID: &str = "1525891596804161727";
 
 const SONG_URL: &str = "https://music.youtube.com/watch?v=";
 const REPO_URL: &str = "https://github.com/Neo-XD/nocturne-music";
@@ -97,7 +89,6 @@ enum Msg {
     /// A real play/pause transition (mpv's pause flag), never inferred from position ticks.
     Playing(bool),
     Enabled(bool),
-    AppId(String),
 }
 
 #[derive(Clone)]
@@ -151,23 +142,21 @@ impl DiscordHandle {
     pub fn set_enabled(&self, on: bool) {
         let _ = self.tx.send(Msg::Enabled(on));
     }
-
-    pub fn set_app_id(&self, id: String) {
-        let _ = self.tx.send(Msg::AppId(id));
-    }
 }
 
 /// Spawn the presence owner thread. `enabled` is the persisted `discord_rpc` setting — when off,
 /// the thread parks on the channel and never opens a socket.
-pub fn spawn(enabled: bool, app_id: String) -> Option<DiscordHandle> {
-    if app_id.is_empty() || !app_id.bytes().all(|b| b.is_ascii_digit()) {
-        tracing::warn!(app_id, "discord rich presence disabled: app_id is not a Discord app id");
+pub fn spawn(enabled: bool) -> Option<DiscordHandle> {
+    // Without a real app id there is nothing to connect *as*. Say so once, loudly, rather than
+    // leaving a settings toggle that silently does nothing.
+    if APP_ID.is_empty() || !APP_ID.bytes().all(|b| b.is_ascii_digit()) {
+        tracing::warn!(APP_ID, "discord rich presence disabled: APP_ID is not a Discord app id");
         return None;
     }
     let (tx, rx) = channel::<Msg>();
     match std::thread::Builder::new()
         .name("discord-rpc".into())
-        .spawn(move || run(rx, Presence::new(enabled, app_id)))
+        .spawn(move || run(rx, Presence::new(enabled)))
     {
         Ok(_) => Some(DiscordHandle { tx }),
         Err(e) => {
@@ -225,7 +214,6 @@ enum Act {
 /// What we want Discord to show, what we last actually pushed, and the socket in between.
 struct Presence {
     enabled: bool,
-    app_id: String,
     client: Option<DiscordIpcClient>,
     last_connect_try: Option<Instant>,
     /// Grows on each failed connect, resets on success. See [`CONNECT_RETRY_MIN`].
@@ -253,10 +241,9 @@ struct Sent {
 }
 
 impl Presence {
-    fn new(enabled: bool, app_id: String) -> Self {
+    fn new(enabled: bool) -> Self {
         Presence {
             enabled,
-            app_id,
             client: None,
             last_connect_try: None,
             connect_backoff: CONNECT_RETRY_MIN,
@@ -313,12 +300,6 @@ impl Presence {
                     if !on {
                         self.disconnect();
                     }
-                }
-            }
-            Msg::AppId(id) => {
-                if self.app_id != id {
-                    self.app_id = id;
-                    self.disconnect();
                 }
             }
         }
@@ -508,10 +489,10 @@ impl Presence {
             return false; // too soon — the loop is already scheduled to wake for this
         }
         self.last_connect_try = Some(Instant::now());
-        let mut client = DiscordIpcClient::new(&self.app_id);
+        let mut client = DiscordIpcClient::new(APP_ID);
         match client.connect() {
             Ok(()) => {
-                tracing::info!(app_id = %self.app_id, "discord rich presence connected");
+                tracing::info!("discord rich presence connected");
                 self.client = Some(client);
                 self.connect_backoff = CONNECT_RETRY_MIN;
                 self.sent = None; // fresh socket shows nothing — re-push everything
@@ -578,6 +559,10 @@ fn field(s: &str) -> String {
     out
 }
 
+/// Ready a thumbnail URL for Discord's card: request a decent resolution (stored thumbs are often
+/// row-sized, 60px) and refuse URLs over Discord's length limit. Mirrors `ui/src/lib/thumb.ts` —
+/// only googleusercontent-style URLs carry their size in the URL; i.ytimg path-variant thumbs pass
+/// through unchanged (other sizes can 404).
 fn discord_thumb(url: &str) -> Option<String> {
     static WH: OnceLock<regex::Regex> = OnceLock::new();
     static S: OnceLock<regex::Regex> = OnceLock::new();
@@ -601,8 +586,8 @@ mod tests {
     #[test]
     fn app_id_is_a_snowflake() {
         assert!(
-            !DEFAULT_APP_ID.is_empty() && DEFAULT_APP_ID.bytes().all(|b| b.is_ascii_digit()),
-            "DEFAULT_APP_ID must be a Discord application id (digits only) — got {DEFAULT_APP_ID:?}"
+            !APP_ID.is_empty() && APP_ID.bytes().all(|b| b.is_ascii_digit()),
+            "APP_ID must be a Discord application id (digits only) — got {APP_ID:?}"
         );
     }
 
@@ -617,7 +602,7 @@ mod tests {
     }
 
     fn playing(id: &str, pos: f64) -> Presence {
-        let mut p = Presence::new(true, DEFAULT_APP_ID.to_string());
+        let mut p = Presence::new(true);
         p.apply(Msg::Track(track(id)));
         p.apply(Msg::Playing(true));
         p.apply(Msg::Position { pos, at: Instant::now() });
@@ -768,7 +753,7 @@ mod tests {
     /// often just slower to start than we are.
     #[test]
     fn a_failed_connect_retries_soon_then_backs_off() {
-        let mut p = Presence::new(true, DEFAULT_APP_ID.to_string());
+        let mut p = Presence::new(true);
         assert!(p.connect_backoff_remaining().is_none(), "never tried — try now");
 
         p.last_connect_try = Some(Instant::now()); // as ensure_connected does on failure
