@@ -82,16 +82,17 @@
 	const currentTheme = $derived(THEMES.find((t) => t.id === theme.id) ?? THEMES[0]);
 
 	// --- Themes tab ---
-	type FontKey = 'fontSans' | 'fontHeading';
+	type FontKey = 'fontSans' | 'fontHeading' | 'fontLyrics';
 	const FONT_ROWS: { key: FontKey; label: string; hint: string }[] = [
-		{ key: 'fontSans', label: 'Interface font', hint: 'Everything except headings.' },
-		{ key: 'fontHeading', label: 'Heading font', hint: 'Page and section titles.' }
+		{ key: 'fontSans', label: 'Interface font', hint: 'Everything except headings and lyrics.' },
+		{ key: 'fontHeading', label: 'Heading font', hint: 'Page and section titles.' },
+		{ key: 'fontLyrics', label: 'Lyrics font', hint: 'Synchronized and static lyrics across the player.' }
 	];
 	let pickerOpen = $state(false);
 	// Whether each font row is on "Custom", and the family name typed into it. Kept locally because
 	// the select can sit on Custom before anything has been typed.
-	let isCustomFont = $state<Record<FontKey, boolean>>({ fontSans: false, fontHeading: false });
-	let fontName = $state<Record<FontKey, string>>({ fontSans: '', fontHeading: '' });
+	let isCustomFont = $state<Record<FontKey, boolean>>({ fontSans: false, fontHeading: false, fontLyrics: false });
+	let fontName = $state<Record<FontKey, string>>({ fontSans: '', fontHeading: '', fontLyrics: '' });
 
 	/** Which entry in the font dropdown a resolved stack corresponds to. */
 	const fontOptions = $derived([...FONTS, ...fileFonts()]);
@@ -125,7 +126,8 @@
 	// theme follows once typing pauses. Half-typed names are meaningless anyway.
 	const fontTimers: Record<FontKey, ReturnType<typeof setTimeout> | undefined> = {
 		fontSans: undefined,
-		fontHeading: undefined
+		fontHeading: undefined,
+		fontLyrics: undefined
 	};
 
 	function typeFont(key: FontKey, name: string) {
@@ -162,7 +164,7 @@
 			readBack();
 			// Catches a font deleted while the app was running, not just between launches.
 			registerFontFiles();
-			for (const key of ['fontSans', 'fontHeading'] as FontKey[]) {
+			for (const key of ['fontSans', 'fontHeading', 'fontLyrics'] as FontKey[]) {
 				isCustomFont[key] = matchFont(effective[key]) === 'custom';
 				fontName[key] = isCustomFont[key] ? familyName(effective[key]) : '';
 			}
@@ -1180,8 +1182,8 @@
 		disabled={isDefaultCustom()}
 		onclick={() => {
 			resetCustom();
-			isCustomFont = { fontSans: false, fontHeading: false };
-			fontName = { fontSans: '', fontHeading: '' };
+			isCustomFont = { fontSans: false, fontHeading: false, fontLyrics: false };
+			fontName = { fontSans: '', fontHeading: '', fontLyrics: '' };
 		}}
 	>
 		Reset

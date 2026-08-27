@@ -82,6 +82,7 @@
 	--sidebar-ring: oklch(0.145 0 var(--hue));
 	--font-sans: 'IBM Plex Sans Variable', sans-serif;
 	--font-heading: 'IBM Plex Sans Variable', sans-serif;
+	--font-lyrics: 'IBM Plex Sans Variable', sans-serif;
 	--font-serif: ui-serif, Georgia, serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	/* Tailwind's stock shadow scale. Restated here because @theme inline maps the shadow
@@ -595,6 +596,7 @@ html.art-tint.dark {
 @theme inline {
 	--font-sans: var(--font-sans);
 	--font-heading: var(--font-heading);
+	--font-lyrics: var(--font-lyrics);
 	--font-serif: var(--font-serif);
 	--font-mono: var(--font-mono);
 	--shadow-2xs: var(--shadow-2xs);

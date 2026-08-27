@@ -1246,10 +1246,11 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
 
 - **Playlist Folders**: Organize playlists in your library into custom folders with 2×2 artwork collage previews and folder management.
 - **Sticky Top Search Bar**: Omnipresent search bar in the top header with real-time typeahead suggestions, keyboard navigation, and Ctrl+K shortcut.
-- **Customizable Lyrics Priority**: New Settings menu to reorder lyrics provider priority (Move Up/Down) and toggle sources on/off.
+- **Dedicated Lyrics Tab & Custom Priority**: Full priority ordering and provider toggle control in a dedicated Settings tab.
+- **Customizable Lyrics Font**: New Lyrics Font selector in Settings (Appearance ▸ Typography) with custom loaded font support.
 - **Better Lyrics Integration**: High-precision syllable-by-syllable and word-level synchronized lyrics powered by Better Lyrics.
-- **Fullscreen Player Upgrades**: Titlebar toggle button, lyrics hide/show toggle with hotkey (L), high-contrast played vs unplayed progress bar, centered single-column layout, and instrumental auto-hide.
-- **Discord Rich Presence Customization**: Custom Discord Application ID configuration in Settings for personalized presence and title rebranding.
+- **Fullscreen Player Upgrades**: Upstream theater-mode seek scrubber, dedicated volume slider, UI font timestamps, fixed-position top bar, lyrics hide/show toggle with hotkey (L), and instrumental auto-hide.
+- **Discord Rich Presence**: Restored clean upstream IPC architecture with updated Nocturne branding.
 - **Instant Window Startup**: Resolved launch permission delay so the window displays immediately on startup.
 - **Upstream v0.6.0-v0.6.2 Merges**: BotGuard PoToken background minting worker, YouTube uploads tab in Library, dislike skip purging, and persistent queue shuffle."#.to_string(),
     };

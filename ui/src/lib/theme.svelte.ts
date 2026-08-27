@@ -53,6 +53,7 @@ export type Custom = {
 	radius: number | null; // rem
 	fontSans: string | null; // a CSS font-family value
 	fontHeading: string | null;
+	fontLyrics: string | null;
 	// Font files the user loaded from disk, by absolute path. Not an override — a small library that
 	// both font rows can then choose from, which is why `resetCustom` leaves it alone.
 	fontFiles: string[];
@@ -65,7 +66,7 @@ const PALETTE_CLASSES = THEMES.filter((t) => t.kind === 'palette').map((t) => `t
 const ACCENT_VARS = ['--primary', '--primary-foreground', '--accent', '--accent-foreground'];
 /** Set on <html> while the artwork tint is live; the surface rules in layout.css hang off it. */
 const TINT_CLASS = 'art-tint';
-const CUSTOM_VARS = ['--hue', '--radius', '--font-sans', '--font-heading'];
+const CUSTOM_VARS = ['--hue', '--radius', '--font-sans', '--font-heading', '--font-lyrics'];
 // Same two neutrals the preset accent themes pick between.
 const ON_DARK = 'oklch(0.985 0 0)';
 const ON_LIGHT = 'oklch(0.205 0 0)';
@@ -78,6 +79,7 @@ export const custom = $state<Custom>({
 	radius: null,
 	fontSans: null,
 	fontHeading: null,
+	fontLyrics: null,
 	fontFiles: []
 });
 
@@ -116,7 +118,8 @@ export const effective = $state({
 	radius: 0.45,
 	accent: '#ffffff',
 	fontSans: '',
-	fontHeading: ''
+	fontHeading: '',
+	fontLyrics: ''
 });
 
 /**
@@ -148,6 +151,7 @@ export function readBack(): void {
 	effective.accent = toHex(g('--primary'));
 	effective.fontSans = g('--font-sans');
 	effective.fontHeading = g('--font-heading');
+	effective.fontLyrics = g('--font-lyrics');
 }
 
 /** Write the accent quartet as inline vars on <html>, foreground picked for legibility on it. */
@@ -184,6 +188,7 @@ function apply(): void {
 	if (custom.radius !== null) root.style.setProperty('--radius', `${custom.radius}rem`);
 	if (custom.fontSans) root.style.setProperty('--font-sans', custom.fontSans);
 	if (custom.fontHeading) root.style.setProperty('--font-heading', custom.fontHeading);
+	if (custom.fontLyrics) root.style.setProperty('--font-lyrics', custom.fontLyrics);
 
 	readBack();
 }
@@ -204,12 +209,12 @@ export function setCustom(patch: Partial<Custom>): void {
 
 /** Drops the overrides. Loaded font *files* stay: they're assets, not a setting. */
 export function resetCustom(): void {
-	setCustom({ accent: null, hue: null, radius: null, fontSans: null, fontHeading: null });
+	setCustom({ accent: null, hue: null, radius: null, fontSans: null, fontHeading: null, fontLyrics: null });
 }
 
 /** True when nothing is overridden, so the UI can disable the reset. */
 export function isDefaultCustom(): boolean {
-	return !custom.accent && custom.hue === null && custom.radius === null && !custom.fontSans && !custom.fontHeading;
+	return !custom.accent && custom.hue === null && custom.radius === null && !custom.fontSans && !custom.fontHeading && !custom.fontLyrics;
 }
 
 // --- Font files loaded from disk -------------------------------------------------------------
@@ -240,6 +245,7 @@ function forget(path: string): void {
 	const gone = `'${fileFamily(path)}', sans-serif`;
 	if (custom.fontSans === gone) custom.fontSans = null;
 	if (custom.fontHeading === gone) custom.fontHeading = null;
+	if (custom.fontLyrics === gone) custom.fontLyrics = null;
 }
 
 /**
@@ -380,7 +386,7 @@ export function initTheme(): void {
 		const saved = JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? '{}');
 		// Only keys we know about, only the shape we expect: a hand-edited or older localStorage
 		// entry must not be able to write arbitrary properties into the inline style.
-		for (const k of ['accent', 'fontSans', 'fontHeading'] as const) {
+		for (const k of ['accent', 'fontSans', 'fontHeading', 'fontLyrics'] as const) {
 			if (typeof saved?.[k] === 'string') custom[k] = saved[k];
 		}
 		for (const k of ['hue', 'radius'] as const) {

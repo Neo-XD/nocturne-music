@@ -173,7 +173,8 @@
 				<button
 					data-line={i}
 					onclick={() => seekTo(line)}
-					class="block w-full origin-left cursor-pointer text-left font-heading font-bold leading-snug transition-[color,transform] duration-300 ease-out hover:text-foreground
+					style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
+					class="block w-full origin-left cursor-pointer text-left font-bold leading-snug transition-[color,transform] duration-300 ease-out hover:text-foreground
 						{expanded ? 'py-3 text-3xl' : compact ? 'py-1 text-sm' : 'py-2 text-xl'}
 						{isActive
 						? 'scale-[1.04] text-foreground'
@@ -225,6 +226,7 @@
 		</div>
 	{:else if lyrics}
 		<div
+			style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
 			class="space-y-2 leading-relaxed text-foreground/90 {expanded
 				? 'mx-auto max-w-3xl text-xl'
 				: compact
