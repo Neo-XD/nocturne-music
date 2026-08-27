@@ -1,8 +1,6 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { Search01Icon, UserGroup02Icon } from '@hugeicons/core-free-icons';
-	import SearchSuggest from '$lib/components/SearchSuggest.svelte';
+	import { UserGroup02Icon } from '@hugeicons/core-free-icons';
 	import { auth, playback, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { thumb } from '$lib/thumb';
@@ -11,13 +9,6 @@
 	const hour = new Date().getHours();
 	const daypart =
 		hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-
-	let searchQuery = $state('');
-
-	function goSearch() {
-		if (!searchQuery.trim()) return;
-		goto(`/search?${new URLSearchParams({ q: searchQuery }).toString()}`);
-	}
 
 	// Google's CDN doesn't serve every rewritten size, so a 404'd backdrop must degrade to nothing
 	// rendered, never a broken-image glyph. Re-arm whenever the track changes, mirroring MediaCard.
@@ -59,7 +50,7 @@
 		></div>
 	</div>
 	<div class="relative p-6 pt-8">
-		<div class="flex items-start justify-between gap-4">
+		<div class="flex items-center justify-between gap-4">
 			<div class="flex min-w-0 items-center gap-3">
 				{#if auth.account?.signedIn && auth.account.thumbnail}
 					<!-- max-width:none defeats Tailwind Preflight's `img{max-width:100%}`, which in a tight box
@@ -93,20 +84,6 @@
 						></span>
 					{/if}
 				</button>
-				<form class="relative w-full max-w-xs" onsubmit={(e) => { e.preventDefault(); goSearch(); }}>
-					<HugeiconsIcon
-						icon={Search01Icon}
-						class="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-					/>
-					<!-- The panel is wider than this field and hangs off its right edge: the rows carry
-					     artwork and two lines of text, which 20rem can't hold. -->
-					<SearchSuggest
-						bind:value={searchQuery}
-						placeholder="Search"
-						inputClass="rounded-full pl-9"
-						panelClass="right-0 w-[26rem]"
-					/>
-				</form>
 			</div>
 		</div>
 	</div>
