@@ -1,14 +1,11 @@
 //! Lyrics fetching. Provider chain (plan `graceful-kindling`):
 //!
-//! 1. **Boidu** (`lyrics-api.boidu.dev`) → word-level timings, which nothing else here returns and
-//!    the karaoke sweep needs. First because of that, and behind the `lyrics_boidu` setting
-//!    because first also means it sees every track played.
-//! 2. **LRCLIB** `/api/get` (exact match) → synced LRC lyrics. Free, no key, best coverage —
-//!    what Metrolist defaults to.
+//! 1. **Better Lyrics** (`api.betterlyrics.org` / `lyrics-api.boidu.dev`) → syllable-by-syllable
+//!    and word-level timings in TTML/AAML/JSON/eLRC, giving high-precision karaoke sweeps.
+//! 2. **LRCLIB** `/api/get` (exact match) → synced LRC lyrics. Free, no key, best coverage.
 //! 3. **YouTube Music timed** — `next(videoId)` → lyrics browseId → mobile-client browse
 //!    (`timedLyricsData`). The same real-time lyrics the YTM app shows.
-//! 4. **Netease / QQ / Kugou** → synced LRC, plus translations from Netease. Search hits are
-//!    matched on length (`best_by_duration`); these catalogues rank remixes next to originals.
+//! 4. **QQ Music / Kugou** → synced LRC. Search hits matched on length (`best_by_duration`).
 //! 5. Plain fallbacks: LRCLIB fuzzy search → LRCLIB plain (from step 2's response) → YT plain
 //!    (WEB_REMIX browse) → the fuzzy search's plain text.
 //!
@@ -57,7 +54,7 @@ impl LyricLine {
 /// What the UI gets (and what `lyrics_cache` stores as JSON).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lyrics {
-    /// Attribution shown in the panel footer ("LRCLIB", "Musixmatch", …).
+    /// Attribution shown in the panel footer ("LRCLIB", "Better Lyrics", "YouTube Music", …).
     pub source: String,
     pub synced: bool,
     #[serde(default)]
@@ -74,9 +71,8 @@ pub struct LyricsRequest {
     pub duration: Option<f64>,
 }
 
-/// `NOCTURNE_LYRICS_ONLY` / `LIMUSIC_LYRICS_ONLY=<boidu|netease|qq|kugou>` pins the chain to that one provider and bypasses
-/// the cache both ways. The last three sit below Boidu, LRCLIB and YouTube Music, so on a normal
-/// catalogue nothing ever reaches them and they cannot be exercised by just playing tracks.
+/// `NOCTURNE_LYRICS_ONLY` / `LIMUSIC_LYRICS_ONLY=<betterlyrics|qq|kugou>` pins the chain to that one provider and bypasses
+/// the cache both ways.
 ///
 /// Unset (the default) leaves the chain exactly as it ships. Testing aid, not a user setting.
 fn forced_provider() -> Option<String> {
@@ -112,12 +108,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     let mut definitive = false;
 
     // 0. `next()` up front: it carries the lyrics browseId AND — via its seed item — the exact
-    //    length of the cut this videoId plays. The queue item often has no duration (card plays;
-    //    stream-cache replays skip /player entirely), and duration is what keeps LRCLIB from
-    //    matching a differently-timed cut, so resolve it here where it's always available.
-    //    A local file has no videoId to ask about — its duration came off the file itself, and
-    //    YouTube has no lyrics browseId for it. Skip straight to LRCLIB (title + artist), which is
-    //    the only provider that can answer for it anyway.
+    //    length of the cut this videoId plays.
     let next = if crate::local::is_local_song(&req.video_id) {
         None
     } else {
@@ -142,13 +133,10 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     }
     let req = &req;
 
-    // Pinned to one provider: run it alone and report whatever it says, hit or miss, so a silent
-    // fallthrough to LRCLIB can't be mistaken for the pinned provider working. Sits below the
-    // duration lookup above on purpose, so the match tightening gets exercised too.
+    // Pinned to one provider: run it alone and report whatever it says, hit or miss.
     if let Some(only) = forced_provider() {
         let hit = match only.as_str() {
-            "boidu" => boidu_get(req).await,
-            "netease" => netease_get(req).await,
+            "betterlyrics" | "boidu" => betterlyrics_get(req).await,
             "qq" => qqmusic_get(req).await,
             "kugou" => kugou_get(req).await,
             other => {
@@ -164,12 +152,12 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         return (hit.ok().flatten(), false);
     }
 
-    // 1. Boidu, ahead of LRCLIB because it is the only provider here that returns word-level
-    //    timings, and those are what the karaoke sweep renders. Going first also means it is the
-    //    one provider that sees every track played rather than only the ones LRCLIB misses, so it
-    //    is behind a setting. Off falls straight through to the chain as it was before.
-    if state.db.get_setting("lyrics_boidu").as_deref() != Some("false") {
-        if let Ok(Some(l)) = boidu_get(req).await {
+    // 1. Better Lyrics, ahead of LRCLIB because it returns syllable-by-syllable & word-level
+    //    timings for high-precision karaoke sweeps.
+    if state.db.get_setting("lyrics_boidu").as_deref() != Some("false")
+        && state.db.get_setting("lyrics_betterlyrics").as_deref() != Some("false")
+    {
+        if let Ok(Some(l)) = betterlyrics_get(req).await {
             return (Some(l), req.duration.is_some());
         }
     }
@@ -212,17 +200,12 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         }
     }
 
-    // 4. Netease Cloud Music provider (synced + word timestamps + translations)
-    if let Ok(Some(l)) = netease_get(req).await {
-        return (Some(l), req.duration.is_some());
-    }
-
-    // 5. QQ Music provider
+    // 4. QQ Music provider
     if let Ok(Some(l)) = qqmusic_get(req).await {
         return (Some(l), req.duration.is_some());
     }
 
-    // 6. Kugou provider
+    // 5. Kugou provider
     if let Ok(Some(l)) = kugou_get(req).await {
         return (Some(l), req.duration.is_some());
     }
@@ -483,10 +466,10 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-// --- Additional Providers (minilyricsv2 & LyricsPlus) --------------------------------------
+// --- Additional Providers (Better Lyrics & Asian Catalogues) ------------------------------
 
-/// Boidu provider (boidu.dev / Better Lyrics API)
-async fn boidu_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+/// Better Lyrics provider (Better Lyrics API / Boidu) - syllable-by-syllable & word-level sync
+async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
     let mut q: Vec<(&str, String)> = vec![("s", req.title.clone()), ("a", req.artists.clone())];
     if let Some(album) = &req.album {
         q.push(("al", album.clone()));
@@ -495,52 +478,59 @@ async fn boidu_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
         q.push(("d", format!("{}", d.round() as i64)));
     }
 
-    let url = "https://lyrics-api.boidu.dev/getLyrics";
-    tracing::debug!(title = %req.title, artist = %req.artists, "lyrics: querying Boidu provider");
-    let resp: serde_json::Value = match crate::http::client()
-        .get(url)
-        .query(&q)
-        .header("User-Agent", LRCLIB_UA)
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-    {
-        Ok(r) => match r.json().await {
-            Ok(j) => j,
+    let endpoints = [
+        "https://lyrics-api.boidu.dev/getLyrics",
+        "https://api.betterlyrics.org/getLyrics",
+    ];
+
+    for url in endpoints {
+        tracing::debug!(title = %req.title, artist = %req.artists, %url, "lyrics: querying Better Lyrics provider");
+        let resp_opt: Option<serde_json::Value> = match crate::http::client()
+            .get(url)
+            .query(&q)
+            .header("User-Agent", LRCLIB_UA)
+            .timeout(Duration::from_secs(8))
+            .send()
+            .await
+        {
+            Ok(r) => r.json().await.ok(),
             Err(e) => {
-                tracing::debug!(error = %e, "lyrics: Boidu json parse failed");
-                return Ok(None);
+                tracing::debug!(%url, error = %e, "lyrics: Better Lyrics request failed");
+                None
             }
-        },
-        Err(e) => {
-            tracing::debug!(error = %e, "lyrics: Boidu request failed");
-            return Ok(None);
-        }
-    };
+        };
 
-    let lrc_str = resp
-        .get("ttml")
-        .or_else(|| resp.get("syncedLyrics"))
-        .or_else(|| resp.get("lyrics"))
-        .or_else(|| resp.get("lrc"))
-        .and_then(|v| {
-            if let Some(s) = v.as_str() {
-                if !s.trim().is_empty() {
-                    return Some(s.to_string());
+        let Some(resp) = resp_opt else {
+            continue;
+        };
+
+        let lrc_str = resp
+            .get("ttml")
+            .or_else(|| resp.get("syncedLyrics"))
+            .or_else(|| resp.get("lyrics"))
+            .or_else(|| resp.get("lrc"))
+            .and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    if !s.trim().is_empty() {
+                        return Some(s.to_string());
+                    }
                 }
-            }
-            if v.is_array() {
-                return serde_json::to_string(v).ok();
-            }
-            None
-        });
+                if v.is_array() {
+                    return serde_json::to_string(v).ok();
+                }
+                None
+            });
 
-    let hit = lrc_str.and_then(|lrc| from_parsed("Boidu", parse_lrc_or_ttml(&lrc)));
-    match &hit {
-        Some(l) => tracing::debug!(count = l.lines.len(), synced = l.synced, "lyrics: Boidu hit"),
-        None => tracing::debug!("lyrics: Boidu returned no lines"),
+        if let Some(lrc) = lrc_str {
+            let hit = from_parsed("Better Lyrics", parse_lrc_or_ttml(&lrc));
+            if let Some(l) = hit {
+                tracing::debug!(count = l.lines.len(), synced = l.synced, "lyrics: Better Lyrics hit");
+                return Ok(Some(l));
+            }
+        }
     }
-    Ok(hit)
+
+    Ok(None)
 }
 
 /// How far a search hit's length may sit from the track we're actually playing. Same tolerance the
@@ -550,11 +540,11 @@ const MATCH_TOLERANCE_SECS: f64 = 5.0;
 /// Pick the search hit closest in length to what we're playing, rejecting anything further off than
 /// `MATCH_TOLERANCE_SECS`.
 ///
-/// The three providers below rank remixes, live cuts and radio edits right next to the original
-/// (Kugou's top hit for "Shape of You" is a 263s edit of a 233s song, and Netease ranks a 231s
-/// remix second), so taking whatever came back first plays lyrics seconds out of step with the
-/// audio. Closest-match rather than first-within-tolerance matters: the remix is often inside the
-/// window too, and only the distance separates it from the real cut.
+/// The providers below rank remixes, live cuts and radio edits right next to the original
+/// (Kugou's top hit for "Shape of You" is a 263s edit of a 233s song), so taking whatever came back
+/// first plays lyrics seconds out of step with the audio. Closest-match rather than
+/// first-within-tolerance matters: the remix is often inside the window too, and only the distance
+/// separates it from the real cut.
 ///
 /// With no length on our side there is nothing to check, so the first hit stands. A candidate whose
 /// own length is missing ranks last but is not dropped — if a provider renames the field we want
@@ -573,82 +563,6 @@ fn best_by_duration<T>(
         .filter(|(d, _)| *d <= MATCH_TOLERANCE_SECS || d.is_infinite())
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, c)| c)
-}
-
-/// Netease Cloud Music provider (supports LRC, word timestamps, & translations)
-async fn netease_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
-    let query = format!("{} {}", req.title, req.artists);
-    // POST `/api/search/get`, not GET `/api/search/get/web`: the latter now answers with an
-    // encrypted hex blob instead of JSON, which parsed to "no hit" and left this provider dead.
-    let resp: serde_json::Value = match crate::http::client()
-        .post("https://music.163.com/api/search/get")
-        .form(&[("s", query.as_str()), ("type", "1"), ("limit", "5"), ("offset", "0")])
-        .header("User-Agent", LRCLIB_UA)
-        .header("Referer", "https://music.163.com/")
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-    {
-        Ok(r) => match r.json().await {
-            Ok(j) => j,
-            Err(_) => return Ok(None),
-        },
-        Err(_) => return Ok(None),
-    };
-
-    let songs = resp
-        .pointer("/result/songs")
-        .and_then(|v| v.as_array())
-        .map(|v| v.as_slice())
-        .unwrap_or_default();
-    // Netease reports track length in milliseconds.
-    let hit =
-        best_by_duration(req.duration, songs, |s| Some(s.get("duration")?.as_f64()? / 1000.0));
-    let Some(id) = hit.and_then(|s| s.get("id")).and_then(|v| v.as_u64()) else {
-        return Ok(None);
-    };
-
-    let lyric_url = format!("https://music.163.com/api/song/lyric?id={id}&lv=1&kv=1&tv=-1");
-    let l_resp: serde_json::Value = match crate::http::client()
-        .get(&lyric_url)
-        .header("User-Agent", LRCLIB_UA)
-        .header("Referer", "https://music.163.com/")
-        .timeout(Duration::from_secs(8))
-        .send()
-        .await
-    {
-        Ok(r) => match r.json().await {
-            Ok(j) => j,
-            Err(_) => return Ok(None),
-        },
-        Err(_) => return Ok(None),
-    };
-
-    let lrc_str = l_resp.pointer("/lrc/lyric").and_then(|v| v.as_str());
-    let klyric_str = l_resp.pointer("/klyric/lyric").and_then(|v| v.as_str());
-    let tlyric_str = l_resp.pointer("/tlyric/lyric").and_then(|v| v.as_str());
-
-    if let Some(lrc) = lrc_str {
-        let mut lines = parse_lrc_or_ttml(lrc);
-        if let Some(klrc) = klyric_str {
-            let klines = parse_lrc_or_ttml(klrc);
-            lines = lrc_mux(lines, klines);
-        }
-        if let Some(tlrc) = tlyric_str {
-            let tlines = parse_lrc(tlrc);
-            for l in &mut lines {
-                if let Some(t_time) = l.time_ms {
-                    if let Some(tl) = tlines.iter().find(|t| t.time_ms == Some(t_time)) {
-                        if !tl.text.trim().is_empty() {
-                            l.translation = Some(tl.text.clone());
-                        }
-                    }
-                }
-            }
-        }
-        return Ok(from_parsed("Netease Cloud Music", lines));
-    }
-    Ok(None)
 }
 
 /// QQ Music provider
@@ -1041,6 +955,7 @@ fn parse_elrc(lrc: &str) -> Vec<LyricLine> {
 }
 
 /// LRCMux multiplexer: merges line lyrics with word timing or translations
+#[cfg(test)]
 fn lrc_mux(mut primary: Vec<LyricLine>, word_source: Vec<LyricLine>) -> Vec<LyricLine> {
     if word_source.is_empty() {
         return primary;
@@ -1229,7 +1144,7 @@ mod tests {
         assert!(from_parsed("X", Vec::new()).is_none());
     }
 
-    /// Real Kugou/Netease search shapes: the original is not first, and a remix sits inside the
+    /// Real search shapes: the original is not first, and a remix sits inside the
     /// tolerance window, so only closest-match picks the right cut.
     #[test]
     fn best_by_duration_skips_remixes_and_wrong_cuts() {
@@ -1237,9 +1152,9 @@ mod tests {
         // Kugou's actual top hit for "Shape of You" is a 263s edit of a 233s song.
         let kugou = [(263.0, "wrong cut"), (251.0, "dj edit"), (233.0, "original")];
         assert_eq!(best_by_duration(Some(233.0), &kugou, secs).unwrap().1, "original");
-        // Netease ranks a 231s remix second; both are within 5s, distance breaks the tie.
-        let netease = [(233.7, "original"), (231.2, "stormzy remix")];
-        assert_eq!(best_by_duration(Some(233.0), &netease, secs).unwrap().1, "original");
+        // Ranked remix second: both inside 5s window, closest distance breaks the tie.
+        let remix_cands = [(233.7, "original"), (231.2, "club remix")];
+        assert_eq!(best_by_duration(Some(233.0), &remix_cands, secs).unwrap().1, "original");
         // Nothing close enough beats a wrong answer.
         assert!(best_by_duration(Some(233.0), &kugou[..2], secs).is_none());
         // No length on our side: nothing to check, first hit stands.
@@ -1266,23 +1181,11 @@ mod tests {
         assert_eq!(muxed[0].translation.as_deref(), Some("Halo dunia"));
     }
 
-    /// Are the external providers still alive? Hits all four for real, so it is NOT in the default
+    /// Are the external providers still alive? Hits all three for real, so it is NOT in the default
     /// run (context/17: network tests are opt-in, or `cargo test` fails offline):
-    ///   cargo test -p limusic-app --lib -- --ignored --nocapture
-    ///
-    /// This exists because a provider that is *broken* and a provider that simply *has no lyrics
-    /// for this track* both return `Ok(None)`, and nothing else in the chain can tell them apart:
-    /// each one just falls through to the next. Netease and Kugou both shipped in PR #13 querying
-    /// endpoints that answered an error for every track, and stayed unnoticed for exactly that
-    /// reason. Run this after touching a provider, and whenever lyrics quietly get worse.
-    ///
-    /// **Read the output, don't just trust the pass.** It fails only when *every* provider is
-    /// silent, because a single "no hit" is not proof of breakage: these are third-party
-    /// catalogues, they drop tracks, and Kugou in particular throttles by IP and answers
-    /// `total: 0` to everything for a while rather than returning an error. A provider that is
-    /// genuinely dead prints "no hit" on every track you try, run after run.
+    ///   cargo test -p nocturne-app --lib -- --ignored --nocapture
     #[tokio::test]
-    #[ignore = "hits four live lyrics APIs"]
+    #[ignore = "hits live lyrics APIs"]
     async fn providers_are_alive() {
         let req = LyricsRequest {
             video_id: "test".into(),
@@ -1293,8 +1196,7 @@ mod tests {
         };
         let mut alive = 0;
         for (name, hit) in [
-            ("Boidu", boidu_get(&req).await),
-            ("Netease Cloud Music", netease_get(&req).await),
+            ("Better Lyrics", betterlyrics_get(&req).await),
             ("QQ Music", qqmusic_get(&req).await),
             ("Kugou", kugou_get(&req).await),
         ] {
@@ -1313,11 +1215,8 @@ mod tests {
         }
         assert!(alive > 0, "no lyrics from any provider (offline?)");
 
-        // Boidu is the only provider carrying per-word timings, and the karaoke sweep renders
-        // nothing without them. Checked here rather than in its own test: a second live test runs
-        // concurrently with this one, and the added latency alone was enough to trip another
-        // provider's 8s timeout and fail the run.
-        let boidu = boidu_get(&req).await.unwrap().expect("Boidu hit");
-        assert!(boidu.lines.iter().any(|l| l.words.is_some()));
+        // Better Lyrics carries syllable/per-word timings, which the karaoke sweep renders.
+        let bl = betterlyrics_get(&req).await.unwrap().expect("Better Lyrics hit");
+        assert!(bl.lines.iter().any(|l| l.words.is_some()));
     }
 }

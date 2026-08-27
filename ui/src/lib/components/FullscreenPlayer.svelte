@@ -178,6 +178,9 @@
 	let seekDrag = $state<number | null>(null);
 	const currentPos = $derived(seekDrag ?? playback.position);
 	const durationNum = $derived(durationSecs(playback.now?.duration) ?? playback.duration);
+	const progressPct = $derived(
+		durationNum > 0 ? Math.min(100, Math.max(0, (currentPos / durationNum) * 100)) : 0
+	);
 	const repeat = $derived(playback.queue.repeat ?? 'off');
 
 	function onSeekInput(e: Event) {
@@ -408,7 +411,7 @@
 						<span class="w-10 text-right font-mono text-xs text-muted-foreground">
 							{fmt(currentPos)}
 						</span>
-						<div class="relative flex-1 group">
+						<div class="relative flex-1 group flex items-center">
 							<input
 								type="range"
 								min="0"
@@ -417,7 +420,8 @@
 								oninput={onSeekInput}
 								onchange={onSeekCommit}
 								aria-label="Seek position"
-								class="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-foreground/20 accent-primary transition group-hover:h-2"
+								class="fs-range h-1.5 w-full cursor-pointer appearance-none rounded-full transition group-hover:h-2 focus:outline-none"
+								style="background: linear-gradient(to right, hsl(var(--primary)) {progressPct}%, rgba(255, 255, 255, 0.2) {progressPct}%);"
 							/>
 						</div>
 						<span class="w-10 text-left font-mono text-xs text-muted-foreground">
@@ -569,11 +573,11 @@
 	{:else}
 		<!-- Centered Single-Column View (For instrumental tracks or when lyrics are hidden) -->
 		<main
-			class="relative z-10 mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center px-8 pt-36 pb-12 text-center"
+			class="relative z-10 mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center px-8 py-8 my-auto text-center"
 			onwheel={wheelVolume}
 		>
 			<!-- Artwork Card -->
-			<div class="relative w-full max-w-[19rem] sm:max-w-[23rem] lg:max-w-[26rem] aspect-square overflow-hidden rounded-3xl ring-1 ring-white/10 shadow-2xl transition-transform duration-300 hover:scale-[1.01]">
+			<div class="relative w-full max-h-[44vh] max-w-[19rem] sm:max-w-[23rem] lg:max-w-[26rem] aspect-square overflow-hidden rounded-3xl ring-1 ring-white/10 shadow-2xl transition-transform duration-300 hover:scale-[1.01]">
 				{#if coverSrc}
 					<img
 						src={coverSrc}
@@ -613,7 +617,7 @@
 					<span class="w-10 text-right font-mono text-xs text-muted-foreground">
 						{fmt(currentPos)}
 					</span>
-					<div class="relative flex-1 group">
+					<div class="relative flex-1 group flex items-center">
 						<input
 							type="range"
 							min="0"
@@ -622,7 +626,8 @@
 							oninput={onSeekInput}
 							onchange={onSeekCommit}
 							aria-label="Seek position"
-							class="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-foreground/20 accent-primary transition group-hover:h-2"
+							class="fs-range h-1.5 w-full cursor-pointer appearance-none rounded-full transition group-hover:h-2 focus:outline-none"
+							style="background: linear-gradient(to right, hsl(var(--primary)) {progressPct}%, rgba(255, 255, 255, 0.2) {progressPct}%);"
 						/>
 					</div>
 					<span class="w-10 text-left font-mono text-xs text-muted-foreground">
@@ -684,3 +689,24 @@
 		</main>
 	{/if}
 </div>
+
+<style>
+	:global(input[type='range'].fs-range::-webkit-slider-thumb) {
+		-webkit-appearance: none;
+		appearance: none;
+		height: 14px;
+		width: 14px;
+		border-radius: 50%;
+		background: #ffffff;
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+		opacity: 0;
+		transition: opacity 0.15s ease, transform 0.15s ease;
+	}
+	:global(input[type='range'].fs-range:hover::-webkit-slider-thumb),
+	:global(input[type='range'].fs-range:focus-visible::-webkit-slider-thumb) {
+		opacity: 1;
+	}
+	:global(input[type='range'].fs-range:active::-webkit-slider-thumb) {
+		transform: scale(1.25);
+	}
+</style>

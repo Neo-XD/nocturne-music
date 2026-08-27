@@ -16,6 +16,7 @@
 		Mic01Icon,
 		InfinityIcon,
 		ArrowRight01Icon,
+		FullScreenIcon,
 		Maximize01Icon,
 		Minimize01Icon
 	} from '@hugeicons/core-free-icons';
@@ -317,7 +318,7 @@
 				title="Fullscreen player"
 				class="cursor-pointer hover:text-foreground"
 			>
-				<HugeiconsIcon icon={Maximize01Icon} class="h-4 w-4" />
+				<HugeiconsIcon icon={FullScreenIcon} class="h-4 w-4" />
 			</Button>
 			<Button
 				variant="ghost"
