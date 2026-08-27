@@ -14,7 +14,8 @@
 		Link04Icon,
 		KeyboardIcon,
 		ArrowUp01Icon,
-		ArrowDown01Icon
+		ArrowDown01Icon,
+		Mic01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -59,11 +60,12 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'lyrics' | 'data' | 'about';
 	const TABS: { id: TabId; label: string; hint: string; icon: typeof Settings02Icon }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
-		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and lyrics.', icon: PlayCircleIcon },
+		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and stream clients.', icon: PlayCircleIcon },
+		{ id: 'lyrics', label: 'Lyrics', hint: 'Provider priority, sources and synchronization.', icon: Mic01Icon },
 		{ id: 'data', label: 'Data & storage', hint: 'Network and cached files.', icon: Database02Icon },
 		{ id: 'about', label: 'About', hint: 'Version, updates and what changed.', icon: InformationCircleIcon }
 	];
@@ -531,10 +533,10 @@
 {/snippet}
 
 <Dialog.Root bind:open={ui.settingsOpen}>
-	<Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-3xl">
+	<Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl">
 		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
-		<div class="flex h-[min(34rem,72vh)]">
+		<div class="flex h-[min(38rem,80vh)]">
 			<!-- Tab rail -->
 			<nav class="flex w-52 shrink-0 flex-col border-r bg-muted/40 p-3">
 				<Dialog.Title class="px-3 pt-1 pb-4 font-heading text-base font-semibold">
@@ -574,7 +576,7 @@
 					<p class="truncate text-xs text-muted-foreground">{currentTab.hint}</p>
 				</header>
 
-				<div class="min-w-0 flex-1 overflow-y-auto px-6 py-5">
+				<div class="min-w-0 flex-1 overflow-y-auto px-6 py-5 pb-10">
 					{#if !loaded}
 						<p class="text-sm text-muted-foreground">Loading…</p>
 					{:else if tab === 'general'}
@@ -760,6 +762,13 @@
 							</div>
 						</section>
 						<section class={GROUP}>
+							<h3 class={LABEL}>Advanced</h3>
+							<div class={CARD}>
+								{@render row({ title: 'Stream clients', below: clientList })}
+							</div>
+						</section>
+					{:else if tab === 'lyrics'}
+						<section class={GROUP}>
 							<div class="flex items-center justify-between px-1 mb-2">
 								<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 									Lyrics Providers & Priority
@@ -836,12 +845,6 @@
 										</div>
 									</div>
 								{/each}
-							</div>
-						</section>
-						<section class={GROUP}>
-							<h3 class={LABEL}>Advanced</h3>
-							<div class={CARD}>
-								{@render row({ title: 'Stream clients', below: clientList })}
 							</div>
 						</section>
 					{:else if tab === 'data'}
