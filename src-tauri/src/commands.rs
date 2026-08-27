@@ -178,13 +178,14 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 16] = [
+const UI_SETTINGS: [&str; 17] = [
     "volume",
     "proxy",
     "quality",
     "enable_history",
     "disabled_stream_clients",
     "discord_rpc",
+    "discord_app_id",
     "close_to_tray",
     "autostart",
     "autoplay",
@@ -263,6 +264,14 @@ pub async fn set_setting(
     // to see it take effect.
     if key == "discord_rpc" {
         state.set_discord_enabled(value == "true");
+    }
+    if key == "discord_app_id" {
+        let id = if value.trim().is_empty() {
+            crate::discord::resolve_default_app_id()
+        } else {
+            value.trim().to_string()
+        };
+        state.set_discord_app_id(id);
     }
     // Update active Last.fm keys dynamically when changed in settings.
     if key == "lastfm_api_key" || key == "lastfm_api_secret" {
@@ -1233,6 +1242,19 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v063_note = ReleaseNote {
+        version: "0.6.3".to_string(),
+        date: "2026-08-27".to_string(),
+        body: r#"### Nocturne Music v0.6.3
+
+- **Playlist Folders**: Organize playlists in your library into custom folders with 2×2 artwork collage previews and folder management.
+- **Sticky Top Search Bar**: Omnipresent search bar in the top header with real-time typeahead suggestions, keyboard navigation, and Ctrl+K shortcut.
+- **Fullscreen Player Upgrades**: Added top Titlebar toggle button, lyrics hide/show toggle with hotkey (L), instrumental and empty lyrics auto-hide, and subtle user-theme accent glow.
+- **Discord Rich Presence Customization**: Added custom Discord Application ID configuration in Settings for personalized presence and title rebranding.
+- **Instant Window Startup**: Resolved launch permission delay so the window displays immediately on startup.
+- **Upstream v0.6.0-v0.6.2 Merges**: BotGuard PoToken background minting worker, YouTube uploads tab in Library, dislike skip purging, and persistent queue shuffle."#.to_string(),
+    };
+
     let v062_note = ReleaseNote {
         version: "0.6.2".to_string(),
         date: "2026-08-26".to_string(),
@@ -1282,6 +1304,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes: Vec<ReleaseNote> = Vec::new();
+    notes.push(v063_note);
     notes.push(v062_note);
     notes.push(v061_note);
     notes.push(v06_note);
