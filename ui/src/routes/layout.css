@@ -896,3 +896,12 @@ input[type='range'].range:active::-webkit-slider-thumb {
 	scroll-behavior: auto !important;
 }
 
+/* Hide scrollbars while preserving scrollability */
+.no-scrollbar::-webkit-scrollbar {
+	display: none;
+}
+.no-scrollbar {
+	-ms-overflow-style: none;
+	scrollbar-width: none;
+}
+
