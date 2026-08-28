@@ -262,7 +262,7 @@
 	<!-- Ambient User Theme Tint (Subtle glow matching active primary accent) -->
 	<div
 		class="pointer-events-none absolute inset-0 opacity-20 transition-opacity duration-500"
-		style="background: radial-gradient(120% 120% at 50% 15%, hsl(var(--primary) / 0.45) 0%, transparent 65%), radial-gradient(90% 90% at 85% 85%, hsl(var(--primary) / 0.25) 0%, transparent 70%);"
+		style="background: radial-gradient(120% 120% at 50% 15%, color-mix(in srgb, var(--primary) 45%, transparent) 0%, transparent 65%), radial-gradient(90% 90% at 85% 85%, color-mix(in srgb, var(--primary) 25%, transparent) 0%, transparent 70%);"
 	></div>
 
 	<!-- Top Header Bar (With generous top padding from screen edge) -->
@@ -541,9 +541,10 @@
 													{#if isActive}
 														{@const progress = getWordProgress(word, posMs)}
 														{@const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)}
+														{@const isCurrentWord = progress > 0 && progress < 1}
 														<span
-															class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-colors duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''}"
-															style="background-image: linear-gradient(90deg, hsl(var(--primary)) {pct}%, var(--foreground) {pct}%)"
+															class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord ? 'scale-[1.03]' : ''}"
+															style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
 														>
 															{cleanText}
 														</span>
