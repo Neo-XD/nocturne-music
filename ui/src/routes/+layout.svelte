@@ -177,21 +177,21 @@
 			? ''
 			: 'rounded-lg'}"
 	>
-		<!-- Glassy Theme: Dimmed & Blurred Album Art Ambient App Background -->
+		<!-- Glassy Theme: Solid Base Underlayer + Dimmed & Blurred Album Art Background -->
 		{#if theme.id === 'glassy'}
-			<div class="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none">
+			<div class="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none bg-background">
 				{#if playback.now?.thumbnail}
 					<img
 						src={thumb(playback.now.thumbnail, 720)}
 						alt=""
-						class="absolute inset-0 h-full w-full object-cover scale-125 blur-3xl opacity-35 dark:opacity-25 transition-all duration-700"
+						class="absolute inset-0 h-full w-full object-cover scale-125 blur-3xl opacity-45 dark:opacity-35 transition-all duration-700"
 					/>
 				{:else}
 					<div
-						class="absolute inset-0 bg-gradient-to-br from-primary/15 via-background to-secondary/20"
+						class="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-secondary/30"
 					></div>
 				{/if}
-				<div class="absolute inset-0 bg-background/50 dark:bg-background/60 backdrop-blur-3xl"></div>
+				<div class="absolute inset-0 bg-background/50 dark:bg-black/45 backdrop-blur-2xl"></div>
 			</div>
 		{/if}
 
