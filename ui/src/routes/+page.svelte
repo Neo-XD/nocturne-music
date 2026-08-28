@@ -329,11 +329,11 @@
 	<HomeHero />
 	{#if chips.length}
 		<div class="sticky top-3.5 z-20 my-4 px-6 flex w-fit max-w-full items-center">
-			<div class="flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
+			<div class="h-10.5 flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
 				<!-- An explicit "All" is the way out of a filter. -->
 				<button
 					onclick={() => load(null)}
-					class="gap-1.5 rounded-full border border-transparent px-4 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {!selected
+					class="gap-1.5 rounded-full border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {!selected
 						? 'bg-background text-foreground shadow-xs dark:border-input dark:bg-input/30'
 						: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
 				>
@@ -342,7 +342,7 @@
 				{#each chips as chip (chip.params)}
 					<button
 						onclick={() => load(selected === chip.params ? null : chip.params)}
-						class="gap-1.5 rounded-full border border-transparent px-4 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {selected === chip.params
+						class="gap-1.5 rounded-full border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {selected === chip.params
 							? 'bg-background text-foreground shadow-xs dark:border-input dark:bg-input/30'
 							: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
 					>
@@ -354,7 +354,7 @@
 	{:else if loading}
 		<!-- Hold the bar's height on a cold load -->
 		<div class="sticky top-3.5 z-20 my-4 px-6 flex w-fit max-w-full items-center" aria-hidden="true">
-			<div class="flex items-center gap-1 rounded-full border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
+			<div class="h-10.5 flex items-center gap-1 rounded-full border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
 				{#each ['w-12', 'w-20', 'w-24', 'w-16', 'w-28', 'w-20'] as w, i (i)}
 					<Skeleton class="h-8 shrink-0 rounded-full {w}" />
 				{/each}
