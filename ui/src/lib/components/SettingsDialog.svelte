@@ -757,6 +757,13 @@
 									tall: true
 								})}
 								{@render row({
+									title: 'Animated Fullscreen Background',
+									badge: 'Shaders',
+									desc: 'Display real-time fluid GPU shaders and domain-warped blur behind the fullscreen player.',
+									control: animatedArtworkSwitch,
+									tall: true
+								})}
+								{@render row({
 									title: 'Adapt colors to artwork',
 									badge: 'Experimental',
 									desc: "Recolor the app from the playing track's cover: accent, surfaces and borders, fading between tracks. Off keeps the selected theme's own colors.",
