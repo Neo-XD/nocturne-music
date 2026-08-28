@@ -33,11 +33,12 @@
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
 	import NowPlayingSidebar from '$lib/components/NowPlayingSidebar.svelte';
 	import FullscreenPlayer from '$lib/components/FullscreenPlayer.svelte';
+	import AnimatedArtwork from '$lib/components/AnimatedArtwork.svelte';
 	import VideoSurface from '$lib/components/VideoSurface.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import { auth, initApp, np, playback, ui } from '$lib/player.svelte';
+	import { auth, initApp, np, playback, prefs, ui } from '$lib/player.svelte';
 	import { win, initWin } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
 	import { initShortcuts } from '$lib/shortcuts.svelte';
@@ -177,15 +178,24 @@
 			? ''
 			: 'rounded-lg'}"
 	>
-		<!-- Glassy Theme: Solid Base Underlayer + Dimmed & Blurred Album Art Background -->
+		<!-- Glassy Theme: Solid Base Underlayer + Warped/Blurred Animated Album Art Background -->
 		{#if theme.id === 'glassy'}
 			<div class="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none bg-background">
 				{#if playback.now?.thumbnail}
-					<img
-						src={thumb(playback.now.thumbnail, 720)}
-						alt=""
-						class="absolute inset-0 h-full w-full object-cover scale-125 blur-3xl opacity-45 dark:opacity-35 transition-all duration-700"
-					/>
+					{#if prefs.animatedArtwork}
+						<AnimatedArtwork
+							src={thumb(playback.now.thumbnail, 720)}
+							class="absolute inset-0 h-full w-full scale-125 object-cover blur-3xl opacity-45 dark:opacity-35 transition-all duration-700"
+							intensity={1.5}
+							speed={0.5}
+						/>
+					{:else}
+						<img
+							src={thumb(playback.now.thumbnail, 720)}
+							alt=""
+							class="absolute inset-0 h-full w-full object-cover scale-125 blur-3xl opacity-45 dark:opacity-35 transition-all duration-700"
+						/>
+					{/if}
 				{:else}
 					<div
 						class="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-secondary/30"
