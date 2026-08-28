@@ -1252,7 +1252,8 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
 - **Customizable Shortcuts Editor**: Search is now bound to Ctrl+Space by default, with a keybind manager in Settings (General) to rebind or reset your shortcuts.
 - **Explicit Content Filter & Badges**: Added an explicit content filter toggle in Playback Settings, relocated the explicit song badge to the left of the artist's name across all views, and added the badge to the bottom player bar.
 - **Search Context Menus**: Added three-dot context menus to search suggestions and song results so you can save, queue, and manage songs right from search.
-- **Sidebar Folder Creation**: Quick "New folder" button next to "New playlist" in the sidebar."#.to_string(),
+- **Sidebar Folder Creation**: Quick "New folder" button next to "New playlist" in the sidebar.
+- **Fullscreen Lyrics Fix**: Resolved word-by-word synced lyrics visibility bug in the fullscreen theater view."#.to_string(),
     };
 
     let v063_note = ReleaseNote {
