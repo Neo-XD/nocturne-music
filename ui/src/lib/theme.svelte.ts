@@ -100,12 +100,24 @@ export const appearance = $state({
 	/** Starting playback opens the now-playing view. Off, it plays and leaves you where you are (#64). */
 	openPlayerOnPlay: true,
 	/** Take the accent colour from the playing track's cover, crossfading on each change. */
-	artworkAccent: false
+	artworkAccent: false,
+	/** Disable heavy CSS backdrop-blur and transparency for max rendering speed on low-end devices. */
+	reduceTransparency: false,
+	/** Reduce animations and transitions across the interface for battery saving and low-spec PCs. */
+	reduceMotion: false
 });
+
+export function applyPerformanceClasses(): void {
+	if (typeof document === 'undefined') return;
+	const root = document.documentElement;
+	root.classList.toggle('reduce-transparency', appearance.reduceTransparency);
+	root.classList.toggle('reduce-motion', appearance.reduceMotion);
+}
 
 export function setAppearance(patch: Partial<typeof appearance>): void {
 	Object.assign(appearance, patch);
 	localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance));
+	applyPerformanceClasses();
 }
 
 /**
@@ -400,13 +412,14 @@ export function initTheme(): void {
 	}
 	try {
 		const saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) ?? '{}');
-		for (const k of ['artworkBackground', 'tabbedPlayer', 'openPlayerOnPlay', 'artworkAccent'] as const) {
+		for (const k of ['artworkBackground', 'tabbedPlayer', 'openPlayerOnPlay', 'artworkAccent', 'reduceTransparency', 'reduceMotion'] as const) {
 			if (typeof saved?.[k] === 'boolean') appearance[k] = saved[k];
 		}
 	} catch {
 		// unparseable — keep the defaults
 	}
 	apply();
+	applyPerformanceClasses();
 	// Async (each file needs its URL granted first), so the app paints in the fallback font for a
 	// frame or two before a loaded font swaps in.
 	if (custom.fontFiles.length) registerFontFiles();

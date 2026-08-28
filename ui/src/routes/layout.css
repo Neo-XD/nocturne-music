@@ -809,3 +809,22 @@ input[type='range'].range:active::-webkit-slider-thumb {
 		scroll-behavior: auto !important;
 	}
 }
+
+/* Performance mode: Disable expensive backdrop-filter blurs and glass effects */
+.reduce-transparency *,
+.reduce-transparency *::before,
+.reduce-transparency *::after {
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+/* Performance mode: In-app reduced motion setting */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+	animation-duration: 0.01ms !important;
+	animation-iteration-count: 1 !important;
+	transition-duration: 0.01ms !important;
+	scroll-behavior: auto !important;
+}
+

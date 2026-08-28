@@ -16,7 +16,9 @@
 		ArrowUp01Icon,
 		ArrowDown01Icon,
 		Mic01Icon,
-		RotateLeft01Icon
+		RotateLeft01Icon,
+		FlashIcon,
+		CpuIcon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -70,11 +72,12 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'lyrics' | 'keybindings' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
 	const TABS: { id: TabId; label: string; hint: string; icon: typeof Settings02Icon }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
 		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and stream clients.', icon: PlayCircleIcon },
+		{ id: 'performance', label: 'Performance', hint: 'Graphics, animation speed and resource optimizations.', icon: FlashIcon },
 		{ id: 'lyrics', label: 'Lyrics', hint: 'Provider priority, sources and synchronization.', icon: Mic01Icon },
 		{ id: 'keybindings', label: 'Keybindings', hint: 'Keyboard shortcuts and custom key mappings.', icon: KeyboardIcon },
 		{ id: 'data', label: 'Data & storage', hint: 'Network and cached files.', icon: Database02Icon },
@@ -541,6 +544,28 @@
 			clearing = false;
 		}
 	}
+
+	function applyMaxPerformance() {
+		setAppearance({
+			reduceTransparency: true,
+			reduceMotion: true,
+			artworkBackground: false,
+			artworkAccent: false
+		});
+		setAnimatedArtwork(false);
+		setMusicVideos(false);
+		toast.success('Applied Maximum Performance profile');
+	}
+
+	function restoreHighQuality() {
+		setAppearance({
+			reduceTransparency: false,
+			reduceMotion: false,
+			artworkBackground: true
+		});
+		setAnimatedArtwork(true);
+		toast.success('Restored High Quality Visuals');
+	}
 </script>
 
 <!-- One row shape for the whole modal: label and description on the left, the control on the right,
@@ -549,6 +574,7 @@
 	title: string;
 	desc?: string;
 	badge?: string;
+	badgeVariant?: 'default' | 'performance' | 'warning' | 'saving' | 'info';
 	control?: Snippet;
 	below?: Snippet;
 	tall?: boolean;
@@ -556,11 +582,19 @@
 	<div class="px-4 py-3.5">
 		<div class="flex {o.tall ? 'items-start' : 'items-center'} justify-between gap-6">
 			<div class="min-w-0">
-				<div class="flex items-center gap-2">
+				<div class="flex items-center gap-2 flex-wrap">
 					<span class="text-sm font-medium">{o.title}</span>
 					{#if o.badge}
 						<span
-							class="rounded-full bg-primary/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
+							class="rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide {o.badgeVariant === 'performance'
+								? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25'
+								: o.badgeVariant === 'warning'
+									? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/25'
+									: o.badgeVariant === 'saving'
+										? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25'
+										: o.badgeVariant === 'info'
+											? 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/25'
+											: 'bg-primary/12 text-primary'}"
 						>
 							{o.badge}
 						</span>
@@ -736,7 +770,7 @@
 						</section>
 
 						<section class={GROUP}>
-							<h3 class={LABEL}>Player view</h3>
+							<h3 class={LABEL}>Player view & effects</h3>
 							<div class={CARD}>
 								{@render row({
 									title: 'Open the player when you press play',
@@ -752,22 +786,42 @@
 								})}
 								{@render row({
 									title: 'Artwork background',
+									badge: 'Moderate GPU',
+									badgeVariant: 'performance',
 									desc: "Tint the player view with the playing track's cover, blurred. Off leaves it plain.",
 									control: artworkBgSwitch,
 									tall: true
 								})}
 								{@render row({
 									title: 'Animated Fullscreen Background',
-									badge: 'Shaders',
+									badge: 'High GPU',
+									badgeVariant: 'performance',
 									desc: 'Display real-time fluid GPU shaders and domain-warped blur behind the fullscreen player.',
 									control: animatedArtworkSwitch,
 									tall: true
 								})}
 								{@render row({
 									title: 'Adapt colors to artwork',
-									badge: 'Experimental',
+									badge: 'CPU Sampling',
+									badgeVariant: 'warning',
 									desc: "Recolor the app from the playing track's cover: accent, surfaces and borders, fading between tracks. Off keeps the selected theme's own colors.",
 									control: artworkAccentSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Reduce transparency & blur',
+									badge: 'Saves GPU & Battery',
+									badgeVariant: 'saving',
+									desc: 'Disables full-window backdrop-filter blurs and translucent glass surfaces across the app for significant rendering performance gains.',
+									control: reduceTransparencySwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Reduce animations & motion',
+									badge: 'Saves CPU',
+									badgeVariant: 'saving',
+									desc: 'Disables UI transitions, marquee auto-scroll tickers, and spring animations for instant, lightweight response.',
+									control: reduceMotionSwitch,
 									tall: true
 								})}
 								{@render row({
@@ -783,7 +837,9 @@
 							<div class={CARD}>
 								{@render row({
 									title: 'Audio quality',
-									desc: 'Preferred stream quality when resolving a track.',
+									badge: 'Network & CPU',
+									badgeVariant: 'info',
+									desc: 'Preferred stream quality when resolving a track. Lower qualities use less data and CPU.',
 									control: qualityPicker
 								})}
 								{@render row({
@@ -810,14 +866,16 @@
 							<div class={CARD}>
 								{@render row({
 									title: 'Play music videos',
-									badge: 'Experimental',
-									desc: 'When a track is a music video, the player shows the video instead of the artwork. Uses noticeably more data and battery than audio alone.',
+									badge: 'High GPU & Data',
+									badgeVariant: 'performance',
+									desc: 'When a track is a music video, the player shows the video instead of the artwork. Uses noticeably more data, hardware video decoding, and battery than audio alone.',
 									control: musicVideoSwitch,
 									tall: true
 								})}
 								{@render row({
 									title: 'Animated Fullscreen Background',
-									badge: 'Shaders',
+									badge: 'High GPU',
+									badgeVariant: 'performance',
 									desc: 'Display real-time fluid GPU shaders and domain-warped blur behind the fullscreen player.',
 									control: animatedArtworkSwitch,
 									tall: true
@@ -834,6 +892,77 @@
 							<h3 class={LABEL}>Advanced</h3>
 							<div class={CARD}>
 								{@render row({ title: 'Stream clients', below: clientList })}
+							</div>
+						</section>
+					{:else if tab === 'performance'}
+						<section class={GROUP}>
+							<h3 class={LABEL}>Quick Presets</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Performance profiles',
+									desc: 'One-click configurations to optimize Nocturne Music for your hardware.',
+									below: performancePresets
+								})}
+							</div>
+						</section>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>Optimization & Battery Saving</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Reduce transparency & frosted blur',
+									badge: 'Saves GPU & Battery',
+									badgeVariant: 'saving',
+									desc: 'Replaces expensive CSS backdrop-filter blurs and translucent panels with solid surfaces. Highly recommended for laptops on battery or integrated GPUs.',
+									control: reduceTransparencySwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Reduce motion & animations',
+									badge: 'Saves CPU',
+									badgeVariant: 'saving',
+									desc: 'Disables UI transition animations, spring fly-ins, and marquee ticker scrolls for maximum responsiveness on lower-end CPUs.',
+									control: reduceMotionSwitch,
+									tall: true
+								})}
+							</div>
+						</section>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>Resource Impact Settings</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Animated Fullscreen Background',
+									badge: 'High GPU Impact',
+									badgeVariant: 'performance',
+									desc: 'Runs continuous WebGL domain-warping fluid shaders behind the fullscreen player. Automatically halts when paused or obscured.',
+									control: animatedArtworkSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Play music videos',
+									badge: 'High GPU & Data',
+									badgeVariant: 'performance',
+									desc: 'Streams and hardware-decodes high-definition video when available instead of static cover artwork.',
+									control: musicVideoSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Artwork background wash',
+									badge: 'Moderate GPU',
+									badgeVariant: 'performance',
+									desc: 'Full-window blurred cover wash in the Now Playing player view.',
+									control: artworkBgSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Adapt colors to artwork',
+									badge: 'CPU Sampling',
+									badgeVariant: 'warning',
+									desc: 'Reads cover image pixels on a 2D canvas to calculate dynamic palette colors on every song change.',
+									control: artworkAccentSwitch,
+									tall: true
+								})}
 							</div>
 						</section>
 					{:else if tab === 'lyrics'}
@@ -1196,6 +1325,26 @@
 		checked={appearance.artworkAccent}
 		onCheckedChange={(on) => setAppearance({ artworkAccent: on })}
 	/>{/snippet}
+{#snippet reduceTransparencySwitch()}<Switch
+		checked={appearance.reduceTransparency}
+		onCheckedChange={(on) => setAppearance({ reduceTransparency: on })}
+	/>{/snippet}
+{#snippet reduceMotionSwitch()}<Switch
+		checked={appearance.reduceMotion}
+		onCheckedChange={(on) => setAppearance({ reduceMotion: on })}
+	/>{/snippet}
+{#snippet performancePresets()}
+	<div class="flex flex-wrap gap-2 pt-1">
+		<Button variant="outline" size="sm" onclick={applyMaxPerformance} class="text-xs cursor-pointer">
+			<HugeiconsIcon icon={FlashIcon} class="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+			Maximum Performance
+		</Button>
+		<Button variant="outline" size="sm" onclick={restoreHighQuality} class="text-xs cursor-pointer">
+			<HugeiconsIcon icon={PaintBoardIcon} class="mr-1.5 h-3.5 w-3.5 text-primary" />
+			High Quality Visuals
+		</Button>
+	</div>
+{/snippet}
 
 {#snippet presetSelect()}
 	<Select.Root type="single" value={theme.id} onValueChange={(v) => applyTheme(v as ThemeId)}>
