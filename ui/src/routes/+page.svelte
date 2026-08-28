@@ -3,7 +3,7 @@
 	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { ArrowUpBigIcon, MusicNote01Icon } from '@hugeicons/core-free-icons';
+	import { ArrowUpBigIcon, MusicNote01Icon, ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Button } from '$lib/components/ui/button';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
@@ -268,6 +268,39 @@
 		return () => el.removeEventListener('scroll', onScroll);
 	}
 
+	let chipListEl: HTMLElement | null = null;
+	let canScrollChipsLeft = $state(false);
+	let canScrollChipsRight = $state(false);
+
+	function updateChipsScrollState() {
+		if (!chipListEl) return;
+		canScrollChipsLeft = chipListEl.scrollLeft > 4;
+		canScrollChipsRight = chipListEl.scrollLeft + chipListEl.clientWidth < chipListEl.scrollWidth - 4;
+	}
+
+	function scrollChips(delta: number) {
+		if (!chipListEl) return;
+		chipListEl.scrollBy({ left: delta, behavior: 'smooth' });
+	}
+
+	function trackChipScroll(node: HTMLElement) {
+		chipListEl = node;
+		updateChipsScrollState();
+		const onScroll = () => updateChipsScrollState();
+		const onResize = () => updateChipsScrollState();
+		node.addEventListener('scroll', onScroll, { passive: true });
+		window.addEventListener('resize', onResize);
+		const ro = new ResizeObserver(() => updateChipsScrollState());
+		ro.observe(node);
+
+		return () => {
+			node.removeEventListener('scroll', onScroll);
+			window.removeEventListener('resize', onResize);
+			ro.disconnect();
+			if (chipListEl === node) chipListEl = null;
+		};
+	}
+
 	// One page per approach to the bottom: the observer only fires when the sentinel *enters* view, so
 	// an appended page that pushes it back out is required before the next fetch. rootMargin starts
 	// the fetch early enough that the content is usually there by the time you scroll to it.
@@ -329,26 +362,53 @@
 	<HomeHero />
 	{#if chips.length}
 		<div class="sticky top-3.5 z-20 my-2 px-6 flex w-fit max-w-full items-center">
-			<div class="no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto overflow-y-hidden rounded-[calc(var(--radius,0.45rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
-				<!-- An explicit "All" is the way out of a filter. -->
-				<button
-					onclick={() => load(null)}
-					class="gap-1.5 rounded-[var(--radius,0.45rem)] border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {!selected
-						? 'bg-foreground/15 text-foreground shadow-xs border-foreground/10 dark:bg-white/15 dark:border-white/10 dark:text-foreground'
-						: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
-				>
-					All
-				</button>
-				{#each chips as chip (chip.params)}
+			<div class="flex items-center gap-1 rounded-[calc(var(--radius,0.45rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md max-w-full">
+				{#if canScrollChipsLeft}
 					<button
-						onclick={() => load(selected === chip.params ? null : chip.params)}
-						class="gap-1.5 rounded-[var(--radius,0.45rem)] border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {selected === chip.params
+						type="button"
+						onclick={() => scrollChips(-200)}
+						aria-label="Scroll filters left"
+						class="flex h-8 w-7 shrink-0 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground cursor-pointer"
+					>
+						<HugeiconsIcon icon={ArrowLeft01Icon} class="h-3.5 w-3.5" />
+					</button>
+				{/if}
+
+				<div
+					{@attach trackChipScroll}
+					class="no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto overflow-y-hidden select-none"
+				>
+					<!-- An explicit "All" is the way out of a filter. -->
+					<button
+						onclick={() => load(null)}
+						class="gap-1.5 rounded-[var(--radius,0.45rem)] border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {!selected
 							? 'bg-foreground/15 text-foreground shadow-xs border-foreground/10 dark:bg-white/15 dark:border-white/10 dark:text-foreground'
 							: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
 					>
-						{chip.title}
+						All
 					</button>
-				{/each}
+					{#each chips as chip (chip.params)}
+						<button
+							onclick={() => load(selected === chip.params ? null : chip.params)}
+							class="gap-1.5 rounded-[var(--radius,0.45rem)] border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {selected === chip.params
+								? 'bg-foreground/15 text-foreground shadow-xs border-foreground/10 dark:bg-white/15 dark:border-white/10 dark:text-foreground'
+								: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
+						>
+							{chip.title}
+						</button>
+					{/each}
+				</div>
+
+				{#if canScrollChipsRight}
+					<button
+						type="button"
+						onclick={() => scrollChips(200)}
+						aria-label="Scroll filters right"
+						class="flex h-8 w-7 shrink-0 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground cursor-pointer"
+					>
+						<HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" />
+					</button>
+				{/if}
 			</div>
 		</div>
 	{:else if loading}

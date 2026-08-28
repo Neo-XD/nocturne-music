@@ -142,6 +142,39 @@
 	let deleteFolderId = $state<string | null>(null);
 	let dragOverBack = $state(false);
 
+	let tabListEl: HTMLElement | null = null;
+	let canScrollLeft = $state(false);
+	let canScrollRight = $state(false);
+
+	function updateScrollState() {
+		if (!tabListEl) return;
+		canScrollLeft = tabListEl.scrollLeft > 4;
+		canScrollRight = tabListEl.scrollLeft + tabListEl.clientWidth < tabListEl.scrollWidth - 4;
+	}
+
+	function scrollTabs(delta: number) {
+		if (!tabListEl) return;
+		tabListEl.scrollBy({ left: delta, behavior: 'smooth' });
+	}
+
+	function trackTabScroll(node: HTMLElement) {
+		tabListEl = node;
+		updateScrollState();
+		const onScroll = () => updateScrollState();
+		const onResize = () => updateScrollState();
+		node.addEventListener('scroll', onScroll, { passive: true });
+		window.addEventListener('resize', onResize);
+		const ro = new ResizeObserver(() => updateScrollState());
+		ro.observe(node);
+
+		return () => {
+			node.removeEventListener('scroll', onScroll);
+			window.removeEventListener('resize', onResize);
+			ro.disconnect();
+			if (tabListEl === node) tabListEl = null;
+		};
+	}
+
 	const folders = $derived(personal.folders ?? []);
 	const rootFolders = $derived(folders.filter((f) => !f.parentId));
 	const activeFolder = $derived(folders.find((f) => f.id === activeFolderId));
@@ -383,29 +416,58 @@
 	<!-- The tabs always render: Local music needs neither an account nor a connection. -->
 	<Tabs.Root bind:value={tab}>
 		<div class="sticky top-3.5 z-20 mb-4 flex w-fit max-w-full items-center">
-			<Tabs.List class="no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto overflow-y-hidden rounded-[calc(var(--radius,0.45rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
-				<Tabs.Trigger value="all" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
-					<HugeiconsIcon icon={SquareStackIcon} class="h-4 w-4" /> All
-				</Tabs.Trigger>
-				<Tabs.Trigger value="playlists" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
-					<HugeiconsIcon icon={Playlist02Icon} class="h-4 w-4" /> Playlists
-				</Tabs.Trigger>
-				<Tabs.Trigger value="albums" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
-					<HugeiconsIcon icon={MusicNoteSquare02Icon} class="h-4 w-4" /> Albums
-				</Tabs.Trigger>
-				<Tabs.Trigger value="artists" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
-					<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> Artists
-				</Tabs.Trigger>
-				<Tabs.Trigger value="songs" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
-					<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> Songs
-				</Tabs.Trigger>
-				<Tabs.Trigger value="uploads" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
-					<HugeiconsIcon icon={CloudUploadIcon} class="h-4 w-4" /> Uploads
-				</Tabs.Trigger>
-				<Tabs.Trigger value="local" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
-					<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
-				</Tabs.Trigger>
-			</Tabs.List>
+			<div class="flex items-center gap-1 rounded-[calc(var(--radius,0.45rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md max-w-full">
+				{#if canScrollLeft}
+					<button
+						type="button"
+						onclick={() => scrollTabs(-200)}
+						aria-label="Scroll tabs left"
+						class="flex h-8 w-7 shrink-0 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground cursor-pointer"
+					>
+						<HugeiconsIcon icon={ArrowLeft01Icon} class="h-3.5 w-3.5" />
+					</button>
+				{/if}
+
+				<div
+					{@attach trackTabScroll}
+					class="no-scrollbar flex max-w-full items-center overflow-x-auto overflow-y-hidden select-none"
+				>
+					<Tabs.List class="flex items-center gap-1 bg-transparent !p-0 !border-0 !shadow-none rounded-none">
+						<Tabs.Trigger value="all" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
+							<HugeiconsIcon icon={SquareStackIcon} class="h-4 w-4" /> All
+						</Tabs.Trigger>
+						<Tabs.Trigger value="playlists" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
+							<HugeiconsIcon icon={Playlist02Icon} class="h-4 w-4" /> Playlists
+						</Tabs.Trigger>
+						<Tabs.Trigger value="albums" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
+							<HugeiconsIcon icon={MusicNoteSquare02Icon} class="h-4 w-4" /> Albums
+						</Tabs.Trigger>
+						<Tabs.Trigger value="artists" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
+							<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> Artists
+						</Tabs.Trigger>
+						<Tabs.Trigger value="songs" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
+							<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> Songs
+						</Tabs.Trigger>
+						<Tabs.Trigger value="uploads" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
+							<HugeiconsIcon icon={CloudUploadIcon} class="h-4 w-4" /> Uploads
+						</Tabs.Trigger>
+						<Tabs.Trigger value="local" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
+							<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
+						</Tabs.Trigger>
+					</Tabs.List>
+				</div>
+
+				{#if canScrollRight}
+					<button
+						type="button"
+						onclick={() => scrollTabs(200)}
+						aria-label="Scroll tabs right"
+						class="flex h-8 w-7 shrink-0 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground cursor-pointer"
+					>
+						<HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" />
+					</button>
+				{/if}
+			</div>
 		</div>
 		<!-- Every branch below is gated on `tab`, because bits-ui never unmounts an inactive panel: it
 		     renders every one and hides the inactive ones. Left alone, opening Library builds each card twice
