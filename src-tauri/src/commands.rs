@@ -178,7 +178,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 21] = [
+const UI_SETTINGS: [&str; 24] = [
     "volume",
     "proxy",
     "quality",
@@ -200,7 +200,30 @@ const UI_SETTINGS: [&str; 21] = [
     "lastfm_api_secret",
     "custom_keybindings",
     "filter_explicit",
+    "enable_canvas",
+    "spotify_sp_dc",
+    "spotify_canvas_proxy",
 ];
+
+/// Resolve the Spotify Canvas looping video URL for a track given its title and artists.
+#[tauri::command]
+pub async fn get_canvas_url(
+    state: St<'_>,
+    title: String,
+    artists: String,
+    _video_id: Option<String>,
+) -> Result<Option<String>, String> {
+    let sp_dc = state.db.get_setting("spotify_sp_dc");
+    let custom_proxy = state.db.get_setting("spotify_canvas_proxy");
+    let url = crate::canvas::resolve_canvas_url(
+        &title,
+        &artists,
+        sp_dc.as_deref(),
+        custom_proxy.as_deref(),
+    )
+    .await;
+    Ok(url)
+}
 
 /// Resolve the music video for `video_id` and hand back a proxy URL the player view
 /// can put in a `<video src>`. `None` when YouTube has no usable video stream for it, which is the
@@ -1246,6 +1269,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         date: "2026-08-28".to_string(),
         body: r#"### Nocturne Music v0.6.5
 
+- **Spotify Canvases**: Added looping Spotify Canvas video visuals in the Now Playing Info Sidebar (enabled by default), with an instant toggle in the sidebar options menu and Settings.
 - **Fullscreen Lyrics Fix**: Fixed word-by-word synced lyrics becoming invisible for the current line in fullscreen mode."#.to_string(),
     };
 

@@ -419,6 +419,7 @@
 	const musicVideosOn = $derived(settings.music_videos === 'true');
 	const boiduOn = $derived(settings.lyrics_boidu !== 'false');
 	const filterExplicitOn = $derived(settings.filter_explicit === 'true');
+	const canvasOn = $derived(settings.enable_canvas !== 'false');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const discordOn = $derived(settings.discord_rpc === 'true');
@@ -461,6 +462,12 @@
 		settings.filter_explicit = on ? 'true' : 'false';
 		prefs.filterExplicit = on;
 		await api.setSetting('filter_explicit', settings.filter_explicit);
+	}
+
+	async function setCanvas(on: boolean) {
+		settings.enable_canvas = on ? 'true' : 'false';
+		prefs.enableCanvas = on;
+		await api.setSetting('enable_canvas', settings.enable_canvas);
 	}
 
 	// Also lands in `prefs`, which is where the player view reads it: the switch has to take effect
@@ -799,6 +806,12 @@
 									badge: 'Experimental',
 									desc: 'When a track is a music video, the player shows the video instead of the artwork. Uses noticeably more data and battery than audio alone.',
 									control: musicVideoSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Spotify Canvases',
+									desc: 'Display looping Spotify canvas video visuals in the Info Sidebar when available.',
+									control: canvasSwitch,
 									tall: true
 								})}
 								{@render row({
@@ -1155,6 +1168,7 @@
 		onCheckedChange={setFilterExplicit}
 	/>{/snippet}
 {#snippet musicVideoSwitch()}<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />{/snippet}
+{#snippet canvasSwitch()}<Switch checked={canvasOn} onCheckedChange={setCanvas} />{/snippet}
 {#snippet hideVideoSwitch()}<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />{/snippet}
 {#snippet boiduSwitch()}<Switch checked={boiduOn} onCheckedChange={setBoidu} />{/snippet}
 {#snippet bannerSwitch()}<Switch checked={updateBannerOn} onCheckedChange={setUpdateBanner} />{/snippet}

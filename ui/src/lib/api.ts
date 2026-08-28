@@ -366,6 +366,10 @@ export const videoStream = (videoId: string, maxHeight: number) =>
 export const forgetVideoStream = (videoId: string) =>
 	invoke<void>('forget_video_stream', { videoId });
 
+/** Fetch Spotify Canvas looping video URL for a track */
+export const getCanvasUrl = (title: string, artists: string, videoId?: string) =>
+	invoke<string | null>('get_canvas_url', { title, artists, videoId: videoId ?? null });
+
 /** What the event stream already reported, for a webview that started after it did. */
 export interface PlaybackSnapshot {
 	now: NowPlaying | null;

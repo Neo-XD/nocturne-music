@@ -18,19 +18,26 @@
 		ArrowRight01Icon,
 		FullScreenIcon,
 		Maximize01Icon,
-		Minimize01Icon
+		Minimize01Icon,
+		SparklesIcon,
+		CheckmarkCircle02Icon,
+		MoreHorizontalIcon,
+		MoreVerticalIcon
 	} from '@hugeicons/core-free-icons';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import type { ArtistPage, SongItem } from '$lib/api';
+	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 	import {
 		playback,
 		prefs,
 		np,
 		toggleNowPlayingLike,
 		openAddToPlaylist,
-		wheelVolume
+		setEnableCanvas,
+		wheelVolume,
+		toast
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import ExplicitIcon from './ExplicitIcon.svelte';
@@ -283,6 +290,56 @@
 		else el.play().catch(() => {});
 	});
 
+	// --- Spotify Canvas State & Sync ---
+	let canvasUrl = $state<string | null>(null);
+	let canvasVideoEl = $state<HTMLVideoElement | undefined>();
+	let requestedCanvasId = '';
+
+	$effect(() => {
+		const now = playback.now;
+		if (!now || !prefs.enableCanvas || api.isLocalId(now.videoId)) {
+			canvasUrl = null;
+			requestedCanvasId = '';
+			return;
+		}
+		if (now.videoId === requestedCanvasId) return;
+		const id = (requestedCanvasId = now.videoId);
+		api.getCanvasUrl(now.title, now.artists, now.videoId)
+			.then((url) => {
+				if (requestedCanvasId !== id) return;
+				canvasUrl = url;
+			})
+			.catch(() => {
+				if (requestedCanvasId !== id) return;
+				canvasUrl = null;
+			});
+	});
+
+	$effect(() => {
+		const paused = playback.paused;
+		const el = canvasVideoEl;
+		if (!el || !canvasUrl || !prefs.enableCanvas) return;
+		if (paused) el.pause();
+		else el.play().catch(() => {});
+	});
+
+	// Sidebar context menu
+	let sidebarMenuOpen = $state(false);
+	let sidebarMenuAnchor = $state(NO_ANCHOR);
+
+	function openSidebarMenu(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		sidebarMenuAnchor = anchorMenu(e, { align: 'right' });
+		sidebarMenuOpen = true;
+	}
+
+	function closeSidebarMenu(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		sidebarMenuOpen = false;
+	}
+
 	function openFullscreen() {
 		np.fullscreenOpen = true;
 	}
@@ -302,6 +359,8 @@
 <aside
 	transition:fly={{ x: 32, duration: 220, easing: cubicOut }}
 	class="fixed inset-y-0 right-0 z-40 flex h-full w-80 max-w-[85vw] flex-col border-l bg-card shadow-2xl lg:relative lg:inset-auto lg:z-10 lg:w-84 xl:w-92 2xl:w-96 lg:shrink-0 lg:shadow-none"
+	data-ctx
+	{@attach ctxHost(openSidebarMenu)}
 >
 	<!-- Header -->
 	<div class="flex items-center justify-between border-b px-4 py-3">
@@ -311,6 +370,17 @@
 			</div>
 		</div>
 		<div class="flex items-center gap-1">
+			<!-- Context Menu Button -->
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={openSidebarMenu}
+				aria-label="Sidebar options"
+				title="Options"
+				class="cursor-pointer hover:text-foreground"
+			>
+				<HugeiconsIcon icon={MoreVerticalIcon} class="h-4 w-4" />
+			</Button>
 			<Button
 				variant="ghost"
 				size="icon-sm"
@@ -351,6 +421,23 @@
 					onerror={() => (videoUrl = null)}
 					class="aspect-square w-full bg-black object-contain"
 				></video>
+			{:else if canvasUrl && prefs.enableCanvas}
+				<!-- svelte-ignore a11y_media_has_caption -->
+				<video
+					bind:this={canvasVideoEl}
+					src={canvasUrl}
+					autoplay
+					loop
+					muted
+					playsinline
+					preload="auto"
+					onerror={() => (canvasUrl = null)}
+					class="aspect-square w-full object-cover transition-all duration-300 group-hover:scale-105"
+				></video>
+				<!-- Subtle Spotify Canvas indicator badge on hover -->
+				<div class="pointer-events-none absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white/90 backdrop-blur-sm opacity-0 transition-opacity group-hover:opacity-100">
+					Canvas
+				</div>
 			{:else if playback.now?.thumbnail}
 				<img
 					src={thumb(playback.now.thumbnail, 400)}
@@ -684,3 +771,73 @@
 		</div>
 	</div>
 </aside>
+
+{#if sidebarMenuOpen}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<button
+		type="button"
+		class="fixed inset-0 z-40 cursor-default"
+		onclick={closeSidebarMenu}
+		oncontextmenu={closeSidebarMenu}
+		aria-label="Close sidebar menu"
+		{@attach toBody}
+	></button>
+	<div
+		class="fixed z-50 min-w-48 overflow-hidden rounded-xl border border-border/80 bg-popover/95 p-1 text-popover-foreground shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+		style={sidebarMenuAnchor.style}
+		{@attach toBody}
+		{@attach fitMenu(sidebarMenuAnchor)}
+	>
+		<!-- Spotify Canvas Toggle -->
+		<button
+			type="button"
+			class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground transition-colors"
+			onclick={(e) => {
+				e.stopPropagation();
+				const next = !prefs.enableCanvas;
+				setEnableCanvas(next);
+				toast.success(next ? 'Spotify canvas enabled' : 'Spotify canvas disabled');
+				sidebarMenuOpen = false;
+			}}
+		>
+			<div class="flex items-center gap-2">
+				<HugeiconsIcon icon={SparklesIcon} class="h-3.5 w-3.5 {prefs.enableCanvas ? 'text-primary' : 'text-muted-foreground'}" />
+				<span>{prefs.enableCanvas ? 'Disable canvas' : 'Enable canvas'}</span>
+			</div>
+			{#if prefs.enableCanvas}
+				<HugeiconsIcon icon={CheckmarkCircle02Icon} class="h-3.5 w-3.5 text-primary" />
+			{/if}
+		</button>
+
+		<!-- Fullscreen Player -->
+		<button
+			type="button"
+			class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground transition-colors"
+			onclick={(e) => {
+				e.stopPropagation();
+				sidebarMenuOpen = false;
+				openFullscreen();
+			}}
+		>
+			<HugeiconsIcon icon={FullScreenIcon} class="h-3.5 w-3.5 text-muted-foreground" />
+			<span>Fullscreen player</span>
+		</button>
+
+		{#if playback.now?.artistId && !api.isLocalId(playback.now.artistId)}
+			<div class="my-1 h-px bg-border/60"></div>
+			<button
+				type="button"
+				class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground transition-colors"
+				onclick={(e) => {
+					e.stopPropagation();
+					sidebarMenuOpen = false;
+					goto(`/artist/${playback.now?.artistId}`);
+				}}
+			>
+				<HugeiconsIcon icon={UserIcon} class="h-3.5 w-3.5 text-muted-foreground" />
+				<span>Go to artist</span>
+			</button>
+		{/if}
+	</div>
+{/if}
