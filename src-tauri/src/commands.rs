@@ -1247,7 +1247,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         date: "2026-08-28".to_string(),
         body: r#"### Nocturne Music v0.6.5
 
-- **Animated Album Art**: Added real-time fluid WebGL animated album artwork with GPU shaders in the Info Sidebar, with an instant toggle in the track menu and Settings.
+- **Animated Fullscreen Background**: Added real-time fluid WebGL animated album artwork with GPU shaders and domain-warped blur behind the fullscreen player, with an instant toggle in the track menu and Settings.
 - **Fullscreen Lyrics Fix**: Fixed word-by-word synced lyrics becoming invisible for the current line in fullscreen mode."#.to_string(),
     };
 

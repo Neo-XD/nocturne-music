@@ -37,7 +37,6 @@
 	import ArtistLine from './ArtistLine.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
-	import AnimatedArtwork from './AnimatedArtwork.svelte';
 
 	let {
 		onClose,
@@ -352,12 +351,6 @@
 					onerror={() => (videoUrl = null)}
 					class="aspect-square w-full bg-black object-contain"
 				></video>
-			{:else if prefs.animatedArtwork && playback.now?.thumbnail}
-				<AnimatedArtwork
-					src={thumb(playback.now.thumbnail, 400)}
-					alt={playback.now.title}
-					class="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
-				/>
 			{:else if playback.now?.thumbnail}
 				<img
 					src={thumb(playback.now.thumbnail, 400)}

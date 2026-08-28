@@ -273,7 +273,7 @@
 					e.stopPropagation();
 					const next = !prefs.animatedArtwork;
 					setAnimatedArtwork(next);
-					toast.success(next ? 'Animated artwork enabled' : 'Animated artwork disabled');
+					toast.success(next ? 'Animated background enabled' : 'Animated background disabled');
 				}}
 			>
 				<div class="flex items-center gap-2">
@@ -281,7 +281,7 @@
 						icon={SparklesIcon}
 						class="h-4 w-4 {prefs.animatedArtwork ? 'text-primary' : 'text-muted-foreground'}"
 					/>
-					<span>Animated artwork</span>
+					<span>Animated background</span>
 				</div>
 				<div class="pointer-events-none flex items-center pr-0.5">
 					<Switch checked={prefs.animatedArtwork} class="scale-75" />

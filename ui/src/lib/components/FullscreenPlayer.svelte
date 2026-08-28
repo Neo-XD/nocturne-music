@@ -21,6 +21,7 @@
 	import * as api from '$lib/api';
 	import {
 		playback,
+		prefs,
 		np,
 		toggleNowPlayingLike,
 		openAddToPlaylist,
@@ -34,6 +35,7 @@
 	import ExplicitIcon from './ExplicitIcon.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import AnimatedArtwork from './AnimatedArtwork.svelte';
 
 	// --- Lyrics Loading & Sync ---
 	let lyrics = $state<api.Lyrics | null>(null);
@@ -250,13 +252,22 @@
 	transition:fade={{ duration: 250 }}
 	class="theater fixed inset-0 z-[90] flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground select-none"
 >
-	<!-- Blurred Background Album Art Wash -->
+	<!-- Blurred Background Album Art Wash (Fluid GPU Shaders or Static Art Wash) -->
 	{#if coverSrc}
-		<img
-			src={coverSrc}
-			alt=""
-			class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-125 object-cover opacity-25 blur-3xl dark:opacity-35"
-		/>
+		{#if prefs.animatedArtwork}
+			<AnimatedArtwork
+				src={coverSrc}
+				class="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover opacity-35 blur-3xl dark:opacity-45"
+				intensity={1.6}
+				speed={0.6}
+			/>
+		{:else}
+			<img
+				src={coverSrc}
+				alt=""
+				class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-125 object-cover opacity-25 blur-3xl dark:opacity-35"
+			/>
+		{/if}
 	{/if}
 
 	<!-- Ambient User Theme Tint (Subtle glow matching active primary accent) -->

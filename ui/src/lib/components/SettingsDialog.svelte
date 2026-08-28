@@ -809,9 +809,9 @@
 									tall: true
 								})}
 								{@render row({
-									title: 'Animated Album Art',
+									title: 'Animated Fullscreen Background',
 									badge: 'Shaders',
-									desc: 'Animate album covers with real-time fluid GPU shaders in the Info Sidebar.',
+									desc: 'Display real-time fluid GPU shaders and domain-warped blur behind the fullscreen player.',
 									control: animatedArtworkSwitch,
 									tall: true
 								})}
