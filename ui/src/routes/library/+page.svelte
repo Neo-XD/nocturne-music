@@ -381,29 +381,31 @@
 
 	<!-- The tabs always render: Local music needs neither an account nor a connection. -->
 	<Tabs.Root bind:value={tab}>
-		<Tabs.List class="mb-4">
-			<Tabs.Trigger value="all">
-				<HugeiconsIcon icon={SquareStackIcon} class="h-4 w-4" /> All
-			</Tabs.Trigger>
-			<Tabs.Trigger value="playlists">
-				<HugeiconsIcon icon={Playlist02Icon} class="h-4 w-4" /> Playlists
-			</Tabs.Trigger>
-			<Tabs.Trigger value="albums">
-				<HugeiconsIcon icon={MusicNoteSquare02Icon} class="h-4 w-4" /> Albums
-			</Tabs.Trigger>
-			<Tabs.Trigger value="artists">
-				<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> Artists
-			</Tabs.Trigger>
-			<Tabs.Trigger value="songs">
-				<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> Songs
-			</Tabs.Trigger>
-			<Tabs.Trigger value="uploads">
-				<HugeiconsIcon icon={CloudUploadIcon} class="h-4 w-4" /> Uploads
-			</Tabs.Trigger>
-			<Tabs.Trigger value="local">
-				<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
-			</Tabs.Trigger>
-		</Tabs.List>
+		<div class="sticky top-2 z-20 mb-6 flex w-fit max-w-full items-center">
+			<Tabs.List class="shadow-md border border-border/60 bg-muted/80 backdrop-blur-md max-w-full overflow-x-auto">
+				<Tabs.Trigger value="all">
+					<HugeiconsIcon icon={SquareStackIcon} class="h-4 w-4" /> All
+				</Tabs.Trigger>
+				<Tabs.Trigger value="playlists">
+					<HugeiconsIcon icon={Playlist02Icon} class="h-4 w-4" /> Playlists
+				</Tabs.Trigger>
+				<Tabs.Trigger value="albums">
+					<HugeiconsIcon icon={MusicNoteSquare02Icon} class="h-4 w-4" /> Albums
+				</Tabs.Trigger>
+				<Tabs.Trigger value="artists">
+					<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> Artists
+				</Tabs.Trigger>
+				<Tabs.Trigger value="songs">
+					<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> Songs
+				</Tabs.Trigger>
+				<Tabs.Trigger value="uploads">
+					<HugeiconsIcon icon={CloudUploadIcon} class="h-4 w-4" /> Uploads
+				</Tabs.Trigger>
+				<Tabs.Trigger value="local">
+					<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
+				</Tabs.Trigger>
+			</Tabs.List>
+		</div>
 		<!-- Every branch below is gated on `tab`, because bits-ui never unmounts an inactive panel: it
 		     renders every one and hides the inactive ones. Left alone, opening Library builds each card twice
 		     (once for All, once for its own tab) and mounts the whole Local tab, disk scan included,

@@ -327,20 +327,24 @@
 
 <div {@attach watchScroll}>
 	<HomeHero />
-	<!-- Mood chips filter the whole feed, so they're page-level controls: sticky, they stay reachable
-	     while the feed scrolls under them instead of leaving with the header they were pinned to.
-	     Opaque rather than blurred — a backdrop-filter repainting on every scroll frame is the one
-	     thing WebKitGTK reliably chokes on. -->
 	{#if chips.length}
-		<div class="sticky top-0 z-20 border-b bg-background px-6 pt-2.5">
-			<div class="flex gap-2 overflow-x-auto pb-2">
-				<!-- An explicit "All" is the way out of a filter. Clicking the active chip again also
-				     clears it, but nobody discovers that, and nothing else on screen says you're filtered. -->
-				<button onclick={() => load(null)} class={chipClass(!selected)}>All</button>
+		<div class="sticky top-2 z-20 mb-2 px-6 flex w-fit max-w-full items-center">
+			<div class="flex max-w-full items-center gap-1 overflow-x-auto rounded-4xl border border-border/60 bg-muted/80 p-[3px] shadow-md backdrop-blur-md">
+				<!-- An explicit "All" is the way out of a filter. -->
+				<button
+					onclick={() => load(null)}
+					class="gap-1.5 rounded-xl border border-transparent px-3.5 py-1 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {!selected
+						? 'bg-background text-foreground shadow-xs dark:border-input dark:bg-input/30'
+						: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
+				>
+					All
+				</button>
 				{#each chips as chip (chip.params)}
 					<button
 						onclick={() => load(selected === chip.params ? null : chip.params)}
-						class={chipClass(selected === chip.params)}
+						class="gap-1.5 rounded-xl border border-transparent px-3.5 py-1 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {selected === chip.params
+							? 'bg-background text-foreground shadow-xs dark:border-input dark:bg-input/30'
+							: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
 					>
 						{chip.title}
 					</button>
@@ -348,12 +352,11 @@
 			</div>
 		</div>
 	{:else if loading}
-		<!-- Hold the bar's height on a cold load: chips arrive with the feed, and popping them in
-		     afterwards shoves the whole page down under the cursor. -->
-		<div class="sticky top-0 z-20 border-b bg-background px-6 pt-2.5" aria-hidden="true">
-			<div class="flex gap-2 overflow-hidden pb-2">
+		<!-- Hold the bar's height on a cold load -->
+		<div class="sticky top-2 z-20 mb-2 px-6 flex w-fit max-w-full items-center" aria-hidden="true">
+			<div class="flex items-center gap-1.5 rounded-4xl border border-border/60 bg-muted/80 p-[3px] shadow-md backdrop-blur-md">
 				{#each ['w-10', 'w-16', 'w-20', 'w-14', 'w-24', 'w-16'] as w, i (i)}
-					<Skeleton class="h-8 shrink-0 rounded-full {w}" />
+					<Skeleton class="h-7 shrink-0 rounded-xl {w}" />
 				{/each}
 			</div>
 		</div>
