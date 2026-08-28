@@ -382,26 +382,26 @@
 	<!-- The tabs always render: Local music needs neither an account nor a connection. -->
 	<Tabs.Root bind:value={tab}>
 		<div class="sticky top-3.5 z-20 mb-6 flex w-fit max-w-full items-center">
-			<Tabs.List class="tab-scroller flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
-				<Tabs.Trigger value="all" class="!flex-none w-auto gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all">
+			<Tabs.List class="tab-scroller !h-10.5 max-h-10.5 flex max-w-full items-center gap-1 rounded-[calc(var(--radius,0.45rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
+				<Tabs.Trigger value="all" class="!flex-none w-auto !h-[34px] flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 					<HugeiconsIcon icon={SquareStackIcon} class="h-4 w-4" /> All
 				</Tabs.Trigger>
-				<Tabs.Trigger value="playlists" class="!flex-none w-auto gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all">
+				<Tabs.Trigger value="playlists" class="!flex-none w-auto !h-[34px] flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 					<HugeiconsIcon icon={Playlist02Icon} class="h-4 w-4" /> Playlists
 				</Tabs.Trigger>
-				<Tabs.Trigger value="albums" class="!flex-none w-auto gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all">
+				<Tabs.Trigger value="albums" class="!flex-none w-auto !h-[34px] flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 					<HugeiconsIcon icon={MusicNoteSquare02Icon} class="h-4 w-4" /> Albums
 				</Tabs.Trigger>
-				<Tabs.Trigger value="artists" class="!flex-none w-auto gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all">
+				<Tabs.Trigger value="artists" class="!flex-none w-auto !h-[34px] flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 					<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> Artists
 				</Tabs.Trigger>
-				<Tabs.Trigger value="songs" class="!flex-none w-auto gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all">
+				<Tabs.Trigger value="songs" class="!flex-none w-auto !h-[34px] flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 					<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> Songs
 				</Tabs.Trigger>
-				<Tabs.Trigger value="uploads" class="!flex-none w-auto gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all">
+				<Tabs.Trigger value="uploads" class="!flex-none w-auto !h-[34px] flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 					<HugeiconsIcon icon={CloudUploadIcon} class="h-4 w-4" /> Uploads
 				</Tabs.Trigger>
-				<Tabs.Trigger value="local" class="!flex-none w-auto gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all">
+				<Tabs.Trigger value="local" class="!flex-none w-auto !h-[34px] flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 					<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
 				</Tabs.Trigger>
 			</Tabs.List>

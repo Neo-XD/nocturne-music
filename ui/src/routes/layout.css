@@ -905,36 +905,35 @@ input[type='range'].range:active::-webkit-slider-thumb {
 	scrollbar-width: none;
 }
 
-/* Thin autohiding horizontal scrollbar for tab bars */
+/* Thin autohiding overlay horizontal scrollbar for tab bars */
 .tab-scroller {
 	overflow-x: auto;
+	overflow-x: overlay;
 	overflow-y: hidden;
-	scrollbar-width: thin;
-	scrollbar-color: transparent transparent;
-	transition: scrollbar-color 0.2s ease-in-out;
-}
-.tab-scroller:hover,
-.tab-scroller:focus-within {
-	scrollbar-color: color-mix(in srgb, var(--foreground) 25%, transparent) transparent;
+	scrollbar-width: none;
+	position: relative;
+	box-sizing: border-box;
 }
 .tab-scroller::-webkit-scrollbar {
-	height: 3.5px;
+	height: 3px;
 	width: 0px;
+	background: transparent;
 }
 .tab-scroller::-webkit-scrollbar-track {
 	background: transparent;
+	margin: 0 10px;
 }
 .tab-scroller::-webkit-scrollbar-thumb {
 	background: transparent;
-	border-radius: 999px;
+	border-radius: var(--radius, 999px);
 	transition: background 0.2s ease-in-out;
 }
 .tab-scroller:hover::-webkit-scrollbar-thumb,
 .tab-scroller:focus-within::-webkit-scrollbar-thumb {
-	background: color-mix(in srgb, var(--foreground) 25%, transparent);
+	background: color-mix(in srgb, var(--foreground) 30%, transparent);
 }
 .tab-scroller::-webkit-scrollbar-thumb:hover {
-	background: color-mix(in srgb, var(--foreground) 45%, transparent);
+	background: color-mix(in srgb, var(--foreground) 50%, transparent);
 }
 
 /* Translucent scrollbars for lyrics views across the app */
