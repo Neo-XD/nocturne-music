@@ -1241,6 +1241,15 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v065_note = ReleaseNote {
+        version: "0.6.5".to_string(),
+        date: "2026-08-28".to_string(),
+        body: r#"### Nocturne Music v0.6.5
+
+- **Fullscreen Word-by-Word Lyrics Fix**: Resolved syllable/word-by-word synced lyrics visibility bug in the fullscreen theater player.
+- **Ambient Lighting**: Enhanced theme ambient backdrop glow with CSS color-mix gradients."#.to_string(),
+    };
+
     let v064_note = ReleaseNote {
         version: "0.6.4".to_string(),
         date: "2026-08-28".to_string(),
@@ -1252,8 +1261,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
 - **Customizable Shortcuts Editor**: Search is now bound to Ctrl+Space by default, with a keybind manager in Settings (General) to rebind or reset your shortcuts.
 - **Explicit Content Filter & Badges**: Added an explicit content filter toggle in Playback Settings, relocated the explicit song badge to the left of the artist's name across all views, and added the badge to the bottom player bar.
 - **Search Context Menus**: Added three-dot context menus to search suggestions and song results so you can save, queue, and manage songs right from search.
-- **Sidebar Folder Creation**: Quick "New folder" button next to "New playlist" in the sidebar.
-- **Fullscreen Lyrics Fix**: Resolved word-by-word synced lyrics visibility bug in the fullscreen theater view."#.to_string(),
+- **Sidebar Folder Creation**: Quick "New folder" button next to "New playlist" in the sidebar."#.to_string(),
     };
 
     let v063_note = ReleaseNote {
@@ -1320,7 +1328,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         prerelease: bool,
     }
 
-    let mut notes = vec![v064_note, v063_note, v062_note, v061_note, v06_note];
+    let mut notes = vec![v065_note, v064_note, v063_note, v062_note, v061_note, v06_note];
 
     let known_versions: std::collections::HashSet<String> =
         notes.iter().map(|n| n.version.clone()).collect();
