@@ -381,8 +381,8 @@
 
 	<!-- The tabs always render: Local music needs neither an account nor a connection. -->
 	<Tabs.Root bind:value={tab}>
-		<div class="sticky top-3.5 z-20 mb-6 flex w-fit max-w-full items-center pl-1">
-			<Tabs.List class="h-10.5 no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto overflow-y-hidden rounded-full border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
+		<div class="sticky top-3.5 z-20 mb-6 flex w-fit max-w-full items-center">
+			<Tabs.List class="tab-scroller flex max-w-full items-center gap-1 rounded-full border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
 				<Tabs.Trigger value="all" class="!flex-none w-auto gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all">
 					<HugeiconsIcon icon={SquareStackIcon} class="h-4 w-4" /> All
 				</Tabs.Trigger>

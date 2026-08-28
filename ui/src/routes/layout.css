@@ -905,6 +905,38 @@ input[type='range'].range:active::-webkit-slider-thumb {
 	scrollbar-width: none;
 }
 
+/* Thin autohiding horizontal scrollbar for tab bars */
+.tab-scroller {
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: thin;
+	scrollbar-color: transparent transparent;
+	transition: scrollbar-color 0.2s ease-in-out;
+}
+.tab-scroller:hover,
+.tab-scroller:focus-within {
+	scrollbar-color: color-mix(in srgb, var(--foreground) 25%, transparent) transparent;
+}
+.tab-scroller::-webkit-scrollbar {
+	height: 3.5px;
+	width: 0px;
+}
+.tab-scroller::-webkit-scrollbar-track {
+	background: transparent;
+}
+.tab-scroller::-webkit-scrollbar-thumb {
+	background: transparent;
+	border-radius: 999px;
+	transition: background 0.2s ease-in-out;
+}
+.tab-scroller:hover::-webkit-scrollbar-thumb,
+.tab-scroller:focus-within::-webkit-scrollbar-thumb {
+	background: color-mix(in srgb, var(--foreground) 25%, transparent);
+}
+.tab-scroller::-webkit-scrollbar-thumb:hover {
+	background: color-mix(in srgb, var(--foreground) 45%, transparent);
+}
+
 /* Translucent scrollbars for lyrics views across the app */
 .lyrics-scroller {
 	scrollbar-width: thin;
