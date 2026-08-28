@@ -301,7 +301,7 @@
 <!-- Docked in-flow sidebar on lg+, overlay on smaller screens -->
 <aside
 	transition:fly={{ x: 32, duration: 220, easing: cubicOut }}
-	class="fixed inset-y-0 right-0 z-40 flex h-full w-80 max-w-[85vw] flex-col border-l bg-card shadow-2xl lg:relative lg:inset-auto lg:z-10 lg:w-84 xl:w-92 2xl:w-96 lg:shrink-0 lg:shadow-none"
+	class="info-sidebar fixed inset-y-0 right-0 z-40 flex h-full w-80 max-w-[85vw] flex-col border-l bg-card shadow-2xl lg:relative lg:inset-auto lg:z-10 lg:w-84 xl:w-92 2xl:w-96 lg:shrink-0 lg:shadow-none overflow-x-hidden"
 >
 	<!-- Header -->
 	<div class="flex items-center justify-between border-b px-4 py-3">
@@ -334,8 +334,8 @@
 		</div>
 	</div>
 
-	<!-- Scrollable Body -->
-	<div class="flex-1 overflow-y-auto p-4 space-y-5">
+	<!-- Scrollable Body (Strictly no horizontal scroll) -->
+	<div class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-5">
 		<!-- Artwork / Video Card -->
 		<div class="relative group overflow-hidden rounded-xl bg-muted shadow-lg" onwheel={wheelVolume}>
 			{#if showVideo}
@@ -482,7 +482,7 @@
 				onwheel={onUserLyricsScroll}
 				ontouchmove={onUserLyricsScroll}
 				onpointerdown={onUserLyricsScroll}
-				class="overflow-y-auto [scrollbar-width:thin] transition-all duration-300 {expandedLyrics ? 'max-h-96' : 'max-h-48'}"
+				class="lyrics-scroller overflow-y-auto overflow-x-hidden transition-all duration-300 {expandedLyrics ? 'max-h-96' : 'max-h-48'}"
 			>
 				{#if loadingLyrics}
 					<div class="space-y-2.5 py-2">

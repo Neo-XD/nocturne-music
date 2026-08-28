@@ -150,7 +150,7 @@
 	onwheel={onUserScroll}
 	ontouchmove={onUserScroll}
 	onpointerdown={onUserScroll}
-	class="min-h-0 flex-1 overflow-y-auto {compact
+	class="lyrics-scroller min-h-0 flex-1 overflow-y-auto {compact
 		? 'px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
 		: expanded
 			? 'px-10 py-6'

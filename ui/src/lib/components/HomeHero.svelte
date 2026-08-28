@@ -21,33 +21,17 @@
 
 <!-- overflow-hidden lives on the backdrop wrapper, not the hero: the scaled blur has to be clipped,
      but the search preview below has to hang out past the bottom edge. -->
-<div class="relative border-b">
+<div class="relative">
 	<div class="pointer-events-none absolute inset-0 overflow-hidden">
 		{#if playback.now?.thumbnail && !artFailed}
-			<!-- 96px, not display size: blur-2xl is a 40px blur, so every detail above a handful of
-			     pixels is thrown away anyway. The old 1200px source decoded to 5.7 MiB for this, and
-			     re-decoded on every track change. -->
 			<img
 				src={thumb(playback.now.thumbnail, 96)}
 				alt=""
-				class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-110 object-cover opacity-60 blur-2xl"
+				class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-110 object-cover opacity-25 blur-3xl"
 				onerror={() => (artFailed = true)}
 			/>
-		{:else}
-			<!-- Nothing playing: without this the header is a bare strip with a greeting in it. An accent
-			     wash keeps it a header. Inline style so it can't be lost to a stale dev stylesheet, and it
-			     rides --primary so every preset theme gets its own. -->
-			<div
-				class="pointer-events-none absolute inset-0 opacity-[0.18]"
-				style="background:radial-gradient(120% 130% at 12% 0%, var(--primary) 0%, transparent 58%)"
-			></div>
 		{/if}
-		<div
-			class="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/40"
-		></div>
-		<div
-			class="absolute inset-0 bg-gradient-to-r from-background/80 via-background/30 to-transparent"
-		></div>
+		<div class="absolute inset-0 bg-gradient-to-b from-transparent via-background/40 to-background"></div>
 	</div>
 	<div class="relative p-6 pt-8">
 		<div class="flex items-center justify-between gap-4">

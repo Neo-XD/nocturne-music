@@ -334,7 +334,7 @@
 				<button
 					onclick={() => load(null)}
 					class="gap-1.5 rounded-full border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {!selected
-						? 'bg-background text-foreground shadow-xs dark:border-input dark:bg-input/30'
+						? 'bg-foreground/15 text-foreground shadow-xs border-foreground/10 dark:bg-white/15 dark:border-white/10 dark:text-foreground'
 						: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
 				>
 					All
@@ -343,7 +343,7 @@
 					<button
 						onclick={() => load(selected === chip.params ? null : chip.params)}
 						class="gap-1.5 rounded-full border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {selected === chip.params
-							? 'bg-background text-foreground shadow-xs dark:border-input dark:bg-input/30'
+							? 'bg-foreground/15 text-foreground shadow-xs border-foreground/10 dark:bg-white/15 dark:border-white/10 dark:text-foreground'
 							: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
 					>
 						{chip.title}
