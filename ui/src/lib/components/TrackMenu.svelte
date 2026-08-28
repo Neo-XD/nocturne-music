@@ -21,20 +21,25 @@
 		Vynil02Icon,
 		DashboardSquare02Icon,
 		Share08Icon,
-		PreferenceVerticalIcon
+		PreferenceVerticalIcon,
+		SparklesIcon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
 	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
+	import { Switch } from '$lib/components/ui/switch';
 	import {
 		addPick,
 		enqueue,
 		openShare,
 		personal,
+		prefs,
+		setEnableCanvas,
 		ratingOf,
 		removePick,
 		startRadio,
-		toggleRating
+		toggleRating,
+		toast
 	} from '$lib/player.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
 
@@ -44,7 +49,8 @@
 		onAdd,
 		onRemove,
 		removeLabel = 'Remove from playlist',
-		linksOnly = false
+		linksOnly = false,
+		showCanvasToggle = false
 	}: {
 		song: SongItem;
 		/** Classes for the ⋯ trigger button (positioning differs per host: inline vs overlay). */
@@ -57,6 +63,8 @@
 		/** Player-bar variant: ⋮ trigger, and only artist/album/shortcuts (queue and like already
 		    have their own buttons there). */
 		linksOnly?: boolean;
+		/** Show Spotify Canvas toggle switch in menu */
+		showCanvasToggle?: boolean;
 	} = $props();
 
 	// Already on the home grid: the menu offers the way out rather than a second copy.
@@ -254,6 +262,30 @@
 				onclick={(e) => run(e, onRemove)}
 			>
 				<HugeiconsIcon icon={PlayListRemoveIcon} class="h-4 w-4" /> {removeLabel}
+			</button>
+		{/if}
+		{#if showCanvasToggle}
+			<div class="my-1 h-px bg-border/60"></div>
+			<button
+				type="button"
+				class="flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => {
+					e.stopPropagation();
+					const next = !prefs.enableCanvas;
+					setEnableCanvas(next);
+					toast.success(next ? 'Spotify Canvas enabled' : 'Spotify Canvas disabled');
+				}}
+			>
+				<div class="flex items-center gap-2">
+					<HugeiconsIcon
+						icon={SparklesIcon}
+						class="h-4 w-4 {prefs.enableCanvas ? 'text-primary' : 'text-muted-foreground'}"
+					/>
+					<span>Spotify Canvas</span>
+				</div>
+				<div class="pointer-events-none flex items-center pr-0.5">
+					<Switch checked={prefs.enableCanvas} class="scale-75" />
+				</div>
 			</button>
 		{/if}
 	</div>

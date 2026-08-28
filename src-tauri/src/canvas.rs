@@ -17,6 +17,22 @@ struct SpotifyAccessToken {
 }
 
 #[derive(Debug, Deserialize)]
+struct SpotifySearchResponse {
+    tracks: Option<SpotifySearchTracks>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpotifySearchTracks {
+    items: Option<Vec<SpotifySearchTrackItem>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpotifySearchTrackItem {
+    id: Option<String>,
+    uri: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct PathfinderCanvasResponse {
     data: Option<PathfinderData>,
 }
@@ -66,66 +82,10 @@ fn clean_query(title: &str, artists: &str) -> String {
     format!("{} {}", cleaned_title.trim(), first_artist)
 }
 
-/// Attempts to find a Spotify track ID by querying Spotify's public embed or search endpoint.
-async fn find_spotify_track_id(title: &str, artists: &str) -> Option<String> {
+/// Exchanges `sp_dc` cookie for an authorized web player access token.
+async fn get_access_token_from_sp_dc(sp_dc: &str) -> Option<String> {
     let client = crate::http::client();
-    let query = clean_query(title, artists);
-    let search_url = format!(
-        "https://open.spotify.com/search/{}",
-        urlencoding::encode(&query)
-    );
-
     let res = client
-        .get(&search_url)
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        )
-        .header("Accept-Language", "en-US,en;q=0.9")
-        .timeout(Duration::from_secs(4))
-        .send()
-        .await
-        .ok()?;
-
-    if !res.status().is_success() {
-        return None;
-    }
-
-    let text = res.text().await.ok()?;
-
-    // Search for Spotify track URIs or paths in the returned markup
-    // e.g., "spotify:track:0VjIjW4GlUZAMYd2vXMi3b" or "/track/0VjIjW4GlUZAMYd2vXMi3b"
-    if let Some(pos) = text.find("/track/") {
-        let after = &text[pos + 7..];
-        let id: String = after
-            .chars()
-            .take_while(|c| c.is_alphanumeric())
-            .collect();
-        if id.len() == 22 {
-            return Some(id);
-        }
-    }
-
-    if let Some(pos) = text.find("spotify:track:") {
-        let after = &text[pos + 14..];
-        let id: String = after
-            .chars()
-            .take_while(|c| c.is_alphanumeric())
-            .collect();
-        if id.len() == 22 {
-            return Some(id);
-        }
-    }
-
-    None
-}
-
-/// Fetch canvas using an official user session token derived from `sp_dc` cookie.
-async fn fetch_via_sp_dc(track_id: &str, sp_dc: &str) -> Option<String> {
-    let client = crate::http::client();
-
-    // 1. Get access token from web player endpoint
-    let token_res = client
         .get("https://open.spotify.com/get_access_token?reason=transport&productType=web_player")
         .header("Cookie", format!("sp_dc={}", sp_dc.trim()))
         .header(
@@ -137,10 +97,56 @@ async fn fetch_via_sp_dc(track_id: &str, sp_dc: &str) -> Option<String> {
         .await
         .ok()?;
 
-    let token_data: SpotifyAccessToken = token_res.json().await.ok()?;
-    let access_token = token_data.access_token?;
+    if !res.status().is_success() {
+        return None;
+    }
 
-    // 2. Query Pathfinder GraphQL endpoint
+    let token_data: SpotifyAccessToken = res.json().await.ok()?;
+    token_data.access_token
+}
+
+/// Searches Spotify track ID using the official Web API with access token.
+async fn search_track_with_token(title: &str, artists: &str, token: &str) -> Option<String> {
+    let client = crate::http::client();
+    let query = clean_query(title, artists);
+    let search_url = format!(
+        "https://api.spotify.com/v1/search?q={}&type=track&limit=1",
+        urlencoding::encode(&query)
+    );
+
+    let res = client
+        .get(&search_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        )
+        .timeout(Duration::from_secs(4))
+        .send()
+        .await
+        .ok()?;
+
+    if !res.status().is_success() {
+        return None;
+    }
+
+    let data: SpotifySearchResponse = res.json().await.ok()?;
+    let track = data.tracks?.items?.into_iter().next()?;
+    track.id.or_else(|| {
+        track.uri.and_then(|u| {
+            if u.starts_with("spotify:track:") {
+                Some(u[14..].to_string())
+            } else {
+                None
+            }
+        })
+    })
+}
+
+/// Fetch canvas URL using Spotify Pathfinder GraphQL API with access token.
+async fn fetch_canvas_with_token(track_id: &str, token: &str) -> Option<String> {
+    let client = crate::http::client();
+
     let pathfinder_url = format!(
         "https://api-partner.spotify.com/pathfinder/v1/query?operationName=canvas&variables=%7B%22trackUri%22%3A%22spotify%3Atrack%3A{}%22%7D&extensions=%7B%22persistedQuery%22%3A%7B%22version%22%3A1%2C%22sha256Hash%22%3A%2220eb50013d940562e841804c7c5a0d33e507b587d55eb23b03ad71542f7480a4%22%7D%7D",
         track_id
@@ -148,7 +154,7 @@ async fn fetch_via_sp_dc(track_id: &str, sp_dc: &str) -> Option<String> {
 
     let query_res = client
         .get(&pathfinder_url)
-        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Authorization", format!("Bearer {}", token))
         .header("app-platform", "WebPlayer")
         .header(
             "User-Agent",
@@ -179,28 +185,42 @@ async fn fetch_via_sp_dc(track_id: &str, sp_dc: &str) -> Option<String> {
     None
 }
 
-/// Fetch canvas via public proxy / mirror endpoints.
-async fn fetch_via_proxy(track_id: &str, custom_proxy: Option<&str>) -> Option<String> {
+/// Fetch canvas via public proxy / mirror endpoints or title+artist queries.
+async fn fetch_via_proxy(
+    title: &str,
+    artists: &str,
+    track_id: Option<&str>,
+    custom_proxy: Option<&str>,
+) -> Option<String> {
     let client = crate::http::client();
+    let clean = clean_query(title, artists);
     let mut endpoints = Vec::new();
 
     if let Some(cp) = custom_proxy {
         if !cp.trim().is_empty() {
-            let formatted = if cp.contains("{id}") {
-                cp.replace("{id}", track_id)
-            } else if cp.contains("?") {
-                format!("{}&track_id={}", cp.trim_end_matches('&'), track_id)
-            } else {
-                format!("{}?track_id={}", cp.trim_end_matches('/'), track_id)
-            };
-            endpoints.push(formatted);
+            if let Some(tid) = track_id {
+                let formatted = if cp.contains("{id}") {
+                    cp.replace("{id}", tid)
+                } else if cp.contains("?") {
+                    format!("{}&track_id={}", cp.trim_end_matches('&'), tid)
+                } else {
+                    format!("{}?track_id={}", cp.trim_end_matches('/'), tid)
+                };
+                endpoints.push(formatted);
+            }
         }
     }
 
-    // Default public mirrors
-    endpoints.push(format!("https://canvas-api.boidu.dev/canvas?track_id={}", track_id));
-    endpoints.push(format!("https://spotify-canvas.vercel.app/api/canvas?trackId={}", track_id));
-    endpoints.push(format!("https://canvaz-api.fly.dev/canvas/{}", track_id));
+    if let Some(tid) = track_id {
+        endpoints.push(format!("https://canvas-api.boidu.dev/canvas?track_id={}", tid));
+        endpoints.push(format!("https://spotify-canvas.vercel.app/api/canvas?trackId={}", tid));
+        endpoints.push(format!("https://canvaz-api.fly.dev/canvas/{}", tid));
+    }
+
+    endpoints.push(format!(
+        "https://canvas-api.boidu.dev/canvas?q={}",
+        urlencoding::encode(&clean)
+    ));
 
     for ep in endpoints {
         let res = match client
@@ -248,26 +268,25 @@ pub async fn resolve_canvas_url(
     }
 
     debug!("Resolving Spotify Canvas for '{}' by '{}'", title, artists);
-
-    // 2. Find Spotify track ID
-    let track_id = find_spotify_track_id(title, artists).await;
     let mut canvas_url = None;
 
-    if let Some(ref tid) = track_id {
-        // Try sp_dc authenticated resolution first if provided
-        if let Some(cookie) = sp_dc {
-            if !cookie.trim().is_empty() {
-                canvas_url = fetch_via_sp_dc(tid, cookie).await;
+    // 2. If user provided sp_dc cookie, authenticate and fetch directly
+    if let Some(cookie) = sp_dc {
+        if !cookie.trim().is_empty() {
+            if let Some(token) = get_access_token_from_sp_dc(cookie).await {
+                if let Some(track_id) = search_track_with_token(title, artists, &token).await {
+                    canvas_url = fetch_canvas_with_token(&track_id, &token).await;
+                }
             }
-        }
-
-        // Fall back to proxies if not resolved
-        if canvas_url.is_none() {
-            canvas_url = fetch_via_proxy(tid, custom_proxy).await;
         }
     }
 
-    // 3. Cache result (even if None, to prevent spamming failed queries)
+    // 3. Fall back to proxy mirrors if not yet resolved
+    if canvas_url.is_none() {
+        canvas_url = fetch_via_proxy(title, artists, None, custom_proxy).await;
+    }
+
+    // 4. Cache result (even if None, to prevent spamming failed queries)
     {
         let mut cache = cache().lock().unwrap();
         cache.insert(cache_key, canvas_url.clone());
