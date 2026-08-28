@@ -21,18 +21,7 @@
 
 <!-- overflow-hidden lives on the backdrop wrapper, not the hero: the scaled blur has to be clipped,
      but the search preview below has to hang out past the bottom edge. -->
-<div class="relative">
-	<div class="pointer-events-none absolute inset-0 overflow-hidden">
-		{#if playback.now?.thumbnail && !artFailed}
-			<img
-				src={thumb(playback.now.thumbnail, 96)}
-				alt=""
-				class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-110 object-cover opacity-25 blur-3xl"
-				onerror={() => (artFailed = true)}
-			/>
-		{/if}
-		<div class="absolute inset-0 bg-gradient-to-b from-background via-background/50 to-transparent"></div>
-	</div>
+<div class="relative bg-sidebar text-sidebar-foreground">
 	<div class="relative p-6 pt-8">
 		<div class="flex items-center justify-between gap-4">
 			<div class="flex min-w-0 items-center gap-3">

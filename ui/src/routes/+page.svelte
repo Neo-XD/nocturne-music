@@ -459,17 +459,22 @@
 </div>
 
 {#if scrolled}
-	<!-- Clears the player bar when there is one. z-10 keeps it under the queue/lyrics overlays. -->
-	<button
+	<!-- Centered floating pill: never covered by sidebars, clears the player bar -->
+	<div
 		transition:fade={{ duration: 150 }}
-		onclick={() => scroller?.scrollTo({ top: 0, behavior: 'smooth' })}
-		aria-label="Back to top"
-		class="fixed right-6 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-110 {playback.now
+		class="pointer-events-none fixed inset-x-0 z-20 flex justify-center {playback.now
 			? 'bottom-24'
 			: 'bottom-6'}"
 	>
-		<HugeiconsIcon icon={ArrowUpBigIcon} class="h-5 w-5" />
-	</button>
+		<button
+			onclick={() => scroller?.scrollTo({ top: 0, behavior: 'smooth' })}
+			aria-label="Back to top"
+			class="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/70 bg-card/90 px-3.5 py-1.5 text-xs font-semibold text-foreground shadow-lg backdrop-blur-md transition-all hover:scale-105 hover:bg-card cursor-pointer"
+		>
+			<HugeiconsIcon icon={ArrowUpBigIcon} class="h-3.5 w-3.5 text-primary" />
+			<span>Back to top</span>
+		</button>
+	</div>
 {/if}
 
 <HomeLayoutDialog bind:open={editing} sections={known} />
