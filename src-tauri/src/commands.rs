@@ -1246,8 +1246,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         date: "2026-08-28".to_string(),
         body: r#"### Nocturne Music v0.6.5
 
-- **Fullscreen Word-by-Word Lyrics Fix**: Resolved syllable/word-by-word synced lyrics visibility bug in the fullscreen theater player.
-- **Ambient Lighting**: Enhanced theme ambient backdrop glow with CSS color-mix gradients."#.to_string(),
+- **Fullscreen Lyrics Fix**: Fixed word-by-word synced lyrics becoming invisible for the current line in fullscreen mode."#.to_string(),
     };
 
     let v064_note = ReleaseNote {
