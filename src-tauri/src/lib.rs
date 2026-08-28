@@ -1,6 +1,5 @@
 //! Nocturne Music Tauri app. Wires transport + player + db + orchestrator behind the command boundary.
 
-mod canvas;
 mod cipher;
 mod commands;
 mod db;
@@ -496,7 +495,6 @@ pub fn run() {
             commands::release_notes,
             commands::can_self_update,
             commands::open_external,
-            commands::get_canvas_url,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is

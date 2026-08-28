@@ -37,6 +37,7 @@
 	import ArtistLine from './ArtistLine.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
+	import AnimatedArtwork from './AnimatedArtwork.svelte';
 
 	let {
 		onClose,
@@ -283,39 +284,6 @@
 		else el.play().catch(() => {});
 	});
 
-	// --- Spotify Canvas State & Sync ---
-	let canvasUrl = $state<string | null>(null);
-	let canvasVideoEl = $state<HTMLVideoElement | undefined>();
-	let requestedCanvasId = '';
-
-	$effect(() => {
-		const now = playback.now;
-		if (!now || !prefs.enableCanvas || api.isLocalId(now.videoId)) {
-			canvasUrl = null;
-			requestedCanvasId = '';
-			return;
-		}
-		if (now.videoId === requestedCanvasId) return;
-		const id = (requestedCanvasId = now.videoId);
-		api.getCanvasUrl(now.title, now.artists, now.videoId)
-			.then((url) => {
-				if (requestedCanvasId !== id) return;
-				canvasUrl = url;
-			})
-			.catch(() => {
-				if (requestedCanvasId !== id) return;
-				canvasUrl = null;
-			});
-	});
-
-	$effect(() => {
-		const paused = playback.paused;
-		const el = canvasVideoEl;
-		if (!el || !canvasUrl || !prefs.enableCanvas) return;
-		if (paused) el.pause();
-		else el.play().catch(() => {});
-	});
-
 	function openFullscreen() {
 		np.fullscreenOpen = true;
 	}
@@ -384,23 +352,12 @@
 					onerror={() => (videoUrl = null)}
 					class="aspect-square w-full bg-black object-contain"
 				></video>
-			{:else if canvasUrl && prefs.enableCanvas}
-				<!-- svelte-ignore a11y_media_has_caption -->
-				<video
-					bind:this={canvasVideoEl}
-					src={canvasUrl}
-					autoplay
-					loop
-					muted
-					playsinline
-					preload="auto"
-					onerror={() => (canvasUrl = null)}
-					class="aspect-square w-full object-cover transition-all duration-300 group-hover:scale-105"
-				></video>
-				<!-- Subtle Spotify Canvas indicator badge on hover -->
-				<div class="pointer-events-none absolute bottom-2 right-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white/90 backdrop-blur-sm opacity-0 transition-opacity group-hover:opacity-100">
-					Canvas
-				</div>
+			{:else if prefs.animatedArtwork && playback.now?.thumbnail}
+				<AnimatedArtwork
+					src={thumb(playback.now.thumbnail, 400)}
+					alt={playback.now.title}
+					class="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
+				/>
 			{:else if playback.now?.thumbnail}
 				<img
 					src={thumb(playback.now.thumbnail, 400)}
@@ -498,7 +455,7 @@
 						{#if currentSong}
 							<TrackMenu
 								song={currentSong}
-								showCanvasToggle={true}
+								showAnimatedArtworkToggle={true}
 								onAdd={() => openAddToPlaylist(currentSong!)}
 								triggerClass="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
 							/>

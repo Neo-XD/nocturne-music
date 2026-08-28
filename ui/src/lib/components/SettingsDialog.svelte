@@ -419,7 +419,7 @@
 	const musicVideosOn = $derived(settings.music_videos === 'true');
 	const boiduOn = $derived(settings.lyrics_boidu !== 'false');
 	const filterExplicitOn = $derived(settings.filter_explicit === 'true');
-	const canvasOn = $derived(settings.enable_canvas !== 'false');
+	const animatedArtworkOn = $derived(settings.animated_artwork !== 'false');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const discordOn = $derived(settings.discord_rpc === 'true');
@@ -464,24 +464,10 @@
 		await api.setSetting('filter_explicit', settings.filter_explicit);
 	}
 
-	async function setCanvas(on: boolean) {
-		settings.enable_canvas = on ? 'true' : 'false';
-		prefs.enableCanvas = on;
-		await api.setSetting('enable_canvas', settings.enable_canvas);
-	}
-
-	let spotifySpDcInput = $state('');
-
-	$effect(() => {
-		if (settings.spotify_sp_dc !== undefined) {
-			spotifySpDcInput = settings.spotify_sp_dc;
-		}
-	});
-
-	async function saveSpotifySpDc() {
-		settings.spotify_sp_dc = spotifySpDcInput.trim();
-		await api.setSetting('spotify_sp_dc', settings.spotify_sp_dc);
-		toast.success(settings.spotify_sp_dc ? 'Spotify session cookie saved' : 'Spotify cookie cleared');
+	async function setAnimatedArtwork(on: boolean) {
+		settings.animated_artwork = on ? 'true' : 'false';
+		prefs.animatedArtwork = on;
+		await api.setSetting('animated_artwork', settings.animated_artwork);
 	}
 
 	// Also lands in `prefs`, which is where the player view reads it: the switch has to take effect
@@ -823,10 +809,10 @@
 									tall: true
 								})}
 								{@render row({
-									title: 'Spotify Canvases',
-									desc: 'Display looping Spotify canvas video visuals in the Info Sidebar when available.',
-									control: canvasSwitch,
-									below: canvasCookieInput,
+									title: 'Animated Album Art',
+									badge: 'Shaders',
+									desc: 'Animate album covers with real-time fluid GPU shaders in the Info Sidebar.',
+									control: animatedArtworkSwitch,
 									tall: true
 								})}
 								{@render row({
@@ -1183,35 +1169,7 @@
 		onCheckedChange={setFilterExplicit}
 	/>{/snippet}
 {#snippet musicVideoSwitch()}<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />{/snippet}
-{#snippet canvasSwitch()}<Switch checked={canvasOn} onCheckedChange={setCanvas} />{/snippet}
-{#snippet canvasCookieInput()}
-	<div class="mt-2 space-y-1.5 rounded-lg bg-secondary/50 p-3 text-xs">
-		<div class="flex items-center justify-between">
-			<label for="spotify-sp-dc" class="font-medium text-foreground">Spotify Session Cookie (sp_dc)</label>
-			<button
-				type="button"
-				onclick={() => api.openExternal('https://open.spotify.com')}
-				class="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline cursor-pointer"
-			>
-				<span>Open Spotify</span>
-				<HugeiconsIcon icon={Link04Icon} class="h-3 w-3" />
-			</button>
-		</div>
-		<p class="text-[11px] leading-relaxed text-muted-foreground">
-			For 100% canvas coverage, paste your <code class="rounded bg-muted px-1 py-0.5 font-mono">sp_dc</code> cookie (found in browser Developer Tools ▸ Application ▸ Cookies on open.spotify.com).
-		</p>
-		<div class="flex gap-2 pt-1">
-			<Input
-				id="spotify-sp-dc"
-				type="password"
-				bind:value={spotifySpDcInput}
-				placeholder="Paste sp_dc cookie value"
-				class="h-8 flex-1 font-mono text-xs"
-			/>
-			<Button size="sm" class="h-8 shrink-0" onclick={saveSpotifySpDc}>Save</Button>
-		</div>
-	</div>
-{/snippet}
+{#snippet animatedArtworkSwitch()}<Switch checked={animatedArtworkOn} onCheckedChange={setAnimatedArtwork} />{/snippet}
 {#snippet hideVideoSwitch()}<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />{/snippet}
 {#snippet boiduSwitch()}<Switch checked={boiduOn} onCheckedChange={setBoidu} />{/snippet}
 {#snippet bannerSwitch()}<Switch checked={updateBannerOn} onCheckedChange={setUpdateBanner} />{/snippet}

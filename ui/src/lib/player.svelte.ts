@@ -56,11 +56,11 @@ export const np = $state({
 	tab: 'queue' as 'queue' | 'lyrics'
 });
 
-export const prefs = $state({ musicVideos: false, filterExplicit: false, enableCanvas: true });
+export const prefs = $state({ musicVideos: false, filterExplicit: false, animatedArtwork: true });
 
-export function setEnableCanvas(enabled: boolean) {
-	prefs.enableCanvas = enabled;
-	api.setSetting('enable_canvas', enabled ? 'true' : 'false').catch(() => {});
+export function setAnimatedArtwork(enabled: boolean) {
+	prefs.animatedArtwork = enabled;
+	api.setSetting('animated_artwork', enabled ? 'true' : 'false').catch(() => {});
 }
 
 /** videoId → the in-flight or settled loopback URL for its music video (null when it has none).
@@ -993,7 +993,7 @@ export function initApp(mini = false): () => void {
 		.then((s) => {
 			prefs.musicVideos = s.music_videos === 'true';
 			prefs.filterExplicit = s.filter_explicit === 'true';
-			prefs.enableCanvas = s.enable_canvas !== 'false';
+			prefs.animatedArtwork = s.animated_artwork !== 'false';
 		})
 		.catch(() => {});
 	api.getAccount()
