@@ -36,6 +36,7 @@
 	import ArtistLine from './ArtistLine.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import AnimatedArtwork from './AnimatedArtwork.svelte';
+	import { appearance } from '$lib/theme.svelte';
 
 	// --- Lyrics Loading & Sync ---
 	let lyrics = $state<api.Lyrics | null>(null);
@@ -257,15 +258,17 @@
 		{#if prefs.animatedArtwork}
 			<AnimatedArtwork
 				src={coverSrc}
-				class="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover opacity-35 blur-3xl dark:opacity-45"
-				intensity={1.6}
+				class="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover"
+				style="opacity: {appearance.fullscreenLightness}; filter: blur({appearance.fullscreenBlur}px) saturate({Math.round(appearance.fullscreenSaturation * 100)}%);"
+				intensity={appearance.fullscreenWarp}
 				speed={0.6}
 			/>
 		{:else}
 			<img
 				src={coverSrc}
 				alt=""
-				class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-125 object-cover opacity-25 blur-3xl dark:opacity-35"
+				class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-125 object-cover"
+				style="opacity: {appearance.fullscreenLightness}; filter: blur({appearance.fullscreenBlur}px) saturate({Math.round(appearance.fullscreenSaturation * 100)}%);"
 			/>
 		{/if}
 	{/if}

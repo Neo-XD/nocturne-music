@@ -185,15 +185,17 @@
 					{#if prefs.animatedArtwork}
 						<AnimatedArtwork
 							src={thumb(playback.now.thumbnail, 720)}
-							class="absolute inset-0 h-full w-full scale-125 object-cover blur-3xl opacity-45 dark:opacity-35 transition-all duration-700"
-							intensity={1.5}
+							class="absolute inset-0 h-full w-full scale-125 object-cover transition-all duration-700"
+							style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
+							intensity={appearance.glassyWarp}
 							speed={0.5}
 						/>
 					{:else}
 						<img
 							src={thumb(playback.now.thumbnail, 720)}
 							alt=""
-							class="absolute inset-0 h-full w-full object-cover scale-125 blur-3xl opacity-45 dark:opacity-35 transition-all duration-700"
+							class="absolute inset-0 h-full w-full object-cover scale-125 transition-all duration-700"
+							style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
 						/>
 					{/if}
 				{:else}

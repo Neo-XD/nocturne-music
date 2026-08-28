@@ -570,6 +570,25 @@
 		setAnimatedArtwork(true);
 		toast.success('Restored High Quality Visuals');
 	}
+	function resetGlassyVisuals() {
+		setAppearance({
+			glassyWarp: 1.5,
+			glassyLightness: 0.45,
+			glassyBlur: 64,
+			glassySaturation: 1.0
+		});
+		toast.success('Reset Glassy theme background settings');
+	}
+
+	function resetFullscreenVisuals() {
+		setAppearance({
+			fullscreenWarp: 1.6,
+			fullscreenLightness: 0.45,
+			fullscreenBlur: 64,
+			fullscreenSaturation: 1.0
+		});
+		toast.success('Reset Fullscreen player background settings');
+	}
 </script>
 
 <!-- One row shape for the whole modal: label and description on the left, the control on the right,
@@ -832,6 +851,76 @@
 									title: 'Reset customization',
 									desc: 'Drop the color, roundness and font overrides. Keeps the preset.',
 									control: resetButton
+								})}
+							</div>
+						</section>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>Glassy Theme Background (Ambient App Wash)</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Warping intensity',
+									desc: 'Controls the fluid wave distortion and liquid displacement in the ambient app background.',
+									control: glassyWarpSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Brightness & opacity',
+									desc: 'Adjusts how brightly the ambient album art shines through behind the UI.',
+									control: glassyLightnessSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Blur radius',
+									desc: 'Sets the gaussian blur radius applied over the ambient background art.',
+									control: glassyBlurSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Saturation',
+									desc: 'Controls color vibrancy in the background wash.',
+									control: glassySaturationSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Reset Glassy background',
+									desc: 'Restore default warp intensity, brightness, blur radius and saturation.',
+									control: resetGlassyButton
+								})}
+							</div>
+						</section>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>Fullscreen Player Background</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Warping intensity',
+									desc: 'Controls the fluid wave distortion behind fullscreen lyrics and player.',
+									control: fullscreenWarpSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Brightness & opacity',
+									desc: 'Adjusts background brightness and opacity in fullscreen mode.',
+									control: fullscreenLightnessSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Blur radius',
+									desc: 'Sets the gaussian blur radius applied over fullscreen background artwork.',
+									control: fullscreenBlurSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Saturation',
+									desc: 'Controls color vibrancy behind fullscreen playback.',
+									control: fullscreenSaturationSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Reset Fullscreen background',
+									desc: 'Restore default warp intensity, brightness, blur radius and saturation.',
+									control: resetFullscreenButton
 								})}
 							</div>
 						</section>
@@ -1362,6 +1451,150 @@
 		checked={theme.id === 'glassy'}
 		onCheckedChange={(on) => toggleGlassyTheme(on)}
 	/>{/snippet}
+
+{#snippet glassyWarpSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.glassyWarp) / 3.0) * 100}%"
+			min="0"
+			max="3.0"
+			step="0.1"
+			value={appearance.glassyWarp}
+			oninput={(e) => setAppearance({ glassyWarp: parseFloat(e.currentTarget.value) })}
+			aria-label="Glassy warping intensity"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{appearance.glassyWarp.toFixed(1)}x</span>
+	</div>
+{/snippet}
+
+{#snippet glassyLightnessSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.glassyLightness - 0.1) / 0.9) * 100}%"
+			min="0.1"
+			max="1.0"
+			step="0.05"
+			value={appearance.glassyLightness}
+			oninput={(e) => setAppearance({ glassyLightness: parseFloat(e.currentTarget.value) })}
+			aria-label="Glassy brightness and opacity"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{Math.round(appearance.glassyLightness * 100)}%</span>
+	</div>
+{/snippet}
+
+{#snippet glassyBlurSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{(appearance.glassyBlur / 100) * 100}%"
+			min="0"
+			max="100"
+			step="2"
+			value={appearance.glassyBlur}
+			oninput={(e) => setAppearance({ glassyBlur: parseInt(e.currentTarget.value, 10) })}
+			aria-label="Glassy blur radius"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{appearance.glassyBlur}px</span>
+	</div>
+{/snippet}
+
+{#snippet glassySaturationSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{(appearance.glassySaturation / 2.0) * 100}%"
+			min="0.0"
+			max="2.0"
+			step="0.05"
+			value={appearance.glassySaturation}
+			oninput={(e) => setAppearance({ glassySaturation: parseFloat(e.currentTarget.value) })}
+			aria-label="Glassy saturation"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{Math.round(appearance.glassySaturation * 100)}%</span>
+	</div>
+{/snippet}
+
+{#snippet fullscreenWarpSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.fullscreenWarp) / 3.0) * 100}%"
+			min="0"
+			max="3.0"
+			step="0.1"
+			value={appearance.fullscreenWarp}
+			oninput={(e) => setAppearance({ fullscreenWarp: parseFloat(e.currentTarget.value) })}
+			aria-label="Fullscreen warping intensity"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{appearance.fullscreenWarp.toFixed(1)}x</span>
+	</div>
+{/snippet}
+
+{#snippet fullscreenLightnessSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.fullscreenLightness - 0.1) / 0.9) * 100}%"
+			min="0.1"
+			max="1.0"
+			step="0.05"
+			value={appearance.fullscreenLightness}
+			oninput={(e) => setAppearance({ fullscreenLightness: parseFloat(e.currentTarget.value) })}
+			aria-label="Fullscreen brightness and opacity"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{Math.round(appearance.fullscreenLightness * 100)}%</span>
+	</div>
+{/snippet}
+
+{#snippet fullscreenBlurSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{(appearance.fullscreenBlur / 100) * 100}%"
+			min="0"
+			max="100"
+			step="2"
+			value={appearance.fullscreenBlur}
+			oninput={(e) => setAppearance({ fullscreenBlur: parseInt(e.currentTarget.value, 10) })}
+			aria-label="Fullscreen blur radius"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{appearance.fullscreenBlur}px</span>
+	</div>
+{/snippet}
+
+{#snippet fullscreenSaturationSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{(appearance.fullscreenSaturation / 2.0) * 100}%"
+			min="0.0"
+			max="2.0"
+			step="0.05"
+			value={appearance.fullscreenSaturation}
+			oninput={(e) => setAppearance({ fullscreenSaturation: parseFloat(e.currentTarget.value) })}
+			aria-label="Fullscreen saturation"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{Math.round(appearance.fullscreenSaturation * 100)}%</span>
+	</div>
+{/snippet}
+
+{#snippet resetGlassyButton()}
+	<Button variant="outline" size="sm" onclick={resetGlassyVisuals}>Reset Glassy visuals</Button>
+{/snippet}
+
+{#snippet resetFullscreenButton()}
+	<Button variant="outline" size="sm" onclick={resetFullscreenVisuals}>Reset Fullscreen visuals</Button>
+{/snippet}
 
 {#snippet presetSelect()}
 	<Select.Root type="single" value={theme.id} onValueChange={(v) => applyTheme(v as ThemeId)}>

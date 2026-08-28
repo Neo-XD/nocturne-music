@@ -6,12 +6,14 @@
 		src,
 		alt = '',
 		class: className = '',
+		style = '',
 		intensity = 1.0,
 		speed = 1.0
 	}: {
 		src?: string | null;
 		alt?: string;
 		class?: string;
+		style?: string;
 		intensity?: number;
 		speed?: number;
 	} = $props();
@@ -319,11 +321,12 @@
 </script>
 
 {#if webglFailed}
-	<img {src} {alt} class="{className} object-cover" />
+	<img {src} {alt} class="{className} object-cover" {style} />
 {:else}
 	<canvas
 		bind:this={canvasEl}
 		aria-label={alt}
 		class="{className} block h-full w-full object-cover"
+		{style}
 	></canvas>
 {/if}

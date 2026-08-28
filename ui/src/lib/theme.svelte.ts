@@ -105,7 +105,25 @@ export const appearance = $state({
 	/** Disable heavy CSS backdrop-blur and transparency for max rendering speed on low-end devices. */
 	reduceTransparency: false,
 	/** Reduce animations and transitions across the interface for battery saving and low-spec PCs. */
-	reduceMotion: false
+	reduceMotion: false,
+
+	/** Glassy theme background warping intensity (0.0 to 3.0). */
+	glassyWarp: 1.5,
+	/** Glassy theme background opacity/lightness (0.10 to 1.0). */
+	glassyLightness: 0.45,
+	/** Glassy theme background blur radius in px (0 to 100). */
+	glassyBlur: 64,
+	/** Glassy theme background saturation (0.0 to 2.0). */
+	glassySaturation: 1.0,
+
+	/** Fullscreen player background warping intensity (0.0 to 3.0). */
+	fullscreenWarp: 1.6,
+	/** Fullscreen player background opacity/lightness (0.10 to 1.0). */
+	fullscreenLightness: 0.45,
+	/** Fullscreen player background blur radius in px (0 to 100). */
+	fullscreenBlur: 64,
+	/** Fullscreen player background saturation (0.0 to 2.0). */
+	fullscreenSaturation: 1.0
 });
 
 export function applyPerformanceClasses(): void {
@@ -441,6 +459,18 @@ export function initTheme(): void {
 		const saved = JSON.parse(localStorage.getItem(APPEARANCE_KEY) ?? '{}');
 		for (const k of ['artworkBackground', 'tabbedPlayer', 'openPlayerOnPlay', 'artworkAccent', 'reduceTransparency', 'reduceMotion'] as const) {
 			if (typeof saved?.[k] === 'boolean') appearance[k] = saved[k];
+		}
+		for (const k of [
+			'glassyWarp',
+			'glassyLightness',
+			'glassyBlur',
+			'glassySaturation',
+			'fullscreenWarp',
+			'fullscreenLightness',
+			'fullscreenBlur',
+			'fullscreenSaturation'
+		] as const) {
+			if (typeof saved?.[k] === 'number') appearance[k] = saved[k];
 		}
 	} catch {
 		// unparseable — keep the defaults
