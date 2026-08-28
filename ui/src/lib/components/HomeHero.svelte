@@ -31,7 +31,7 @@
 				onerror={() => (artFailed = true)}
 			/>
 		{/if}
-		<div class="absolute inset-0 bg-gradient-to-b from-transparent via-background/40 to-background"></div>
+		<div class="absolute inset-0 bg-gradient-to-b from-background via-background/50 to-transparent"></div>
 	</div>
 	<div class="relative p-6 pt-8">
 		<div class="flex items-center justify-between gap-4">
