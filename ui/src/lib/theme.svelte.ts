@@ -15,7 +15,7 @@ import { hexToHsv, isLight, nearestHue } from './color';
 import { artworkAccent, warmAccent } from './artcolor';
 import { allowFontFile } from './api';
 
-export type ThemeId = 'monochrome' | 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze';
+export type ThemeId = 'monochrome' | 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze' | 'glassy';
 
 // `fg` (accent themes only) is the text/icon colour that sits ON the accent: light accents (lime,
 // teal) need a dark foreground; dark accents keep the light one. `color` is just the picker swatch.
@@ -33,7 +33,8 @@ export const THEMES: Theme[] = [
 	{ id: 'catppuccin', label: 'Catppuccin', kind: 'palette', color: 'oklch(0.5547 0.2503 297.0156)' },
 	{ id: 'caffeine', label: 'Caffeine', kind: 'palette', color: 'oklch(0.4341 0.0392 41.9938)' },
 	{ id: 'neon', label: 'Neon', kind: 'palette', color: 'oklch(0.6726 0.2904 341.4084)' },
-	{ id: 'breeze', label: 'Breeze', kind: 'palette', color: 'oklch(0.7227 0.1920 149.5793)' }
+	{ id: 'breeze', label: 'Breeze', kind: 'palette', color: 'oklch(0.7227 0.1920 149.5793)' },
+	{ id: 'glassy', label: 'Glassy', kind: 'palette', color: 'oklch(0.7 0.15 220)' }
 ];
 
 /** Font stacks bundled with the app (imported in layout.css). "System" needs no download. */
@@ -205,10 +206,30 @@ function apply(): void {
 	readBack();
 }
 
+const PREVIOUS_KEY = 'previous-theme';
+let previousTheme: ThemeId = 'monochrome';
+
 export function applyTheme(id: ThemeId): void {
-	theme.id = THEMES.some((t) => t.id === id) ? id : THEMES[0].id;
+	const validId = THEMES.some((t) => t.id === id) ? id : THEMES[0].id;
+	if (theme.id !== 'glassy' && validId === 'glassy') {
+		previousTheme = theme.id;
+		localStorage.setItem(PREVIOUS_KEY, previousTheme);
+	} else if (validId !== 'glassy') {
+		previousTheme = validId;
+		localStorage.setItem(PREVIOUS_KEY, previousTheme);
+	}
+	theme.id = validId;
 	apply();
 	localStorage.setItem(KEY, theme.id);
+}
+
+export function toggleGlassyTheme(enabled: boolean): void {
+	if (enabled) {
+		applyTheme('glassy');
+	} else {
+		const fallback = previousTheme && previousTheme !== 'glassy' ? previousTheme : 'monochrome';
+		applyTheme(fallback);
+	}
 }
 
 const persist = () => localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
@@ -394,6 +415,12 @@ export function prewarmArtworkAccent(url: string | undefined | null): void {
 export function initTheme(): void {
 	const stored = localStorage.getItem(KEY) as ThemeId | null;
 	theme.id = stored && THEMES.some((t) => t.id === stored) ? stored : 'monochrome';
+	const storedPrev = localStorage.getItem(PREVIOUS_KEY) as ThemeId | null;
+	if (storedPrev && storedPrev !== 'glassy' && THEMES.some((t) => t.id === storedPrev)) {
+		previousTheme = storedPrev;
+	} else if (theme.id !== 'glassy') {
+		previousTheme = theme.id;
+	}
 	try {
 		const saved = JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? '{}');
 		// Only keys we know about, only the shape we expect: a hand-edited or older localStorage

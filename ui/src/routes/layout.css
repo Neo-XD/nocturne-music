@@ -510,6 +510,66 @@
 	--sidebar-ring: oklch(0.7729 0.1535 163.2231);
 }
 
+.theme-glassy {
+	--background: oklch(0.96 0.01 240 / 65%);
+	--foreground: oklch(0.145 0 var(--hue));
+	--card: oklch(1 0 0 / 60%);
+	--card-foreground: oklch(0.145 0 var(--hue));
+	--popover: oklch(1 0 0 / 85%);
+	--popover-foreground: oklch(0.145 0 var(--hue));
+	--primary: oklch(0.45 0.22 250);
+	--primary-foreground: oklch(0.985 0 0);
+	--secondary: oklch(1 0 0 / 40%);
+	--secondary-foreground: oklch(0.145 0 var(--hue));
+	--muted: oklch(1 0 0 / 35%);
+	--muted-foreground: oklch(0.40 0 var(--hue));
+	--accent: oklch(0.45 0.22 250);
+	--accent-foreground: oklch(0.985 0 0);
+	--destructive: oklch(0.577 0.245 27.325);
+	--border: oklch(0 0 0 / 12%);
+	--input: oklch(0 0 0 / 14%);
+	--ring: oklch(0.45 0.22 250);
+	--radius: 0.65rem;
+	--sidebar: oklch(1 0 0 / 45%);
+	--sidebar-foreground: oklch(0.145 0 var(--hue));
+	--sidebar-primary: oklch(0.45 0.22 250);
+	--sidebar-primary-foreground: oklch(0.985 0 0);
+	--sidebar-accent: oklch(1 0 0 / 35%);
+	--sidebar-accent-foreground: oklch(0.145 0 var(--hue));
+	--sidebar-border: oklch(0 0 0 / 10%);
+	--sidebar-ring: oklch(0.45 0.22 250);
+}
+
+.dark.theme-glassy {
+	--background: oklch(0.10 0.01 240 / 70%);
+	--foreground: oklch(0.985 0 0);
+	--card: oklch(0.16 0.01 240 / 55%);
+	--card-foreground: oklch(0.985 0 0);
+	--popover: oklch(0.18 0.01 240 / 85%);
+	--popover-foreground: oklch(0.985 0 0);
+	--primary: oklch(0.75 0.18 240);
+	--primary-foreground: oklch(0.12 0 0);
+	--secondary: oklch(1 0 0 / 12%);
+	--secondary-foreground: oklch(0.985 0 0);
+	--muted: oklch(1 0 0 / 10%);
+	--muted-foreground: oklch(0.70 0 0);
+	--accent: oklch(0.75 0.18 240);
+	--accent-foreground: oklch(0.12 0 0);
+	--destructive: oklch(0.704 0.191 22.216);
+	--border: oklch(1 0 0 / 14%);
+	--input: oklch(1 0 0 / 16%);
+	--ring: oklch(0.75 0.18 240);
+	--radius: 0.65rem;
+	--sidebar: oklch(0.10 0.01 240 / 50%);
+	--sidebar-foreground: oklch(0.985 0 0);
+	--sidebar-primary: oklch(0.75 0.18 240);
+	--sidebar-primary-foreground: oklch(0.12 0 0);
+	--sidebar-accent: oklch(1 0 0 / 12%);
+	--sidebar-accent-foreground: oklch(0.985 0 0);
+	--sidebar-border: oklch(1 0 0 / 12%);
+	--sidebar-ring: oklch(0.75 0.18 240);
+}
+
 /* The blurred cover behind a hero (HomeHero, NowPlaying, the album and library headers), on its
    own compositing layer. That promotion is the whole point of the class: left unpromoted,
    WebKitGTK re-runs the 40px gaussian over the element every time anything underneath it repaints,

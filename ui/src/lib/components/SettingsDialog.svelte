@@ -50,6 +50,7 @@
 		custom,
 		effective,
 		applyTheme,
+		toggleGlassyTheme,
 		setCustom,
 		resetCustom,
 		isDefaultCustom,
@@ -546,6 +547,9 @@
 	}
 
 	function applyMaxPerformance() {
+		if (theme.id === 'glassy') {
+			toggleGlassyTheme(false);
+		}
 		setAppearance({
 			reduceTransparency: true,
 			reduceMotion: true,
@@ -948,6 +952,14 @@
 									tall: true
 								})}
 								{@render row({
+									title: 'Glassy theme (Album art background)',
+									badge: 'Moderate GPU',
+									badgeVariant: 'performance',
+									desc: 'Sets the entire app background to a dimmed and blurred version of the playing album art with frosted glass panels.',
+									control: glassyThemeSwitch,
+									tall: true
+								})}
+								{@render row({
 									title: 'Artwork background wash',
 									badge: 'Moderate GPU',
 									badgeVariant: 'performance',
@@ -1345,6 +1357,11 @@
 		</Button>
 	</div>
 {/snippet}
+
+{#snippet glassyThemeSwitch()}<Switch
+		checked={theme.id === 'glassy'}
+		onCheckedChange={(on) => toggleGlassyTheme(on)}
+	/>{/snippet}
 
 {#snippet presetSelect()}
 	<Select.Root type="single" value={theme.id} onValueChange={(v) => applyTheme(v as ThemeId)}>

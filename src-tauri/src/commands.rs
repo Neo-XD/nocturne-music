@@ -1247,6 +1247,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         date: "2026-08-28".to_string(),
         body: r#"### Nocturne Music v0.6.5
 
+- **Glassy Ambient Theme**: Added a new ambient theme featuring frosted glass surfaces and a dimmed, blurred album art background across the entire app, accessible via Appearance and Performance with synchronized state and previous-theme restoration.
 - **Performance Settings & Impact Labels**: Added a dedicated Performance tab in Settings with Reduce Transparency, Reduce Motion, resource impact badges (High GPU, Saves CPU, etc.), and quick 1-click optimization presets.
 - **Animated Fullscreen Background**: Added real-time fluid WebGL animated album artwork with GPU shaders and domain-warped blur behind the fullscreen player.
 - **Fullscreen Lyrics Fix**: Fixed word-by-word synced lyrics becoming invisible for the current line in fullscreen mode."#.to_string(),
