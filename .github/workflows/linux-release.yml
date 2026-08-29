@@ -394,7 +394,13 @@ jobs:
             return 1
           }
           fetch_manifest() { # fetch_manifest <dir>
-            rm -rf "$1" && gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$1"
+            rm -rf "$1" && mkdir -p "$1"
+            if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$1" 2>/dev/null; then
+              return 0
+            else
+              echo "{\"version\": \"$VERSION\", \"notes\": \"\", \"pub_date\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"platforms\": {}}" > "$1/latest.json"
+              return 0
+            fi
           }
 
           APPIMAGE="$(ls target/release/bundle/appimage/*.AppImage 2>/dev/null | grep -v '\.sig$' | head -1 || true)"
