@@ -1275,6 +1275,18 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v067_note = ReleaseNote {
+        version: "0.6.7".to_string(),
+        date: "2026-08-30".to_string(),
+        body: r#"### Nocturne Music v0.6.7
+
+- **Zero-Friction Zero-PIN Remote Device Sync (Orchard-Inspired)**: Replaced manual PIN pairing with seamless UDP discovery and instant WebSocket pairing. Mobile and desktop Nocturne clients on the same Wi-Fi or Tailscale network automatically discover each other with zero friction.
+- **Dedicated Output Devices Sidebar**: Added a clean Spotify-Connect-style Output Devices sidebar opened directly from the speaker icon in the bottom player bar to switch playback between Desktop PC and connected mobile devices.
+- **LAN Host Details & Masked IP in Settings**: Moved the local network host information (Host Device Name, Local IP, WebSocket Port 8080, UDP Discovery Port 8081, and Connected Clients) into Settings under Remote Device Sync, with an eye toggle to mask/reveal private IP addresses.
+- **Real-Time Live Position & Queue Synchronization**: Broadcaster now pushes continuous playback position and full active queue snapshots to connected mobile devices.
+- **Bidirectional Playback Handoff**: Full support for seamless playback session transfer (`transfer_to_phone` and `transfer_to_desktop`), allowing you to hand off songs and queue position between your PC and phone on the fly."#.to_string(),
+    };
+
     let v066_note = ReleaseNote {
         version: "0.6.6".to_string(),
         date: "2026-08-29".to_string(),
@@ -1373,7 +1385,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes =
-        vec![v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note];
+        vec![v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note];
 
     let known_versions: std::collections::HashSet<String> =
         notes.iter().map(|n| n.version.clone()).collect();
