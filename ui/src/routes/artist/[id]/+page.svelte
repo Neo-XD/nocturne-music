@@ -327,7 +327,7 @@
 		aria-label="Close menu"
 	></button>
 	<div
-		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
+		class="fixed z-50 min-w-52 animate-in rounded-lg border border-border/80 bg-popover/85 p-1 text-popover-foreground shadow-2xl backdrop-blur-2xl duration-150 fade-in-0 zoom-in-95"
 		style={anchor.style}
 		{@attach fitMenu(anchor)}
 	>

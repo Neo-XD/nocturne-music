@@ -21,7 +21,7 @@
 
 <!-- Below lg: Backdrop scrim dismisses the panel -->
 <button
-	class="fixed inset-0 z-40 cursor-default bg-black/40 lg:hidden"
+	class="fixed inset-0 z-30 cursor-default bg-black/20 backdrop-blur-xs lg:hidden"
 	onclick={onClose}
 	aria-label="Close queue"
 	transition:fade={{ duration: 150 }}
@@ -30,7 +30,7 @@
 <!-- Docked in-flow sidebar on lg+, overlay on smaller screens -->
 <aside
 	transition:fly={{ x: 32, duration: 220, easing: cubicOut }}
-	class="fixed inset-y-0 right-0 z-40 flex h-full w-80 max-w-[85vw] flex-col border-l bg-card shadow-2xl lg:relative lg:inset-auto lg:z-10 lg:w-80 lg:shrink-0 lg:shadow-none"
+	class="fixed inset-y-0 right-0 z-40 flex h-full w-80 max-w-[85vw] flex-col border-l border-border/70 bg-card/85 dark:bg-card/80 backdrop-blur-2xl shadow-2xl lg:relative lg:inset-auto lg:z-10 lg:w-80 lg:shrink-0 lg:shadow-none"
 >
 	<div class="flex items-center justify-between border-b px-4 py-3">
 		<div class="flex items-center gap-2">

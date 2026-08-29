@@ -147,7 +147,7 @@
 			id="search-suggest"
 			role="listbox"
 			aria-label="Search preview"
-			class="absolute top-full z-50 mt-2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl animate-in fade-in-0 zoom-in-95 duration-150 {panelClass}"
+			class="absolute top-full z-50 mt-2 overflow-hidden rounded-xl border border-border/80 bg-popover/90 text-popover-foreground shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150 {panelClass}"
 		>
 			{#if loading && !items.length}
 				{#each Array(4) as _, i (i)}
