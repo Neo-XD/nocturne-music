@@ -638,6 +638,14 @@ fn spawn_event_pump(
                     // MPRIS uses, so tray state can't drift from media-key state.
                     tray::set_playing(&app, playing);
                     state.lt_on_play_state(playing).await; // Listen Together host → broadcast
+
+                    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+                        if rs.is_running() {
+                            let snapshot = state.playback_snapshot().await;
+                            let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+                            rs.broadcast_state(st);
+                        }
+                    }
                 }
                 PlayerEvent::TrackEnded => {
                     state.on_track_ended().await;

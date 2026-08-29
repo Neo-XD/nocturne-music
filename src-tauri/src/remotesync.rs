@@ -8,9 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
-use listen_protocol::{PlaybackKind, RoomState, Track};
+use listen_protocol::{RoomState, Track};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tauri::Emitter;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio_tungstenite::tungstenite::Message;
@@ -31,7 +32,7 @@ pub enum SyncWireMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemotePlaybackAction {
-    pub kind: PlaybackKind,
+    pub kind: String,
     #[serde(default)]
     pub position_ms: i64,
     #[serde(default)]
@@ -249,17 +250,20 @@ async fn handle_connection(
 }
 
 async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction) {
-    match action.kind {
-        PlaybackKind::Play => {
+    match action.kind.as_str() {
+        "play" | "pause" | "toggle" => {
             state.resume_or_toggle().await;
         }
-        PlaybackKind::Pause => {
-            state.resume_or_toggle().await;
-        }
-        PlaybackKind::Seek => {
+        "seek" => {
             let _ = state.user_seek(action.position_ms as f64 / 1000.0).await;
         }
-        PlaybackKind::ChangeTrack => {
+        "next_track" | "next" => {
+            state.next_in_queue().await;
+        }
+        "previous_track" | "prev" | "previous" => {
+            state.prev_in_queue().await;
+        }
+        "change_track" => {
             if let Some(track) = action.track {
                 let song = innertube::SongItem {
                     video_id: track.id,
@@ -272,15 +276,16 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
                 state.play_song(song).await;
             }
         }
-        PlaybackKind::SetVolume => {
+        "set_volume" => {
             let vol = (action.volume * 100.0) as i64;
             let _ = state.player.set_volume(vol);
+            let _ = state.app.emit("volume", vol);
         }
         _ => {}
     }
 }
 
-fn room_state_from_snapshot(v: &Value) -> RoomState {
+pub fn room_state_from_snapshot(v: &Value) -> RoomState {
     let title = v.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
     let artists = v.get("artists").and_then(Value::as_str).unwrap_or_default().to_string();
     let video_id = v.get("videoId").and_then(Value::as_str).unwrap_or_default().to_string();
