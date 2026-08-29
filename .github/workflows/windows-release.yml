@@ -312,12 +312,12 @@ jobs:
             rm -rf "$1" && gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$1"
           }
 
-          EXE="target/release/bundle/nsis/limusic_${VERSION}_x64-setup.exe"
+          EXE="$(ls target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1 || true)"
           SIG="$EXE.sig"
-          MSI="$(ls target/release/bundle/msi/limusic_${VERSION}_*.msi 2>/dev/null | head -1 || true)"
+          MSI="$(ls target/release/bundle/msi/*.msi 2>/dev/null | head -1 || true)"
 
-          if [ ! -f "$EXE" ]; then
-            echo "::error::expected installer not found: $EXE"; find target/release/bundle -maxdepth 2; exit 1
+          if [ -z "$EXE" ] || [ ! -f "$EXE" ]; then
+            echo "::error::expected installer not found in target/release/bundle/nsis"; find target/release/bundle -maxdepth 2; exit 1
           fi
           if [ ! -f "$SIG" ]; then
             echo "::error::no .sig next to the installer — signing key missing, or createUpdaterArtifacts got turned off"; exit 1

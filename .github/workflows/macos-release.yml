@@ -211,8 +211,12 @@ jobs:
           # to the filesystem.
           tauri build --bundles app --config \
             '{"build":{"beforeBuildCommand":""},"bundle":{"createUpdaterArtifacts":false}}'
-          [ -d "target/release/bundle/macos/limusic.app" ] \
-            || { echo "::error::no .app at target/release/bundle/macos/limusic.app"; find target/release/bundle -maxdepth 2; exit 1; }
+          APP="$(readlink -f "$(ls -d target/release/bundle/macos/*.app 2>/dev/null | head -1)")"
+          [ -d "$APP" ] \
+            || { echo "::error::no .app at target/release/bundle/macos"; find target/release/bundle -maxdepth 2; exit 1; }
+          APP_NAME="$(basename "$APP")"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
 
       # THE step this workflow exists for. dylibbundler walks the binary's dependency graph, copies
       # every non-system dylib into Contents/Frameworks and rewrites the install names to
@@ -228,10 +232,6 @@ jobs:
         timeout-minutes: 6
         run: |
           set -euo pipefail
-          APP=target/release/bundle/macos/limusic.app
-          # The executable inside the bundle is NOT named after the bundle: productName names the
-          # .app, the cargo package names the binary (limusic-app). Ask the bundle rather than
-          # guessing, so a rename of either can't quietly break this.
           BIN="$APP/Contents/MacOS/$(plutil -extract CFBundleExecutable raw "$APP/Contents/Info.plist")"
           [ -x "$BIN" ] || { echo "::error::no executable at $BIN"; ls -l "$APP/Contents/MacOS"; exit 1; }
           echo "EXECUTABLE=$(basename "$BIN")" >> "$GITHUB_ENV"
@@ -249,7 +249,6 @@ jobs:
       - name: Re-sign the bundle
         run: |
           set -euo pipefail
-          APP=target/release/bundle/macos/limusic.app
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
 
@@ -260,7 +259,6 @@ jobs:
       - name: Check nothing still links to Homebrew
         run: |
           set -euo pipefail
-          APP=target/release/bundle/macos/limusic.app
           # [[:space:]], not \s: this runs under BSD grep, whose POSIX regex has no \s, and a
           # pattern that quietly matches nothing is worse than no guard at all.
           #
@@ -294,12 +292,12 @@ jobs:
             echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is not set, the build would produce an unsignable update"
             exit 1
           fi
-          TAR="target/release/bundle/macos/limusic_${VERSION}_aarch64.app.tar.gz"
+          TAR="target/release/bundle/macos/nocturne_${VERSION}_aarch64.app.tar.gz"
           # cd into the bundle dir rather than `tar -C`, so there is no question about whether the
           # archive path is resolved before or after the chdir. The archive must contain the .app
           # at its root: that is what the updater extracts over the installed one.
           (cd target/release/bundle/macos \
-            && COPYFILE_DISABLE=1 tar -czf "limusic_${VERSION}_aarch64.app.tar.gz" limusic.app)
+            && COPYFILE_DISABLE=1 tar -czf "nocturne_${VERSION}_aarch64.app.tar.gz" "$APP_NAME")
           tauri signer sign "$TAR"
           [ -f "$TAR.sig" ] || { echo "::error::tauri signer produced no .sig for $TAR"; exit 1; }
           echo "TAR=$TAR" >> "$GITHUB_ENV"
@@ -313,8 +311,8 @@ jobs:
           set -euo pipefail
           rm -rf /tmp/roundtrip && mkdir -p /tmp/roundtrip
           tar -xzf "$TAR" -C /tmp/roundtrip
-          codesign --verify --deep --strict --verbose=2 /tmp/roundtrip/limusic.app
-          test -x "/tmp/roundtrip/limusic.app/Contents/MacOS/$EXECUTABLE"
+          codesign --verify --deep --strict --verbose=2 "/tmp/roundtrip/$APP_NAME"
+          test -x "/tmp/roundtrip/$APP_NAME/Contents/MacOS/$EXECUTABLE"
           echo "the extracted bundle verifies and its binary is executable"
 
       # hdiutil rather than tauri's dmg bundler: that one drives AppleScript to lay the window out
@@ -323,14 +321,13 @@ jobs:
       - name: Build the DMG
         run: |
           set -euo pipefail
-          APP=target/release/bundle/macos/limusic.app
-          DMG="target/release/bundle/dmg/limusic_${VERSION}_aarch64.dmg"
-          STAGE="$(mktemp -d)/Limusic"
+          DMG="target/release/bundle/dmg/nocturne_${VERSION}_aarch64.dmg"
+          STAGE="$(mktemp -d)/Nocturne"
           mkdir -p "$STAGE" "$(dirname "$DMG")"
           # ditto, not cp: it is the copy that preserves a bundle's metadata and signature intact.
-          ditto "$APP" "$STAGE/limusic.app"
+          ditto "$APP" "$STAGE/$APP_NAME"
           ln -s /Applications "$STAGE/Applications"
-          hdiutil create -volname "Limusic" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          hdiutil create -volname "Nocturne" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
           echo "DMG=$DMG" >> "$GITHUB_ENV"
           echo "dmg: $(du -h "$DMG" | cut -f1)"
 
