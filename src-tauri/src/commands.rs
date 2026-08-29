@@ -308,9 +308,14 @@ pub async fn set_setting(
     }
     if key == "remote_sync_enabled" || key == "remote_sync_port" || key == "remote_sync_pin" {
         use tauri::Manager;
-        if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+        if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
+        {
             let enabled = state.db.get_setting("remote_sync_enabled").as_deref() == Some("true");
-            let port = state.db.get_setting("remote_sync_port").and_then(|p| p.parse::<u16>().ok()).unwrap_or(8080);
+            let port = state
+                .db
+                .get_setting("remote_sync_port")
+                .and_then(|p| p.parse::<u16>().ok())
+                .unwrap_or(8080);
             let pin = state.db.get_setting("remote_sync_pin").unwrap_or_else(|| "1234".into());
             let rs = rs.inner().clone();
             if enabled {
@@ -1356,9 +1361,8 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         prerelease: bool,
     }
 
-    let mut notes = vec![
-        v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
-    ];
+    let mut notes =
+        vec![v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note];
 
     let known_versions: std::collections::HashSet<String> =
         notes.iter().map(|n| n.version.clone()).collect();

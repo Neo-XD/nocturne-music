@@ -20,25 +20,11 @@ use crate::state::AppState;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncWireMessage {
-    AuthChallenge {
-        nonce: String,
-        host_device_name: String,
-    },
-    AuthResponse {
-        client_device_name: String,
-        pin_hash: String,
-    },
-    AuthResult {
-        success: bool,
-        session_token: Option<String>,
-        message: Option<String>,
-    },
-    SyncState {
-        state: RoomState,
-    },
-    PlaybackAction {
-        action: RemotePlaybackAction,
-    },
+    AuthChallenge { nonce: String, host_device_name: String },
+    AuthResponse { client_device_name: String, pin_hash: String },
+    AuthResult { success: bool, session_token: Option<String>, message: Option<String> },
+    SyncState { state: RoomState },
+    PlaybackAction { action: RemotePlaybackAction },
     Ping,
     Pong,
 }
@@ -188,21 +174,28 @@ async fn handle_connection(
         if let Ok(wire_msg) = serde_json::from_str::<SyncWireMessage>(&msg) {
             match wire_msg {
                 SyncWireMessage::AuthResponse { pin_hash, .. } => {
-                    if pin_hash.eq_ignore_ascii_case(&target_sha256) || pin_hash == *configured_pin {
+                    if pin_hash.eq_ignore_ascii_case(&target_sha256) || pin_hash == *configured_pin
+                    {
                         authenticated = true;
                         let res = SyncWireMessage::AuthResult {
                             success: true,
                             session_token: Some("token_ok".into()),
                             message: None,
                         };
-                        let _ = ws_sender.send(Message::Text(serde_json::to_string(&res).unwrap().into())).await;
+                        let _ = ws_sender
+                            .send(Message::Text(serde_json::to_string(&res).unwrap().into()))
+                            .await;
 
                         // Send current state
                         if let Some(app_state) = state_ref.read().await.as_ref() {
                             let snapshot = app_state.playback_snapshot().await;
                             let state = room_state_from_snapshot(&snapshot);
                             let state_msg = SyncWireMessage::SyncState { state };
-                            let _ = ws_sender.send(Message::Text(serde_json::to_string(&state_msg).unwrap().into())).await;
+                            let _ = ws_sender
+                                .send(Message::Text(
+                                    serde_json::to_string(&state_msg).unwrap().into(),
+                                ))
+                                .await;
                         }
                         break;
                     } else {
@@ -211,7 +204,9 @@ async fn handle_connection(
                             session_token: None,
                             message: Some("Invalid PIN".into()),
                         };
-                        let _ = ws_sender.send(Message::Text(serde_json::to_string(&res).unwrap().into())).await;
+                        let _ = ws_sender
+                            .send(Message::Text(serde_json::to_string(&res).unwrap().into()))
+                            .await;
                         return;
                     }
                 }
