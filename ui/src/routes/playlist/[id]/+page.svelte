@@ -710,19 +710,19 @@
 		<!-- One scroller for the whole page: the header scrolls away above the rows, same as the
 		     album page. -->
 		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
-			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden border-b p-6">
+			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden p-6 pt-8">
 				{#if headerImage}
 					<img
 						src={headerImage}
 						alt=""
-						class="pointer-events-none absolute -inset-6 h-[calc(100%+3rem)] w-[calc(100%+3rem)] max-w-none scale-105 object-cover object-center opacity-75 blur-2xl"
+						class="pointer-events-none absolute -inset-6 h-[calc(100%+3rem)] w-[calc(100%+3rem)] max-w-none scale-105 object-cover object-center opacity-65 blur-2xl"
 					/>
 				{/if}
-				<!-- Fade the cover into the page: flipped gradient -->
+				<!-- Smooth, seamless gradient transition to app background -->
 				<div
-					class="absolute inset-0 bg-gradient-to-b from-background via-background/60 to-background/20"
+					class="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/20"
 				></div>
-				<div class="absolute inset-0 bg-gradient-to-l from-background via-background/50 to-transparent"></div>
+				<div class="absolute inset-0 bg-gradient-to-r from-background/80 via-background/40 to-transparent"></div>
 				{#if isOnRepeat}
 					<div
 						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"
