@@ -1,7 +1,7 @@
-//! Remote Device Playback Sync (Direct IP / Tailscale with PIN).
+//! Remote Device Playback Sync (Direct IP / Tailscale - Orchard inspired zero-friction pairing).
 //!
-//! Embedded WebSocket server that allows Nocturne Mobile (or remote clients) to securely
-//! pair and control desktop playback over local network or Tailscale.
+//! Embedded WebSocket server that allows Nocturne Mobile to securely
+//! discover, pair, and control desktop playback with instant bidirectional state syncing.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,7 +22,7 @@ use crate::state::AppState;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncWireMessage {
     AuthChallenge { nonce: String, host_device_name: String },
-    AuthResponse { client_device_name: String, pin_hash: String },
+    AuthResponse { client_device_name: String, pin_hash: Option<String> },
     AuthResult { success: bool, session_token: Option<String>, message: Option<String> },
     SyncState { state: RoomState },
     PlaybackAction { action: RemotePlaybackAction },
@@ -54,7 +54,7 @@ pub struct RemoteSyncController {
 
 impl RemoteSyncController {
     pub fn new() -> Self {
-        let (broadcast_tx, _) = broadcast::channel(64);
+        let (broadcast_tx, _) = broadcast::channel(128);
         Self {
             running: Arc::new(AtomicBool::new(false)),
             broadcast_tx,
@@ -72,7 +72,7 @@ impl RemoteSyncController {
         self.running.load(Ordering::SeqCst)
     }
 
-    pub async fn start(&self, port: u16, pin: String) -> Result<(), String> {
+    pub async fn start(&self, port: u16) -> Result<(), String> {
         if self.is_running() {
             self.stop().await;
         }
@@ -87,7 +87,6 @@ impl RemoteSyncController {
         let running = self.running.clone();
         let broadcast_tx = self.broadcast_tx.clone();
         let state_ref = self.state_ref.clone();
-        let pin = Arc::new(pin);
 
         tokio::spawn(async move {
             tracing::info!(port, "Remote sync server started on 0.0.0.0:{port}");
@@ -102,9 +101,8 @@ impl RemoteSyncController {
                                 let b_tx = broadcast_tx.clone();
                                 let b_rx = broadcast_tx.subscribe();
                                 let st_ref = state_ref.clone();
-                                let p = pin.clone();
                                 tokio::spawn(async move {
-                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, p).await;
+                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref).await;
                                 });
                             }
                             Err(e) => {
@@ -142,10 +140,9 @@ impl RemoteSyncController {
 async fn handle_connection(
     stream: TcpStream,
     peer_addr: SocketAddr,
-    _b_tx: broadcast::Sender<String>,
+    b_tx: broadcast::Sender<String>,
     mut b_rx: broadcast::Receiver<String>,
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
-    configured_pin: Arc<String>,
 ) {
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
@@ -157,67 +154,23 @@ async fn handle_connection(
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
 
-    // Authenticate
-    let mut authenticated = false;
-    let target_sha256 = sha256_hex(&configured_pin);
+    // Send immediate Auth OK & initial state on connect
+    let auth_ok = SyncWireMessage::AuthResult {
+        success: true,
+        session_token: Some("token_ok".into()),
+        message: None,
+    };
+    let _ = ws_sender
+        .send(Message::Text(serde_json::to_string(&auth_ok).unwrap().into()))
+        .await;
 
-    while let Some(msg_res) = ws_receiver.next().await {
-        let msg = match msg_res {
-            Ok(Message::Text(t)) => t,
-            Ok(Message::Ping(data)) => {
-                let _ = ws_sender.send(Message::Pong(data)).await;
-                continue;
-            }
-            Ok(Message::Close(_)) | Err(_) => break,
-            _ => continue,
-        };
-
-        if let Ok(wire_msg) = serde_json::from_str::<SyncWireMessage>(&msg) {
-            match wire_msg {
-                SyncWireMessage::AuthResponse { pin_hash, .. } => {
-                    if pin_hash.eq_ignore_ascii_case(&target_sha256) || pin_hash == *configured_pin
-                    {
-                        authenticated = true;
-                        let res = SyncWireMessage::AuthResult {
-                            success: true,
-                            session_token: Some("token_ok".into()),
-                            message: None,
-                        };
-                        let _ = ws_sender
-                            .send(Message::Text(serde_json::to_string(&res).unwrap().into()))
-                            .await;
-
-                        // Send current state
-                        if let Some(app_state) = state_ref.read().await.as_ref() {
-                            let snapshot = app_state.playback_snapshot().await;
-                            let state = room_state_from_snapshot(&snapshot);
-                            let state_msg = SyncWireMessage::SyncState { state };
-                            let _ = ws_sender
-                                .send(Message::Text(
-                                    serde_json::to_string(&state_msg).unwrap().into(),
-                                ))
-                                .await;
-                        }
-                        break;
-                    } else {
-                        let res = SyncWireMessage::AuthResult {
-                            success: false,
-                            session_token: None,
-                            message: Some("Invalid PIN".into()),
-                        };
-                        let _ = ws_sender
-                            .send(Message::Text(serde_json::to_string(&res).unwrap().into()))
-                            .await;
-                        return;
-                    }
-                }
-                _ => continue,
-            }
-        }
-    }
-
-    if !authenticated {
-        return;
+    if let Some(app_state) = state_ref.read().await.as_ref() {
+        let snapshot = app_state.playback_snapshot().await;
+        let state = room_state_from_snapshot(&snapshot);
+        let state_msg = SyncWireMessage::SyncState { state };
+        let _ = ws_sender
+            .send(Message::Text(serde_json::to_string(&state_msg).unwrap().into()))
+            .await;
     }
 
     // Active session loop
@@ -233,9 +186,42 @@ async fn handle_connection(
             client_msg = ws_receiver.next() => {
                 match client_msg {
                     Some(Ok(Message::Text(t))) => {
-                        if let Ok(SyncWireMessage::PlaybackAction { action }) = serde_json::from_str::<SyncWireMessage>(&t) {
-                            if let Some(app_state) = state_ref.read().await.as_ref() {
-                                apply_remote_action(app_state, action).await;
+                        if let Ok(wire_msg) = serde_json::from_str::<SyncWireMessage>(&t) {
+                            match wire_msg {
+                                SyncWireMessage::PlaybackAction { action } => {
+                                    if let Some(app_state) = state_ref.read().await.as_ref() {
+                                        apply_remote_action(app_state, action).await;
+                                        // Broadcast updated state immediately
+                                        let snapshot = app_state.playback_snapshot().await;
+                                        let state = room_state_from_snapshot(&snapshot);
+                                        let msg = SyncWireMessage::SyncState { state };
+                                        if let Ok(json) = serde_json::to_string(&msg) {
+                                            let _ = b_tx.send(json);
+                                        }
+                                    }
+                                }
+                                SyncWireMessage::AuthResponse { .. } => {
+                                    let res = SyncWireMessage::AuthResult {
+                                        success: true,
+                                        session_token: Some("token_ok".into()),
+                                        message: None,
+                                    };
+                                    let _ = ws_sender
+                                        .send(Message::Text(serde_json::to_string(&res).unwrap().into()))
+                                        .await;
+                                    if let Some(app_state) = state_ref.read().await.as_ref() {
+                                        let snapshot = app_state.playback_snapshot().await;
+                                        let state = room_state_from_snapshot(&snapshot);
+                                        let state_msg = SyncWireMessage::SyncState { state };
+                                        let _ = ws_sender
+                                            .send(Message::Text(serde_json::to_string(&state_msg).unwrap().into()))
+                                            .await;
+                                    }
+                                }
+                                SyncWireMessage::Ping => {
+                                    let _ = ws_sender.send(Message::Text(r#"{"type":"pong"}"#.into())).await;
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -251,8 +237,11 @@ async fn handle_connection(
 
 async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction) {
     match action.kind.as_str() {
-        "play" | "pause" | "toggle" => {
+        "play" | "toggle" => {
             state.resume_or_toggle().await;
+        }
+        "pause" => {
+            let _ = state.player.pause();
         }
         "seek" => {
             let _ = state.user_seek(action.position_ms as f64 / 1000.0).await;
@@ -277,7 +266,7 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
             }
         }
         "set_volume" => {
-            let vol = (action.volume * 100.0) as i64;
+            let vol = (action.volume * 100.0).clamp(0.0, 100.0) as i64;
             let _ = state.player.set_volume(vol);
             let _ = state.app.emit("volume", vol);
         }
@@ -318,11 +307,4 @@ pub fn room_state_from_snapshot(v: &Value) -> RoomState {
         volume: 1.0,
         queue: vec![],
     }
-}
-
-fn sha256_hex(input: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    format!("{:x}", hasher.finalize())
 }

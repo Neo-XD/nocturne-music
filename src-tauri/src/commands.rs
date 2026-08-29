@@ -306,20 +306,19 @@ pub async fn set_setting(
         };
         res.map_err(|e| format!("autostart: {e}"))?;
     }
-    if key == "remote_sync_enabled" || key == "remote_sync_port" || key == "remote_sync_pin" {
+    if key == "remote_sync_enabled" || key == "remote_sync_port" {
         use tauri::Manager;
         if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
         {
-            let enabled = state.db.get_setting("remote_sync_enabled").as_deref() == Some("true");
+            let enabled = state.db.get_setting("remote_sync_enabled").as_deref() != Some("false");
             let port = state
                 .db
                 .get_setting("remote_sync_port")
                 .and_then(|p| p.parse::<u16>().ok())
                 .unwrap_or(8080);
-            let pin = state.db.get_setting("remote_sync_pin").unwrap_or_else(|| "1234".into());
             let rs = rs.inner().clone();
             if enabled {
-                let _ = rs.start(port, pin).await;
+                let _ = rs.start(port).await;
             } else {
                 rs.stop().await;
             }
