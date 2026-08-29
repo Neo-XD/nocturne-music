@@ -696,6 +696,13 @@ export function togglePin(id: string) {
 // stays owned by `playback.rating`, which the Rust side reseeds on every track change.
 const ratings = $state<Record<string, Rating>>({});
 
+const MAX_OVERRIDES = 500;
+function capOverrides(map: Record<string, unknown>): void {
+	if (Object.keys(map).length > MAX_OVERRIDES) {
+		for (const k in map) delete map[k];
+	}
+}
+
 export function ratingOf(song: SongItem): Rating {
 	if (playback.now?.videoId === song.video_id) return playback.rating;
 	return ratings[song.video_id] ?? song.rating ?? 'indifferent';
@@ -819,6 +826,7 @@ async function rate(song: SongItem, next: Rating) {
 	if (prev === next) return;
 	const isNow = playback.now?.videoId === song.video_id;
 	ratings[song.video_id] = next;
+	capOverrides(ratings);
 	if (isNow) playback.rating = next;
 	try {
 		await api.rate(song.video_id, next);
@@ -1038,6 +1046,7 @@ export function initApp(mini = false): () => void {
 		// and `ratingOf` reads that map for every row that is not the playing one.
 		api.onRating((videoId, rating) => {
 			ratings[videoId] = rating;
+			capOverrides(ratings);
 			if (playback.now?.videoId === videoId) playback.rating = rating;
 		}),
 		api.onQueueChanged((q) => (playback.queue = q)),

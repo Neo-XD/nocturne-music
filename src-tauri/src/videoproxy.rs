@@ -67,12 +67,24 @@ pub fn start(state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         let Ok(listener) = tokio::net::TcpListener::from_std(listener) else { return };
         loop {
-            let Ok((stream, _)) = listener.accept().await else { continue };
+            let (stream, _) = match listener.accept().await {
+                Ok(v) => v,
+                Err(e) => {
+                    // EMFILE/ENFILE/ENOBUFS return immediately, so `continue` alone was a tight
+                    // loop pinning a core for the rest of the process.
+                    tracing::warn!(error = %e, "video proxy: accept failed");
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
             let state = state.clone();
             tauri::async_runtime::spawn(async move {
                 let svc = service_fn(move |req| serve(req, state.clone()));
                 // A dropped connection is what a seek looks like from here, so errors are expected.
-                let _ = http1::Builder::new().serve_connection(TokioIo::new(stream), svc).await;
+                let _ = http1::Builder::new()
+                    .header_read_timeout(std::time::Duration::from_secs(15))
+                    .serve_connection(TokioIo::new(stream), svc)
+                    .await;
             });
         }
     });

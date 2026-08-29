@@ -803,12 +803,12 @@ html.art-tint.dark {
 
 /* A track title too wide for the player scrolls itself instead of stopping at an ellipsis.
    --marquee-dx is one text width plus the gap, measured in Marquee.svelte, which also sets the
-   duration to keep the speed constant. One direction, looping: the second copy lands where the
-   first started, so translating back to 0 is not a visible jump. */
+   duration to keep the speed constant. Three passes so a long title is readable without keeping
+   an active animation running for the entire session. */
 @keyframes marquee {
 	to { transform: translateX(calc(var(--marquee-dx) * -1)); }
 }
-.marquee { animation: marquee linear infinite; }
+.marquee { animation: marquee linear 3 forwards; }
 /* Hovering holds it still: the artist line's names are links, and hitting a moving target is not.
    Triggered from the clipping box, not the scrolling track: the trailing copy is inert, so it is
    not hit-testable and hovering it would never reach the track itself. */
