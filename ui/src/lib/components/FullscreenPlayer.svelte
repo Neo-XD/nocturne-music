@@ -261,7 +261,7 @@
 				class="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover"
 				style="opacity: {appearance.fullscreenLightness}; filter: blur({appearance.fullscreenBlur}px) saturate({Math.round(appearance.fullscreenSaturation * 100)}%);"
 				intensity={appearance.fullscreenWarp}
-				speed={0.6}
+				speed={appearance.fullscreenSpeed}
 			/>
 		{:else}
 			<img

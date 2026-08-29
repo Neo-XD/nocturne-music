@@ -515,7 +515,7 @@
 	--foreground: oklch(0.145 0 var(--hue));
 	--card: oklch(1 0 0 / 35%);
 	--card-foreground: oklch(0.145 0 var(--hue));
-	--popover: oklch(1 0 0 / 75%);
+	--popover: oklch(1 0 0 / 68%);
 	--popover-foreground: oklch(0.145 0 var(--hue));
 	--primary: oklch(0.45 0.22 250);
 	--primary-foreground: oklch(0.985 0 0);
@@ -545,7 +545,7 @@
 	--foreground: oklch(0.985 0 0);
 	--card: oklch(0.16 0.01 240 / 30%);
 	--card-foreground: oklch(0.985 0 0);
-	--popover: oklch(0.18 0.01 240 / 75%);
+	--popover: oklch(0.14 0.01 240 / 68%);
 	--popover-foreground: oklch(0.985 0 0);
 	--primary: oklch(0.75 0.18 240);
 	--primary-foreground: oklch(0.12 0 0);
@@ -572,10 +572,11 @@
 
 .theme-glassy .bg-card,
 .theme-glassy .bg-sidebar,
+.theme-glassy .bg-popover,
 .theme-glassy aside,
 .theme-glassy footer {
-	backdrop-filter: blur(16px);
-	-webkit-backdrop-filter: blur(16px);
+	backdrop-filter: blur(20px) saturate(180%);
+	-webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 
 /* The blurred cover behind a hero (HomeHero, NowPlaying, the album and library headers), on its

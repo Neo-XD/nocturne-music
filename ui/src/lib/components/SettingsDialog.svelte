@@ -573,6 +573,7 @@
 	function resetGlassyVisuals() {
 		setAppearance({
 			glassyWarp: 1.5,
+			glassySpeed: 0.5,
 			glassyLightness: 0.45,
 			glassyBlur: 64,
 			glassySaturation: 1.0
@@ -583,6 +584,7 @@
 	function resetFullscreenVisuals() {
 		setAppearance({
 			fullscreenWarp: 1.6,
+			fullscreenSpeed: 0.6,
 			fullscreenLightness: 0.45,
 			fullscreenBlur: 64,
 			fullscreenSaturation: 1.0
@@ -865,6 +867,12 @@
 									tall: true
 								})}
 								{@render row({
+									title: 'Animation speed',
+									desc: 'Sets the speed of fluid wave motion and liquid warping in the ambient background.',
+									control: glassySpeedSlider,
+									tall: true
+								})}
+								{@render row({
 									title: 'Brightness & opacity',
 									desc: 'Adjusts how brightly the ambient album art shines through behind the UI.',
 									control: glassyLightnessSlider,
@@ -884,7 +892,7 @@
 								})}
 								{@render row({
 									title: 'Reset Glassy background',
-									desc: 'Restore default warp intensity, brightness, blur radius and saturation.',
+									desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
 									control: resetGlassyButton
 								})}
 							</div>
@@ -897,6 +905,12 @@
 									title: 'Warping intensity',
 									desc: 'Controls the fluid wave distortion behind fullscreen lyrics and player.',
 									control: fullscreenWarpSlider,
+									tall: true
+								})}
+								{@render row({
+									title: 'Animation speed',
+									desc: 'Sets the speed of fluid wave motion behind the fullscreen player.',
+									control: fullscreenSpeedSlider,
 									tall: true
 								})}
 								{@render row({
@@ -919,7 +933,7 @@
 								})}
 								{@render row({
 									title: 'Reset Fullscreen background',
-									desc: 'Restore default warp intensity, brightness, blur radius and saturation.',
+									desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
 									control: resetFullscreenButton
 								})}
 							</div>
@@ -1469,6 +1483,23 @@
 	</div>
 {/snippet}
 
+{#snippet glassySpeedSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.glassySpeed - 0.1) / 2.9) * 100}%"
+			min="0.1"
+			max="3.0"
+			step="0.1"
+			value={appearance.glassySpeed}
+			oninput={(e) => setAppearance({ glassySpeed: parseFloat(e.currentTarget.value) })}
+			aria-label="Glassy animation speed"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{appearance.glassySpeed.toFixed(1)}x</span>
+	</div>
+{/snippet}
+
 {#snippet glassyLightnessSlider()}
 	<div class="flex items-center gap-3 w-48">
 		<input
@@ -1534,6 +1565,23 @@
 			aria-label="Fullscreen warping intensity"
 		/>
 		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{appearance.fullscreenWarp.toFixed(1)}x</span>
+	</div>
+{/snippet}
+
+{#snippet fullscreenSpeedSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.fullscreenSpeed - 0.1) / 2.9) * 100}%"
+			min="0.1"
+			max="3.0"
+			step="0.1"
+			value={appearance.fullscreenSpeed}
+			oninput={(e) => setAppearance({ fullscreenSpeed: parseFloat(e.currentTarget.value) })}
+			aria-label="Fullscreen animation speed"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{appearance.fullscreenSpeed.toFixed(1)}x</span>
 	</div>
 {/snippet}
 

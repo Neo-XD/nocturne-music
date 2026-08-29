@@ -188,7 +188,7 @@
 							class="absolute inset-0 h-full w-full scale-125 object-cover transition-all duration-700"
 							style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
 							intensity={appearance.glassyWarp}
-							speed={0.5}
+							speed={appearance.glassySpeed}
 						/>
 					{:else}
 						<img

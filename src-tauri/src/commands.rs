@@ -1247,7 +1247,10 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         date: "2026-08-29".to_string(),
         body: r#"### Nocturne Music v0.6.6
 
-- **Save to Library from Context Menus (YouTube Account Sync)**: Added "Save to library" and "Remove from library" options to the ⋯ context menu on every song, album, artist, and playlist card or row. Changes automatically sync to your YouTube Music account when signed in, or save locally when signed out."#.to_string(),
+- **Save to Library from Context Menus (YouTube Account Sync)**: Added "Save to library" and "Remove from library" options to the ⋯ context menu on every song, album, artist, and playlist card or row. Changes automatically sync to your YouTube Music account when signed in, or save locally when signed out.
+- **Frosted Glass Context Menus (Glassy Theme)**: Context menus and dropdown popovers now render with real-time backdrop blur in the Glassy theme while remaining completely opaque in standard themes.
+- **Flipped Playlist Header Gradient**: Inverted the vertical and horizontal header banner gradients on playlist pages for enhanced cover art visibility and visual contrast.
+- **Background Shader Animation Speed Sliders**: Added independent animation speed controls (0.1x–3.0x) in Settings (Appearance tab) for both the Glassy Theme Background and the Fullscreen Player Background."#.to_string(),
     };
 
     let v065_note = ReleaseNote {

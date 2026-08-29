@@ -109,6 +109,8 @@ export const appearance = $state({
 
 	/** Glassy theme background warping intensity (0.0 to 3.0). */
 	glassyWarp: 1.5,
+	/** Glassy theme background animation speed (0.1 to 3.0). */
+	glassySpeed: 0.5,
 	/** Glassy theme background opacity/lightness (0.10 to 1.0). */
 	glassyLightness: 0.45,
 	/** Glassy theme background blur radius in px (0 to 100). */
@@ -118,6 +120,8 @@ export const appearance = $state({
 
 	/** Fullscreen player background warping intensity (0.0 to 3.0). */
 	fullscreenWarp: 1.6,
+	/** Fullscreen player background animation speed (0.1 to 3.0). */
+	fullscreenSpeed: 0.6,
 	/** Fullscreen player background opacity/lightness (0.10 to 1.0). */
 	fullscreenLightness: 0.45,
 	/** Fullscreen player background blur radius in px (0 to 100). */

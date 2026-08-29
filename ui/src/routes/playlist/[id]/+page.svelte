@@ -718,12 +718,11 @@
 						class="pointer-events-none absolute -inset-6 h-[calc(100%+3rem)] w-[calc(100%+3rem)] max-w-none scale-105 object-cover object-center opacity-75 blur-2xl"
 					/>
 				{/if}
-				<!-- Fade the cover into the page so the text stays readable: solid at the bottom and on the
-				     left (behind the title), the image itself visible toward the top-right. -->
+				<!-- Fade the cover into the page: flipped gradient -->
 				<div
-					class="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-background/20"
+					class="absolute inset-0 bg-gradient-to-b from-background via-background/60 to-background/20"
 				></div>
-				<div class="absolute inset-0 bg-gradient-to-r from-background via-background/50 to-transparent"></div>
+				<div class="absolute inset-0 bg-gradient-to-l from-background via-background/50 to-transparent"></div>
 				{#if isOnRepeat}
 					<div
 						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"
