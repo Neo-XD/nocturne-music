@@ -386,13 +386,29 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
 }
 
 pub fn room_state_from_snapshot(v: &Value) -> RoomState {
-    let title = v.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
-    let artists = v.get("artists").and_then(Value::as_str).unwrap_or_default().to_string();
-    let video_id = v.get("videoId").and_then(Value::as_str).unwrap_or_default().to_string();
-    let thumbnail = v.get("thumbnail").and_then(Value::as_str).map(str::to_string);
-    let playing = v.get("playing").and_then(Value::as_bool).unwrap_or(false);
+    let now_obj = v.get("now").filter(|n| !n.is_null());
+    let (video_id, title, artists, thumbnail, duration) = if let Some(n) = now_obj {
+        (
+            n.get("videoId").and_then(Value::as_str).unwrap_or_default().to_string(),
+            n.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
+            n.get("artists").and_then(Value::as_str).unwrap_or_default().to_string(),
+            n.get("thumbnail").and_then(Value::as_str).map(str::to_string),
+            n.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+        )
+    } else {
+        (
+            v.get("videoId").and_then(Value::as_str).unwrap_or_default().to_string(),
+            v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
+            v.get("artists").and_then(Value::as_str).unwrap_or_default().to_string(),
+            v.get("thumbnail").and_then(Value::as_str).map(str::to_string),
+            v.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+        )
+    };
+
+    let paused = v.get("paused").and_then(Value::as_bool).unwrap_or(false);
+    let playing = v.get("playing").and_then(Value::as_bool).unwrap_or(!paused);
     let position = v.get("position").and_then(Value::as_f64).unwrap_or(0.0);
-    let duration = v.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
+    let volume = v.get("volume").and_then(Value::as_f64).unwrap_or(100.0) / 100.0;
 
     let track = if !video_id.is_empty() {
         Some(Track {
@@ -415,7 +431,7 @@ pub fn room_state_from_snapshot(v: &Value) -> RoomState {
         is_playing: playing,
         position_ms: (position * 1000.0) as i64,
         last_update_ms: crate::db::now_secs() * 1000,
-        volume: 1.0,
+        volume,
         queue: vec![],
     }
 }

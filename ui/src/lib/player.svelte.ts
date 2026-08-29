@@ -53,8 +53,17 @@ export const np = $state({
 	open: false,
 	sidebarOpen: true,
 	fullscreenOpen: false,
+	devicesOpen: false,
 	tab: 'queue' as 'queue' | 'lyrics'
 });
+
+export const toggleDevicesSidebar = () => {
+	np.devicesOpen = !np.devicesOpen;
+	if (np.devicesOpen) {
+		np.sidebarOpen = false;
+		np.open = false;
+	}
+};
 
 export const prefs = $state({ musicVideos: false, filterExplicit: false, animatedArtwork: true });
 

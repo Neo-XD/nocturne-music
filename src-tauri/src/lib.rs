@@ -622,6 +622,13 @@ fn spawn_event_pump(
                 PlayerEvent::Duration(d) => {
                     let _ = app.emit("duration", serde_json::json!({ "duration": d }));
                     state.on_duration(d).await;
+                    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+                        if rs.is_running() {
+                            let snapshot = state.playback_snapshot().await;
+                            let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+                            rs.broadcast_state(st);
+                        }
+                    }
                 }
                 PlayerEvent::Playing(playing) => {
                     let _ = app.emit("playback-state", if playing { "playing" } else { "paused" });

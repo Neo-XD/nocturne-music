@@ -15,7 +15,8 @@
 		ListRestartIcon,
 		SquareArrowLeft01Icon,
 		SquareArrowRight01Icon,
-		FolderAddIcon
+		FolderAddIcon,
+		ComputerIcon
 	} from '@hugeicons/core-free-icons';
 	import { toggleMode } from 'mode-watcher';
 	import { Button } from '$lib/components/ui/button';
@@ -29,6 +30,8 @@
 		library,
 		personal,
 		ui,
+		np,
+		toggleDevicesSidebar,
 		createLibraryPlaylist,
 		createPlaylistFolder,
 		toggleSidebar,
@@ -183,6 +186,21 @@
 				class="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
 			/>
 			<span class="hidden {wide('lg:inline')}">Settings</span>
+		</button>
+		<button
+			onclick={toggleDevicesSidebar}
+			title="Connected Devices"
+			class="group flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium {np.devicesOpen
+				? 'bg-primary/10 text-primary'
+				: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'} transition-colors {wide(
+				'lg:justify-start'
+			)}"
+		>
+			<HugeiconsIcon
+				icon={ComputerIcon}
+				class="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+			/>
+			<span class="hidden {wide('lg:inline')}">Devices</span>
 		</button>
 	</nav>
 

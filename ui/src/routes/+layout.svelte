@@ -245,8 +245,8 @@
 			{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
 			{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} {queueOpen} />{/if}
 			{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
-			{#if devicesOpen}
-				<DevicesSidebar onClose={() => (devicesOpen = false)} />
+			{#if devicesOpen || np.devicesOpen}
+				<DevicesSidebar onClose={() => { devicesOpen = false; np.devicesOpen = false; }} />
 			{/if}
 			{#if np.sidebarOpen && playback.now && !np.open}
 				<NowPlayingSidebar
@@ -264,7 +264,7 @@
 					onToggleLyrics={toggleLyrics}
 					lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
 					onToggleDevices={toggleDevices}
-					devicesOpen={devicesOpen}
+					devicesOpen={devicesOpen || np.devicesOpen}
 					onToggleNowPlayingSidebar={toggleNowPlayingSidebar}
 				/>
 			</div>
