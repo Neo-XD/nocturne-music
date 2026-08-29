@@ -616,6 +616,13 @@ fn spawn_event_pump(
                 PlayerEvent::Position(p) => {
                     if throttle.should_emit(p, std::time::Instant::now()) {
                         let _ = app.emit("position", serde_json::json!({ "position": p }));
+                        if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+                            if rs.is_running() {
+                                let snapshot = state.playback_snapshot().await;
+                                let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+                                rs.broadcast_state(st);
+                            }
+                        }
                     }
                     state.on_position(p).await;
                 }

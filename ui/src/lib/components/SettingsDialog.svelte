@@ -18,7 +18,11 @@
 		Mic01Icon,
 		RotateLeft01Icon,
 		FlashIcon,
-		CpuIcon
+		CpuIcon,
+		ComputerIcon,
+		SmartPhone01Icon,
+		CheckmarkCircle02Icon,
+		Wifi01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -527,6 +531,25 @@
 	const remoteSyncOn = $derived(settings.remote_sync_enabled === 'true');
 	let remoteSyncPort = $state('8080');
 	let remoteSyncPin = $state('1234');
+	let syncInfo = $state<api.RemoteSyncInfo | null>(null);
+	let showHostIp = $state(false);
+
+	function maskIp(ip: string) {
+		if (!ip) return '•••.•••.•••.•••';
+		const parts = ip.split('.');
+		if (parts.length === 4) {
+			return `${parts[0]}.${parts[1]}.•••.•••`;
+		}
+		return '••••••••••••';
+	}
+
+	async function fetchSyncStatus() {
+		try {
+			syncInfo = await api.getRemoteSyncStatus();
+		} catch (e) {
+			console.error('Failed to get remote sync status', e);
+		}
+	}
 
 	async function setRemoteSync(on: boolean) {
 		settings.remote_sync_enabled = on ? 'true' : 'false';
@@ -1446,41 +1469,67 @@
 {/snippet}
 {#snippet remoteSyncSwitch()}<Switch checked={remoteSyncOn} onCheckedChange={setRemoteSync} />{/snippet}
 {#snippet remoteSyncConfig()}
-	<div class="mt-2.5 space-y-2.5 rounded-xl border border-border/60 bg-muted/30 p-3">
+	<div class="mt-2.5 space-y-3 rounded-xl border border-border/60 bg-muted/30 p-3.5">
 		<div class="flex items-center justify-between gap-2">
 			<div>
-				<span class="text-xs font-semibold text-foreground">Mobile & Remote Pairing</span>
+				<span class="text-xs font-semibold text-foreground">Host Connection Info</span>
 				<p class="text-[11px] text-muted-foreground">
-					Connect Nocturne Mobile using this PC's Local IP or Tailscale IP.
+					Nocturne Mobile auto-discovers this PC over Wi-Fi. For manual connection, use the IP below.
 				</p>
+			</div>
+			<span class="flex items-center gap-1 text-[11px] font-medium text-emerald-500">
+				<HugeiconsIcon icon={Wifi01Icon} class="h-3.5 w-3.5" />
+				LAN Sync Ready
+			</span>
+		</div>
+
+		<div class="space-y-2 rounded-lg border bg-card/60 p-3 text-xs">
+			<div class="flex items-center justify-between">
+				<span class="text-muted-foreground">Device Name:</span>
+				<span class="font-medium text-foreground">{syncInfo?.device_name || 'Nocturne PC'}</span>
+			</div>
+
+			<div class="flex items-center justify-between">
+				<span class="text-muted-foreground">Local IP Address:</span>
+				<div class="flex items-center gap-2 font-mono text-foreground">
+					<span>{showHostIp ? (syncInfo?.local_ip || '127.0.0.1') : maskIp(syncInfo?.local_ip || '')}</span>
+					<button
+						type="button"
+						class="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+						onclick={() => (showHostIp = !showHostIp)}
+						title={showHostIp ? 'Hide IP' : 'Reveal IP'}
+					>
+						<HugeiconsIcon icon={showHostIp ? ViewOffSlashIcon : ViewIcon} class="h-3.5 w-3.5" />
+					</button>
+				</div>
+			</div>
+
+			<div class="flex items-center justify-between">
+				<span class="text-muted-foreground">WebSocket Port:</span>
+				<span class="font-mono text-foreground">{syncInfo?.port || 8080}</span>
+			</div>
+
+			<div class="flex items-center justify-between">
+				<span class="text-muted-foreground">UDP Discovery Port:</span>
+				<span class="font-mono text-foreground">8081</span>
 			</div>
 		</div>
 
-		<div class="grid gap-2.5 sm:grid-cols-2">
-			<div class="space-y-1">
-				<label for="remote-sync-port" class="text-[11px] font-medium text-muted-foreground">Port</label>
-				<input
-					id="remote-sync-port"
-					type="text"
-					bind:value={remoteSyncPort}
-					oninput={(e) => updateRemoteSyncPort(e.currentTarget.value)}
-					placeholder="8080"
-					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
-				/>
+		{#if syncInfo && syncInfo.connected_clients.length > 0}
+			<div class="space-y-1.5 pt-1">
+				<span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Connected Devices</span>
+				{#each syncInfo.connected_clients as client (client.id)}
+					<div class="flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2 text-xs">
+						<div class="flex items-center gap-2">
+							<HugeiconsIcon icon={SmartPhone01Icon} class="h-3.5 w-3.5 text-primary" />
+							<span class="font-medium text-foreground">{client.name}</span>
+							<span class="text-muted-foreground">({client.ip})</span>
+						</div>
+						<span class="text-[10px] font-semibold text-emerald-500">Connected</span>
+					</div>
+				{/each}
 			</div>
-			<div class="space-y-1">
-				<label for="remote-sync-pin" class="text-[11px] font-medium text-muted-foreground">Security PIN (4-6 digits)</label>
-				<input
-					id="remote-sync-pin"
-					type="text"
-					bind:value={remoteSyncPin}
-					oninput={(e) => updateRemoteSyncPin(e.currentTarget.value)}
-					placeholder="1234"
-					maxlength="6"
-					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
-				/>
-			</div>
-		</div>
+		{/if}
 	</div>
 {/snippet}
 {#snippet traySwitch()}<Switch checked={trayOn} onCheckedChange={setTray} />{/snippet}
