@@ -178,7 +178,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 22] = [
+const UI_SETTINGS: [&str; 25] = [
     "volume",
     "proxy",
     "quality",
@@ -201,6 +201,9 @@ const UI_SETTINGS: [&str; 22] = [
     "custom_keybindings",
     "filter_explicit",
     "animated_artwork",
+    "remote_sync_enabled",
+    "remote_sync_port",
+    "remote_sync_pin",
 ];
 
 /// Resolve the music video for `video_id` and hand back a proxy URL the player view
@@ -302,6 +305,20 @@ pub async fn set_setting(
             Ok(())
         };
         res.map_err(|e| format!("autostart: {e}"))?;
+    }
+    if key == "remote_sync_enabled" || key == "remote_sync_port" || key == "remote_sync_pin" {
+        use tauri::Manager;
+        if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+            let enabled = state.db.get_setting("remote_sync_enabled").as_deref() == Some("true");
+            let port = state.db.get_setting("remote_sync_port").and_then(|p| p.parse::<u16>().ok()).unwrap_or(8080);
+            let pin = state.db.get_setting("remote_sync_pin").unwrap_or_else(|| "1234".into());
+            let rs = rs.inner().clone();
+            if enabled {
+                let _ = rs.start(port, pin).await;
+            } else {
+                rs.stop().await;
+            }
+        }
     }
     Ok(())
 }

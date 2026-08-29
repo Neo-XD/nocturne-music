@@ -13,6 +13,7 @@ mod media;
 mod mini;
 mod orchestrator;
 mod potoken;
+pub mod remotesync;
 mod session;
 mod state;
 #[cfg(target_os = "windows")]
@@ -298,6 +299,29 @@ pub fn run() {
                 lastfm,
             ));
             app.manage(app_state.clone());
+
+            // Remote Device Playback Sync (Direct IP / Tailscale with PIN)
+            let remote_sync = Arc::new(remotesync::RemoteSyncController::new());
+            {
+                let rs = remote_sync.clone();
+                let st = app_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    rs.set_app_state(st).await;
+                });
+            }
+            app.manage(remote_sync.clone());
+
+            {
+                let db_sync = app_state.db.clone();
+                let rs_ctrl = remote_sync.clone();
+                tauri::async_runtime::spawn(async move {
+                    if db_sync.get_setting("remote_sync_enabled").as_deref() == Some("true") {
+                        let port = db_sync.get_setting("remote_sync_port").and_then(|p| p.parse::<u16>().ok()).unwrap_or(8080);
+                        let pin = db_sync.get_setting("remote_sync_pin").unwrap_or_else(|| "1234".into());
+                        let _ = rs_ctrl.start(port, pin).await;
+                    }
+                });
+            }
 
             // The player view's <video> pulls its bytes from Rust over loopback, so the webview
             // never sees a googlevideo URL (context/11). videoproxy.rs explains why a socket and

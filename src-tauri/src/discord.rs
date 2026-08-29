@@ -50,7 +50,7 @@ use innertube::SongItem;
 /// icon is the fallback artwork. Nothing else in the portal needs configuring: no bot user, no
 /// OAuth redirect, no client secret. (Metrolist needs all of that only because Android has no
 /// Discord client.)
-const APP_ID: &str = "1525891596804161727";
+const APP_ID: &str = "1543224160166092828";
 
 const SONG_URL: &str = "https://music.youtube.com/watch?v=";
 const REPO_URL: &str = "https://github.com/Neo-XD/nocturne-music";

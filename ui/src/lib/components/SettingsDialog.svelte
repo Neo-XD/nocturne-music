@@ -301,6 +301,8 @@
 			proxyInput = s.proxy ?? '';
 			lastfmKeyInput = s.lastfm_api_key ?? '';
 			lastfmSecretInput = s.lastfm_api_secret ?? '';
+			remoteSyncPort = s.remote_sync_port ?? '8080';
+			remoteSyncPin = s.remote_sync_pin ?? '1234';
 			initLyricsProviders(s.lyrics_providers ?? s.lyrics_priority);
 		} catch (e) {
 			toast.error(String(e));
@@ -522,6 +524,29 @@
 		}
 	}
 
+	const remoteSyncOn = $derived(settings.remote_sync_enabled === 'true');
+	let remoteSyncPort = $state('8080');
+	let remoteSyncPin = $state('1234');
+
+	async function setRemoteSync(on: boolean) {
+		settings.remote_sync_enabled = on ? 'true' : 'false';
+		await api.setSetting('remote_sync_enabled', settings.remote_sync_enabled);
+		if (on) toast.success(`Remote Sync Server listening on port ${remoteSyncPort || '8080'}`);
+		else toast('Remote Sync Server stopped');
+	}
+
+	async function updateRemoteSyncPort(val: string) {
+		remoteSyncPort = val;
+		settings.remote_sync_port = val;
+		await api.setSetting('remote_sync_port', val);
+	}
+
+	async function updateRemoteSyncPin(val: string) {
+		remoteSyncPin = val;
+		settings.remote_sync_pin = val;
+		await api.setSetting('remote_sync_pin', val);
+	}
+
 	async function toggleClient(name: string) {
 		const set = new Set(disabled);
 		if (set.has(name)) set.delete(name);
@@ -737,6 +762,17 @@
 									title: 'Start on login',
 									desc: 'Launch Nocturne automatically when you log in.',
 									control: autostartSwitch
+								})}
+							</div>
+						</section>
+						<section class={GROUP}>
+							<h3 class={LABEL}>Remote Device Sync (Tailscale / LAN)</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Mobile Sync Server',
+									desc: 'Allow Nocturne Mobile to connect directly over Tailscale or Local Wi-Fi to sync and control playback.',
+									control: remoteSyncSwitch,
+									below: remoteSyncConfig
 								})}
 							</div>
 						</section>
@@ -1402,6 +1438,45 @@
 					bind:value={lastfmSecretInput}
 					oninput={(e) => updateLastfmSecret(e.currentTarget.value)}
 					placeholder="Paste Shared Secret"
+					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
+				/>
+			</div>
+		</div>
+	</div>
+{/snippet}
+{#snippet remoteSyncSwitch()}<Switch checked={remoteSyncOn} onCheckedChange={setRemoteSync} />{/snippet}
+{#snippet remoteSyncConfig()}
+	<div class="mt-2.5 space-y-2.5 rounded-xl border border-border/60 bg-muted/30 p-3">
+		<div class="flex items-center justify-between gap-2">
+			<div>
+				<span class="text-xs font-semibold text-foreground">Mobile & Remote Pairing</span>
+				<p class="text-[11px] text-muted-foreground">
+					Connect Nocturne Mobile using this PC's Local IP or Tailscale IP.
+				</p>
+			</div>
+		</div>
+
+		<div class="grid gap-2.5 sm:grid-cols-2">
+			<div class="space-y-1">
+				<label for="remote-sync-port" class="text-[11px] font-medium text-muted-foreground">Port</label>
+				<input
+					id="remote-sync-port"
+					type="text"
+					bind:value={remoteSyncPort}
+					oninput={(e) => updateRemoteSyncPort(e.currentTarget.value)}
+					placeholder="8080"
+					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
+				/>
+			</div>
+			<div class="space-y-1">
+				<label for="remote-sync-pin" class="text-[11px] font-medium text-muted-foreground">Security PIN (4-6 digits)</label>
+				<input
+					id="remote-sync-pin"
+					type="text"
+					bind:value={remoteSyncPin}
+					oninput={(e) => updateRemoteSyncPin(e.currentTarget.value)}
+					placeholder="1234"
+					maxlength="6"
 					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
 				/>
 			</div>
