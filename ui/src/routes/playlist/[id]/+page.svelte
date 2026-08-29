@@ -715,14 +715,12 @@
 					<img
 						src={headerImage}
 						alt=""
-						class="pointer-events-none absolute -inset-6 h-[calc(100%+3rem)] w-[calc(100%+3rem)] max-w-none scale-105 object-cover object-center opacity-65 blur-2xl"
+						class="pointer-events-none absolute -inset-6 h-[calc(100%+3rem)] w-[calc(100%+3rem)] max-w-none scale-105 object-cover object-center opacity-75 blur-2xl transition-opacity duration-700"
+						style="mask-image: linear-gradient(to bottom, #000 0%, #000 20%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 20%, transparent 100%);"
 					/>
 				{/if}
-				<!-- Smooth, seamless gradient transition to app background -->
-				<div
-					class="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/20"
-				></div>
-				<div class="absolute inset-0 bg-gradient-to-r from-background/80 via-background/40 to-transparent"></div>
+				<!-- Soft subtle lateral gradient for title legibility -->
+				<div class="pointer-events-none absolute inset-0 bg-gradient-to-r from-background/70 via-background/20 to-transparent"></div>
 				{#if isOnRepeat}
 					<div
 						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"
