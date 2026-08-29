@@ -712,15 +712,19 @@
 		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
 			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden p-6 pt-8">
 				{#if headerImage}
-					<img
-						src={headerImage}
-						alt=""
-						class="pointer-events-none absolute -inset-6 h-[calc(100%+3rem)] w-[calc(100%+3rem)] max-w-none scale-105 object-cover object-center opacity-75 blur-2xl transition-opacity duration-700"
-						style="mask-image: linear-gradient(to bottom, #000 0%, #000 20%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 20%, transparent 100%);"
-					/>
+					<div
+						class="pointer-events-none absolute inset-0 overflow-hidden"
+						style="mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 20%, rgba(0,0,0,0.45) 45%, rgba(0,0,0,0.12) 65%, transparent 80%); -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 20%, rgba(0,0,0,0.45) 45%, rgba(0,0,0,0.12) 65%, transparent 80%);"
+					>
+						<img
+							src={headerImage}
+							alt=""
+							class="h-full w-full scale-125 object-cover object-center opacity-70 blur-3xl transition-opacity duration-700"
+						/>
+					</div>
 				{/if}
 				<!-- Soft subtle lateral gradient for title legibility -->
-				<div class="pointer-events-none absolute inset-0 bg-gradient-to-r from-background/70 via-background/20 to-transparent"></div>
+				<div class="pointer-events-none absolute inset-0 bg-gradient-to-r from-background/75 via-background/25 to-transparent"></div>
 				{#if isOnRepeat}
 					<div
 						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"
