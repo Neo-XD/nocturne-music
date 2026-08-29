@@ -1242,6 +1242,14 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v066_note = ReleaseNote {
+        version: "0.6.6".to_string(),
+        date: "2026-08-29".to_string(),
+        body: r#"### Nocturne Music v0.6.6
+
+- **Save to Library from Context Menus (YouTube Account Sync)**: Added "Save to library" and "Remove from library" options to the ⋯ context menu on every song, album, artist, and playlist card or row. Changes automatically sync to your YouTube Music account when signed in, or save locally when signed out."#.to_string(),
+    };
+
     let v065_note = ReleaseNote {
         version: "0.6.5".to_string(),
         date: "2026-08-28".to_string(),
@@ -1274,13 +1282,6 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         date: "2026-08-27".to_string(),
         body: r#"### Nocturne Music v0.6.3
 
-- **Playlist Folders**: Organize playlists in your library into custom folders with 2×2 artwork collage previews and folder management.
-- **Sticky Top Search Bar**: Omnipresent search bar in the top header with real-time typeahead suggestions, keyboard navigation, and Ctrl+K shortcut.
-- **Dedicated Lyrics Tab & Custom Priority**: Full priority ordering and provider toggle control in a dedicated Settings tab.
-- **Customizable Lyrics Font**: New Lyrics Font selector in Settings (Appearance ▸ Typography) with custom loaded font support.
-- **Better Lyrics Integration**: High-precision syllable-by-syllable and word-level synchronized lyrics powered by Better Lyrics.
-- **Fullscreen Player Upgrades**: Upstream theater-mode seek scrubber, dedicated volume slider, UI font timestamps, fixed-position top bar, lyrics hide/show toggle with hotkey (L), and instrumental auto-hide.
-- **Discord Rich Presence**: Restored clean upstream IPC architecture with updated Nocturne branding.
 - **Instant Window Startup**: Resolved launch permission delay so the window displays immediately on startup.
 - **Upstream v0.6.0-v0.6.2 Merges**: BotGuard PoToken background minting worker, YouTube uploads tab in Library, dislike skip purging, and persistent queue shuffle."#.to_string(),
     };
@@ -1333,7 +1334,9 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         prerelease: bool,
     }
 
-    let mut notes = vec![v065_note, v064_note, v063_note, v062_note, v061_note, v06_note];
+    let mut notes = vec![
+        v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
+    ];
 
     let known_versions: std::collections::HashSet<String> =
         notes.iter().map(|n| n.version.clone()).collect();

@@ -21,7 +21,9 @@
 		Vynil02Icon,
 		DashboardSquare02Icon,
 		Share08Icon,
-		PreferenceVerticalIcon
+		PreferenceVerticalIcon,
+		BookmarkAdd02Icon,
+		BookmarkMinus02Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
@@ -29,11 +31,13 @@
 	import {
 		addPick,
 		enqueue,
+		isItemSavedInLibrary,
 		openShare,
 		personal,
 		ratingOf,
 		removePick,
 		startRadio,
+		toggleItemLibrary,
 		toggleRating
 	} from '$lib/player.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
@@ -92,6 +96,7 @@
 	}
 
 	const rated = $derived(ratingOf(song));
+	const inLibrary = $derived(isItemSavedInLibrary(song));
 	// A local file has no YouTube identity: liking it or putting it in a YTM playlist is not a
 	// thing, so those items don't show. Queue, shortcuts and go-to-album work normally.
 	const isLocal = $derived(api.isLocalId(song.video_id));
@@ -214,6 +219,18 @@
 			{isPick ? 'Remove from shortcuts' : 'Add to shortcuts'}
 		</button>
 		{#if !isLocal}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, () => toggleItemLibrary(song))}
+			>
+				<HugeiconsIcon
+					icon={BookmarkAdd02Icon}
+					altIcon={BookmarkMinus02Icon}
+					showAlt={inLibrary}
+					class="h-4 w-4"
+				/>
+				{inLibrary ? 'Remove from library' : 'Save to library'}
+			</button>
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) =>

@@ -50,6 +50,7 @@
 		enqueue,
 		isSaved,
 		isSynced,
+		isItemSavedInLibrary,
 		playback,
 		openAddToPlaylist,
 		openShare,
@@ -57,6 +58,7 @@
 		startRadio,
 		toast,
 		toggleSaved,
+		toggleItemLibrary,
 		bumpLibraryTrackCount,
 		noteUnsavedFrom,
 		patchLibraryPlaylist,
@@ -79,7 +81,6 @@
 	// A song cover is only the fallback: a playlist's own artwork is always the hero backdrop when
 	// it has one. It also keeps auto-generated playlists from ending up with an empty header.
 	let fallbackImage = $state<string | null>(null);
-
 	// ⋯ options menu, positioned `fixed` at the button so it isn't clipped (matches TrackRow).
 	let menuOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
@@ -129,15 +130,8 @@
 	// Only offer rename/delete on playlists the signed-in user actually owns (backend `owned` flag).
 	// Liked Music reports owned but can't be renamed/deleted, so exclude it explicitly.
 	const editable = $derived((pl?.owned ?? false) && !isLiked);
-	// Saving someone else's playlist keeps it on this machine, signed in or not: YouTube has no
-	// "save" for a playlist that doesn't cost an account, and the local one works offline. Your own
-	// playlists, Liked Music and On Repeat are in the library already by definition.
-	// Once the sync button has put it on the account, the account owns the save: removing only the
-	// local copy would leave it in the library grid, so the entry hides until the user signs out.
-	const savable = $derived(
-		!isOnRepeat && !isLiked && !editable && !(auth.account?.signedIn && isSynced(id))
-	);
-	const savedHere = $derived(isSaved(id));
+	const savable = $derived(!isOnRepeat && !isLiked && !editable);
+	const inLibrary = $derived(isItemSavedInLibrary({ kind: 'playlist', id }));
 	// YouTube's header count includes rows that never make it into the list (unavailable or
 	// region-blocked tracks), so it reads high. Once every page is in, we know the real number, so
 	// swap it in. Until then the header's own count is the only estimate of the total there is.
@@ -981,21 +975,16 @@
 		{#if savable}
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
-				onclick={() =>
-					run(() =>
-						toast.success(
-							toggleSaved(asItem()) ? 'Saved to library' : 'Removed from library'
-						)
-					)}
+				onclick={() => run(() => toggleItemLibrary(asItem()))}
 			>
 				<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
 				<HugeiconsIcon
 					icon={BookmarkAdd02Icon}
 					altIcon={BookmarkMinus02Icon}
-					showAlt={savedHere}
+					showAlt={inLibrary}
 					class="h-4 w-4"
 				/>
-				{savedHere ? 'Remove from library' : 'Save to library'}
+				{inLibrary ? 'Remove from library' : 'Save to library'}
 			</button>
 		{/if}
 		{#if editable}

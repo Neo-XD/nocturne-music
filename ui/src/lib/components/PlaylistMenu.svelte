@@ -11,6 +11,7 @@
 		Radio02Icon,
 		ArrowUpNarrowWideIcon,
 		ArrowDownWideNarrowIcon,
+		BookmarkAdd02Icon,
 		BookmarkMinus02Icon,
 		DashboardSquare02Icon,
 		Share08Icon,
@@ -25,6 +26,7 @@
 		auth,
 		isSaved,
 		isSynced,
+		isItemSavedInLibrary,
 		openShare,
 		personal,
 		removePick,
@@ -32,6 +34,7 @@
 		toast,
 		togglePin,
 		toggleSaved,
+		toggleItemLibrary,
 		findPlaylistFolder
 	} from '$lib/player.svelte';
 	import AddToFolderDialog from './AddToFolderDialog.svelte';
@@ -57,9 +60,7 @@
 	const isPick = $derived(personal.picks.some((p) => p.id === item.id));
 	// A synced row is on the account too, and dropping only the local copy would leave the card on
 	// screen with a "removed" toast under it. Signed out, the local copy is the whole library again.
-	const savedHere = $derived(
-		isSaved(item.id) && !(auth.account?.signedIn && isSynced(item.id))
-	);
+	const inLibrary = $derived(isItemSavedInLibrary(item));
 	// Radio and Share both need a YouTube item behind them: local folders and the locally-built
 	// On Repeat have none.
 	const onYouTube = $derived(!api.isLocalId(item.id) && item.id !== api.ON_REPEAT_ID);
@@ -201,18 +202,18 @@
 				{folderForPlaylist ? `Folder (${folderForPlaylist.name})` : 'Add to folder'}
 			</button>
 		{/if}
-		<!-- Only for cards saved on this machine: YouTube's own library rows are unsaved from their
-		     page, where the button knows which write action to send. -->
-		{#if savedHere}
+		{#if onYouTube || api.isLocalId(item.id)}
 			<button
 				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
-				onclick={(e) =>
-					run(e, () => {
-						toggleSaved(item);
-						toast.success('Removed from library');
-					})}
+				onclick={(e) => run(e, () => toggleItemLibrary(item))}
 			>
-				<HugeiconsIcon icon={BookmarkMinus02Icon} class="h-4 w-4" /> Remove from library
+				<HugeiconsIcon
+					icon={BookmarkAdd02Icon}
+					altIcon={BookmarkMinus02Icon}
+					showAlt={inLibrary}
+					class="h-4 w-4"
+				/>
+				{inLibrary ? 'Remove from library' : 'Save to library'}
 			</button>
 		{/if}
 	</div>

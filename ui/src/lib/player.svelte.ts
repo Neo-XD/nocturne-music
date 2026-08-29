@@ -441,6 +441,130 @@ export function toggleSaved(item: BrowseItem): boolean {
 
 export const isSaved = (id: string): boolean => pl.isSaved(personal, id);
 
+/**
+ * Check if a song, album, artist, or playlist is in the user's library (either synced with YouTube or saved locally).
+ */
+export function isItemSavedInLibrary(item: BrowseItem | SongItem | { id?: string; video_id?: string; kind?: string }): boolean {
+	if ('video_id' in item && item.video_id) {
+		return isLiked({ video_id: item.video_id } as SongItem) || isSaved(item.video_id);
+	}
+	const b = item as BrowseItem;
+	if (b.kind === 'song') {
+		return isLiked({ video_id: b.id } as SongItem) || isSaved(b.id);
+	}
+	if (b.kind === 'album') {
+		return isSaved(b.id) || library.albums.some((a) => a.id === b.id);
+	}
+	if (b.kind === 'artist') {
+		return isSaved(b.id) || library.artists.some((a) => a.id === b.id);
+	}
+	if (b.kind === 'playlist') {
+		return isSaved(b.id) || library.items.some((p) => p.id === b.id);
+	}
+	return isSaved(b.id ?? '');
+}
+
+/**
+ * Save/remove a song, album, artist, or playlist to/from library.
+ * Writes directly to the user's YouTube account if signed in, or to local library if signed out.
+ */
+export async function toggleItemLibrary(item: BrowseItem | SongItem): Promise<boolean> {
+	const isSong = 'video_id' in item || (item as BrowseItem).kind === 'song';
+	const id = 'video_id' in item ? item.video_id : item.id;
+	const title = item.title ?? 'Item';
+
+	// 1. Signed out: save locally
+	if (!auth.account?.signedIn) {
+		const browseItem: BrowseItem = 'video_id' in item
+			? { kind: 'song', id: item.video_id, title: item.title, subtitle: item.artists, thumbnail: item.thumbnail }
+			: item;
+		const saved = toggleSaved(browseItem);
+		toast.success(saved ? 'Saved to library' : 'Removed from library');
+		return saved;
+	}
+
+	// 2. Signed in: write to YouTube account
+	const currentlyIn = isItemSavedInLibrary(item);
+	const next = !currentlyIn;
+
+	if (isSong) {
+		const songItem: SongItem = 'video_id' in item
+			? item
+			: { video_id: item.id, title: item.title, artists: item.subtitle ?? '', thumbnail: item.thumbnail };
+		if (isSaved(songItem.video_id)) {
+			pl.toggleSaved(personal, { kind: 'song', id: songItem.video_id, title: songItem.title });
+			savePersonal();
+		}
+		await toggleRating(songItem, 'like');
+		return next;
+	}
+
+	const b = item as BrowseItem;
+	if (isSaved(b.id)) {
+		pl.toggleSaved(personal, b);
+		savePersonal();
+	}
+
+	if (b.kind === 'album') {
+		const prev = [...library.albums];
+		if (next) {
+			if (!library.albums.some((a) => a.id === b.id)) library.albums = [b, ...library.albums];
+		} else {
+			library.albums = library.albums.filter((a) => a.id !== b.id);
+		}
+		try {
+			let targetId = b.id;
+			if (next && b.id.startsWith('MPRE')) {
+				try {
+					const albumData = await api.getAlbum(b.id);
+					if (albumData.playlistId) targetId = albumData.playlistId;
+				} catch {}
+			}
+			await api.setAlbumSaved(targetId, next);
+			toast.success(next ? 'Saved to library' : 'Removed from library');
+			return next;
+		} catch (e) {
+			library.albums = prev;
+			toast.error(String(e));
+			return currentlyIn;
+		}
+	} else if (b.kind === 'artist') {
+		const prev = [...library.artists];
+		if (next) {
+			if (!library.artists.some((a) => a.id === b.id)) library.artists = [b, ...library.artists];
+		} else {
+			library.artists = library.artists.filter((a) => a.id !== b.id);
+		}
+		try {
+			await api.subscribe(b.id, next);
+			toast.success(next ? 'Saved to library' : 'Removed from library');
+			return next;
+		} catch (e) {
+			library.artists = prev;
+			toast.error(String(e));
+			return currentlyIn;
+		}
+	} else if (b.kind === 'playlist') {
+		const prev = [...library.items];
+		if (next) {
+			if (!library.items.some((p) => p.id === b.id)) library.items = [b, ...library.items];
+		} else {
+			library.items = library.items.filter((p) => p.id !== b.id);
+		}
+		try {
+			await api.setAlbumSaved(b.id, next);
+			toast.success(next ? 'Saved to library' : 'Removed from library');
+			return next;
+		} catch (e) {
+			library.items = prev;
+			toast.error(String(e));
+			return currentlyIn;
+		}
+	}
+
+	return next;
+}
+
 export function createPlaylistFolder(name: string, parentId: string | null = null): pl.PlaylistFolder {
 	const folder = pl.createFolder(personal, name, parentId);
 	savePersonal();
