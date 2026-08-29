@@ -351,7 +351,7 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
         "play" | "toggle" => {
             state.resume_or_toggle().await;
         }
-        "pause" => {
+        "pause" | "transfer_to_phone" => {
             let _ = state.player.pause();
         }
         "seek" => {
@@ -363,7 +363,7 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
         "previous_track" | "prev" | "previous" => {
             state.prev_in_queue().await;
         }
-        "change_track" => {
+        "change_track" | "transfer_to_desktop" => {
             if let Some(track) = action.track {
                 let song = innertube::SongItem {
                     video_id: track.id,
@@ -374,6 +374,9 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
                     ..Default::default()
                 };
                 state.play_song(song).await;
+                if action.position_ms > 0 {
+                    let _ = state.user_seek(action.position_ms as f64 / 1000.0).await;
+                }
             }
         }
         "set_volume" => {
