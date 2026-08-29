@@ -327,6 +327,18 @@ pub async fn set_setting(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn get_remote_sync_status(
+    app: tauri::AppHandle,
+) -> Result<crate::remotesync::RemoteSyncInfo, String> {
+    use tauri::Manager;
+    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+        Ok(rs.get_info().await)
+    } else {
+        Err("Remote sync controller unavailable".into())
+    }
+}
+
 /// The streamable client keys the orchestrator tries, for the "disabled clients" setting. Names
 /// come from the innertube crate so the UI stays free of YouTube-shaped identity strings.
 #[tauri::command]

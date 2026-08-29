@@ -32,6 +32,7 @@
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
 	import NowPlayingSidebar from '$lib/components/NowPlayingSidebar.svelte';
+	import DevicesSidebar from '$lib/components/DevicesSidebar.svelte';
 	import FullscreenPlayer from '$lib/components/FullscreenPlayer.svelte';
 	import AnimatedArtwork from '$lib/components/AnimatedArtwork.svelte';
 	import VideoSurface from '$lib/components/VideoSurface.svelte';
@@ -53,6 +54,7 @@
 	// Only 1 sidebar can be visible at a time:
 	let queueOpen = $state(false);
 	let lyricsOpen = $state(false);
+	let devicesOpen = $state(false);
 
 	function toggleQueue() {
 		if (tabbed) {
@@ -63,6 +65,7 @@
 			} else {
 				queueOpen = true;
 				lyricsOpen = false;
+				devicesOpen = false;
 				np.sidebarOpen = false;
 			}
 		}
@@ -77,8 +80,21 @@
 			} else {
 				lyricsOpen = true;
 				queueOpen = false;
+				devicesOpen = false;
 				np.sidebarOpen = false;
 			}
+		}
+	}
+
+	function toggleDevices() {
+		if (devicesOpen) {
+			devicesOpen = false;
+		} else {
+			devicesOpen = true;
+			queueOpen = false;
+			lyricsOpen = false;
+			np.sidebarOpen = false;
+			np.open = false;
 		}
 	}
 
@@ -89,18 +105,20 @@
 			np.sidebarOpen = true;
 			queueOpen = false;
 			lyricsOpen = false;
+			devicesOpen = false;
 			np.open = false;
 		}
 	}
 
 	const tabbed = $derived(np.open && appearance.tabbedPlayer);
 	$effect(() => {
-		if (tabbed) queueOpen = lyricsOpen = false;
+		if (tabbed) queueOpen = lyricsOpen = devicesOpen = false;
 	});
 	$effect(() => {
 		if (np.sidebarOpen) {
 			queueOpen = false;
 			lyricsOpen = false;
+			devicesOpen = false;
 		}
 	});
 
@@ -227,6 +245,9 @@
 			{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
 			{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} {queueOpen} />{/if}
 			{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
+			{#if devicesOpen}
+				<DevicesSidebar onClose={() => (devicesOpen = false)} />
+			{/if}
 			{#if np.sidebarOpen && playback.now && !np.open}
 				<NowPlayingSidebar
 					onClose={() => (np.sidebarOpen = false)}
@@ -242,6 +263,8 @@
 					queueOpen={tabbed ? np.tab === 'queue' : queueOpen}
 					onToggleLyrics={toggleLyrics}
 					lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
+					onToggleDevices={toggleDevices}
+					devicesOpen={devicesOpen}
 					onToggleNowPlayingSidebar={toggleNowPlayingSidebar}
 				/>
 			</div>

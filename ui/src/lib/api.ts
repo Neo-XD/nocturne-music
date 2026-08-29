@@ -522,6 +522,23 @@ export const subscribe = (channelId: string, subscribed: boolean) =>
 export const setAlbumSaved = (playlistId: string, saved: boolean) =>
 	invoke<void>('set_album_saved', { playlistId, saved });
 
+export interface ConnectedClient {
+	id: string;
+	name: string;
+	ip: string;
+	connected_at: number;
+}
+
+export interface RemoteSyncInfo {
+	is_running: boolean;
+	port: number;
+	local_ip: string;
+	device_name: string;
+	connected_clients: ConnectedClient[];
+}
+
+export const getRemoteSyncStatus = () => invoke<RemoteSyncInfo>('get_remote_sync_status');
+
 // --- events (context/11). Each returns an unlisten fn; call it on component teardown. --------
 export const onNowPlaying = (cb: (n: NowPlaying) => void): Promise<UnlistenFn> =>
 	listen<NowPlaying>('now-playing', (e) => cb(e.payload));

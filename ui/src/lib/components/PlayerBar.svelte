@@ -18,6 +18,7 @@
 		MinimizeScreenIcon,
 		MusicNote01Icon,
 		InformationCircleIcon,
+		ComputerIcon,
 		ArrowUp01Icon,
 		ArrowDown01Icon
 	} from '@hugeicons/core-free-icons';
@@ -48,12 +49,16 @@
 		queueOpen,
 		onToggleLyrics,
 		lyricsOpen,
+		onToggleDevices,
+		devicesOpen = false,
 		onToggleNowPlayingSidebar
 	}: {
 		onToggleQueue: () => void;
 		queueOpen: boolean;
 		onToggleLyrics: () => void;
 		lyricsOpen: boolean;
+		onToggleDevices?: () => void;
+		devicesOpen?: boolean;
 		onToggleNowPlayingSidebar?: () => void;
 	} = $props();
 
@@ -404,6 +409,17 @@
 			>
 				<HugeiconsIcon icon={Queue01Icon} class="h-5 w-5" />
 			</Button>
+			{#if onToggleDevices}
+				<Button
+					variant={devicesOpen ? 'secondary' : 'ghost'}
+					size="icon-sm"
+					onclick={onToggleDevices}
+					aria-label="Connect to a device"
+					title="Connect to a device"
+				>
+					<HugeiconsIcon icon={ComputerIcon} class="h-5 w-5" />
+				</Button>
+			{/if}
 			<!-- The keyboard (and discoverable) way in and out of the now-playing view; clicking the
 			     bar's empty space does the same thing. -->
 			<Button
