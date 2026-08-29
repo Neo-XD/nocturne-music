@@ -253,10 +253,7 @@ async fn handle_connection(
     let client_id = format!("{peer_addr}");
     let client_ip = peer_addr.ip().to_string();
 
-    let now_secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
     let mut client_info = ConnectedClient {
         id: client_id.clone(),
@@ -276,17 +273,14 @@ async fn handle_connection(
         session_token: Some("token_ok".into()),
         message: None,
     };
-    let _ = ws_sender
-        .send(Message::Text(serde_json::to_string(&auth_ok).unwrap().into()))
-        .await;
+    let _ = ws_sender.send(Message::Text(serde_json::to_string(&auth_ok).unwrap().into())).await;
 
     if let Some(app_state) = state_ref.read().await.as_ref() {
         let snapshot = app_state.playback_snapshot().await;
         let state = room_state_from_snapshot(&snapshot);
         let state_msg = SyncWireMessage::SyncState { state };
-        let _ = ws_sender
-            .send(Message::Text(serde_json::to_string(&state_msg).unwrap().into()))
-            .await;
+        let _ =
+            ws_sender.send(Message::Text(serde_json::to_string(&state_msg).unwrap().into())).await;
     }
 
     // Active session loop
