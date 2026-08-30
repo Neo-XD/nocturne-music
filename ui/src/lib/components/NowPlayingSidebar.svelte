@@ -458,7 +458,7 @@
 		</div>
 
 		<!-- Spotify-style Synced Lyrics Card -->
-		<div class="overflow-hidden rounded-xl border bg-gradient-to-b from-primary/10 via-muted/30 to-muted/50 p-4 transition-all">
+		<div class="overflow-hidden rounded-xl border bg-muted/40 p-4 transition-all">
 			<div class="flex items-center justify-between pb-3">
 				<div class="flex items-center gap-1.5">
 					<HugeiconsIcon icon={Mic01Icon} class="h-4 w-4 text-primary" />
