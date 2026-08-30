@@ -147,7 +147,7 @@
      at this z — it must outrank the panels below (LyricsPanel/QueuePanel, z-30). -->
 <header
 	data-tauri-drag-region
-	class="relative z-50 flex h-10.5 shrink-0 select-none items-center justify-between border-b border-border/60 bg-background px-1"
+	class="app-titlebar relative z-50 flex h-10.5 shrink-0 select-none items-center justify-between border-b border-border/60 bg-background px-1"
 >
 	<div class="flex h-full items-center shrink-0">
 		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->

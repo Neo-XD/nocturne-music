@@ -575,9 +575,15 @@
 .theme-glassy .bg-popover,
 .theme-glassy aside,
 .theme-glassy footer,
+.theme-glassy .app-titlebar,
 .theme-glassy .info-sidebar {
 	backdrop-filter: blur(24px) saturate(190%);
 	-webkit-backdrop-filter: blur(24px) saturate(190%);
+}
+
+/* backdrop-filter over the titlebar's opaque bg-background is a no-op, and --sidebar keeps the corner where the two meet from reading as a seam. */
+.theme-glassy .app-titlebar {
+	background-color: var(--sidebar);
 }
 
 .bg-popover,
