@@ -40,7 +40,7 @@
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { auth, initApp, np, playback, prefs, ui } from '$lib/player.svelte';
-	import { win, initWin } from '$lib/win.svelte';
+	import { win, initWin, setWindowFullscreen, onFullscreenExit } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
 	import { initShortcuts } from '$lib/shortcuts.svelte';
 	import {
@@ -153,12 +153,18 @@
 	// Apply the saved accent color before the first paint (ssr=false → nothing renders until now).
 	if (browser) initTheme();
 
+	// Mirrors the condition that renders FullscreenPlayer, so a track ending cannot leave the window fullscreen with no overlay.
+	$effect(() => {
+		void setWindowFullscreen(np.fullscreenOpen && !!playback.now);
+	});
+
 	// Wire the Tauri event bridge once for the whole app; teardown on destroy. Check for an update
 	// on every app open (silent unless one exists).
 	onMount(() => {
 		if (isMini) return initApp(true);
 		// First: it reveals the window (see initWin).
 		const teardownWin = initWin();
+		onFullscreenExit(() => (np.fullscreenOpen = false));
 		checkForUpdatesQuiet();
 		const teardownApp = initApp();
 		const teardownZoom = initZoom();

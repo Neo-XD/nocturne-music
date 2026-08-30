@@ -1,10 +1,43 @@
-// Shared window-maximized state: the resize borders hide when maximized, and the root container
-// drops its rounded corners. One listener, initialized once by the root layout.
+// Shared window state: the resize borders hide when maximized, the root container drops its
+// rounded corners, and the fullscreen player drives real OS fullscreen. One listener,
+// initialized once by the root layout.
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-export const win = $state({ maximized: false });
+export const win = $state({ maximized: false, fullscreen: false });
 
 let started = false;
+// Set while our own setFullscreen call is in flight, so the resize it causes is not mistaken for the user leaving fullscreen.
+let applying = false;
+let wasMaximized = false;
+let exitHandler: (() => void) | null = null;
+
+// The overlay is closed from here rather than from a component, because the OS can leave fullscreen without anything in the UI asking.
+export function onFullscreenExit(cb: () => void): void {
+	exitHandler = cb;
+}
+
+export async function setWindowFullscreen(on: boolean): Promise<void> {
+	let w: ReturnType<typeof getCurrentWindow>;
+	try {
+		w = getCurrentWindow();
+	} catch {
+		return;
+	}
+	applying = true;
+	try {
+		if (on) wasMaximized = await w.isMaximized().catch(() => false);
+		await w.setFullscreen(on);
+		win.fullscreen = on;
+		// tao restores the pre-fullscreen geometry but not always the maximized flag, so put it back explicitly.
+		if (!on && wasMaximized && !(await w.isMaximized().catch(() => true))) {
+			await w.maximize().catch(() => {});
+		}
+	} catch {
+		win.fullscreen = await w.isFullscreen().catch(() => false);
+	} finally {
+		applying = false;
+	}
+}
 
 export function initWin(): () => void {
 	if (started) return () => {};
@@ -12,11 +45,19 @@ export function initWin(): () => void {
 	try {
 		const w = getCurrentWindow();
 		w.show().catch(() => {});
-		const sync = () =>
-			w
-				.isMaximized()
+		const sync = () => {
+			w.isMaximized()
 				.then((m) => (win.maximized = m))
 				.catch(() => {});
+			w.isFullscreen()
+				.then((f) => {
+					if (applying) return;
+					const left = win.fullscreen && !f;
+					win.fullscreen = f;
+					if (left) exitHandler?.();
+				})
+				.catch(() => {});
+		};
 		sync();
 		const un = w.onResized(sync);
 		return () => { un.then((u) => u()).catch(() => {}); };
