@@ -23,7 +23,8 @@ export async function setWindowFullscreen(on: boolean): Promise<void> {
 	}
 	applying = true;
 	try {
-		if (on) {
+		if (on && !win.fullscreen) {
+			// Only on the transition into fullscreen: re-running while already fullscreen reads false and loses the state to restore.
 			wasMaximized = await w.isMaximized().catch(() => false);
 			// Going maximized -> fullscreen leaves WRY_WEBVIEW at the old working-area height, so the taskbar shows through the transparent window; restoring first gives the webview a resize it follows.
 			if (wasMaximized) await w.unmaximize().catch(() => {});

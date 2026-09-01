@@ -531,6 +531,7 @@ export interface ConnectedClient {
 
 export interface RemoteSyncInfo {
 	is_running: boolean;
+	pairing_pin: string;
 	port: number;
 	local_ip: string;
 	device_name: string;

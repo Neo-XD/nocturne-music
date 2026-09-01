@@ -309,28 +309,34 @@ where
 /// True while this address is locked out. Entries older than the lockout window are forgotten, so a lockout expires on its own.
 async fn is_locked_out(fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>, ip: IpAddr) -> bool {
     let mut map = fails.write().await;
-    match map.get(&ip) {
-        Some((_, at)) if at.elapsed() >= AUTH_LOCKOUT => {
-            map.remove(&ip);
-            false
-        }
-        Some((n, _)) => *n >= MAX_AUTH_FAILURES,
-        None => false,
-    }
+    map.retain(|_, (_, at)| at.elapsed() < AUTH_LOCKOUT);
+    map.get(&ip).is_some_and(|(n, _)| *n >= MAX_AUTH_FAILURES)
 }
 
-async fn record_auth_result(
-    fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>,
-    ip: IpAddr,
-    ok: bool,
-) {
+/// Counts an attempt up front. A parallel attacker would otherwise open many sockets that all read a zero count before any of them reported a failure.
+async fn reserve_attempt(fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>, ip: IpAddr) {
     let mut map = fails.write().await;
-    if ok {
-        map.remove(&ip);
-    } else {
-        let e = map.entry(ip).or_insert((0, Instant::now()));
-        e.0 += 1;
-        e.1 = Instant::now();
+    map.retain(|_, (_, at)| at.elapsed() < AUTH_LOCKOUT);
+    let e = map.entry(ip).or_insert((0, Instant::now()));
+    e.0 += 1;
+    e.1 = Instant::now();
+}
+
+/// Clears the reservation. Only a correct PIN forgives an attempt; a timeout or a dropped socket keeps it, since neither proves the peer is friendly.
+async fn clear_attempts(fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>, ip: IpAddr) {
+    fails.write().await.remove(&ip);
+}
+
+/// The persisted pairing PIN, generating and storing a six-digit one the first time.
+/// Generated rather than defaulted, because a constant default ships every install the same PIN.
+pub fn ensure_pairing_pin(db: &crate::db::Db) -> String {
+    match db.get_setting("remote_sync_pin").filter(|p| p.len() >= 4) {
+        Some(pin) => pin,
+        None => {
+            let pin = format!("{:06}", rand::random::<u32>() % 1_000_000);
+            db.set_setting("remote_sync_pin", &pin);
+            pin
+        }
     }
 }
 
@@ -369,6 +375,7 @@ async fn handle_connection(
         tracing::warn!("remote sync: {client_ip} is locked out after repeated bad PINs");
         return;
     }
+    reserve_attempt(&auth_failures, peer_addr.ip()).await;
 
     let nonce = format!("{:032x}", rand::random::<u128>());
     let challenge = SyncWireMessage::AuthChallenge {
@@ -392,11 +399,10 @@ async fn handle_connection(
 
     let client_name = match authed {
         Ok(Some(name)) => {
-            record_auth_result(&auth_failures, peer_addr.ip(), true).await;
+            clear_attempts(&auth_failures, peer_addr.ip()).await;
             name
         }
         _ => {
-            record_auth_result(&auth_failures, peer_addr.ip(), false).await;
             tracing::warn!("remote sync: rejected unauthenticated client {client_ip}");
             return;
         }

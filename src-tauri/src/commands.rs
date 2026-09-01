@@ -318,10 +318,7 @@ pub async fn set_setting(
                 .and_then(|p| p.parse::<u16>().ok())
                 .unwrap_or(8080);
             let rs = rs.inner().clone();
-            rs.set_pairing_pin(
-                state.db.get_setting("remote_sync_pin").unwrap_or_else(|| "1234".into()),
-            )
-            .await;
+            rs.set_pairing_pin(crate::remotesync::ensure_pairing_pin(&state.db)).await;
             // A PIN edit takes effect on the next handshake; restarting here would drop a paired phone to change a value it already sent.
             if key != "remote_sync_pin" {
                 if enabled {

@@ -127,8 +127,8 @@ cargo tauri build --bundles deb   # → target/release/bundle/deb/nocturne_*.deb
    `dylibbundler`, which walks the whole thing:
    ```bash
    brew install dylibbundler
-   APP=target/release/bundle/macos/Nocturne Music.app
-   dylibbundler -cd -of -b -x "$APP/Contents/MacOS/nocturne-app" \
+   APP="target/release/bundle/macos/Nocturne Music.app"
+   dylibbundler -cd -of -b -x "$APP/Contents/MacOS/$(plutil -extract CFBundleExecutable raw "$APP/Contents/Info.plist")" \
      -d "$APP/Contents/Frameworks" -p "@executable_path/../Frameworks" -s "$(brew --prefix)/lib"
    codesign --force --deep --sign - "$APP"     # NOT optional, see below
    ```

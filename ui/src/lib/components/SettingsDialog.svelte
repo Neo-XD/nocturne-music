@@ -11,6 +11,7 @@
 		InformationCircleIcon,
 		ViewIcon,
 		ViewOffSlashIcon,
+		Refresh01Icon,
 		Link04Icon,
 		KeyboardIcon,
 		ArrowUp01Icon,
@@ -537,6 +538,15 @@
 		remoteSyncPort = val;
 		settings.remote_sync_port = val;
 		await api.setSetting('remote_sync_port', val);
+	}
+
+	let showPairingPin = $state(false);
+
+	// Six digits, matching what the desktop generates on first run; the mobile client accepts 4 to 8.
+	async function regenerateRemoteSyncPin() {
+		const pin = String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+		await updateRemoteSyncPin(pin);
+		syncInfo = await api.getRemoteSyncStatus();
 	}
 
 	async function updateRemoteSyncPin(val: string) {
@@ -1427,6 +1437,29 @@
 						title={showHostIp ? 'Hide IP' : 'Reveal IP'}
 					>
 						<HugeiconsIcon icon={showHostIp ? ViewOffSlashIcon : ViewIcon} class="h-3.5 w-3.5" />
+					</button>
+				</div>
+			</div>
+
+			<div class="flex items-center justify-between">
+				<span class="text-muted-foreground">Pairing PIN:</span>
+				<div class="flex items-center gap-2 font-mono text-foreground">
+					<span>{showPairingPin ? (syncInfo?.pairing_pin || remoteSyncPin) : '•'.repeat((syncInfo?.pairing_pin || remoteSyncPin).length)}</span>
+					<button
+						type="button"
+						class="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+						onclick={() => (showPairingPin = !showPairingPin)}
+						title={showPairingPin ? 'Hide PIN' : 'Reveal PIN'}
+					>
+						<HugeiconsIcon icon={showPairingPin ? ViewOffSlashIcon : ViewIcon} class="h-3.5 w-3.5" />
+					</button>
+					<button
+						type="button"
+						class="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+						onclick={regenerateRemoteSyncPin}
+						title="Generate a new PIN"
+					>
+						<HugeiconsIcon icon={Refresh01Icon} class="h-3.5 w-3.5" />
 					</button>
 				</div>
 			</div>
