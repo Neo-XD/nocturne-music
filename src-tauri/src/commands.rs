@@ -333,6 +333,21 @@ pub async fn set_setting(
 }
 
 #[tauri::command]
+pub async fn regenerate_remote_sync_pin(
+    app: tauri::AppHandle,
+    state: St<'_>,
+) -> Result<String, String> {
+    use tauri::Manager;
+    // Minted here rather than in the webview, so the pairing PIN always comes from a CSPRNG.
+    let pin = format!("{:06}", rand::random::<u32>() % 1_000_000);
+    state.db.set_setting("remote_sync_pin", &pin);
+    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+        rs.inner().clone().set_pairing_pin(pin.clone()).await;
+    }
+    Ok(pin)
+}
+
+#[tauri::command]
 pub async fn get_remote_sync_status(
     app: tauri::AppHandle,
 ) -> Result<crate::remotesync::RemoteSyncInfo, String> {

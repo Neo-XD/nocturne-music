@@ -495,6 +495,7 @@ pub fn run() {
             commands::set_setting,
             commands::get_stream_clients,
             commands::get_remote_sync_status,
+            commands::regenerate_remote_sync_pin,
             commands::clear_caches,
             commands::get_account,
             commands::get_account_identities,

@@ -3,13 +3,13 @@
 //! Embedded WebSocket server + UDP LAN discovery that allows Nocturne Mobile to automatically
 //! discover, pair, and control desktop playback with instant bidirectional state syncing.
 
-use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
+use listen_protocol::pairing::{constant_time_eq, expected_pin_hash, is_valid_pin, AttemptLimiter};
 use listen_protocol::{RoomState, Track};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,13 +73,8 @@ pub struct RemoteSyncController {
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
     current_port: Arc<RwLock<u16>>,
     pairing_pin: Arc<RwLock<String>>,
-    auth_failures: Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>,
+    auth_failures: Arc<RwLock<AttemptLimiter>>,
 }
-
-/// Consecutive wrong PINs from one address before it is locked out.
-const MAX_AUTH_FAILURES: u32 = 5;
-/// How long a locked-out address stays locked, and how long failures are remembered.
-const AUTH_LOCKOUT: Duration = Duration::from_secs(900);
 
 impl RemoteSyncController {
     pub fn new() -> Self {
@@ -92,7 +87,7 @@ impl RemoteSyncController {
             connected_clients: Arc::new(RwLock::new(Vec::new())),
             current_port: Arc::new(RwLock::new(8080)),
             pairing_pin: Arc::new(RwLock::new(String::new())),
-            auth_failures: Arc::new(RwLock::new(HashMap::new())),
+            auth_failures: Arc::new(RwLock::new(AttemptLimiter::new())),
         }
     }
 
@@ -253,32 +248,20 @@ async fn run_udp_discovery(ws_port: u16) {
     }
 }
 
-/// Expected proof for a nonce and PIN. Hex of SHA-256 over `nonce:pin`, which is what the client computes.
-fn expected_pin_hash(nonce: &str, pin: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(nonce.as_bytes());
-    h.update(b":");
-    h.update(pin.as_bytes());
-    format!("{:x}", h.finalize())
+/// Outcome of one handshake. `WrongPin` is the only one that counts against the address.
+enum AuthOutcome {
+    Ok(String),
+    WrongPin,
+    Aborted,
 }
 
-// Compared byte by byte over the whole length so a wrong hash costs the same time as a right one, and an attacker learns nothing from how long a rejection took.
-fn constant_time_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-/// Reads one `AuthResponse` and verifies it, returning the client's name on success.
+/// Reads one `AuthResponse` and verifies it.
 async fn await_auth<S, R>(
     receiver: &mut R,
     sender: &mut S,
     nonce: &str,
     pairing_pin: &Arc<RwLock<String>>,
-) -> Option<String>
+) -> AuthOutcome
 where
     S: SinkExt<Message> + Unpin,
     R: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -301,36 +284,14 @@ where
         if let Ok(json) = serde_json::to_string(&reply) {
             let _ = sender.send(Message::Text(json.into())).await;
         }
-        return ok.then_some(client_device_name);
+        return if ok { AuthOutcome::Ok(client_device_name) } else { AuthOutcome::WrongPin };
     }
-    None
+    AuthOutcome::Aborted
 }
 
-/// True while this address is locked out. Entries older than the lockout window are forgotten, so a lockout expires on its own.
-async fn is_locked_out(fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>, ip: IpAddr) -> bool {
-    let mut map = fails.write().await;
-    map.retain(|_, (_, at)| at.elapsed() < AUTH_LOCKOUT);
-    map.get(&ip).is_some_and(|(n, _)| *n >= MAX_AUTH_FAILURES)
-}
-
-/// Counts an attempt up front. A parallel attacker would otherwise open many sockets that all read a zero count before any of them reported a failure.
-async fn reserve_attempt(fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>, ip: IpAddr) {
-    let mut map = fails.write().await;
-    map.retain(|_, (_, at)| at.elapsed() < AUTH_LOCKOUT);
-    let e = map.entry(ip).or_insert((0, Instant::now()));
-    e.0 += 1;
-    e.1 = Instant::now();
-}
-
-/// Clears the reservation. Only a correct PIN forgives an attempt; a timeout or a dropped socket keeps it, since neither proves the peer is friendly.
-async fn clear_attempts(fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>, ip: IpAddr) {
-    fails.write().await.remove(&ip);
-}
-
-/// The persisted pairing PIN, generating and storing a six-digit one the first time.
-/// Generated rather than defaulted, because a constant default ships every install the same PIN.
+/// The persisted pairing PIN, generating a six-digit one when absent or unusable, because a constant default would ship every install the same PIN.
 pub fn ensure_pairing_pin(db: &crate::db::Db) -> String {
-    match db.get_setting("remote_sync_pin").filter(|p| p.len() >= 4) {
+    match db.get_setting("remote_sync_pin").filter(|p| is_valid_pin(p)) {
         Some(pin) => pin,
         None => {
             let pin = format!("{:06}", rand::random::<u32>() % 1_000_000);
@@ -348,7 +309,7 @@ async fn handle_connection(
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
     pairing_pin: Arc<RwLock<String>>,
-    auth_failures: Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>,
+    auth_failures: Arc<RwLock<AttemptLimiter>>,
 ) {
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
@@ -371,11 +332,18 @@ async fn handle_connection(
         connected_at: now_secs,
     };
 
-    if is_locked_out(&auth_failures, peer_addr.ip()).await {
+    if !auth_failures.write().await.allows(peer_addr.ip(), Instant::now()) {
         tracing::warn!("remote sync: {client_ip} is locked out after repeated bad PINs");
+        let msg = SyncWireMessage::AuthResult {
+            success: false,
+            session_token: None,
+            message: Some("Too many incorrect PINs. Try again in 15 minutes.".into()),
+        };
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = ws_sender.send(Message::Text(json.into())).await;
+        }
         return;
     }
-    reserve_attempt(&auth_failures, peer_addr.ip()).await;
 
     let nonce = format!("{:032x}", rand::random::<u128>());
     let challenge = SyncWireMessage::AuthChallenge {
@@ -398,12 +366,18 @@ async fn handle_connection(
     .await;
 
     let client_name = match authed {
-        Ok(Some(name)) => {
-            clear_attempts(&auth_failures, peer_addr.ip()).await;
+        Ok(AuthOutcome::Ok(name)) => {
+            auth_failures.write().await.record_success(peer_addr.ip());
             name
         }
+        // Only a wrong PIN counts against the address; a dropped socket or a timeout must not lock out a device that knows it.
+        Ok(AuthOutcome::WrongPin) => {
+            auth_failures.write().await.record_failure(peer_addr.ip(), Instant::now());
+            tracing::warn!("remote sync: wrong PIN from {client_ip}");
+            return;
+        }
         _ => {
-            tracing::warn!("remote sync: rejected unauthenticated client {client_ip}");
+            tracing::debug!("remote sync: handshake abandoned by {client_ip}");
             return;
         }
     };

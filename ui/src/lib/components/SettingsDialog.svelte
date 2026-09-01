@@ -230,6 +230,8 @@
 	}
 
 	onMount(() => {
+		// Without this syncInfo stays null and the pairing PIN row falls back to a stale default.
+		void fetchSyncStatus();
 		const sub = api.onLastfmState((s) => {
 			lastfmConnecting = false;
 			lastfmConnected = s.connected;
@@ -530,6 +532,8 @@
 	async function setRemoteSync(on: boolean) {
 		settings.remote_sync_enabled = on ? 'true' : 'false';
 		await api.setSetting('remote_sync_enabled', settings.remote_sync_enabled);
+		// Enabling generates a PIN on the Rust side, so the panel must re-read it rather than show the old value.
+		await fetchSyncStatus();
 		if (on) toast.success(`Remote Sync Server listening on port ${remoteSyncPort || '8080'}`);
 		else toast('Remote Sync Server stopped');
 	}
@@ -542,11 +546,16 @@
 
 	let showPairingPin = $state(false);
 
-	// Six digits, matching what the desktop generates on first run; the mobile client accepts 4 to 8.
+	// Minted in Rust from a CSPRNG; Math.random is not suitable for a pairing credential.
 	async function regenerateRemoteSyncPin() {
-		const pin = String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
-		await updateRemoteSyncPin(pin);
-		syncInfo = await api.getRemoteSyncStatus();
+		try {
+			remoteSyncPin = await api.regenerateRemoteSyncPin();
+			settings.remote_sync_pin = remoteSyncPin;
+			await fetchSyncStatus();
+		} catch (e) {
+			console.error('Failed to regenerate pairing PIN', e);
+			await fetchSyncStatus();
+		}
 	}
 
 	async function updateRemoteSyncPin(val: string) {
