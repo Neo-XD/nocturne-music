@@ -197,9 +197,6 @@
 	let lastfmConnected = $state(false);
 	let lastfmUser = $state<string | null>(null);
 	let lastfmConnecting = $state(false);
-	let lastfmKeyInput = $state('');
-	let lastfmSecretInput = $state('');
-	let showSecret = $state(false);
 
 	async function loadLastfm() {
 		try {
@@ -209,29 +206,9 @@
 		} catch {}
 	}
 
-	async function updateLastfmKey(val: string) {
-		lastfmKeyInput = val;
-		settings.lastfm_api_key = val;
-		await api.setSetting('lastfm_api_key', val);
-	}
-
-	async function updateLastfmSecret(val: string) {
-		lastfmSecretInput = val;
-		settings.lastfm_api_secret = val;
-		await api.setSetting('lastfm_api_secret', val);
-	}
-
 	async function connectLastfm() {
-		const key = (lastfmKeyInput || settings.lastfm_api_key || '').trim();
-		const secret = (lastfmSecretInput || settings.lastfm_api_secret || '').trim();
-		if (!key || !secret) {
-			toast.error('Please enter both your Last.fm API Key and Shared Secret below.');
-			return;
-		}
 		lastfmConnecting = true;
 		try {
-			await updateLastfmKey(key);
-			await updateLastfmSecret(secret);
 			await api.lastfmConnect();
 			toast('Approve Nocturne in your browser');
 		} catch (e) {
@@ -303,8 +280,6 @@
 			settings = s;
 			clients = c;
 			proxyInput = s.proxy ?? '';
-			lastfmKeyInput = s.lastfm_api_key ?? '';
-			lastfmSecretInput = s.lastfm_api_secret ?? '';
 			remoteSyncPort = s.remote_sync_port ?? '8080';
 			remoteSyncPin = s.remote_sync_pin ?? '1234';
 			initLyricsProviders(s.lyrics_providers ?? s.lyrics_priority);
@@ -768,8 +743,7 @@
 									desc: lastfmConnected
 										? `Connected and scrobbling as ${lastfmUser}.`
 										: 'Connect your Last.fm account to scrobble songs and update now playing.',
-									control: lastfmButton,
-									below: lastfmConfig
+									control: lastfmButton
 								})}
 							</div>
 						</section>
@@ -1419,61 +1393,6 @@
 			{lastfmConnecting ? 'Connecting…' : 'Connect Last.fm'}
 		</Button>
 	{/if}
-{/snippet}
-{#snippet lastfmConfig()}
-	<div class="mt-2.5 space-y-2.5 rounded-xl border border-border/60 bg-muted/30 p-3">
-		<div class="flex items-center justify-between gap-2">
-			<div>
-				<span class="text-xs font-semibold text-foreground">API Credentials</span>
-				<p class="text-[11px] text-muted-foreground">
-					Type your Last.fm API Key and Shared Secret to authorize scrobbling directly in the app.
-				</p>
-			</div>
-			<button
-				type="button"
-				onclick={() => api.openExternal('https://www.last.fm/api/account/create')}
-				class="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline cursor-pointer"
-			>
-				<span>Get keys</span>
-				<HugeiconsIcon icon={Link04Icon} class="h-3 w-3" />
-			</button>
-		</div>
-
-		<div class="grid gap-2.5 sm:grid-cols-2">
-			<div class="space-y-1">
-				<label for="lastfm-api-key" class="text-[11px] font-medium text-muted-foreground">API Key</label>
-				<input
-					id="lastfm-api-key"
-					type="text"
-					bind:value={lastfmKeyInput}
-					oninput={(e) => updateLastfmKey(e.currentTarget.value)}
-					placeholder="Paste Last.fm API key"
-					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
-				/>
-			</div>
-			<div class="space-y-1">
-				<div class="flex items-center justify-between">
-					<label for="lastfm-api-secret" class="text-[11px] font-medium text-muted-foreground">Shared Secret</label>
-					<button
-						type="button"
-						onclick={() => (showSecret = !showSecret)}
-						class="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1"
-					>
-						<HugeiconsIcon icon={showSecret ? ViewOffSlashIcon : ViewIcon} class="h-3 w-3" />
-						<span>{showSecret ? 'Hide' : 'Show'}</span>
-					</button>
-				</div>
-				<input
-					id="lastfm-api-secret"
-					type={showSecret ? 'text' : 'password'}
-					bind:value={lastfmSecretInput}
-					oninput={(e) => updateLastfmSecret(e.currentTarget.value)}
-					placeholder="Paste Shared Secret"
-					class="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary shadow-xs"
-				/>
-			</div>
-		</div>
-	</div>
 {/snippet}
 {#snippet remoteSyncSwitch()}<Switch checked={remoteSyncOn} onCheckedChange={setRemoteSync} />{/snippet}
 {#snippet remoteSyncConfig()}

@@ -318,7 +318,7 @@ pub async fn connect(state: Arc<AppState>) -> Result<(), String> {
     let api_key = resolve_api_key(&state.db);
     let api_secret = resolve_api_secret(&state.db);
     if api_key.is_empty() || api_secret.is_empty() {
-        return Err("Last.fm API key or secret not found. Add them in lastfm.keys or Settings > Last.fm (https://www.last.fm/api/account/create).".into());
+        return Err("Last.fm API key or secret not configured in this build.".into());
     }
 
     let gen = state.lastfm.bump_gen();
