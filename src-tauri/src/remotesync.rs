@@ -3,10 +3,11 @@
 //! Embedded WebSocket server + UDP LAN discovery that allows Nocturne Mobile to automatically
 //! discover, pair, and control desktop playback with instant bidirectional state syncing.
 
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
 use listen_protocol::{RoomState, Track};
@@ -72,7 +73,13 @@ pub struct RemoteSyncController {
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
     current_port: Arc<RwLock<u16>>,
     pairing_pin: Arc<RwLock<String>>,
+    auth_failures: Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>,
 }
+
+/// Consecutive wrong PINs from one address before it is locked out.
+const MAX_AUTH_FAILURES: u32 = 5;
+/// How long a locked-out address stays locked, and how long failures are remembered.
+const AUTH_LOCKOUT: Duration = Duration::from_secs(900);
 
 impl RemoteSyncController {
     pub fn new() -> Self {
@@ -85,6 +92,7 @@ impl RemoteSyncController {
             connected_clients: Arc::new(RwLock::new(Vec::new())),
             current_port: Arc::new(RwLock::new(8080)),
             pairing_pin: Arc::new(RwLock::new(String::new())),
+            auth_failures: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -135,6 +143,7 @@ impl RemoteSyncController {
         let state_ref = self.state_ref.clone();
         let connected_clients = self.connected_clients.clone();
         let pairing_pin = self.pairing_pin.clone();
+        let auth_failures = self.auth_failures.clone();
 
         // Spawn UDP Discovery Beacon and Responder (Port 8081)
         tokio::spawn(async move {
@@ -157,8 +166,9 @@ impl RemoteSyncController {
                                 let st_ref = state_ref.clone();
                                 let clients_ref = connected_clients.clone();
                                 let pin_ref = pairing_pin.clone();
+                                let fails_ref = auth_failures.clone();
                                 tokio::spawn(async move {
-                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref, pin_ref).await;
+                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref, pin_ref, fails_ref).await;
                                 });
                             }
                             Err(e) => {
@@ -296,6 +306,34 @@ where
     None
 }
 
+/// True while this address is locked out. Entries older than the lockout window are forgotten, so a lockout expires on its own.
+async fn is_locked_out(fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>, ip: IpAddr) -> bool {
+    let mut map = fails.write().await;
+    match map.get(&ip) {
+        Some((_, at)) if at.elapsed() >= AUTH_LOCKOUT => {
+            map.remove(&ip);
+            false
+        }
+        Some((n, _)) => *n >= MAX_AUTH_FAILURES,
+        None => false,
+    }
+}
+
+async fn record_auth_result(
+    fails: &Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>,
+    ip: IpAddr,
+    ok: bool,
+) {
+    let mut map = fails.write().await;
+    if ok {
+        map.remove(&ip);
+    } else {
+        let e = map.entry(ip).or_insert((0, Instant::now()));
+        e.0 += 1;
+        e.1 = Instant::now();
+    }
+}
+
 async fn handle_connection(
     stream: TcpStream,
     peer_addr: SocketAddr,
@@ -304,6 +342,7 @@ async fn handle_connection(
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
     pairing_pin: Arc<RwLock<String>>,
+    auth_failures: Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>,
 ) {
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
@@ -326,6 +365,11 @@ async fn handle_connection(
         connected_at: now_secs,
     };
 
+    if is_locked_out(&auth_failures, peer_addr.ip()).await {
+        tracing::warn!("remote sync: {client_ip} is locked out after repeated bad PINs");
+        return;
+    }
+
     let nonce = format!("{:032x}", rand::random::<u128>());
     let challenge = SyncWireMessage::AuthChallenge {
         nonce: nonce.clone(),
@@ -347,8 +391,12 @@ async fn handle_connection(
     .await;
 
     let client_name = match authed {
-        Ok(Some(name)) => name,
+        Ok(Some(name)) => {
+            record_auth_result(&auth_failures, peer_addr.ip(), true).await;
+            name
+        }
         _ => {
+            record_auth_result(&auth_failures, peer_addr.ip(), false).await;
             tracing::warn!("remote sync: rejected unauthenticated client {client_ip}");
             return;
         }
