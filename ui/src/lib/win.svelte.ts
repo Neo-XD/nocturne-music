@@ -25,14 +25,19 @@ export async function setWindowFullscreen(on: boolean): Promise<void> {
 	}
 	applying = true;
 	try {
-		if (on) wasMaximized = await w.isMaximized().catch(() => false);
+		if (on) {
+			wasMaximized = await w.isMaximized().catch(() => false);
+			// Going maximized -> fullscreen leaves WRY_WEBVIEW at the old working-area height, so the taskbar shows through the transparent window; restoring first gives the webview a resize it follows.
+			if (wasMaximized) await w.unmaximize().catch(() => {});
+		}
 		await w.setFullscreen(on);
 		win.fullscreen = on;
 		// tao restores the pre-fullscreen geometry but not always the maximized flag, so put it back explicitly.
 		if (!on && wasMaximized && !(await w.isMaximized().catch(() => true))) {
 			await w.maximize().catch(() => {});
 		}
-	} catch {
+	} catch (e) {
+		console.error('setFullscreen failed', e);
 		win.fullscreen = await w.isFullscreen().catch(() => false);
 	} finally {
 		applying = false;

@@ -37,7 +37,7 @@
 	];
 </script>
 
-{#if !win.maximized}
+{#if !win.maximized && !win.fullscreen}
 	{#each handles as h (h.dir)}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="fixed z-[60] {h.cls}" onmousedown={(e) => start(e, h.dir)} aria-hidden="true"></div>
