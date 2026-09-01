@@ -3,7 +3,7 @@ name = "listen-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Shared JSON wire types for Limusic Listen Together (server + client)"
+description = "Shared JSON wire types for Nocturne Listen Together (server + client)"
 
 [dependencies]
 serde = { workspace = true }

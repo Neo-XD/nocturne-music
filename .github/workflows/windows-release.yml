@@ -157,7 +157,7 @@ jobs:
       #                         ships pregenerated bindings and just emits `cargo:rustc-link-lib`)
       #   rust-lld              LLD instead of MSVC's link.exe. Cargo is the bulk of this job, and
       #                         with `codegen-units = 1` + thin LTO most of that is the codegen and
-      #                         link of limusic-app itself. The Linux job took its release build
+      #                         link of nocturne-app itself. The Linux job took its release build
       #                         from 6m56 to 3m33 by moving to mold; this is the same lever on the
       #                         platform that has no mold. rust-lld ships inside the toolchain, so
       #                         there is nothing to install and nothing to pin.
@@ -277,7 +277,7 @@ jobs:
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: limusic-dry-run-${{ steps.rel.outputs.tag }}
+          name: nocturne-dry-run-${{ steps.rel.outputs.tag }}
           path: |
             target/release/bundle/nsis/*-setup.exe
             target/release/bundle/nsis/*.sig
