@@ -123,58 +123,86 @@ pub(crate) fn tune_webview_labelled(app: &tauri::AppHandle, label: &str, media: 
     }
 }
 
+fn read_hw_accel_setting() -> bool {
+    let mut candidate_dirs = Vec::new();
+    if let Ok(p) = std::env::var("APPDATA") {
+        candidate_dirs.push(std::path::PathBuf::from(p));
+    }
+    if let Ok(p) = std::env::var("LOCALAPPDATA") {
+        candidate_dirs.push(std::path::PathBuf::from(p));
+    }
+    if let Ok(p) = std::env::var("XDG_DATA_HOME") {
+        candidate_dirs.push(std::path::PathBuf::from(p));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let h = std::path::Path::new(&home);
+        candidate_dirs.push(h.join(".local/share"));
+        candidate_dirs.push(h.join(".config"));
+        candidate_dirs.push(h.join("Library/Application Support"));
+    }
+
+    for base in candidate_dirs {
+        for app_name in ["nocturne", "com.nocturne.music", "limusic", "com.limusic.app"] {
+            let db_path = base.join(app_name).join("app.db");
+            if db_path.exists() {
+                if let Ok(conn) = rusqlite::Connection::open_with_flags(
+                    &db_path,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                ) {
+                    let res: rusqlite::Result<String> = conn.query_row(
+                        "SELECT value FROM settings WHERE key = 'hardware_acceleration'",
+                        [],
+                        |r| r.get(0),
+                    );
+                    if let Ok(val) = res {
+                        return val != "false";
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // NVIDIA + Wayland: WebKitGTK's DMABUF renderer trips over NVIDIA's explicit
-    // sync (GBM buffer failures / blank window / Gdk Error 71). Disabling explicit
-    // sync keeps hardware-accelerated rendering, unlike the old
-    // WEBKIT_DISABLE_DMABUF_RENDERER=1 workaround which forced CPU software
-    // rendering on WebKitGTK 2.46+ and made the whole UI laggy. Harmless no-op on
-    // non-NVIDIA drivers. ponytail: blanket-set on Linux; probe driver/session if
-    // an X11/NVIDIA blank-window report ever comes in.
+    let hw_accel = read_hw_accel_setting();
+
     #[cfg(target_os = "linux")]
     {
-        if std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none() {
-            std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
-        }
-        // AppImage + NVIDIA: the AppImage ships its own WebKitGTK/GTK stack, and inside
-        // that environment the DMABUF renderer fails GBM buffer allocation ("Failed to
-        // create GBM buffer … Invalid argument") → solid white window. The explicit-sync
-        // fix above does NOT cover this case — verified 2026-07-15: the raw binary renders
-        // on the system webkit (same 2.52.4) while the AppImage white-screens, and only
-        // disabling DMABUF makes the AppImage paint. Cost: CPU software rendering, so gate
-        // it tightly — rpm/dev builds and non-NVIDIA AppImages keep full GPU compositing.
-        //
-        // That cost is much larger than "no GPU compositing" implies. Measured on this
-        // WebKitGTK 2.52.5, same page of 300 cards, only the renderer differing:
-        //
-        //     GPU compositing      97 MiB idle → 135 MiB
-        //     software rendering   62 MiB idle → 245 MiB
-        //
-        // The gap grows with content, because every composited layer becomes a CPU-side
-        // backing store. It is the single biggest term in this app's memory use, far ahead
-        // of thumbnail sizes or DOM size (both measured, both made no difference).
-        //
-        // This workaround is also older than the fix that probably caused the failure:
-        // it went in 2026-07-15, and b4d98fa (2026-07-27) stopped the AppDir shadowing the
-        // host's libwayland-client, which broke Mesa's EGL vendor loading — the same class
-        // of failure, and its commit message notes it was "invisible on NVIDIA". Set
-        // LIMUSIC_FORCE_GPU=1 to skip the workaround and check whether the AppImage still
-        // white-screens. If it renders, delete this block.
-        if std::env::var_os("APPIMAGE").is_some()
-            && std::path::Path::new("/dev/nvidiactl").exists()
-            && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
-            && std::env::var_os("NOCTURNE_FORCE_GPU").is_none()
-            && std::env::var_os("LIMUSIC_FORCE_GPU").is_none()
-        {
+        if !hw_accel {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+            std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        } else {
+            if std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none() {
+                std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
+            }
+            if std::path::Path::new("/dev/nvidiactl").exists()
+                && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+                && std::env::var_os("NOCTURNE_FORCE_GPU").is_none()
+                && std::env::var_os("LIMUSIC_FORCE_GPU").is_none()
+            {
+                std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if !hw_accel {
+            std::env::set_var(
+                "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                "--disable-gpu --disable-gpu-compositing",
+            );
         }
     }
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,nocturne_app=debug,limusic_app=debug".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "info,app_lib=debug,nocturne_app=debug,limusic_app=debug".into()
+            }),
         )
         .init();
 
@@ -387,14 +415,14 @@ pub fn run() {
             {
                 let cipher = cipher.clone();
                 tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(1500)).await;
+                    tokio::time::sleep(Duration::from_millis(400)).await;
                     cipher.prewarm().await;
                 });
             }
             if let Some(vd) = visitor_for_prewarm {
                 let potoken = potoken.clone();
                 tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(2500)).await;
+                    tokio::time::sleep(Duration::from_millis(800)).await;
                     potoken.prewarm(&vd).await;
                 });
             }

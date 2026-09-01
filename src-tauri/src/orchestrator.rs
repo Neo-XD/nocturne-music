@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use innertube::{
     find_format, find_video_format, rustypipe_fallback, AudioQuality, Clients, Format, InnerTube,
@@ -93,10 +93,25 @@ pub struct Orchestrator {
     clients: Clients,
     cipher: Arc<CipherDeobfuscator>,
     potoken: Arc<PoTokenGenerator>,
-    /// videoIds whose WEB_REMIX stream 403'd on the real GET → skip WEB_REMIX next time for them
-    /// (context/06 §2). Cleared when the cipher self-heals. `Arc` so the off-hot-path self-heal
-    /// task can clear it.
-    web_remix_failed: Arc<Mutex<HashSet<String>>>,
+    /// videoId → when its WEB_REMIX stream last 403'd on the real GET, so the next resolve skips
+    /// WEB_REMIX for it (context/06 §2). Cleared when the cipher self-heals. `Arc` so the
+    /// off-hot-path self-heal task can clear it. Entries expire: the bar only has to survive the
+    /// retry that follows the failure, and a permanent one meant a single bad minute cost that
+    /// track its best client for the rest of the session.
+    web_remix_failed: Arc<Mutex<HashMap<String, Instant>>>,
+}
+
+const WEB_REMIX_BLACKLIST_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// Record a failure, dropping expired entries on the way so the map cannot grow.
+fn blacklist_insert(map: &mut HashMap<String, Instant>, video_id: &str, now: Instant) {
+    map.retain(|_, at| now.duration_since(*at) < WEB_REMIX_BLACKLIST_TTL);
+    map.insert(video_id.to_owned(), now);
+}
+
+/// Is WEB_REMIX still barred for this id? An entry past the TTL counts as absent.
+fn blacklist_blocks(map: &HashMap<String, Instant>, video_id: &str, now: Instant) -> bool {
+    map.get(video_id).is_some_and(|at| now.duration_since(*at) < WEB_REMIX_BLACKLIST_TTL)
 }
 
 impl Orchestrator {
@@ -111,14 +126,14 @@ impl Orchestrator {
             clients,
             cipher,
             potoken,
-            web_remix_failed: Arc::new(Mutex::new(HashSet::new())),
+            web_remix_failed: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     /// Record that a WEB_REMIX stream for `video_id` failed on the real GET (called by the player
     /// layer on a playback 403). The next resolve for this id bypasses WEB_REMIX. context/06 §2.
     pub async fn mark_web_remix_failed(&self, video_id: &str) {
-        self.web_remix_failed.lock().await.insert(video_id.to_owned());
+        blacklist_insert(&mut *self.web_remix_failed.lock().await, video_id, Instant::now());
     }
 
     /// Resolve a videoId to a playable stream. context/06 full algorithm.
@@ -214,7 +229,11 @@ impl Orchestrator {
                 // identically, which is the loop issue #71 has been stuck in.
                 if !main_ok
                     || disabled.contains(MAIN_CLIENT)
-                    || self.web_remix_failed.lock().await.contains(video_id)
+                    || blacklist_blocks(
+                        &*self.web_remix_failed.lock().await,
+                        video_id,
+                        Instant::now(),
+                    )
                 {
                     continue;
                 }
@@ -463,9 +482,8 @@ impl Orchestrator {
     /// player will make. It used to always attach the cookie while `build` attached it only for
     /// uploads, which let an ordinary track pass validation and then 403 on the real open.
     async fn validate_head(&self, url: &str, headers: &HashMap<String, String>) -> bool {
-        // The 10s budget used to live on a client of its own; it is a property of this one
-        // probe, not of the app's HTTP.
-        let mut req = crate::http::client().head(url).timeout(Duration::from_secs(10));
+        // The 3.5s budget avoids stalling playback if a dead stream host hangs.
+        let mut req = crate::http::client().head(url).timeout(Duration::from_millis(3500));
         for (k, v) in headers {
             req = req.header(k, v);
         }

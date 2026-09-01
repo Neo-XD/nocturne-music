@@ -200,14 +200,14 @@
 									? 'my-2 ml-2 h-12 w-12 rounded-full'
 									: 'h-16 w-16'}"
 							>
-								{#if item.thumbnail && !failed[item.id] && !onRepeat}
+								{#if item.thumbnail && !failed[item.thumbnail] && !onRepeat}
 									<img
 										src={thumb(item.thumbnail, 400)}
 										alt=""
 										class="h-full w-full object-cover"
 										loading="lazy"
 										draggable="false"
-										onerror={() => (failed = { ...failed, [item.id]: true })}
+										onerror={() => (failed = { ...failed, [item.thumbnail!]: true })}
 									/>
 								{:else}
 									<div

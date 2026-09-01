@@ -1076,6 +1076,14 @@
 							<h3 class={LABEL}>Optimization & Battery Saving</h3>
 							<div class={CARD}>
 								{@render row({
+									title: 'Hardware Acceleration',
+									badge: 'GPU Compositing',
+									badgeVariant: 'performance',
+									desc: 'Uses your GPU to accelerate UI rendering and background canvas shaders. Turn off if experiencing GPU glitches or blank screens. (Requires app restart)',
+									control: hwAccelSwitch,
+									tall: true
+								})}
+								{@render row({
 									title: 'Reduce transparency & frosted blur',
 									badge: 'Saves GPU & Battery',
 									badgeVariant: 'saving',
@@ -1567,6 +1575,14 @@
 {#snippet reduceTransparencySwitch()}<Switch
 		checked={appearance.reduceTransparency}
 		onCheckedChange={(on) => setAppearance({ reduceTransparency: on })}
+	/>{/snippet}
+{#snippet hwAccelSwitch()}<Switch
+		checked={settings.hardware_acceleration !== 'false'}
+		onCheckedChange={async (on) => {
+			settings.hardware_acceleration = on ? 'true' : 'false';
+			await api.setSetting('hardware_acceleration', settings.hardware_acceleration);
+			toast.info('Hardware acceleration setting updated. Restart Nocturne to apply.');
+		}}
 	/>{/snippet}
 {#snippet reduceMotionSwitch()}<Switch
 		checked={appearance.reduceMotion}

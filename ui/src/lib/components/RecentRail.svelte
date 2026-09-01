@@ -72,7 +72,7 @@
 						? 'rounded-full'
 						: 'rounded-md'}"
 				>
-					{#if item.thumbnail && !failed[item.id]}
+					{#if item.thumbnail && !failed[item.thumbnail]}
 						<!-- 400 for a 40px slot: it's the size every card on the page already asked for, so
 						     it comes straight out of the webview's cache. -->
 						<img
@@ -81,7 +81,7 @@
 							class="h-full w-full object-cover"
 							loading="lazy"
 							draggable="false"
-							onerror={() => (failed = { ...failed, [item.id]: true })}
+							onerror={() => (failed = { ...failed, [item.thumbnail!]: true })}
 						/>
 					{:else}
 						{@const onRepeat = item.id === ON_REPEAT_ID}

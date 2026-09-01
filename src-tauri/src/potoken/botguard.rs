@@ -27,7 +27,7 @@ const POT_OVERHEAD: usize = 14;
 const ACCEPTED_MAX_IT: usize = 63;
 /// How many bootstraps to spend looking for the accepted class. At the measured ~1-in-3 rate this
 /// misses about once in 25 launches; a miss keeps the last runtime and mints from it anyway.
-const MAX_BOOTSTRAPS: usize = 8;
+const MAX_BOOTSTRAPS: usize = 3;
 /// Identifier the class check mints against: plain ASCII, so its decoded byte length is its char
 /// length and the integrity-token arithmetic is exact. visitorData is not usable for this — it
 /// carries percent escapes, and reading the class off it came out a byte adrift of the truth.

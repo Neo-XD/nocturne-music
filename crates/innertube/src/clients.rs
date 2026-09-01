@@ -93,7 +93,7 @@ pub const MAIN_CLIENT: &str = "WEB_REMIX";
 /// "YouTube rejected the stream link". Metrolist's ANDROID_VR 1.65 build takes the slot instead
 /// (its URLs answer an open-ended Range with 206), matching Metrolist's own default chain.
 pub const STREAM_FALLBACK_ORDER: [&str; 3] =
-    ["VISIONOS", "ANDROID_VR_1_65_10", "ANDROID_VR_1_43_32"];
+    ["ANDROID_VR_1_65_10", "ANDROID_VR_1_43_32", "VISIONOS"];
 
 /// The fallback order for one of the user's own uploads (issue #71). YouTube only streams a
 /// privately-owned track to an authenticated client, so every anonymous client in

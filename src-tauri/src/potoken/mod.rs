@@ -25,12 +25,10 @@ use tokio::time::timeout;
 use crate::db::{now_secs, Db};
 use crate::http::WEB_UA;
 
-/// Overall budget for a full bootstrap. Generous because it covers up to `MAX_BOOTSTRAPS` BotGuard
-/// solves (each one a `/Create`, a VM run and a `/GenerateIT`, measured at ~0.8s) while it hunts
-/// for the accepted integrity-token class.
-const MINT_BUDGET: Duration = Duration::from_secs(60);
+/// Overall budget for a full bootstrap. Bounded so a slow BotGuard solve does not hang playback.
+const MINT_BUDGET: Duration = Duration::from_secs(6);
 /// Budget for one mint on an already-bootstrapped runtime. Pure JS, no network.
-const CALL_TIMEOUT: Duration = Duration::from_secs(15);
+const CALL_TIMEOUT: Duration = Duration::from_secs(4);
 /// Safety margin before the integrity token's TTL (context/04 §GenerateIT).
 const EXPIRY_MARGIN: Duration = Duration::from_secs(10 * 60);
 

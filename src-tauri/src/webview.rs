@@ -229,6 +229,7 @@ impl Bridge {
             "(async()=>{{try{{window.__slots['{id}']={{ok:1,v:await ({expr})}};}}\
              catch(e){{window.__slots['{id}']={{ok:0,e:String((e&&e.message)||e)}};}}}})();"
         );
+        self.eval(&kick)?;
         let res = self.poll_json(&format!("window.__slots['{id}']||null"), timeout).await;
         // Free the slot regardless of outcome: an early `?` here used to leave the slot pinned in
         // the harness's heap for the life of the process, once per failed call.

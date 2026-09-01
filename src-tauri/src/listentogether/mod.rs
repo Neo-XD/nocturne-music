@@ -485,6 +485,7 @@ impl LtSession {
             }
             ServerMessage::UserLeft { user_id } => {
                 let mut inner = self.inner.lock().await;
+                inner.pending_joins.retain(|(id, _)| id != &user_id);
                 inner.users.retain(|u| u.user_id != user_id);
             }
             ServerMessage::UserDisconnected { user_id } => {
