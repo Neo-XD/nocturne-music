@@ -22,7 +22,7 @@ name: macOS release binaries
 # Intel Macs need a second leg on `macos-13` publishing `darwin-x86_64`; add it when someone asks.
 #
 # NOT SIGNED WITH AN APPLE CERT, so the app is quarantined on first launch and Gatekeeper says the
-# app "is damaged". Users clear it with `xattr -dr com.apple.quarantine /Applications/Nocturne Music.app`.
+# app "is damaged". Users clear it with `xattr -dr com.apple.quarantine "/Applications/Nocturne Music.app"`.
 # Fixing that properly is a paid Apple Developer account plus notarization. See RELEASING.md §6.
 #
 # It can also be run by hand against an older tag to backfill:

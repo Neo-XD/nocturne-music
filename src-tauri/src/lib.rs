@@ -347,6 +347,14 @@ pub fn run() {
                             .get_setting("remote_sync_port")
                             .and_then(|p| p.parse::<u16>().ok())
                             .unwrap_or(8080);
+                        // The PIN is the user's own setting rather than a generated one, because the desktop already renders this value and a generated one would be shown nowhere.
+                        rs_ctrl
+                            .set_pairing_pin(
+                                db_sync
+                                    .get_setting("remote_sync_pin")
+                                    .unwrap_or_else(|| "1234".into()),
+                            )
+                            .await;
                         let _ = rs_ctrl.start(port).await;
                     }
                 });

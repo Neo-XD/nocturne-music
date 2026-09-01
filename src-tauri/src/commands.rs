@@ -307,7 +307,7 @@ pub async fn set_setting(
         };
         res.map_err(|e| format!("autostart: {e}"))?;
     }
-    if key == "remote_sync_enabled" || key == "remote_sync_port" {
+    if key == "remote_sync_enabled" || key == "remote_sync_port" || key == "remote_sync_pin" {
         use tauri::Manager;
         if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
         {
@@ -318,10 +318,17 @@ pub async fn set_setting(
                 .and_then(|p| p.parse::<u16>().ok())
                 .unwrap_or(8080);
             let rs = rs.inner().clone();
-            if enabled {
-                let _ = rs.start(port).await;
-            } else {
-                rs.stop().await;
+            rs.set_pairing_pin(
+                state.db.get_setting("remote_sync_pin").unwrap_or_else(|| "1234".into()),
+            )
+            .await;
+            // A PIN edit takes effect on the next handshake; restarting here would drop a paired phone to change a value it already sent.
+            if key != "remote_sync_pin" {
+                if enabled {
+                    let _ = rs.start(port).await;
+                } else {
+                    rs.stop().await;
+                }
             }
         }
     }

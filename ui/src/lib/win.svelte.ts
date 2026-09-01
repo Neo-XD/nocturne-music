@@ -1,6 +1,4 @@
-// Shared window state: the resize borders hide when maximized, the root container drops its
-// rounded corners, and the fullscreen player drives real OS fullscreen. One listener,
-// initialized once by the root layout.
+// Shared window state, one listener, initialized once by the root layout.
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export const win = $state({ maximized: false, fullscreen: false });
