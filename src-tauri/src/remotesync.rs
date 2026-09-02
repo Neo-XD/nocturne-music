@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
-use listen_protocol::pairing::{constant_time_eq, expected_pin_hash, is_valid_pin, AttemptLimiter};
+use listen_protocol::pairing::{
+    constant_time_eq, expected_pin_hash, is_valid_pin, PairingGate, Refusal,
+};
 use listen_protocol::{RoomState, Track};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,7 +75,7 @@ pub struct RemoteSyncController {
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
     current_port: Arc<RwLock<u16>>,
     pairing_pin: Arc<RwLock<String>>,
-    auth_failures: Arc<RwLock<AttemptLimiter>>,
+    pairing_gate: Arc<PairingGate>,
 }
 
 impl RemoteSyncController {
@@ -87,7 +89,7 @@ impl RemoteSyncController {
             connected_clients: Arc::new(RwLock::new(Vec::new())),
             current_port: Arc::new(RwLock::new(8080)),
             pairing_pin: Arc::new(RwLock::new(String::new())),
-            auth_failures: Arc::new(RwLock::new(AttemptLimiter::new())),
+            pairing_gate: PairingGate::new(),
         }
     }
 
@@ -138,7 +140,7 @@ impl RemoteSyncController {
         let state_ref = self.state_ref.clone();
         let connected_clients = self.connected_clients.clone();
         let pairing_pin = self.pairing_pin.clone();
-        let auth_failures = self.auth_failures.clone();
+        let pairing_gate = self.pairing_gate.clone();
 
         // Spawn UDP Discovery Beacon and Responder (Port 8081)
         tokio::spawn(async move {
@@ -161,9 +163,9 @@ impl RemoteSyncController {
                                 let st_ref = state_ref.clone();
                                 let clients_ref = connected_clients.clone();
                                 let pin_ref = pairing_pin.clone();
-                                let fails_ref = auth_failures.clone();
+                                let gate_ref = pairing_gate.clone();
                                 tokio::spawn(async move {
-                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref, pin_ref, fails_ref).await;
+                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref, pin_ref, gate_ref).await;
                                 });
                             }
                             Err(e) => {
@@ -248,6 +250,14 @@ async fn run_udp_discovery(ws_port: u16) {
     }
 }
 
+/// What a refused client is told, kept distinct so a busy desktop does not read as a wrong PIN.
+fn refusal_message(refusal: &Refusal) -> &'static str {
+    match refusal {
+        Refusal::LockedOut => "Too many incorrect PINs. Try again in 15 minutes.",
+        Refusal::Busy => "The desktop is busy pairing another device. Try again in a moment.",
+    }
+}
+
 /// Outcome of one handshake. `WrongPin` is the only one that counts against the address.
 enum AuthOutcome {
     Ok(String),
@@ -309,7 +319,7 @@ async fn handle_connection(
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
     pairing_pin: Arc<RwLock<String>>,
-    auth_failures: Arc<RwLock<AttemptLimiter>>,
+    pairing_gate: Arc<PairingGate>,
 ) {
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
@@ -323,6 +333,22 @@ async fn handle_connection(
     let client_id = format!("{peer_addr}");
     let client_ip = peer_addr.ip().to_string();
 
+    let ticket = match pairing_gate.admit(peer_addr.ip(), Instant::now()) {
+        Ok(ticket) => ticket,
+        Err(refusal) => {
+            tracing::warn!(%client_ip, ?refusal, "remote sync: handshake refused");
+            let msg = SyncWireMessage::AuthResult {
+                success: false,
+                session_token: None,
+                message: Some(refusal_message(&refusal).into()),
+            };
+            if let Ok(json) = serde_json::to_string(&msg) {
+                let _ = ws_sender.send(Message::Text(json.into())).await;
+            }
+            return;
+        }
+    };
+
     let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
     let mut client_info = ConnectedClient {
@@ -331,19 +357,6 @@ async fn handle_connection(
         ip: client_ip.clone(),
         connected_at: now_secs,
     };
-
-    if !auth_failures.write().await.allows(peer_addr.ip(), Instant::now()) {
-        tracing::warn!("remote sync: {client_ip} is locked out after repeated bad PINs");
-        let msg = SyncWireMessage::AuthResult {
-            success: false,
-            session_token: None,
-            message: Some("Too many incorrect PINs. Try again in 15 minutes.".into()),
-        };
-        if let Ok(json) = serde_json::to_string(&msg) {
-            let _ = ws_sender.send(Message::Text(json.into())).await;
-        }
-        return;
-    }
 
     let nonce = format!("{:032x}", rand::random::<u128>());
     let challenge = SyncWireMessage::AuthChallenge {
@@ -367,15 +380,15 @@ async fn handle_connection(
 
     let client_name = match authed {
         Ok(AuthOutcome::Ok(name)) => {
-            auth_failures.write().await.record_success(peer_addr.ip());
+            ticket.succeeded();
             name
         }
-        // Only a wrong PIN counts against the address; a dropped socket or a timeout must not lock out a device that knows it.
         Ok(AuthOutcome::WrongPin) => {
-            auth_failures.write().await.record_failure(peer_addr.ip(), Instant::now());
+            ticket.wrong_pin();
             tracing::warn!("remote sync: wrong PIN from {client_ip}");
             return;
         }
+        // Dropping the ticket unsettled refunds the guess, so a Wi-Fi flap locks nobody out.
         _ => {
             tracing::debug!("remote sync: handshake abandoned by {client_ip}");
             return;
