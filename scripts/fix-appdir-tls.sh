@@ -86,10 +86,11 @@ APPIMAGE="$(readlink -f "$APPIMAGE")"
 # .github/workflows/linux-release.yml: that list fails the build when we *fail* to bundle something
 # not on it, this one stops us bundling something that is. Same question, opposite sides.
 HOST_BASELINE="libGL.so.1 libEGL.so.1 libGLX.so.0 libGLdispatch.so.0 libOpenGL.so.0
-  libdrm.so.2 libgbm.so.1 libwayland-client.so.0 libX11.so.6 libX11-xcb.so.1 libxcb.so.1
-  libxcb-dri3.so.0 libexpat.so.1 libfontconfig.so.1 libfreetype.so.6 libharfbuzz.so.0
-  libfribidi.so.0 libz.so.1 libasound.so.2 libusb-1.0.so.0 libcom_err.so.2 libgpg-error.so.0
-  libresolv.so.2 libgcc_s.so.1 libstdc++.so.6"
+  libdrm.so.2 libgbm.so.1 libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.0
+  libwayland-server.so.0 libva.so.2 libva-drm.so.2 libva-wayland.so.2 libva-x11.so.2
+  libX11.so.6 libX11-xcb.so.1 libxcb.so.1 libxcb-dri3.so.0 libexpat.so.1 libfontconfig.so.1
+  libfreetype.so.6 libharfbuzz.so.0 libfribidi.so.0 libz.so.1 libasound.so.2 libusb-1.0.so.0
+  libcom_err.so.2 libgpg-error.so.0 libresolv.so.2 libgcc_s.so.1 libstdc++.so.6"
 
 # Copy every DT_NEEDED of $1 that the AppDir doesn't already have. glibc and the loader are the
 # host's job; everything else has to travel with us, or we just move "cannot open shared object
@@ -146,13 +147,12 @@ else
   bundle_deps_of "$TLSMOD"
 fi
 
-# 1c. Drop libwayland-client. It has to be the host's copy, because the host's Mesa is linked
-#     against it and we are first on LD_LIBRARY_PATH — see defect 3 in the header. Everything the
-#     bundle needs from it exists in 1.22, and every host that can open a window ships a newer one.
-for lib in "$APPDIR"/usr/lib/libwayland-client.so.0*; do
+# 1c. Drop libwayland and libva libraries. They have to be the host's copy, because the host's Mesa
+#     and VA-API drivers are linked against them and we are first on LD_LIBRARY_PATH.
+for lib in "$APPDIR"/usr/lib/libwayland-*.so.0* "$APPDIR"/usr/lib/libva*.so.2*; do
   [ -e "$lib" ] || continue
   rm -f "$lib"
-  echo "==> removed $(basename "$lib") — the host's Mesa must link its own"
+  echo "==> removed $(basename "$lib") — the host graphics stack must link its own"
 done
 
 # 1d. GStreamer plugins, so the webview can decode a music video. See defect 5 in the header.

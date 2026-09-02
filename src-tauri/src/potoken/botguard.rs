@@ -80,30 +80,41 @@ impl Minter {
 
         thread::Builder::new()
             .name("botguard".into())
+            .stack_size(8 * 1024 * 1024)
             .spawn(move || {
-                let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        let _ = ready_tx.send(Err(Error::Fatal(e.to_string())));
-                        return;
-                    }
-                };
-                let mut bg = match rt.block_on(bootstrap(&user_agent, &session_ident)) {
-                    Ok((bg, token, lifetime_secs)) => {
-                        if ready_tx.send(Ok((token, lifetime_secs))).is_err() {
-                            return; // caller gave up (timeout) — don't hold a V8 isolate for nobody
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let rt =
+                        match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                            Ok(rt) => rt,
+                            Err(e) => {
+                                let _ = ready_tx.send(Err(Error::Fatal(e.to_string())));
+                                return;
+                            }
+                        };
+                    let mut bg = match rt.block_on(bootstrap(&user_agent, &session_ident)) {
+                        Ok((bg, token, lifetime_secs)) => {
+                            if ready_tx.send(Ok((token, lifetime_secs))).is_err() {
+                                return; // caller gave up (timeout) — don't hold a V8 isolate for nobody
+                            }
+                            bg
                         }
-                        bg
+                        Err(e) => {
+                            let _ = ready_tx.send(Err(e));
+                            return;
+                        }
+                    };
+                    // Ends when the `Minter` is dropped and the channel closes.
+                    while let Ok(Cmd::Mint { ident, reply }) = rx.recv() {
+                        let mint_res =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                rt.block_on(bg.mint_token(&ident)).map_err(classify)
+                            }))
+                            .unwrap_or_else(|_| {
+                                Err(Error::Transient("botguard isolate panic".into()))
+                            });
+                        let _ = reply.send(mint_res);
                     }
-                    Err(e) => {
-                        let _ = ready_tx.send(Err(e));
-                        return;
-                    }
-                };
-                // Ends when the `Minter` is dropped and the channel closes.
-                while let Ok(Cmd::Mint { ident, reply }) = rx.recv() {
-                    let _ = reply.send(rt.block_on(bg.mint_token(&ident)).map_err(classify));
-                }
+                }));
             })
             .map_err(|e| Error::Fatal(e.to_string()))?;
 

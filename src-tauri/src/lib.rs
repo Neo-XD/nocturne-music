@@ -97,9 +97,9 @@ fn tune_webview(win: &tauri::WebviewWindow, media: bool) {
         if let Some(settings) = WebViewExt::settings(&webview) {
             settings.set_enable_page_cache(false);
             settings.set_enable_media(media);
-            settings.set_enable_mediasource(false);
+            settings.set_enable_mediasource(media);
             settings.set_enable_media_stream(false);
-            settings.set_enable_media_capabilities(false);
+            settings.set_enable_media_capabilities(media);
             settings.set_enable_encrypted_media(false);
             settings.set_enable_webaudio(false);
             settings.set_enable_webrtc(false);
