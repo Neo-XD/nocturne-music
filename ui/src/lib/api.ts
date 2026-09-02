@@ -381,8 +381,18 @@ export const getPlayback = () => invoke<PlaybackSnapshot>('get_playback');
 export const getSettings = () => invoke<Record<string, string>>('get_settings');
 export const setSetting = (key: string, value: string) =>
 	invoke<void>('set_setting', { key, value });
+export interface ClientStats {
+	key: string;
+	latency_ms: number;
+	success_count: number;
+	failure_count: number;
+	penalty: number;
+}
+
 /** Streamable client keys for the "disabled clients" setting. */
 export const getStreamClients = () => invoke<string[]>('get_stream_clients');
+/** Live latency and performance metrics for stream clients. */
+export const getClientLatencies = () => invoke<ClientStats[]>('get_client_latencies');
 /** Wipe both cache tiers (URL cache + mpv on-disk audio cache). */
 export const clearCaches = () => invoke<void>('clear_caches');
 /** Grant the webview a URL for one font file the user picked, so `@font-face` can load it. */

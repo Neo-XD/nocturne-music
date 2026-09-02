@@ -163,6 +163,7 @@
 	const currentTab = $derived(TABS.find((t) => t.id === tab) ?? TABS[0]);
 	let settings = $state<Record<string, string>>({});
 	let clients = $state<string[]>([]);
+	let clientStats = $state<Record<string, api.ClientStats>>({});
 	let proxyInput = $state('');
 	let loaded = $state(false);
 	let clearing = $state(false);
@@ -275,13 +276,19 @@
 
 	async function load() {
 		try {
-			const [s, c] = await Promise.all([
+			const [s, c, stats] = await Promise.all([
 				api.getSettings(),
 				api.getStreamClients(),
+				api.getClientLatencies().catch(() => []),
 				loadLastfm()
 			]);
 			settings = s;
 			clients = c;
+			const smap: Record<string, api.ClientStats> = {};
+			for (const st of stats as api.ClientStats[]) {
+				smap[st.key] = st;
+			}
+			clientStats = smap;
 			proxyInput = s.proxy ?? '';
 			remoteSyncPort = s.remote_sync_port ?? '8080';
 			remoteSyncPin = s.remote_sync_pin ?? '1234';
@@ -1943,13 +1950,26 @@
 
 {#snippet clientList()}
 	<p class="mb-3 max-w-prose text-xs leading-relaxed text-muted-foreground">
-		Turn a client off to skip it when resolving streams. Overridden by the
-		<span class="font-mono">NOCTURNE_DISABLED_CLIENTS</span> env var.
+		Clients are auto-ranked by response latency and health on startup. Turn a client off to skip it when resolving streams.
 	</p>
 	<div class="flex flex-col gap-2">
 		{#each clients as name (name)}
+			{@const stat = clientStats[name]}
 			<div class="flex items-center justify-between rounded-lg bg-muted/60 py-1.5 pr-2 pl-3">
-				<span class="font-mono text-xs">{name}</span>
+				<div class="flex items-center gap-2">
+					<span class="font-mono text-xs">{name}</span>
+					{#if stat}
+						<span
+							class="rounded px-1.5 py-0.5 text-[10px] font-medium {stat.penalty > 0
+								? 'bg-amber-500/15 text-amber-400'
+								: stat.latency_ms < 250
+									? 'bg-emerald-500/15 text-emerald-400'
+									: 'bg-muted text-muted-foreground'}"
+						>
+							{stat.penalty > 0 ? '⚠️ Demoted' : `⚡ ${Math.round(stat.latency_ms)}ms`}
+						</span>
+					{/if}
+				</div>
 				<Switch checked={!disabled.has(name)} onCheckedChange={() => toggleClient(name)} />
 			</div>
 		{/each}

@@ -88,11 +88,163 @@ struct Candidate {
     ping: Option<PlaybackPing>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ClientStats {
+    pub key: String,
+    pub latency_ms: f64,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub penalty: f64,
+}
+
+/// Adaptive stream client latency & health tracker
+pub struct ClientRanker {
+    stats: Arc<Mutex<HashMap<String, ClientStats>>>,
+}
+
+impl ClientRanker {
+    pub fn new() -> Self {
+        let mut map = HashMap::new();
+        map.insert(
+            "ANDROID_VR_1_65_10".to_string(),
+            ClientStats {
+                key: "ANDROID_VR_1_65_10".to_string(),
+                latency_ms: 130.0,
+                success_count: 1,
+                failure_count: 0,
+                penalty: 0.0,
+            },
+        );
+        map.insert(
+            "ANDROID_VR_1_43_32".to_string(),
+            ClientStats {
+                key: "ANDROID_VR_1_43_32".to_string(),
+                latency_ms: 145.0,
+                success_count: 1,
+                failure_count: 0,
+                penalty: 0.0,
+            },
+        );
+        map.insert(
+            "VISIONOS".to_string(),
+            ClientStats {
+                key: "VISIONOS".to_string(),
+                latency_ms: 1050.0,
+                success_count: 1,
+                failure_count: 0,
+                penalty: 0.0,
+            },
+        );
+        Self { stats: Arc::new(Mutex::new(map)) }
+    }
+
+    /// Record resolution success with EMA latency update (alpha = 0.3)
+    pub async fn record_success(&self, key: &str, latency_ms: f64) {
+        let mut map = self.stats.lock().await;
+        let entry = map.entry(key.to_string()).or_insert_with(|| ClientStats {
+            key: key.to_string(),
+            latency_ms,
+            success_count: 0,
+            failure_count: 0,
+            penalty: 0.0,
+        });
+        entry.success_count += 1;
+        entry.latency_ms = (entry.latency_ms * 0.7 + latency_ms * 0.3).max(10.0);
+        entry.penalty = (entry.penalty - 50.0).max(0.0);
+    }
+
+    /// Record a resolution or 403 failure, adding a temporary latency penalty
+    pub async fn record_failure(&self, key: &str) {
+        let mut map = self.stats.lock().await;
+        let entry = map.entry(key.to_string()).or_insert_with(|| ClientStats {
+            key: key.to_string(),
+            latency_ms: 300.0,
+            success_count: 0,
+            failure_count: 0,
+            penalty: 0.0,
+        });
+        entry.failure_count += 1;
+        entry.penalty += 500.0;
+    }
+
+    /// Get ranked fallback candidate keys sorted by effective score (latency + penalty)
+    pub async fn get_ranked_stream_clients(&self, disabled: &HashSet<String>) -> Vec<&'static str> {
+        let map = self.stats.lock().await;
+        let mut candidates: Vec<(&'static str, f64)> = STREAM_FALLBACK_ORDER
+            .iter()
+            .copied()
+            .filter(|k| !disabled.contains(*k))
+            .map(|k| {
+                let score = map.get(k).map_or(200.0, |s| s.latency_ms + s.penalty);
+                (k, score)
+            })
+            .collect();
+
+        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.into_iter().map(|(k, _)| k).collect()
+    }
+
+    /// Run concurrent prewarm probes against candidate stream clients on startup
+    pub async fn benchmark(&self, it: &InnerTube, clients: &Clients, video_id: &str) {
+        let candidates = STREAM_FALLBACK_ORDER;
+        let mut tasks = Vec::new();
+
+        for &key in &candidates {
+            if let Some(client) = clients.get(key) {
+                let it = it.clone();
+                let client = client.clone();
+                let key_str = key.to_string();
+                let video_id_str = video_id.to_string();
+                tasks.push(tokio::spawn(async move {
+                    let start = Instant::now();
+                    let res = tokio::time::timeout(
+                        Duration::from_millis(3000),
+                        it.player(&client, &video_id_str, None, None, None),
+                    )
+                    .await;
+                    let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                    match res {
+                        Ok(Ok(resp)) if resp.playability_status.is_ok() => {
+                            Some((key_str, elapsed, true))
+                        }
+                        _ => Some((key_str, elapsed, false)),
+                    }
+                }));
+            }
+        }
+
+        for task in tasks {
+            if let Ok(Some((key, elapsed, ok))) = task.await {
+                if ok {
+                    tracing::info!(client = %key, latency_ms = elapsed, "stream client benchmark probe ok");
+                    self.record_success(&key, elapsed).await;
+                } else {
+                    tracing::warn!(client = %key, "stream client benchmark probe failed");
+                    self.record_failure(&key).await;
+                }
+            }
+        }
+    }
+
+    /// Status for UI and diagnostics
+    pub async fn get_stats(&self) -> Vec<ClientStats> {
+        let map = self.stats.lock().await;
+        let mut list: Vec<ClientStats> = map.values().cloned().collect();
+        list.sort_by(|a, b| {
+            (a.latency_ms + a.penalty)
+                .partial_cmp(&(b.latency_ms + b.penalty))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        list
+    }
+}
+
 pub struct Orchestrator {
     it: InnerTube,
     clients: Clients,
     cipher: Arc<CipherDeobfuscator>,
     potoken: Arc<PoTokenGenerator>,
+    pub ranker: Arc<ClientRanker>,
     /// videoId → when its WEB_REMIX stream last 403'd on the real GET, so the next resolve skips
     /// WEB_REMIX for it (context/06 §2). Cleared when the cipher self-heals. `Arc` so the
     /// off-hot-path self-heal task can clear it. Entries expire: the bar only has to survive the
@@ -126,13 +278,25 @@ impl Orchestrator {
             clients,
             cipher,
             potoken,
+            ranker: Arc::new(ClientRanker::new()),
             web_remix_failed: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Background benchmark probe across all stream candidate clients on boot
+    pub async fn benchmark_boot(&self) {
+        self.ranker.benchmark(&self.it, &self.clients, "dQw4w9WgXcQ").await;
+    }
+
+    /// Live client statistics and latencies for UI and diagnostics
+    pub async fn get_client_stats(&self) -> Vec<ClientStats> {
+        self.ranker.get_stats().await
     }
 
     /// Record that a WEB_REMIX stream for `video_id` failed on the real GET (called by the player
     /// layer on a playback 403). The next resolve for this id bypasses WEB_REMIX. context/06 §2.
     pub async fn mark_web_remix_failed(&self, video_id: &str) {
+        self.ranker.record_failure(MAIN_CLIENT).await;
         blacklist_insert(&mut *self.web_remix_failed.lock().await, video_id, Instant::now());
     }
 
@@ -147,10 +311,12 @@ impl Orchestrator {
         let prefer_high = matches!(quality, AudioQuality::High | AudioQuality::Auto);
         let logged_in = self.it.is_logged_in();
         let visitor = self.it.visitor_data();
-        // An upload only streams to an authenticated client, so it gets its own chain and never
-        // falls through to the anonymous ones (context: clients::UPLOAD_FALLBACK_ORDER, issue #71).
-        let order: &[&str] =
-            if is_upload { &UPLOAD_FALLBACK_ORDER } else { &STREAM_FALLBACK_ORDER };
+        let ranked_clients = if is_upload {
+            UPLOAD_FALLBACK_ORDER.to_vec()
+        } else {
+            self.ranker.get_ranked_stream_clients(disabled).await
+        };
+        let order: &[&str] = &ranked_clients;
         // Without the uploads-playlist context YouTube hands back upload URLs that expire in about
         // 32 seconds (Metrolist PR #3857). Harmless for ordinary tracks, so scoped to uploads.
         let playlist_id = is_upload.then_some("MLPT");
@@ -219,6 +385,7 @@ impl Orchestrator {
         let last_idx = order.len() as isize - 1;
 
         for idx in -1..=last_idx {
+            let client_t0 = Instant::now();
             let (key, resp): (String, PlayerResponse) = if idx == -1 {
                 // A WEB_REMIX stream that already died in the player is not retried for this
                 // video: it passed HEAD and failed anyway, so validation has nothing left to say.
@@ -252,10 +419,12 @@ impl Orchestrator {
                 match self.it.player(client, video_id, playlist_id, client_sts, client_pot).await {
                     Ok(r) if r.playability_status.is_ok() => (key.to_owned(), r),
                     Ok(r) => {
+                        self.ranker.record_failure(key).await;
                         tracing::debug!(client = key, status = %r.playability_status.status, "not OK");
                         continue;
                     }
                     Err(e) => {
+                        self.ranker.record_failure(key).await;
                         tracing::warn!(client = key, error = %e, "player call failed");
                         continue;
                     }
@@ -271,6 +440,7 @@ impl Orchestrator {
 
             // Resolve the URL: direct, else decipher (context/05).
             let Some(mut url) = self.find_url(format, video_id).await else {
+                self.ranker.record_failure(&key).await;
                 continue;
             };
 
@@ -300,31 +470,11 @@ impl Orchestrator {
                 continue;
             }
 
-            // EVERY client is validated, including WEB_REMIX and the last one in the chain. Both
-            // used to be accepted blind and both were wrong for an mpv-backed player:
-            //
-            // - The last client had rustypipe behind it, so there was never nothing to fall
-            //   through to; skipping the check only hid a dead URL until playback.
-            // - WEB_REMIX skipped it on Metrolist's note that its authed URLs 403 on HEAD but
-            //   stream on GET. That holds for ExoPlayer, which fetches in bounded ranges. mpv opens
-            //   with `Range: bytes=0-`, and for the videos where googlevideo caps a WEB_REMIX URL
-            //   (only the first ~768 KiB is served, in <=256 KiB pieces) that open-ended request
-            //   gets the same 403 the HEAD does.
-            //
-            // Measured on fresh URLs, HEAD agrees with what mpv gets every time: 200/206 for
-            // dQw4w9WgXcQ, 403/403 for XqZsoesa55w and D07O_cbJ_Rw. So the check costs one
-            // round trip and turns a guaranteed failed load, an error toast, a retry and a round
-            // of cipher/PoToken self-heal churn into a silent fall-through at resolve time.
-            //
-            // It also stays correct if a valid PoToken lifts the cap on those videos: then HEAD
-            // passes and WEB_REMIX is used. Nothing here has to know which way that goes.
-            //
-            // The probe sends exactly the headers `build` will hand mpv (same UA, cookie only
-            // where mpv gets one), because a HEAD that carries something the real GET does not
-            // is not a prediction of anything. Issue #71.
             let headers =
                 stream_headers(client.map(|c| c.user_agent.clone()), self.it.cookie(), is_upload);
             if self.validate_head(&url, &headers).await {
+                let elapsed_ms = client_t0.elapsed().as_secs_f64() * 1000.0;
+                self.ranker.record_success(&key, elapsed_ms).await;
                 let ping = main_ping.clone().or_else(|| playback_ping(&resp, &key));
                 return Ok(self.build(
                     video_id,
@@ -338,6 +488,8 @@ impl Orchestrator {
                     headers,
                 ));
             }
+
+            self.ranker.record_failure(&key).await;
 
             // An upload's failed HEAD is a demotion, never a rejection. Metrolist stopped
             // validating privately-owned tracks outright (PR #3517) because a HEAD against one

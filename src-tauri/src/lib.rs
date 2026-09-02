@@ -318,7 +318,7 @@ pub fn run() {
                 player,
                 db,
                 handle.clone(),
-                orchestrator,
+                orchestrator.clone(),
                 lt,
                 cache_dir.clone(),
                 media,
@@ -428,6 +428,13 @@ pub fn run() {
                     potoken.prewarm(&vd).await;
                 });
             }
+            {
+                let orchestrator = orchestrator.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    orchestrator.benchmark_boot().await;
+                });
+            }
             // Mint-and-destroy policy (Phase-0 decision), now applied to the BotGuard V8 isolate
             // rather than a webview. Measured: the live isolate costs ~92 MB RSS, of which a
             // teardown returns ~39 MB (the rest is V8 platform + arenas, retained for the life of
@@ -494,6 +501,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_setting,
             commands::get_stream_clients,
+            commands::get_client_latencies,
             commands::get_remote_sync_status,
             commands::regenerate_remote_sync_pin,
             commands::clear_caches,

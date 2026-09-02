@@ -368,6 +368,14 @@ pub async fn get_stream_clients() -> Result<Vec<String>, String> {
     Ok(v)
 }
 
+/// Retrieve live auto-ranked latency stats for all stream clients
+#[tauri::command]
+pub async fn get_client_latencies(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<crate::orchestrator::ClientStats>, String> {
+    Ok(state.orchestrator.get_client_stats().await)
+}
+
 /// Let the webview fetch one font file the user picked in the Themes tab, so a `@font-face` can
 /// point at it.
 ///
