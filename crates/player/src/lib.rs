@@ -79,6 +79,7 @@ impl Player {
         // resets the process locale from the system locale first, which makes mpv_create()
         // return null (ponytail: locale reset only, revisit if other LC_* categories start
         // tripping mpv too).
+        #[cfg(unix)]
         unsafe {
             libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
         }

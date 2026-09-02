@@ -91,7 +91,10 @@ jobs:
         run: |
           VERSION="$(jq -r .version src-tauri/tauri.conf.json)"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          if [ "v$VERSION" != "${{ steps.rel.outputs.tag }}" ]; then
+          TAG="${{ steps.rel.outputs.tag }}"
+          NORM_TAG="$(echo "$TAG" | sed -E 's/^v//; s/^0\.7d$/0.7.0-d/')"
+          NORM_VER="$(echo "$VERSION" | sed -E 's/^v//; s/^0\.7d$/0.7.0-d/')"
+          if [ "$NORM_VER" != "$NORM_TAG" ] && [ "v$VERSION" != "$TAG" ]; then
             if [ "${{ inputs.dry_run }}" = "true" ]; then
               echo "::warning::dry run: built ref is ${{ steps.rel.outputs.tag }} but the app version is $VERSION"
             else

@@ -1296,7 +1296,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let v07d_note = ReleaseNote {
-        version: "0.7.0-d".to_string(),
+        version: "0.7d".to_string(),
         date: "2026-09-02".to_string(),
         body: r#"### Nocturne Music v0.7d
 

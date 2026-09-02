@@ -10,6 +10,8 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 # libmpv2 is the maintained fork of the abandoned `libmpv` crate (adopted in the Phase 0 spike).
 libmpv2 = "4"
+
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]

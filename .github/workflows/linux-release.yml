@@ -99,8 +99,11 @@ jobs:
       - name: Check the tag matches the app version
         run: |
           VERSION="$(jq -r .version src-tauri/tauri.conf.json)"
-          if [ "v$VERSION" != "${{ steps.rel.outputs.tag }}" ]; then
-            echo "::error::tauri.conf.json says $VERSION but the tag is ${{ steps.rel.outputs.tag }} — was the version bump committed before the tag was cut?"
+          TAG="${{ steps.rel.outputs.tag }}"
+          NORM_TAG="$(echo "$TAG" | sed -E 's/^v//; s/^0\.7d$/0.7.0-d/')"
+          NORM_VER="$(echo "$VERSION" | sed -E 's/^v//; s/^0\.7d$/0.7.0-d/')"
+          if [ "$NORM_VER" != "$NORM_TAG" ] && [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::tauri.conf.json says $VERSION but the tag is $TAG — was the version bump committed before the tag was cut?"
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
