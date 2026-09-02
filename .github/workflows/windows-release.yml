@@ -264,7 +264,7 @@ jobs:
           # beforeBuildCommand emptied: we just ran it. Left on, tauri runs `pnpm build` from the
           # repo root, which has no package.json, so pnpm's choice between ui/ and website/ is down
           # to the filesystem — it resolves to ui here and to website on Linux. Working by accident.
-          tauri build --config src-tauri/tauri.windows.conf.json --config '{"build":{"beforeBuildCommand":""}}'   # → target/release/bundle/{nsis,msi}/
+          tauri build --bundles nsis --config src-tauri/tauri.windows.conf.json --config '{"build":{"beforeBuildCommand":""}}'   # → target/release/bundle/nsis/
 
       - name: Dry run — built and signed, attaching nothing
         if: ${{ inputs.dry_run }}
