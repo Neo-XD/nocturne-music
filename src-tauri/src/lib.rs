@@ -200,9 +200,8 @@ pub fn run() {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "info,app_lib=debug,nocturne_app=debug,limusic_app=debug".into()
-            }),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,app_lib=debug,nocturne_app=debug".into()),
         )
         .init();
 
@@ -348,6 +347,9 @@ pub fn run() {
                             .get_setting("remote_sync_port")
                             .and_then(|p| p.parse::<u16>().ok())
                             .unwrap_or(8080);
+                        rs_ctrl
+                            .set_pairing_pin(crate::remotesync::ensure_pairing_pin(&db_sync))
+                            .await;
                         let _ = rs_ctrl.start(port).await;
                     }
                 });
@@ -493,6 +495,7 @@ pub fn run() {
             commands::set_setting,
             commands::get_stream_clients,
             commands::get_remote_sync_status,
+            commands::regenerate_remote_sync_pin,
             commands::clear_caches,
             commands::get_account,
             commands::get_account_identities,

@@ -23,7 +23,7 @@
 # Bump "version" in src-tauri/tauri.conf.json AND Cargo.toml BEFORE running (tauri.conf.json is the
 # app version the updater compares against; the preflight below refuses to run if they disagree).
 #
-# Requires: the private signing key at ~/.tauri/limusic.key, `gh` authed, jq, curl.
+# Requires: the private signing key at ~/.tauri/nocturne.key, `gh` authed, jq, curl.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

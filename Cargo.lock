@@ -3147,6 +3147,7 @@ version = "0.6.7"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

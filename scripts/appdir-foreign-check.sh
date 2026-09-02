@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Check a Limusic AppDir on a distro that isn't the build host. Runs INSIDE a container, with the
+# Check a Nocturne AppDir on a distro that isn't the build host. Runs INSIDE a container, with the
 # AppDir mounted at /app, and installs the desktop packages it needs itself.
 #
-#   podman run --rm -v "$PWD/target/release/bundle/appimage/limusic.AppDir:/app:ro,z" \
+#   podman run --rm -v "$PWD/target/release/bundle/appimage/nocturne.AppDir:/app:ro,z" \
 #     -v "$PWD/scripts/appdir-foreign-check.sh:/check.sh:ro,z" debian:sid bash /check.sh
 #
 # Also runs against a published release: extract it with `--appimage-extract` and mount

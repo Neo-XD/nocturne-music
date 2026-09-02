@@ -11,6 +11,7 @@
 		InformationCircleIcon,
 		ViewIcon,
 		ViewOffSlashIcon,
+		Refresh01Icon,
 		Link04Icon,
 		KeyboardIcon,
 		ArrowUp01Icon,
@@ -229,6 +230,8 @@
 	}
 
 	onMount(() => {
+		// Without this syncInfo stays null and the pairing PIN row falls back to a stale default.
+		void fetchSyncStatus();
 		const sub = api.onLastfmState((s) => {
 			lastfmConnecting = false;
 			lastfmConnected = s.connected;
@@ -529,6 +532,8 @@
 	async function setRemoteSync(on: boolean) {
 		settings.remote_sync_enabled = on ? 'true' : 'false';
 		await api.setSetting('remote_sync_enabled', settings.remote_sync_enabled);
+		// Enabling generates a PIN on the Rust side, so the panel must re-read it rather than show the old value.
+		await fetchSyncStatus();
 		if (on) toast.success(`Remote Sync Server listening on port ${remoteSyncPort || '8080'}`);
 		else toast('Remote Sync Server stopped');
 	}
@@ -537,6 +542,20 @@
 		remoteSyncPort = val;
 		settings.remote_sync_port = val;
 		await api.setSetting('remote_sync_port', val);
+	}
+
+	let showPairingPin = $state(false);
+
+	// Minted in Rust from a CSPRNG; Math.random is not suitable for a pairing credential.
+	async function regenerateRemoteSyncPin() {
+		try {
+			remoteSyncPin = await api.regenerateRemoteSyncPin();
+			settings.remote_sync_pin = remoteSyncPin;
+			await fetchSyncStatus();
+		} catch (e) {
+			console.error('Failed to regenerate pairing PIN', e);
+			await fetchSyncStatus();
+		}
 	}
 
 	async function updateRemoteSyncPin(val: string) {
@@ -1427,6 +1446,29 @@
 						title={showHostIp ? 'Hide IP' : 'Reveal IP'}
 					>
 						<HugeiconsIcon icon={showHostIp ? ViewOffSlashIcon : ViewIcon} class="h-3.5 w-3.5" />
+					</button>
+				</div>
+			</div>
+
+			<div class="flex items-center justify-between">
+				<span class="text-muted-foreground">Pairing PIN:</span>
+				<div class="flex items-center gap-2 font-mono text-foreground">
+					<span>{showPairingPin ? (syncInfo?.pairing_pin || remoteSyncPin) : '•'.repeat((syncInfo?.pairing_pin || remoteSyncPin).length)}</span>
+					<button
+						type="button"
+						class="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+						onclick={() => (showPairingPin = !showPairingPin)}
+						title={showPairingPin ? 'Hide PIN' : 'Reveal PIN'}
+					>
+						<HugeiconsIcon icon={showPairingPin ? ViewOffSlashIcon : ViewIcon} class="h-3.5 w-3.5" />
+					</button>
+					<button
+						type="button"
+						class="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+						onclick={regenerateRemoteSyncPin}
+						title="Generate a new PIN"
+					>
+						<HugeiconsIcon icon={Refresh01Icon} class="h-3.5 w-3.5" />
 					</button>
 				</div>
 			</div>

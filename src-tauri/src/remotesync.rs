@@ -6,9 +6,10 @@
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
+use listen_protocol::pairing::{constant_time_eq, expected_pin_hash, is_valid_pin, AttemptLimiter};
 use listen_protocol::{RoomState, Track};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -57,6 +58,7 @@ pub struct ConnectedClient {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteSyncInfo {
     pub is_running: bool,
+    pub pairing_pin: String,
     pub port: u16,
     pub local_ip: String,
     pub device_name: String,
@@ -70,6 +72,8 @@ pub struct RemoteSyncController {
     shutdown_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
     current_port: Arc<RwLock<u16>>,
+    pairing_pin: Arc<RwLock<String>>,
+    auth_failures: Arc<RwLock<AttemptLimiter>>,
 }
 
 impl RemoteSyncController {
@@ -82,6 +86,8 @@ impl RemoteSyncController {
             shutdown_tx: Arc::new(Mutex::new(None)),
             connected_clients: Arc::new(RwLock::new(Vec::new())),
             current_port: Arc::new(RwLock::new(8080)),
+            pairing_pin: Arc::new(RwLock::new(String::new())),
+            auth_failures: Arc::new(RwLock::new(AttemptLimiter::new())),
         }
     }
 
@@ -102,11 +108,16 @@ impl RemoteSyncController {
 
         RemoteSyncInfo {
             is_running: self.is_running(),
+            pairing_pin: self.pairing_pin.read().await.clone(),
             port,
             local_ip,
             device_name,
             connected_clients: clients,
         }
+    }
+
+    pub async fn set_pairing_pin(&self, pin: String) {
+        *self.pairing_pin.write().await = pin;
     }
 
     pub async fn start(&self, port: u16) -> Result<(), String> {
@@ -126,6 +137,8 @@ impl RemoteSyncController {
         let broadcast_tx = self.broadcast_tx.clone();
         let state_ref = self.state_ref.clone();
         let connected_clients = self.connected_clients.clone();
+        let pairing_pin = self.pairing_pin.clone();
+        let auth_failures = self.auth_failures.clone();
 
         // Spawn UDP Discovery Beacon and Responder (Port 8081)
         tokio::spawn(async move {
@@ -147,8 +160,10 @@ impl RemoteSyncController {
                                 let b_rx = broadcast_tx.subscribe();
                                 let st_ref = state_ref.clone();
                                 let clients_ref = connected_clients.clone();
+                                let pin_ref = pairing_pin.clone();
+                                let fails_ref = auth_failures.clone();
                                 tokio::spawn(async move {
-                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref).await;
+                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref, pin_ref, fails_ref).await;
                                 });
                             }
                             Err(e) => {
@@ -233,6 +248,59 @@ async fn run_udp_discovery(ws_port: u16) {
     }
 }
 
+/// Outcome of one handshake. `WrongPin` is the only one that counts against the address.
+enum AuthOutcome {
+    Ok(String),
+    WrongPin,
+    Aborted,
+}
+
+/// Reads one `AuthResponse` and verifies it.
+async fn await_auth<S, R>(
+    receiver: &mut R,
+    sender: &mut S,
+    nonce: &str,
+    pairing_pin: &Arc<RwLock<String>>,
+) -> AuthOutcome
+where
+    S: SinkExt<Message> + Unpin,
+    R: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    while let Some(Ok(msg)) = receiver.next().await {
+        let Message::Text(text) = msg else { continue };
+        let Ok(SyncWireMessage::AuthResponse { client_device_name, pin_hash }) =
+            serde_json::from_str::<SyncWireMessage>(&text)
+        else {
+            continue;
+        };
+        let pin = pairing_pin.read().await.clone();
+        let ok = !pin.is_empty()
+            && pin_hash.is_some_and(|h| constant_time_eq(&h, &expected_pin_hash(nonce, &pin)));
+        let reply = SyncWireMessage::AuthResult {
+            success: ok,
+            session_token: ok.then(|| format!("{:032x}", rand::random::<u128>())),
+            message: (!ok).then(|| "Incorrect pairing PIN".to_string()),
+        };
+        if let Ok(json) = serde_json::to_string(&reply) {
+            let _ = sender.send(Message::Text(json.into())).await;
+        }
+        return if ok { AuthOutcome::Ok(client_device_name) } else { AuthOutcome::WrongPin };
+    }
+    AuthOutcome::Aborted
+}
+
+/// The persisted pairing PIN, generating a six-digit one when absent or unusable, because a constant default would ship every install the same PIN.
+pub fn ensure_pairing_pin(db: &crate::db::Db) -> String {
+    match db.get_setting("remote_sync_pin").filter(|p| is_valid_pin(p)) {
+        Some(pin) => pin,
+        None => {
+            let pin = format!("{:06}", rand::random::<u32>() % 1_000_000);
+            db.set_setting("remote_sync_pin", &pin);
+            pin
+        }
+    }
+}
+
 async fn handle_connection(
     stream: TcpStream,
     peer_addr: SocketAddr,
@@ -240,6 +308,8 @@ async fn handle_connection(
     mut b_rx: broadcast::Receiver<String>,
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
+    pairing_pin: Arc<RwLock<String>>,
+    auth_failures: Arc<RwLock<AttemptLimiter>>,
 ) {
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
@@ -262,18 +332,61 @@ async fn handle_connection(
         connected_at: now_secs,
     };
 
+    if !auth_failures.write().await.allows(peer_addr.ip(), Instant::now()) {
+        tracing::warn!("remote sync: {client_ip} is locked out after repeated bad PINs");
+        let msg = SyncWireMessage::AuthResult {
+            success: false,
+            session_token: None,
+            message: Some("Too many incorrect PINs. Try again in 15 minutes.".into()),
+        };
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = ws_sender.send(Message::Text(json.into())).await;
+        }
+        return;
+    }
+
+    let nonce = format!("{:032x}", rand::random::<u128>());
+    let challenge = SyncWireMessage::AuthChallenge {
+        nonce: nonce.clone(),
+        host_device_name: get_device_name(),
+    };
+    if ws_sender
+        .send(Message::Text(serde_json::to_string(&challenge).unwrap().into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    // Bounded so an unauthenticated peer cannot hold a socket open indefinitely.
+    let authed = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        await_auth(&mut ws_receiver, &mut ws_sender, &nonce, &pairing_pin),
+    )
+    .await;
+
+    let client_name = match authed {
+        Ok(AuthOutcome::Ok(name)) => {
+            auth_failures.write().await.record_success(peer_addr.ip());
+            name
+        }
+        // Only a wrong PIN counts against the address; a dropped socket or a timeout must not lock out a device that knows it.
+        Ok(AuthOutcome::WrongPin) => {
+            auth_failures.write().await.record_failure(peer_addr.ip(), Instant::now());
+            tracing::warn!("remote sync: wrong PIN from {client_ip}");
+            return;
+        }
+        _ => {
+            tracing::debug!("remote sync: handshake abandoned by {client_ip}");
+            return;
+        }
+    };
+
+    client_info.name = client_name;
     {
         let mut clients = connected_clients.write().await;
         clients.push(client_info.clone());
     }
-
-    // Send immediate Auth OK & initial state on connect
-    let auth_ok = SyncWireMessage::AuthResult {
-        success: true,
-        session_token: Some("token_ok".into()),
-        message: None,
-    };
-    let _ = ws_sender.send(Message::Text(serde_json::to_string(&auth_ok).unwrap().into())).await;
 
     if let Some(app_state) = state_ref.read().await.as_ref() {
         let snapshot = app_state.playback_snapshot().await;
@@ -298,13 +411,6 @@ async fn handle_connection(
                     Some(Ok(Message::Text(t))) => {
                         if let Ok(wire_msg) = serde_json::from_str::<SyncWireMessage>(&t) {
                             match wire_msg {
-                                SyncWireMessage::AuthResponse { client_device_name, .. } => {
-                                    client_info.name = client_device_name;
-                                    let mut clients = connected_clients.write().await;
-                                    if let Some(c) = clients.iter_mut().find(|c| c.id == client_id) {
-                                        c.name = client_info.name.clone();
-                                    }
-                                }
                                 SyncWireMessage::PlaybackAction { action } => {
                                     if let Some(app_state) = state_ref.read().await.as_ref() {
                                         apply_remote_action(app_state, action).await;

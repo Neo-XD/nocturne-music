@@ -22,7 +22,7 @@ name: macOS release binaries
 # Intel Macs need a second leg on `macos-13` publishing `darwin-x86_64`; add it when someone asks.
 #
 # NOT SIGNED WITH AN APPLE CERT, so the app is quarantined on first launch and Gatekeeper says the
-# app "is damaged". Users clear it with `xattr -dr com.apple.quarantine /Applications/limusic.app`.
+# app "is damaged". Users clear it with `xattr -dr com.apple.quarantine "/Applications/Nocturne Music.app"`.
 # Fixing that properly is a paid Apple Developer account plus notarization. See RELEASING.md §6.
 #
 # It can also be run by hand against an older tag to backfill:
@@ -342,7 +342,7 @@ jobs:
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: limusic-macos-dry-run-${{ steps.rel.outputs.tag }}
+          name: nocturne-macos-dry-run-${{ steps.rel.outputs.tag }}
           path: |
             target/release/bundle/dmg/*.dmg
             target/release/bundle/macos/*.app.tar.gz

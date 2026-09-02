@@ -221,7 +221,7 @@ echo "==> Overriding GIO_EXTRA_MODULES with the bundled module dirs…"
 # silently leave half the fix out.
 grep -q 'GIO_MODULE_DIR' "$HOOK" || cat >> "$HOOK" <<'EOF'
 
-# Limusic: the value written above is unusable — it contains a literal newline and an absolute path
+# Nocturne: the value written above is unusable — it contains a literal newline and an absolute path
 # into the build machine's target/ dir. Bundled dirs only: host modules are built against the host's
 # GLib and fail to load into ours (gvfs wants g_variant_builder_init_static, GLib >= 2.84).
 export GIO_EXTRA_MODULES="$APPDIR/usr/lib/gio/modules:$APPDIR/usr/lib64/gio/modules"
@@ -255,7 +255,7 @@ echo "==> bundled gio modules: $MODS"
 #     this block silently skip itself there.
 grep -q 'GST_PLUGIN_SYSTEM_PATH_1_0' "$HOOK" || cat >> "$HOOK" <<'EOF'
 
-# Limusic: WebKit decodes <video> through GStreamer, and the plugins travel with us (defect 5).
+# Nocturne: WebKit decodes <video> through GStreamer, and the plugins travel with us (defect 5).
 # _1_0 is the versioned spelling GStreamer 1.x reads first, and SYSTEM_PATH replaces the compiled-in
 # /usr/lib/x86_64-linux-gnu/gstreamer-1.0 rather than adding to it, so a Debian host's own plugins
 # are never loaded into the older GStreamer we ship.

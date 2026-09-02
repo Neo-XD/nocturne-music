@@ -531,6 +531,7 @@ export interface ConnectedClient {
 
 export interface RemoteSyncInfo {
 	is_running: boolean;
+	pairing_pin: string;
 	port: number;
 	local_ip: string;
 	device_name: string;
@@ -538,6 +539,7 @@ export interface RemoteSyncInfo {
 }
 
 export const getRemoteSyncStatus = () => invoke<RemoteSyncInfo>('get_remote_sync_status');
+export const regenerateRemoteSyncPin = () => invoke<string>('regenerate_remote_sync_pin');
 
 // --- events (context/11). Each returns an unlisten fn; call it on component teardown. --------
 export const onNowPlaying = (cb: (n: NowPlaying) => void): Promise<UnlistenFn> =>

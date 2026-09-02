@@ -8,7 +8,7 @@ name: Checks
 # had no way to know. `rustfmt.toml` is committed now and the tree was normalised to it, which means
 # the drift is detectable mechanically instead of during review.
 #
-# WHY NOT ALSO BUILD AND TEST HERE: `limusic-app` links libmpv and webkit2gtk, so testing it needs
+# WHY NOT ALSO BUILD AND TEST HERE: `nocturne-app` links libmpv and webkit2gtk, so testing it needs
 # the full Tauri system-dependency install and a cold Rust compile. This job needs neither: rustfmt
 # parses the source and never builds it, so it finishes in seconds on a bare runner and stays cheap
 # enough to run on every push. If you do want tests in CI later, add a separate job rather than

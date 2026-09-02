@@ -307,7 +307,7 @@ pub async fn set_setting(
         };
         res.map_err(|e| format!("autostart: {e}"))?;
     }
-    if key == "remote_sync_enabled" || key == "remote_sync_port" {
+    if key == "remote_sync_enabled" || key == "remote_sync_port" || key == "remote_sync_pin" {
         use tauri::Manager;
         if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
         {
@@ -318,14 +318,33 @@ pub async fn set_setting(
                 .and_then(|p| p.parse::<u16>().ok())
                 .unwrap_or(8080);
             let rs = rs.inner().clone();
-            if enabled {
-                let _ = rs.start(port).await;
-            } else {
-                rs.stop().await;
+            rs.set_pairing_pin(crate::remotesync::ensure_pairing_pin(&state.db)).await;
+            // A PIN edit takes effect on the next handshake; restarting here would drop a paired phone to change a value it already sent.
+            if key != "remote_sync_pin" {
+                if enabled {
+                    let _ = rs.start(port).await;
+                } else {
+                    rs.stop().await;
+                }
             }
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn regenerate_remote_sync_pin(
+    app: tauri::AppHandle,
+    state: St<'_>,
+) -> Result<String, String> {
+    use tauri::Manager;
+    // Minted here rather than in the webview, so the pairing PIN always comes from a CSPRNG.
+    let pin = format!("{:06}", rand::random::<u32>() % 1_000_000);
+    state.db.set_setting("remote_sync_pin", &pin);
+    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+        rs.inner().clone().set_pairing_pin(pin.clone()).await;
+    }
+    Ok(pin)
 }
 
 #[tauri::command]
@@ -1425,7 +1444,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
 /// Tauri's Linux updater knows one trick: rewrite an AppImage in place. It takes the path from
 /// `Env::appimage` and, when that is unset, falls back to `current_exe()` and writes the downloaded
 /// AppImage bytes over whatever it finds there. On the `.rpm` and on distro packages (the AUR's
-/// `limusic-bin`) that is a package-manager-owned `/usr/bin/limusic-app`: it fails on permissions
+/// `nocturne-bin`) that is a package-manager-owned `/usr/bin/nocturne-app`: it fails on permissions
 /// rather than doing damage, but offering the button at all is a lie. Those users update through
 /// their package manager, so the UI shows them a download link instead.
 ///
