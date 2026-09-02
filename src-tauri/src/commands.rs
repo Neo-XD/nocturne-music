@@ -1295,6 +1295,18 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v07d_note = ReleaseNote {
+        version: "0.7.0-d".to_string(),
+        date: "2026-09-02".to_string(),
+        body: r#"### Nocturne Music v0.7d
+
+- **Instant Cold Playback & Latency Optimization**: Reordered the fallback stream resolver to prioritize high-speed Android VR audio clients (~130ms resolution vs 1,050ms) and bounded BotGuard V8 VM isolate solver retries to completely eliminate cold playback freezes on Linux and unplayed tracks.
+- **Hardware Acceleration Setting**: Added a dedicated Hardware Acceleration toggle in Settings ▸ Performance for granular control over GPU compositing vs CPU software rendering, including automatic NVIDIA Wayland explicit sync stability workarounds.
+- **Streamlined Last.fm OAuth Web Login**: Removed manual API Key and Secret input forms in favor of 1-click web OAuth authorization using GitHub Actions CI/CD environment secrets.
+- **Listen Together Polish**: Shortened room invite codes to clean, typable `CODE@host` links (e.g. `AF7SDLML@fedora-1.tail9c4985.ts.net`) and cleaned up orphan pending joiners on participant disconnect.
+- **Thumbnail Invalidation & Memory Refinements**: Keyed failed thumbnails by image URL instead of tile ID so refreshed library covers load immediately, bounded playback failure memory to a 30-minute TTL, and stopped idle drag-and-drop auto-scroll timers."#.to_string(),
+    };
+
     let v067_note = ReleaseNote {
         version: "0.6.7".to_string(),
         date: "2026-08-30".to_string(),
@@ -1404,8 +1416,10 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         prerelease: bool,
     }
 
-    let mut notes =
-        vec![v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note];
+    let mut notes = vec![
+        v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note,
+        v06_note,
+    ];
 
     let known_versions: std::collections::HashSet<String> =
         notes.iter().map(|n| n.version.clone()).collect();
