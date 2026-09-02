@@ -323,7 +323,6 @@ jobs:
 
           EXE="$(ls target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1 || true)"
           SIG="$EXE.sig"
-          MSI="$(ls target/release/bundle/msi/*.msi 2>/dev/null | head -1 || true)"
 
           if [ -z "$EXE" ] || [ ! -f "$EXE" ]; then
             echo "::error::expected installer not found in target/release/bundle/nsis"; find target/release/bundle -maxdepth 2; exit 1
@@ -332,7 +331,7 @@ jobs:
             echo "::error::no .sig next to the installer — signing key missing, or createUpdaterArtifacts got turned off"; exit 1
           fi
 
-          retry 3 gh release upload "$TAG" "$EXE" "$SIG" ${MSI:+"$MSI"} --clobber --repo "$GITHUB_REPOSITORY"
+          retry 3 gh release upload "$TAG" "$EXE" "$SIG" --clobber --repo "$GITHUB_REPOSITORY"
 
           # latest.json is the one thing both release workflows write, and they now run in parallel.
           # There is no compare-and-swap on release assets, so: merge, upload, read back, and retry
