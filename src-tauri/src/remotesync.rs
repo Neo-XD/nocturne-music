@@ -9,9 +9,10 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
-use listen_protocol::pairing::{
-    constant_time_eq, expected_pin_hash, is_valid_pin, PairingGate, Refusal,
+use listen_protocol::handshake::{
+    run_handshake, HandshakeOutcome, RemotePlaybackAction, SyncWireMessage,
 };
+use listen_protocol::pairing::{is_valid_pin, PairingGate, Refusal};
 use listen_protocol::{RoomState, Track};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,33 +22,6 @@ use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::state::AppState;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SyncWireMessage {
-    AuthChallenge { nonce: String, host_device_name: String },
-    AuthResponse { client_device_name: String, pin_hash: Option<String> },
-    AuthResult { success: bool, session_token: Option<String>, message: Option<String> },
-    SyncState { state: RoomState },
-    PlaybackAction { action: RemotePlaybackAction },
-    Ping,
-    Pong,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemotePlaybackAction {
-    pub kind: String,
-    #[serde(default)]
-    pub position_ms: i64,
-    #[serde(default)]
-    pub track: Option<Track>,
-    #[serde(default)]
-    pub queue: Option<Vec<Track>>,
-    #[serde(default)]
-    pub playing: bool,
-    #[serde(default)]
-    pub volume: f64,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectedClient {
@@ -258,47 +232,6 @@ fn refusal_message(refusal: &Refusal) -> &'static str {
     }
 }
 
-/// Outcome of one handshake. `WrongPin` is the only one that counts against the address.
-enum AuthOutcome {
-    Ok(String),
-    WrongPin,
-    Aborted,
-}
-
-/// Reads one `AuthResponse` and verifies it.
-async fn await_auth<S, R>(
-    receiver: &mut R,
-    sender: &mut S,
-    nonce: &str,
-    pairing_pin: &Arc<RwLock<String>>,
-) -> AuthOutcome
-where
-    S: SinkExt<Message> + Unpin,
-    R: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    while let Some(Ok(msg)) = receiver.next().await {
-        let Message::Text(text) = msg else { continue };
-        let Ok(SyncWireMessage::AuthResponse { client_device_name, pin_hash }) =
-            serde_json::from_str::<SyncWireMessage>(&text)
-        else {
-            continue;
-        };
-        let pin = pairing_pin.read().await.clone();
-        let ok = !pin.is_empty()
-            && pin_hash.is_some_and(|h| constant_time_eq(&h, &expected_pin_hash(nonce, &pin)));
-        let reply = SyncWireMessage::AuthResult {
-            success: ok,
-            session_token: ok.then(|| format!("{:032x}", rand::random::<u128>())),
-            message: (!ok).then(|| "Incorrect pairing PIN".to_string()),
-        };
-        if let Ok(json) = serde_json::to_string(&reply) {
-            let _ = sender.send(Message::Text(json.into())).await;
-        }
-        return if ok { AuthOutcome::Ok(client_device_name) } else { AuthOutcome::WrongPin };
-    }
-    AuthOutcome::Aborted
-}
-
 /// The persisted pairing PIN, generating a six-digit one when absent or unusable, because a constant default would ship every install the same PIN.
 pub fn ensure_pairing_pin(db: &crate::db::Db) -> String {
     match db.get_setting("remote_sync_pin").filter(|p| is_valid_pin(p)) {
@@ -359,31 +292,44 @@ async fn handle_connection(
     };
 
     let nonce = format!("{:032x}", rand::random::<u128>());
-    let challenge = SyncWireMessage::AuthChallenge {
-        nonce: nonce.clone(),
-        host_device_name: get_device_name(),
-    };
-    if ws_sender
-        .send(Message::Text(serde_json::to_string(&challenge).unwrap().into()))
-        .await
-        .is_err()
-    {
-        return;
-    }
+    let session_token = format!("{:032x}", rand::random::<u128>());
 
-    // Bounded so an unauthenticated peer cannot hold a socket open indefinitely.
-    let authed = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        await_auth(&mut ws_receiver, &mut ws_sender, &nonce, &pairing_pin),
-    )
-    .await;
+    let authed = {
+        let mut tx = (&mut ws_sender).with(|text: String| {
+            std::future::ready(Ok::<_, tokio_tungstenite::tungstenite::Error>(Message::Text(
+                text.into(),
+            )))
+        });
+        // Stopping at the first transport error ends the stream, which run_handshake reads as an
+        // abandoned handshake; text frames pass through and every other kind becomes None to skip.
+        let mut rx =
+            (&mut ws_receiver).take_while(|frame| std::future::ready(frame.is_ok())).map(|frame| {
+                match frame {
+                    Ok(Message::Text(text)) => Some(text.to_string()),
+                    _ => None,
+                }
+            });
+        // Bounded so an unauthenticated peer cannot hold a socket open indefinitely.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            run_handshake(
+                &mut rx,
+                &mut tx,
+                &nonce,
+                &get_device_name(),
+                || async { pairing_pin.read().await.clone() },
+                &session_token,
+            ),
+        )
+        .await
+    };
 
     let client_name = match authed {
-        Ok(AuthOutcome::Ok(name)) => {
+        Ok(HandshakeOutcome::Authenticated { client_device_name }) => {
             ticket.succeeded();
-            name
+            client_device_name
         }
-        Ok(AuthOutcome::WrongPin) => {
+        Ok(HandshakeOutcome::WrongPin) => {
             ticket.wrong_pin();
             tracing::warn!("remote sync: wrong PIN from {client_ip}");
             return;
