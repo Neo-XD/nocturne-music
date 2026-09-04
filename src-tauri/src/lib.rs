@@ -342,14 +342,13 @@ pub fn run() {
                 let db_sync = app_state.db.clone();
                 let rs_ctrl = remote_sync.clone();
                 tauri::async_runtime::spawn(async move {
+                    // Set before the enabled check so settings can show the PIN the server will accept while it is stopped.
+                    rs_ctrl.set_pairing_pin(crate::remotesync::ensure_pairing_pin(&db_sync)).await;
                     if db_sync.get_setting("remote_sync_enabled").as_deref() != Some("false") {
                         let port = db_sync
                             .get_setting("remote_sync_port")
                             .and_then(|p| p.parse::<u16>().ok())
                             .unwrap_or(8080);
-                        rs_ctrl
-                            .set_pairing_pin(crate::remotesync::ensure_pairing_pin(&db_sync))
-                            .await;
                         let _ = rs_ctrl.start(port).await;
                     }
                 });

@@ -231,7 +231,7 @@
 	}
 
 	onMount(() => {
-		// Without this syncInfo stays null and the pairing PIN row falls back to a stale default.
+		// Without this syncInfo stays null and the pairing PIN row cannot show the server's PIN.
 		void fetchSyncStatus();
 		const sub = api.onLastfmState((s) => {
 			lastfmConnecting = false;
@@ -291,7 +291,6 @@
 			clientStats = smap;
 			proxyInput = s.proxy ?? '';
 			remoteSyncPort = s.remote_sync_port ?? '8080';
-			remoteSyncPin = s.remote_sync_pin ?? '1234';
 			initLyricsProviders(s.lyrics_providers ?? s.lyrics_priority);
 		} catch (e) {
 			toast.error(String(e));
@@ -515,8 +514,9 @@
 
 	const remoteSyncOn = $derived(settings.remote_sync_enabled === 'true');
 	let remoteSyncPort = $state('8080');
-	let remoteSyncPin = $state('1234');
 	let syncInfo = $state<api.RemoteSyncInfo | null>(null);
+	// The server is the only source for this; empty means it holds no PIN a phone could use.
+	const pairingPin = $derived(syncInfo?.pairing_pin ?? '');
 	let showHostIp = $state(false);
 
 	function maskIp(ip: string) {
@@ -556,19 +556,11 @@
 	// Minted in Rust from a CSPRNG; Math.random is not suitable for a pairing credential.
 	async function regenerateRemoteSyncPin() {
 		try {
-			remoteSyncPin = await api.regenerateRemoteSyncPin();
-			settings.remote_sync_pin = remoteSyncPin;
-			await fetchSyncStatus();
+			await api.regenerateRemoteSyncPin();
 		} catch (e) {
 			console.error('Failed to regenerate pairing PIN', e);
-			await fetchSyncStatus();
 		}
-	}
-
-	async function updateRemoteSyncPin(val: string) {
-		remoteSyncPin = val;
-		settings.remote_sync_pin = val;
-		await api.setSetting('remote_sync_pin', val);
+		await fetchSyncStatus();
 	}
 
 	async function toggleClient(name: string) {
@@ -1430,10 +1422,17 @@
 					Nocturne Mobile auto-discovers this PC over Wi-Fi. For manual connection, use the IP below.
 				</p>
 			</div>
-			<span class="flex items-center gap-1 text-[11px] font-medium text-emerald-500">
-				<HugeiconsIcon icon={Wifi01Icon} class="h-3.5 w-3.5" />
-				LAN Sync Ready
-			</span>
+			{#if syncInfo?.is_running}
+				<span class="flex items-center gap-1 text-[11px] font-medium text-emerald-500">
+					<HugeiconsIcon icon={Wifi01Icon} class="h-3.5 w-3.5" />
+					LAN Sync Ready
+				</span>
+			{:else}
+				<span class="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+					<HugeiconsIcon icon={Wifi01Icon} class="h-3.5 w-3.5" />
+					Sync Server Stopped
+				</span>
+			{/if}
 		</div>
 
 		<div class="space-y-2 rounded-lg border bg-card/60 p-3 text-xs">
@@ -1460,15 +1459,19 @@
 			<div class="flex items-center justify-between">
 				<span class="text-muted-foreground">Pairing PIN:</span>
 				<div class="flex items-center gap-2 font-mono text-foreground">
-					<span>{showPairingPin ? (syncInfo?.pairing_pin || remoteSyncPin) : '•'.repeat((syncInfo?.pairing_pin || remoteSyncPin).length)}</span>
-					<button
-						type="button"
-						class="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-						onclick={() => (showPairingPin = !showPairingPin)}
-						title={showPairingPin ? 'Hide PIN' : 'Reveal PIN'}
-					>
-						<HugeiconsIcon icon={showPairingPin ? ViewOffSlashIcon : ViewIcon} class="h-3.5 w-3.5" />
-					</button>
+					{#if pairingPin}
+						<span>{showPairingPin ? pairingPin : '•'.repeat(pairingPin.length)}</span>
+						<button
+							type="button"
+							class="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+							onclick={() => (showPairingPin = !showPairingPin)}
+							title={showPairingPin ? 'Hide PIN' : 'Reveal PIN'}
+						>
+							<HugeiconsIcon icon={showPairingPin ? ViewOffSlashIcon : ViewIcon} class="h-3.5 w-3.5" />
+						</button>
+					{:else}
+						<span class="font-sans text-muted-foreground">Not configured yet</span>
+					{/if}
 					<button
 						type="button"
 						class="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
