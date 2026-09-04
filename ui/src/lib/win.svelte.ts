@@ -7,6 +7,8 @@ let started = false;
 // Set while our own setFullscreen call is in flight, so the resize it causes is not mistaken for the user leaving fullscreen.
 let applying = false;
 let wasMaximized = false;
+// Bumped when a transition settles, so an isFullscreen read that straddled one is dropped instead of overwriting win.fullscreen.
+let transitions = 0;
 let pending: Promise<void> = Promise.resolve();
 let exitHandler: (() => void) | null = null;
 
@@ -48,6 +50,7 @@ async function applyFullscreen(on: boolean): Promise<void> {
 		win.fullscreen = await w.isFullscreen().catch(() => false);
 	} finally {
 		applying = false;
+		transitions++;
 	}
 }
 
@@ -61,12 +64,20 @@ export function initWin(): () => void {
 			w.isMaximized()
 				.then((m) => (win.maximized = m))
 				.catch(() => {});
+			const seen = transitions;
 			w.isFullscreen()
 				.then((f) => {
-					if (applying) return;
+					if (applying || seen !== transitions) return;
 					const left = win.fullscreen && !f;
 					win.fullscreen = f;
-					if (left) exitHandler?.();
+					if (left) {
+						// Restored here, not via setWindowFullscreen: this path has already cleared win.fullscreen, so applyFullscreen would match the target and return.
+						if (wasMaximized) {
+							wasMaximized = false;
+							w.maximize().catch(() => {});
+						}
+						exitHandler?.();
+					}
 				})
 				.catch(() => {});
 		};
