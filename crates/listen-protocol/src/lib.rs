@@ -6,6 +6,7 @@
 //! JSON instead of protobuf, and the server hands the host role off on disconnect instead of
 //! freezing the room for 15 minutes (context/19 §4.7 "host-gone dead zone").
 
+pub mod handshake;
 pub mod pairing;
 
 use serde::{Deserialize, Serialize};

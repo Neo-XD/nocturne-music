@@ -3145,6 +3145,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 name = "listen-protocol"
 version = "0.7.0"
 dependencies = [
+ "futures-util",
  "serde",
  "serde_json",
  "sha2",
