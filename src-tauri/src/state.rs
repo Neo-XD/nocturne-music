@@ -87,6 +87,12 @@ pub struct AppState {
     /// `last_queue_fingerprint`, for the persistence side: an advance rewrites 40 bytes rather
     /// than the whole blob.
     last_persisted_fingerprint: AtomicU64,
+    /// One [`Self::sign_in`] at a time. It snapshots the cookie and identity, then mutates them
+    /// across two awaited round trips, and rolls the snapshot back if either fails. Two of them
+    /// overlapping (the login webview and the session heal both call it) lets the loser restore
+    /// its stale snapshot over the winner's fresh session. Async because it is held across those
+    /// awaits, which a std `Mutex` cannot be.
+    auth: tokio::sync::Mutex<()>,
 }
 
 /// Repeat mode for the queue. Serialized lowercase for the UI + `queue_json`.
@@ -367,6 +373,7 @@ impl AppState {
             last_media_push: AtomicU64::new(0),
             last_queue_fingerprint: AtomicU64::new(0),
             last_persisted_fingerprint: AtomicU64::new(0),
+            auth: tokio::sync::Mutex::default(),
         }
     }
 
@@ -409,6 +416,24 @@ impl AppState {
         raw.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
     }
 
+    fn stream_client_priority(&self) -> Option<Vec<String>> {
+        let raw = self.db.get_setting("stream_client_priority")?;
+        let parsed: Vec<String> = if raw.starts_with('[') {
+            serde_json::from_str(&raw).unwrap_or_default()
+        } else {
+            raw.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        };
+        if parsed.is_empty() {
+            None
+        } else {
+            Some(parsed)
+        }
+    }
+
+    fn stream_client_auto_rank(&self) -> bool {
+        self.db.get_setting("stream_client_auto_rank").map(|v| v != "false").unwrap_or(true)
+    }
+
     // --- auth (context/15) ------------------------------------------------------------------
 
     /// Sign in with the Cookie header captured from the login webview (context/15 Path A).
@@ -418,6 +443,7 @@ impl AppState {
     /// Google's current default; a new multi-channel login pauses before finalization and asks the
     /// UI to choose.
     pub async fn sign_in(&self, cookie: String) -> Result<SignInOutcome, String> {
+        let _turn = self.auth.lock().await;
         let cookie = cookie.trim().to_owned();
         if innertube::cookie_sapisid(&cookie).is_none() {
             return Err("Sign-in didn't complete — try signing in again.".into());
@@ -618,6 +644,7 @@ impl AppState {
     /// account_menu must succeed under a one-off context for that exact identity before the shared
     /// transport, persistence, or UI is updated.
     pub async fn switch_account(&self, selection_key: &str) -> Result<serde_json::Value, String> {
+        let _turn = self.auth.lock().await;
         if !self.it.is_logged_in() {
             return Err("Sign in before switching channels.".into());
         }
@@ -712,6 +739,7 @@ impl AppState {
     }
 
     pub async fn sign_out(&self) {
+        let _turn = self.auth.lock().await;
         self.it.set_cookie(None);
         self.it.set_data_sync_id(None);
         self.db.delete_setting("session_cookie");
@@ -790,9 +818,18 @@ impl AppState {
                 stream_client: "cache".to_owned(),
             });
         }
+        let custom_priority = self.stream_client_priority();
+        let auto_rank = self.stream_client_auto_rank();
         let data = self
             .orchestrator
-            .resolve(video_id, is_upload, self.quality(), &self.disabled_clients())
+            .resolve(
+                video_id,
+                is_upload,
+                self.quality(),
+                &self.disabled_clients(),
+                custom_priority.as_deref(),
+                auto_rank,
+            )
             .await?;
         // Never cache rustypipe URLs: googlevideo serves them only for bounded-Range requests,
         // which mpv doesn't send → LOADING_FAILED(-13). Caching one poisons the videoId for ~6h.

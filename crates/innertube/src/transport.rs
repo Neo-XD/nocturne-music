@@ -4,9 +4,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, SET_COOKIE};
 use serde::Serialize;
 use sha1::{Digest, Sha1};
+use tokio::sync::Notify;
 
 use crate::clients::YouTubeClient;
 use crate::models::context::Locale;
@@ -62,6 +63,42 @@ pub fn cookie_sapisid(cookie: &str) -> Option<&str> {
     })
 }
 
+/// Merge every `Set-Cookie` header in `set_cookie` into the stored `Cookie` header string `cookie`,
+/// replacing existing names in place and appending new ones. Returns `None` when no value changed,
+/// so callers can skip the disk write.
+///
+/// ponytail: deletions (`NAME=;`) are ignored rather than applied. A cookie Google wants gone is
+/// dead server-side anyway, so carrying it costs nothing, while honouring the deletion would let
+/// one odd response drop `SAPISID` and silently sign the user out.
+pub(crate) fn merge_set_cookie(cookie: &str, set_cookie: &[&str]) -> Option<String> {
+    let mut jar: Vec<(String, String)> = cookie
+        .split(';')
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
+        .collect();
+    let mut changed = false;
+    for line in set_cookie {
+        let pair = line.split(';').next().unwrap_or_default();
+        let Some((name, value)) = pair.split_once('=') else { continue };
+        let (name, value) = (name.trim(), value.trim());
+        if name.is_empty() || value.is_empty() {
+            continue;
+        }
+        match jar.iter_mut().find(|(n, _)| n == name) {
+            Some(entry) if entry.1 == value => {}
+            Some(entry) => {
+                entry.1 = value.to_owned();
+                changed = true;
+            }
+            None => {
+                jar.push((name.to_owned(), value.to_owned()));
+                changed = true;
+            }
+        }
+    }
+    changed.then(|| jar.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; "))
+}
+
 /// The transport client. One shared `reqwest::Client`; proxy must be set before the
 /// first request or reqwest snapshots it as none (context/12, the App.kt gotcha).
 ///
@@ -76,6 +113,14 @@ pub struct InnerTube {
     /// generates. Shared like `session` so a settings toggle reaches every clone, and an atomic
     /// rather than part of `Session` because the endpoints read it on every parse.
     hide_videos: Arc<AtomicBool>,
+    /// Pinged whenever a signed-in request comes back rejected (401/403, or a 200 carrying the
+    /// logged-out browse state). The app listens and re-mints the cookie; this crate stays pure,
+    /// so it only raises the flag. `notify_one` stores a permit, so a single listener that is
+    /// busy healing still sees the next rejection.
+    session_rejected: Arc<Notify>,
+    /// Pinged when a response's `Set-Cookie` actually changed the stored jar, so the app can
+    /// write the rotated cookie back to disk. See [`InnerTube::absorb_cookies`].
+    cookie_changed: Arc<Notify>,
 }
 
 impl InnerTube {
@@ -92,7 +137,59 @@ impl InnerTube {
             http: builder.build()?,
             session: Arc::new(RwLock::new(session)),
             hide_videos: Arc::new(AtomicBool::new(false)),
+            session_rejected: Arc::new(Notify::new()),
+            cookie_changed: Arc::new(Notify::new()),
         })
+    }
+
+    /// Signal raised when YouTube rejects the signed-in session. See the field.
+    pub fn session_rejected(&self) -> Arc<Notify> {
+        self.session_rejected.clone()
+    }
+
+    /// Signal raised when the stored cookie jar was updated from a response. See the field.
+    pub fn cookie_changed(&self) -> Arc<Notify> {
+        self.cookie_changed.clone()
+    }
+
+    /// The session no longer authenticates. Both callers (transport 401/403 and the logged-out
+    /// browse payload) route through here so the healer hears about either one.
+    pub(crate) fn reject_session(&self) -> Error {
+        self.session_rejected.notify_one();
+        Error::SessionExpired
+    }
+
+    /// Merge a response's `Set-Cookie` into the stored jar.
+    ///
+    /// Google rotates `__Secure-1PSIDTS` / `__Secure-3PSIDTS` on the very requests this client
+    /// makes, and invalidates the previous value when it does. Dropping the new one (which is
+    /// what a `reqwest` client with no cookie store does) is what killed the login a few hours
+    /// into every session — issue #165 / KI-2. Note that `cookie_store(true)` would not help:
+    /// reqwest skips its own store whenever a `Cookie` header is already set, and `headers()`
+    /// always sets one.
+    fn absorb_cookies(&self, headers: &HeaderMap) {
+        if headers.get(SET_COOKIE).is_none() {
+            return;
+        }
+        let set_cookie: Vec<&str> =
+            headers.get_all(SET_COOKIE).iter().filter_map(|v| v.to_str().ok()).collect();
+        {
+            let mut s = self.session.write().unwrap();
+            let Some(merged) = s.cookie.as_deref().and_then(|c| merge_set_cookie(c, &set_cookie))
+            else {
+                return;
+            };
+            s.cookie = Some(merged);
+        }
+        // Names only, never values: this line ends up in the log a user attaches to a bug report,
+        // and it is the one piece of evidence that says whether rotation is being kept.
+        let names: Vec<&str> = set_cookie
+            .iter()
+            .filter_map(|line| line.split(';').next()?.split_once('='))
+            .map(|(name, _)| name.trim())
+            .collect();
+        tracing::debug!(cookies = ?names, "kept rotated cookies");
+        self.cookie_changed.notify_one();
     }
 
     /// Turn "hide music videos" on/off (context: the user setting, default off).
@@ -188,7 +285,10 @@ impl InnerTube {
                 .await
                 .and_then(|r| r.error_for_status());
             match res {
-                Ok(resp) => return Ok(resp.json().await?),
+                Ok(resp) => {
+                    self.absorb_cookies(resp.headers());
+                    return Ok(resp.json().await?);
+                }
                 // Retry only on connect/timeout (transient), matching Metrolist's IOException filter.
                 Err(e) if attempt < 3 && (e.is_timeout() || e.is_connect() || e.is_request()) => {
                     tracing::warn!(attempt, error = %e, "retrying InnerTube POST {path}");
@@ -202,7 +302,7 @@ impl InnerTube {
                     if self.is_logged_in() && e.status().is_some_and(|s| s == 401 || s == 403) =>
                 {
                     tracing::warn!(status = ?e.status(), "InnerTube {path} rejected the session");
-                    return Err(Error::SessionExpired);
+                    return Err(self.reject_session());
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -244,6 +344,7 @@ impl InnerTube {
             .await?
             .error_for_status()?;
         let headers = resp.headers().clone();
+        self.absorb_cookies(&headers);
         Ok((headers, resp.bytes().await?.to_vec()))
     }
 
@@ -304,7 +405,8 @@ impl InnerTube {
     ) -> Result<(), Error> {
         let url = build_playback_url(base_url, &client.client_name, cpn, playlist_id);
         let headers = self.headers(client, true);
-        self.http.get(&url).headers(headers).send().await?.error_for_status()?;
+        let resp = self.http.get(&url).headers(headers).send().await?.error_for_status()?;
+        self.absorb_cookies(resp.headers());
         Ok(())
     }
 
@@ -487,5 +589,25 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(s.sapisid().as_deref(), Some("secret123"));
+    }
+
+    #[test]
+    fn a_rotated_cookie_replaces_the_stored_one() {
+        let merged = merge_set_cookie(
+            "SAPISID=keep; __Secure-3PSIDTS=old; PREF=x",
+            &["__Secure-3PSIDTS=new; Path=/; Secure; HttpOnly", "YSC=fresh; Path=/"],
+        );
+        assert_eq!(
+            merged.as_deref(),
+            Some("SAPISID=keep; __Secure-3PSIDTS=new; PREF=x; YSC=fresh")
+        );
+    }
+
+    #[test]
+    fn nothing_new_means_no_rewrite_and_no_deletions_applied() {
+        assert_eq!(
+            merge_set_cookie("SAPISID=keep; PREF=x", &["PREF=x; Path=/", "SAPISID=; Max-Age=0"]),
+            None
+        );
     }
 }

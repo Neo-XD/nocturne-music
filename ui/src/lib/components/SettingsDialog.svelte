@@ -283,7 +283,18 @@
 				loadLastfm()
 			]);
 			settings = s;
-			clients = c;
+			let clientOrder = c;
+			if (s.stream_client_priority) {
+				try {
+					const parsed = JSON.parse(s.stream_client_priority);
+					if (Array.isArray(parsed) && parsed.length) {
+						const set = new Set(parsed);
+						clientOrder = [...parsed, ...c.filter((x) => !set.has(x))];
+					}
+				} catch {}
+			}
+			clients = clientOrder;
+			autoRankClients = s.stream_client_auto_rank !== 'false';
 			const smap: Record<string, api.ClientStats> = {};
 			for (const st of stats as api.ClientStats[]) {
 				smap[st.key] = st;
@@ -561,6 +572,58 @@
 			console.error('Failed to regenerate pairing PIN', e);
 		}
 		await fetchSyncStatus();
+	}
+
+	let autoRankClients = $state(true);
+	let benchmarkingClients = $state(false);
+
+	async function runClientBenchmark() {
+		benchmarkingClients = true;
+		try {
+			const stats = await api.benchmarkStreamClients();
+			const smap: Record<string, api.ClientStats> = {};
+			for (const st of stats) {
+				smap[st.key] = st;
+			}
+			clientStats = smap;
+			toast.success('Stream client latencies updated');
+		} catch (e) {
+			toast.error(String(e));
+		} finally {
+			benchmarkingClients = false;
+		}
+	}
+
+	async function toggleAutoRank(on: boolean) {
+		autoRankClients = on;
+		settings.stream_client_auto_rank = on ? 'true' : 'false';
+		await api.setSetting('stream_client_auto_rank', settings.stream_client_auto_rank);
+		toast.success(on ? 'Auto-ranking enabled' : 'Custom stream client priority active');
+	}
+
+	function moveClientUp(index: number) {
+		if (index <= 0) return;
+		const next = [...clients];
+		const temp = next[index];
+		next[index] = next[index - 1];
+		next[index - 1] = temp;
+		clients = next;
+		saveStreamClientPriority();
+	}
+
+	function moveClientDown(index: number) {
+		if (index >= clients.length - 1) return;
+		const next = [...clients];
+		const temp = next[index];
+		next[index] = next[index + 1];
+		next[index + 1] = temp;
+		clients = next;
+		saveStreamClientPriority();
+	}
+
+	async function saveStreamClientPriority() {
+		settings.stream_client_priority = JSON.stringify(clients);
+		await api.setSetting('stream_client_priority', settings.stream_client_priority);
 	}
 
 	async function toggleClient(name: string) {
@@ -1068,11 +1131,11 @@
 							<h3 class={LABEL}>Optimization & Battery Saving</h3>
 							<div class={CARD}>
 								{@render row({
-									title: 'Hardware Acceleration',
-									badge: 'GPU Compositing',
-									badgeVariant: 'performance',
-									desc: 'Uses your GPU to accelerate UI rendering and background canvas shaders. Turn off if experiencing GPU glitches or blank screens. (Requires app restart)',
-									control: hwAccelSwitch,
+									title: 'Aggressive Memory Trimming (Experimental - Linux)',
+									badge: 'Linux glibc',
+									badgeVariant: 'warning',
+									desc: 'Periodically calls malloc_trim to release unused heap pages back to the OS. Default disabled to prevent idle audio/webview thread crashes.',
+									control: aggressiveTrimSwitch,
 									tall: true
 								})}
 								{@render row({
@@ -1547,12 +1610,16 @@
 		checked={appearance.reduceTransparency}
 		onCheckedChange={(on) => setAppearance({ reduceTransparency: on })}
 	/>{/snippet}
-{#snippet hwAccelSwitch()}<Switch
-		checked={settings.hardware_acceleration !== 'false'}
+{#snippet aggressiveTrimSwitch()}<Switch
+		checked={settings.aggressive_memory_trimming === 'true'}
 		onCheckedChange={async (on) => {
-			settings.hardware_acceleration = on ? 'true' : 'false';
-			await api.setSetting('hardware_acceleration', settings.hardware_acceleration);
-			toast.info('Hardware acceleration setting updated. Restart Nocturne to apply.');
+			settings.aggressive_memory_trimming = on ? 'true' : 'false';
+			await api.setSetting('aggressive_memory_trimming', settings.aggressive_memory_trimming);
+			if (on) {
+				toast.warning('Aggressive memory trimming enabled. Note: May cause random crashes on some Linux distributions while idle.');
+			} else {
+				toast.info('Aggressive memory trimming disabled.');
+			}
 		}}
 	/>{/snippet}
 {#snippet reduceMotionSwitch()}<Switch
@@ -1953,13 +2020,54 @@
 
 {#snippet clientList()}
 	<p class="mb-3 max-w-prose text-xs leading-relaxed text-muted-foreground">
-		Clients are auto-ranked by response latency and health on startup. Turn a client off to skip it when resolving streams.
+		Clients provide playback streams. You can benchmark connection latencies or specify custom fallback priority.
 	</p>
+	<div class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 p-2.5">
+		<div class="flex items-center gap-2">
+			<Button
+				variant="outline"
+				size="sm"
+				class="h-8 gap-1.5 text-xs font-medium cursor-pointer"
+				onclick={runClientBenchmark}
+				disabled={benchmarkingClients}
+			>
+				<HugeiconsIcon icon={FlashIcon} class="h-3.5 w-3.5 text-amber-500 {benchmarkingClients ? 'animate-spin' : ''}" />
+				{benchmarkingClients ? 'Testing latencies…' : 'Test Latencies'}
+			</Button>
+		</div>
+		<div class="flex items-center gap-2">
+			<span class="text-xs text-muted-foreground">Auto-rank by latency</span>
+			<Switch checked={autoRankClients} onCheckedChange={toggleAutoRank} />
+		</div>
+	</div>
 	<div class="flex flex-col gap-2">
-		{#each clients as name (name)}
+		{#each clients as name, i (name)}
 			{@const stat = clientStats[name]}
 			<div class="flex items-center justify-between rounded-lg bg-muted/60 py-1.5 pr-2 pl-3">
 				<div class="flex items-center gap-2">
+					{#if !autoRankClients}
+						<div class="flex flex-col gap-0.5">
+							<button
+								type="button"
+								class="flex h-3.5 w-3.5 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+								disabled={i === 0}
+								onclick={() => moveClientUp(i)}
+								title="Move up priority"
+							>
+								<HugeiconsIcon icon={ArrowUp01Icon} class="h-3 w-3" />
+							</button>
+							<button
+								type="button"
+								class="flex h-3.5 w-3.5 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+								disabled={i === clients.length - 1}
+								onclick={() => moveClientDown(i)}
+								title="Move down priority"
+							>
+								<HugeiconsIcon icon={ArrowDown01Icon} class="h-3 w-3" />
+							</button>
+						</div>
+						<span class="w-4 text-center font-mono text-[11px] text-muted-foreground">#{i + 1}</span>
+					{/if}
 					<span class="font-mono text-xs">{name}</span>
 					{#if stat}
 						<span

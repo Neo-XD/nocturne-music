@@ -51,14 +51,46 @@ browser runtime, no backend server, no ads in the audio. Started as a fork of [L
 
 | Platform | File | Notes | Testing Status |
 |---|---|---|---|
-| Linux | `.AppImage` | Self-updating, libmpv bundled. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) | untested for nocturne |
-| Linux (Ubuntu/Debian) | `.deb` | No self-update. Needs Ubuntu 24.04+ / Debian 13+; apt pulls libmpv and webkit2gtk in for you | untested for nocturne |
-| Linux (Fedora/RHEL) | `.rpm` | Needs `mpv-libs` installed (`sudo dnf install mpv-libs`). Updates through dnf, not in-app | untested for nocturne |
-| Windows | `-setup.exe` | Self-updating | Tested and working as expected |
-| Windows | `.msi` | Plain installer, no auto-update | Tested and working as expected |
+| Linux | `.AppImage` | Self-updating, libmpv bundled. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) | Tested and working |
+| Linux (Ubuntu/Debian) | `.deb` | No self-update. Needs Ubuntu 24.04+ / Debian 13+; apt pulls libmpv and webkit2gtk in for you | Tested and working |
+| Linux (Fedora/RHEL) | `.rpm` | Needs `mpv-libs` installed (`sudo dnf install mpv-libs`). Updates through dnf, not in-app | Tested and working |
+| Windows | `-setup.exe` | Self-updating NSIS installer | Tested and working as expected |
 | macOS | none yet | Build from source, see [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md) | untested for nocturne |
 
 ---
+
+## Stream Client Pipeline & Priority Selection
+
+Nocturne resolves audio streams through high-speed official YouTube clients with multi-tiered fallback:
+
+1. **Hierarchy & Fast Fallback**: Resolves streams using high-speed direct clients (`VISIONOS` ~130ms and `ANDROID_VR_1_43_32` ~145ms), with demoted `ANDROID_VR_1_65_10` and web cipher/PoToken clients as backup.
+2. **On-Demand Latency Benchmark**: Under **Settings > Playback > Advanced > Stream Clients**, click **Test Latencies** to instantly probe live round-trip resolution times and health scores for all stream clients.
+3. **Auto-Rank vs Custom Priority**:
+   - **Auto-Rank Mode (Default)**: Automatically sorts candidates by dynamic exponential moving average (EMA) latency with failure penalty weighting.
+   - **Custom Priority Mode**: Toggle off Auto-Rank to manually control the exact priority order using the Up/Down arrow buttons.
+
+---
+
+## Performance & Linux Stability
+
+- **Linux Idle Crash Fix**: Periodic background glibc heap compaction (`malloc_trim`) is now disabled by default to prevent multi-threaded arena heap corruption during idle audio/webview states. Linux users who explicitly want aggressive memory reclamation can opt in via **Settings > Performance > Aggressive Memory Trimming (Experimental - Linux)**.
+- **Native GPU Acceleration**: Hardware acceleration uses native auto-detection (NVIDIA explicit sync + DMABUF renderer rules on Linux, Direct3D/WebView2 native GPU on Windows, Metal/WebKit on macOS) without manual flag overhead.
+
+---
+
+## Upstream Bugfix Integration (v0.6.7 & v0.6.8)
+
+Nocturne integrates the stability and authentication fixes from upstream v0.6.7 and v0.6.8:
+
+- **Session Keep-Alive**: InnerTube transport automatically absorbs `Set-Cookie` rotation headers from API responses and persists updated session cookies to disk. If YouTube rejects an expired cookie, the backend transparently re-mints a fresh token from the persistent login webview session jar without requiring re-login.
+- **Serialized Authentication**: Added concurrency locking across `sign_in`, `switch_account`, and `sign_out` to prevent race conditions during multi-channel identity selection.
+- **Native Windows Login**: Removed Safari User-Agent spoofing in WebView2 on Windows so Google sign-in no longer triggers "This browser or app may not be secure".
+- **Upload Album Artwork**: Uploaded tracks inherit album cover artwork and playlist rows no longer display artist avatars for user-uploaded content.
+- **Home Shelf Dragging**: Midpoint hysteresis thresholding prevents list ping-ponging while dragging shelves in the Home layout editor.
+- **Singles & EPs "Go to Album"**: Track context menus now offer "Go to album" for songs on single and EP releases by stamping parent release IDs onto album tracks.
+- **Perceived Brightness Theme Banding**: Artwork accent generation uses bounded perceived brightness targets for high text and icon contrast across Light, Dark, and Glassy themes.
+- **Self-Updater Fallback**: Missing platform entries in `latest.json` fall back to querying the GitHub Releases API.
+- **openSUSE Certificate Trust**: AppImage runner automatically falls back to `/etc/ssl/ca-bundle.pem` and `/var/lib/ca-certificates/ca-bundle.pem` for system root certificate authorities.
 
 ## Scrobbling & Discord
 

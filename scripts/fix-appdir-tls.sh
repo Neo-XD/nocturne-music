@@ -231,6 +231,16 @@ export GIO_EXTRA_MODULES="$APPDIR/usr/lib/gio/modules:$APPDIR/usr/lib64/gio/modu
 # loads them, they fail, two lines of "undefined symbol: g_variant_builder_init_static" per process.
 # GIO_MODULE_DIR replaces that compiled-in path instead of adding to it.
 export GIO_MODULE_DIR="$APPDIR/usr/lib/gio/modules"
+
+# Fallback for openSUSE / distros where ca-certificates.crt is located elsewhere
+if [ -z "${SSL_CERT_FILE:-}" ]; then
+  for cand in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem /var/lib/ca-certificates/ca-bundle.pem; do
+    if [ -f "$cand" ]; then
+      export SSL_CERT_FILE="$cand"
+      break
+    fi
+  done
+fi
 EOF
 
 # …and make sure there is actually something there to load. An AppDir with no TLS module is the

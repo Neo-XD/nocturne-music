@@ -35,23 +35,16 @@ use orchestrator::Orchestrator;
 use potoken::PoTokenGenerator;
 use state::AppState;
 
-/// Hand glibc's freed-but-retained heap back to the OS every few minutes.
-///
-/// glibc gives each thread its own arena and never returns those pages on `free`, so this process
-/// (45 threads across tokio, GTK, mpv and souvlaki) accumulates empty heap it will never reuse.
-/// Measured against a running 0.3.2 build: `malloc_trim(0)` dropped it from 211 MiB to 160 MiB PSS
-/// and the slack came back at roughly 15 MiB per 15 minutes, so a periodic trim keeps it flat.
-///
-/// ponytail: trim only. `mallopt(M_ARENA_MAX, 2)` would cap the sprawl at the source, but it
-/// serialises allocation across all those threads for a win the trim already gets. Reach for it
-/// only if RSS starts climbing between trims.
+/// Hand glibc's freed-but-retained heap back to the OS every few minutes if enabled in settings.
 #[cfg(target_os = "linux")]
-fn spawn_heap_trimmer() {
-    tauri::async_runtime::spawn(async {
+fn spawn_heap_trimmer(db: Arc<Db>) {
+    tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(180)).await;
-            // Safe: no arguments, no allocation, glibc walks its own arenas.
-            unsafe { libc::malloc_trim(0) };
+            if db.get_setting("aggressive_memory_trimming").as_deref() == Some("true") {
+                // Safe: no arguments, no allocation, glibc walks its own arenas.
+                unsafe { libc::malloc_trim(0) };
+            }
         }
     });
 }
@@ -123,78 +116,19 @@ pub(crate) fn tune_webview_labelled(app: &tauri::AppHandle, label: &str, media: 
     }
 }
 
-fn read_hw_accel_setting() -> bool {
-    let mut candidate_dirs = Vec::new();
-    if let Ok(p) = std::env::var("APPDATA") {
-        candidate_dirs.push(std::path::PathBuf::from(p));
-    }
-    if let Ok(p) = std::env::var("LOCALAPPDATA") {
-        candidate_dirs.push(std::path::PathBuf::from(p));
-    }
-    if let Ok(p) = std::env::var("XDG_DATA_HOME") {
-        candidate_dirs.push(std::path::PathBuf::from(p));
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        let h = std::path::Path::new(&home);
-        candidate_dirs.push(h.join(".local/share"));
-        candidate_dirs.push(h.join(".config"));
-        candidate_dirs.push(h.join("Library/Application Support"));
-    }
-
-    for base in candidate_dirs {
-        for app_name in ["nocturne", "com.nocturne.music", "limusic", "com.limusic.app"] {
-            let db_path = base.join(app_name).join("app.db");
-            if db_path.exists() {
-                if let Ok(conn) = rusqlite::Connection::open_with_flags(
-                    &db_path,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-                ) {
-                    let res: rusqlite::Result<String> = conn.query_row(
-                        "SELECT value FROM settings WHERE key = 'hardware_acceleration'",
-                        [],
-                        |r| r.get(0),
-                    );
-                    if let Ok(val) = res {
-                        return val != "false";
-                    }
-                }
-            }
-        }
-    }
-    true
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let hw_accel = read_hw_accel_setting();
-
     #[cfg(target_os = "linux")]
     {
-        if !hw_accel {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-            std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
-        } else {
-            if std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none() {
-                std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
-            }
-            if std::path::Path::new("/dev/nvidiactl").exists()
-                && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
-                && std::env::var_os("NOCTURNE_FORCE_GPU").is_none()
-                && std::env::var_os("LIMUSIC_FORCE_GPU").is_none()
-            {
-                std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-            }
+        if std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none() {
+            std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
         }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        if !hw_accel {
-            std::env::set_var(
-                "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-                "--disable-gpu --disable-gpu-compositing",
-            );
+        if std::path::Path::new("/dev/nvidiactl").exists()
+            && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+            && std::env::var_os("NOCTURNE_FORCE_GPU").is_none()
+            && std::env::var_os("LIMUSIC_FORCE_GPU").is_none()
+        {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
     }
 
@@ -467,10 +401,42 @@ pub fn run() {
                 });
             }
 
+            // Cookie rotation absorption: when InnerTube absorbs rotated cookies from responses,
+            // persist them into SQLite settings so restart / session keeps them.
+            {
+                let it_cookie = app_state.it.cookie_changed();
+                let it_clone = app_state.it.clone();
+                let db_clone = app_state.db.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        it_cookie.notified().await;
+                        if let Some(cookie) = it_clone.cookie() {
+                            db_clone.set_setting("session_cookie", &cookie);
+                            tracing::info!("persisted rotated session cookie");
+                        }
+                    }
+                });
+            }
+
+            // Session rejection: when YouTube indicates the session expired or failed,
+            // attempt transparent re-minting via hidden webview refresh if possible.
+            {
+                let it_reject = app_state.it.session_rejected();
+                let handle_clone = handle.clone();
+                let st_clone = app_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        it_reject.notified().await;
+                        tracing::warn!("InnerTube session rejected - attempting session refresh");
+                        session::refresh_session(handle_clone.clone(), st_clone.clone()).await;
+                    }
+                });
+            }
+
             #[cfg(target_os = "linux")]
             {
                 tune_webview_labelled(app.handle(), "main", true);
-                spawn_heap_trimmer();
+                spawn_heap_trimmer(app_state.db.clone());
             }
             Ok(())
         })
@@ -501,6 +467,7 @@ pub fn run() {
             commands::set_setting,
             commands::get_stream_clients,
             commands::get_client_latencies,
+            commands::benchmark_stream_clients,
             commands::get_remote_sync_status,
             commands::regenerate_remote_sync_pin,
             commands::clear_caches,

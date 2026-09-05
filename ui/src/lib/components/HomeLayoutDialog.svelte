@@ -43,13 +43,17 @@
 		});
 	});
 
-	/** Live reorder while dragging: the row moves as you pass over its neighbours, no drop marker. */
-	function moveTo(to: number) {
+	/** Live reorder while dragging: check that the cursor crossed the midpoint before swapping */
+	function handleDragOver(e: DragEvent, to: number) {
 		if (dragging === null || dragging === to) return;
-		const next = rows.slice();
-		next.splice(to, 0, ...next.splice(dragging, 1));
-		rows = next;
-		dragging = to;
+		e.preventDefault();
+		const target = e.currentTarget as HTMLElement | null;
+		if (!target) return;
+		const rect = target.getBoundingClientRect();
+		const midY = rect.top + rect.height / 2;
+		if (dragging < to && e.clientY < midY) return;
+		if (dragging > to && e.clientY > midY) return;
+		moveTo(to);
 	}
 
 	function save() {
@@ -83,11 +87,7 @@
 						e.dataTransfer?.setData('text/plain', row.key); // some engines refuse a payload-less drag
 						if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 					}}
-					ondragover={(e) => {
-						if (dragging === null) return; // a file or a card from the page behind
-						e.preventDefault();
-						moveTo(i);
-					}}
+					ondragover={(e) => handleDragOver(e, i)}
 					ondragend={() => (dragging = null)}
 					class="flex cursor-grab items-center gap-2 rounded-lg py-2 pl-3 pr-2 transition-colors hover:bg-muted/50 {dragging ===
 					i

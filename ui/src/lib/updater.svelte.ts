@@ -4,6 +4,7 @@
 // update through their package manager, so they get a download link instead. See `canInstall`.
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { getVersion } from '@tauri-apps/api/app';
 import { toast } from './player.svelte';
 import { canSelfUpdate, getSettings, openExternal } from './api';
 
@@ -19,6 +20,15 @@ export const updateState = $state({
 // The resolved handle to download; kept out of reactive state (it's not serializable/renderable).
 let pending: Update | null = null;
 
+function isNewer(latest: string, current: string): boolean {
+	const parse = (v: string) => v.replace(/^v/, '').split('.').map((p) => parseInt(p, 10) || 0);
+	const [lMaj = 0, lMin = 0, lPatch = 0] = parse(latest);
+	const [cMaj = 0, cMin = 0, cPatch = 0] = parse(current);
+	if (lMaj !== cMaj) return lMaj > cMaj;
+	if (lMin !== cMin) return lMin > cMin;
+	return lPatch > cPatch;
+}
+
 async function look(): Promise<boolean> {
 	try {
 		const u = await check();
@@ -33,6 +43,24 @@ async function look(): Promise<boolean> {
 		}
 	} catch (e) {
 		console.debug('Tauri update check:', e);
+	}
+	// Fallback to releases API when updater manifest is missing a platform entry
+	try {
+		const res = await fetch('https://api.github.com/repos/Neo-XD/nocturne-music/releases/latest', {
+			headers: { Accept: 'application/vnd.github.v3+json' }
+		});
+		if (res.ok) {
+			const data = await res.json();
+			const tag = (data.tag_name || '').replace(/^v/, '');
+			const current = await getVersion().catch(() => '');
+			if (tag && current && isNewer(tag, current)) {
+				updateState.canInstall = false;
+				updateState.available = { version: tag };
+				return true;
+			}
+		}
+	} catch (e) {
+		console.debug('Releases API fallback check:', e);
 	}
 	return false;
 }

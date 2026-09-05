@@ -376,6 +376,15 @@ pub async fn get_client_latencies(
     Ok(state.orchestrator.get_client_stats().await)
 }
 
+/// Trigger an on-demand latency & health benchmark across all stream clients
+#[tauri::command]
+pub async fn benchmark_stream_clients(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<crate::orchestrator::ClientStats>, String> {
+    state.orchestrator.benchmark_boot().await;
+    Ok(state.orchestrator.get_client_stats().await)
+}
+
 /// Let the webview fetch one font file the user picked in the Themes tab, so a `@font-face` can
 /// point at it.
 ///

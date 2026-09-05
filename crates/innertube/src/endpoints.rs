@@ -391,6 +391,9 @@ impl InnerTube {
     pub async fn album(&self, client: &YouTubeClient, browse_id: &str) -> Result<AlbumPage, Error> {
         let value = self.browse(client, Some(browse_id), None).await?;
         let mut page = browse::parse_album(&value);
+        for item in &mut page.items {
+            item.album_id.get_or_insert_with(|| browse_id.to_owned());
+        }
         let video = browse::album_video_flags(&value);
         if video.contains(&true) {
             if let Some(pl) = &page.playlist_id {

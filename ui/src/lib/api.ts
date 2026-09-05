@@ -393,6 +393,8 @@ export interface ClientStats {
 export const getStreamClients = () => invoke<string[]>('get_stream_clients');
 /** Live latency and performance metrics for stream clients. */
 export const getClientLatencies = () => invoke<ClientStats[]>('get_client_latencies');
+/** Run an on-demand latency test across all candidate stream clients. */
+export const benchmarkStreamClients = () => invoke<ClientStats[]>('benchmark_stream_clients');
 /** Wipe both cache tiers (URL cache + mpv on-disk audio cache). */
 export const clearCaches = () => invoke<void>('clear_caches');
 /** Grant the webview a URL for one font file the user picked, so `@font-face` can load it. */

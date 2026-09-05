@@ -106,9 +106,9 @@ impl ClientRanker {
     pub fn new() -> Self {
         let mut map = HashMap::new();
         map.insert(
-            "ANDROID_VR_1_65_10".to_string(),
+            "VISIONOS".to_string(),
             ClientStats {
-                key: "ANDROID_VR_1_65_10".to_string(),
+                key: "VISIONOS".to_string(),
                 latency_ms: 130.0,
                 success_count: 1,
                 failure_count: 0,
@@ -126,13 +126,13 @@ impl ClientRanker {
             },
         );
         map.insert(
-            "VISIONOS".to_string(),
+            "ANDROID_VR_1_65_10".to_string(),
             ClientStats {
-                key: "VISIONOS".to_string(),
-                latency_ms: 1050.0,
+                key: "ANDROID_VR_1_65_10".to_string(),
+                latency_ms: 350.0,
                 success_count: 1,
                 failure_count: 0,
-                penalty: 0.0,
+                penalty: 50.0,
             },
         );
         Self { stats: Arc::new(Mutex::new(map)) }
@@ -167,15 +167,40 @@ impl ClientRanker {
         entry.penalty += 500.0;
     }
 
-    /// Get ranked fallback candidate keys sorted by effective score (latency + penalty)
-    pub async fn get_ranked_stream_clients(&self, disabled: &HashSet<String>) -> Vec<&'static str> {
+    /// Get ranked fallback candidate keys sorted by effective score (latency + penalty) or custom priority
+    pub async fn get_ranked_stream_clients(
+        &self,
+        disabled: &HashSet<String>,
+        custom_priority: Option<&[String]>,
+        auto_rank: bool,
+    ) -> Vec<String> {
         let map = self.stats.lock().await;
-        let mut candidates: Vec<(&'static str, f64)> = STREAM_FALLBACK_ORDER
-            .iter()
-            .copied()
-            .filter(|k| !disabled.contains(*k))
+
+        let base_order: Vec<String> = if let Some(custom) = custom_priority {
+            let mut list: Vec<String> =
+                custom.iter().filter(|k| !disabled.contains(*k)).cloned().collect();
+            for &k in STREAM_FALLBACK_ORDER {
+                if !disabled.contains(k) && !list.iter().any(|x| x == k) {
+                    list.push(k.to_string());
+                }
+            }
+            list
+        } else {
+            STREAM_FALLBACK_ORDER
+                .iter()
+                .filter(|k| !disabled.contains(**k))
+                .map(|k| k.to_string())
+                .collect()
+        };
+
+        if !auto_rank {
+            return base_order;
+        }
+
+        let mut candidates: Vec<(String, f64)> = base_order
+            .into_iter()
             .map(|k| {
-                let score = map.get(k).map_or(200.0, |s| s.latency_ms + s.penalty);
+                let score = map.get(&k).map_or(200.0, |s| s.latency_ms + s.penalty);
                 (k, score)
             })
             .collect();
@@ -307,16 +332,18 @@ impl Orchestrator {
         is_upload: bool,
         quality: AudioQuality,
         disabled: &HashSet<String>,
+        custom_priority: Option<&[String]>,
+        auto_rank: bool,
     ) -> Result<PlaybackData, ResolveError> {
         let prefer_high = matches!(quality, AudioQuality::High | AudioQuality::Auto);
         let logged_in = self.it.is_logged_in();
         let visitor = self.it.visitor_data();
-        let ranked_clients = if is_upload {
-            UPLOAD_FALLBACK_ORDER.to_vec()
+        let ranked_clients: Vec<String> = if is_upload {
+            UPLOAD_FALLBACK_ORDER.iter().map(|s| s.to_string()).collect()
         } else {
-            self.ranker.get_ranked_stream_clients(disabled).await
+            self.ranker.get_ranked_stream_clients(disabled, custom_priority, auto_rank).await
         };
-        let order: &[&str] = &ranked_clients;
+        let order: &[String] = &ranked_clients;
         // Without the uploads-playlist context YouTube hands back upload URLs that expire in about
         // 32 seconds (Metrolist PR #3857). Harmless for ordinary tracks, so scoped to uploads.
         let playlist_id = is_upload.then_some("MLPT");
@@ -406,7 +433,7 @@ impl Orchestrator {
                 }
                 (MAIN_CLIENT.to_owned(), main_resp.clone().unwrap())
             } else {
-                let key = order[idx as usize];
+                let key = &order[idx as usize];
                 if disabled.contains(key) {
                     continue;
                 }
@@ -417,7 +444,7 @@ impl Orchestrator {
                 let client_pot = if client.use_web_po_tokens { session_pot } else { None };
                 let client_sts = if client.use_signature_timestamp { sts } else { None };
                 match self.it.player(client, video_id, playlist_id, client_sts, client_pot).await {
-                    Ok(r) if r.playability_status.is_ok() => (key.to_owned(), r),
+                    Ok(r) if r.playability_status.is_ok() => (key.clone(), r),
                     Ok(r) => {
                         self.ranker.record_failure(key).await;
                         tracing::debug!(client = key, status = %r.playability_status.status, "not OK");
