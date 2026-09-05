@@ -193,13 +193,72 @@ export async function loadLibraryExtras(force = false) {
 }
 
 /** Create a playlist and optimistically prepend it so every view updates immediately. */
-export async function createLibraryPlaylist(title: string): Promise<string> {
-	const id = await api.createPlaylist(title);
+export async function createLibraryPlaylist(
+	title: string,
+	description?: string,
+	isPublic?: boolean,
+	coverPath?: string | null
+): Promise<string> {
+	const id = await api.createPlaylist(title, description, isPublic, coverPath ?? undefined);
 	// YouTube's library browse is eventually-consistent and won't include a brand-new playlist for a
 	// few seconds, so surface it immediately instead of refetching.
 	const browseId = id.startsWith('VL') ? id : `VL${id}`;
-	library.items = [{ kind: 'playlist', id: browseId, title }, ...library.items];
+	library.items = [
+		{ kind: 'playlist', id: browseId, title, subtitle: description || undefined },
+		...library.items
+	];
 	return browseId;
+}
+
+// --- Lyrics Sync Offset Store (BetterLyrics style) ---
+const LYRICS_OFFSET_KEY_PREFIX = 'nocturne_lyrics_offset_';
+
+export const lyricsSync = $state({
+	offsets: {} as Record<string, number>,
+	currentOffsetMs: 0
+});
+
+export function getLyricsOffset(videoId: string): number {
+	if (!videoId) return 0;
+	if (lyricsSync.offsets[videoId] !== undefined) return lyricsSync.offsets[videoId];
+	try {
+		const raw = localStorage.getItem(LYRICS_OFFSET_KEY_PREFIX + videoId);
+		if (raw !== null) {
+			const num = parseFloat(raw);
+			if (!isNaN(num)) {
+				lyricsSync.offsets[videoId] = num;
+				return num;
+			}
+		}
+	} catch {}
+	return 0;
+}
+
+export function setLyricsOffset(videoId: string, offsetMs: number): void {
+	if (!videoId) return;
+	const clamped = Math.max(-10000, Math.min(10000, Math.round(offsetMs)));
+	lyricsSync.offsets[videoId] = clamped;
+	lyricsSync.currentOffsetMs = clamped;
+	try {
+		if (clamped === 0) {
+			localStorage.removeItem(LYRICS_OFFSET_KEY_PREFIX + videoId);
+		} else {
+			localStorage.setItem(LYRICS_OFFSET_KEY_PREFIX + videoId, String(clamped));
+		}
+	} catch {}
+}
+
+export function adjustCurrentLyricsOffset(deltaMs: number): void {
+	const videoId = playback.now?.videoId;
+	if (!videoId) return;
+	const current = getLyricsOffset(videoId);
+	setLyricsOffset(videoId, current + deltaMs);
+}
+
+export function resetCurrentLyricsOffset(): void {
+	const videoId = playback.now?.videoId;
+	if (!videoId) return;
+	setLyricsOffset(videoId, 0);
 }
 
 /** Optimistically apply an edit to a library playlist's row (sidebar + Library grid), so a rename
@@ -1026,6 +1085,7 @@ export function initApp(mini = false): () => void {
 		api.onNowPlaying((n) => {
 			playback.now = n;
 			playback.rating = n.rating ?? 'indifferent'; // the track's real rating when known
+			lyricsSync.currentOffsetMs = getLyricsOffset(n.videoId);
 			if (prefs.filterExplicit && n?.explicit) {
 				toast('Skipped explicit song');
 				api.nextTrack().catch(() => {});

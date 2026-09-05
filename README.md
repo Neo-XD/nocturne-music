@@ -28,7 +28,11 @@ browser runtime, no backend server, no ads in the audio. Started as a fork of [L
 - **Your library** — playlists, liked songs, and write actions (like, add to playlist, create/rename/delete playlists, subscribe)
 - **Gapless playback** with loudness normalization, powered by libmpv
 - **Queue** with radio/automix continuation, restored across restarts
-- **Synced lyrics** — line-by-line side panel with auto-scroll and click-to-jump
+- **Synced lyrics & Glassy Turbo** — ultra-fluid lyrics with luminous syllable glow, soft defocusing inactive lines, smooth spring-inertia auto-scroll, and per-song BetterLyrics sync offset tuning
+- **BetterLyrics Sync Dock** — on-the-fly lyrics sync offset tuner (`[-0.5s]`, `[-0.1s]`, `[+0.1s]`, `[+0.5s]`, reset) integrated into Info Sidebar, Fullscreen Player, and Lyrics Panel
+- **Playlist Folders & Drag-and-Drop** — organize your playlists into expandable sidebar folders with drag-and-drop support
+- **Rich Playlist Creation** — set custom cover artwork, description, and public/private visibility right at creation time
+- **Glassy Frosted Theme** — modern frosted glassmorphism inspired by `NanKillBro/glassy-music-nankill` with luminous specular highlights and dynamic ambient background wash
 - **Mini Player** — Minimize the player and keep enjoying your music
 - **Local Music** — ability to play your own local music, with all metadata still intact
 - **Last.fm scrobbling** — connect once from the title bar, every play is scrobbled

@@ -36,6 +36,7 @@
 	import MediaCard from '$lib/components/MediaCard.svelte';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
 	import FolderCard from '$lib/components/FolderCard.svelte';
+	import CreatePlaylistDialog from '$lib/components/CreatePlaylistDialog.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import type { BrowseItem } from '$lib/api';
 	import {
@@ -58,8 +59,6 @@
 	import { reveal } from '$lib/reveal.svelte';
 
 	let dialogOpen = $state(false);
-	let newTitle = $state('');
-	let busy = $state(false);
 	// `?tab=local` so anything that sends you back here (an album whose files were deleted) lands
 	// on the tab you came from instead of a sign-in prompt.
 	let tab = $state(page.url.searchParams.get('tab') ?? lastTab);
@@ -111,22 +110,6 @@
 			toast.error(String(e));
 		} finally {
 			syncing = false;
-		}
-	}
-
-	async function createNew() {
-		const title = newTitle.trim();
-		if (!title || busy) return;
-		busy = true;
-		try {
-			await createLibraryPlaylist(title);
-			toast.success(`Created "${title}"`);
-			newTitle = '';
-			dialogOpen = false;
-		} catch (e) {
-			toast.error(String(e));
-		} finally {
-			busy = false;
 		}
 	}
 
@@ -312,32 +295,8 @@
 		{/if}
 	</div>
 
-	<!-- Create Playlist Dialog -->
-	<Dialog.Root bind:open={dialogOpen}>
-		<Dialog.Content class="sm:max-w-md">
-			<Dialog.Header>
-				<Dialog.Title>New playlist</Dialog.Title>
-				<Dialog.Description>Give your playlist a name to get started.</Dialog.Description>
-			</Dialog.Header>
-			<form
-				class="flex flex-col gap-4"
-				onsubmit={(e) => {
-					e.preventDefault();
-					createNew();
-				}}
-			>
-				<Input bind:value={newTitle} placeholder="Playlist name" autofocus />
-				<Dialog.Footer>
-					<Button type="button" variant="outline" onclick={() => (dialogOpen = false)}>
-						Cancel
-					</Button>
-					<Button type="submit" disabled={busy || !newTitle.trim()}>
-						{busy ? 'Creating…' : 'Create'}
-					</Button>
-				</Dialog.Footer>
-			</form>
-		</Dialog.Content>
-	</Dialog.Root>
+	<!-- Create Playlist Dialog with Picture, Description & Privacy -->
+	<CreatePlaylistDialog bind:open={dialogOpen} />
 
 	<!-- Create Folder Dialog -->
 	<Dialog.Root bind:open={folderDialogOpen}>

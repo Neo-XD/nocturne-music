@@ -514,7 +514,18 @@ export const addToPlaylist = (playlistId: string, videoId: string) =>
 	invoke<boolean>('add_to_playlist', { playlistId, videoId });
 export const removeFromPlaylist = (playlistId: string, videoId: string, setVideoId: string) =>
 	invoke<void>('remove_from_playlist', { playlistId, videoId, setVideoId });
-export const createPlaylist = (title: string) => invoke<string>('create_playlist', { title });
+export const createPlaylist = (
+	title: string,
+	description?: string,
+	publicStatus?: boolean,
+	coverPath?: string
+) =>
+	invoke<string>('create_playlist', {
+		title,
+		description: description || undefined,
+		public: publicStatus,
+		coverPath: coverPath || undefined
+	});
 /** Name / description / visibility, from the "Edit playlist" dialog. Leave a field out and
  *  YouTube is never told about it, so an untouched one can't be overwritten. */
 export const editPlaylistDetails = (

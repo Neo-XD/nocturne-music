@@ -15,7 +15,11 @@
 		ListRestartIcon,
 		SquareArrowLeft01Icon,
 		SquareArrowRight01Icon,
+		Folder01Icon,
+		FolderOpenIcon,
 		FolderAddIcon,
+		ArrowDown01Icon,
+		ArrowRight01Icon,
 		ComputerIcon
 	} from '@hugeicons/core-free-icons';
 	import { toggleMode } from 'mode-watcher';
@@ -25,6 +29,8 @@
 	import { ON_REPEAT_ID, type BrowseItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import PlaylistMenu from './PlaylistMenu.svelte';
+	import FolderMenu from './FolderMenu.svelte';
+	import CreatePlaylistDialog from './CreatePlaylistDialog.svelte';
 	import {
 		auth,
 		library,
@@ -34,10 +40,15 @@
 		toggleDevicesSidebar,
 		createLibraryPlaylist,
 		createPlaylistFolder,
+		renamePlaylistFolder,
+		deletePlaylistFolder,
+		toggleFolderCollapsed,
+		movePlaylistToFolder,
 		toggleSidebar,
 		toast
 	} from '$lib/player.svelte';
-	import { mergeSaved, orderLibrary } from '$lib/personal';
+	import { mergeSaved, orderLibrary, type PlaylistFolder } from '$lib/personal';
+	import { PLAYLIST_DND_MIME, setDragPlaylist, setDragItem } from '$lib/dnd';
 
 	const nav = [
 		{ href: '/', label: 'Home', icon: Home01Icon },
@@ -55,6 +66,12 @@
 	// How many of the leading rows are pinned — a rule under the last one explains the split.
 	const pinnedCount = $derived(playlists.filter((p) => personal.pins.includes(p.id)).length);
 
+	const folders = $derived(personal.folders ?? []);
+	const rootFolders = $derived(folders.filter((f) => !f.parentId));
+	const unfiledPlaylists = $derived(
+		playlists.filter((pl) => !folders.some((f) => f.playlistIds.includes(pl.id)))
+	);
+
 	// YTM's library subtitle is "Owner • 20 tracks" and the rail is too narrow for both, so keep the
 	// count and drop the rest. Subtitles without a number (albums: "Album • Artist") stay whole.
 	const rowSubtitle = (s?: string) =>
@@ -71,35 +88,65 @@
 				? `/artist/${encodeURIComponent(item.id)}`
 				: `/playlist/${encodeURIComponent(item.id)}`;
 
-	// New-playlist dialog (mirrors the Library page).
-	let dialogOpen = $state(false);
-	let newTitle = $state('');
-	let creating = $state(false);
-	async function createNew() {
-		const title = newTitle.trim();
-		if (!title || creating) return;
-		creating = true;
-		try {
-			await createLibraryPlaylist(title);
-			toast.success(`Created "${title}"`);
-			newTitle = '';
-			dialogOpen = false;
-		} catch (e) {
-			toast.error(String(e));
-		} finally {
-			creating = false;
-		}
-	}
+	// New-playlist dialog (with name, description, privacy, and image).
+	let playlistDialogOpen = $state(false);
 
 	let folderDialogOpen = $state(false);
 	let newFolderName = $state('');
+	let newFolderParentId = $state<string | null>(null);
+
+	let renameDialogOpen = $state(false);
+	let renameFolderId = $state<string | null>(null);
+	let renameFolderName = $state('');
+
+	let dragOverFolderId = $state<string | null>(null);
+	let dragOverRoot = $state(false);
+
 	function handleCreateFolder() {
 		const name = newFolderName.trim();
 		if (!name) return;
-		const f = createPlaylistFolder(name);
+		const f = createPlaylistFolder(name, newFolderParentId);
 		toast.success(`Created folder "${f.name}"`);
 		newFolderName = '';
+		newFolderParentId = null;
 		folderDialogOpen = false;
+	}
+
+	function openRenameFolder(folder: PlaylistFolder) {
+		renameFolderId = folder.id;
+		renameFolderName = folder.name;
+		renameDialogOpen = true;
+	}
+
+	function handleRenameFolder() {
+		if (!renameFolderId) return;
+		const name = renameFolderName.trim();
+		if (!name) return;
+		renamePlaylistFolder(renameFolderId, name);
+		toast.success('Folder renamed');
+		renameDialogOpen = false;
+	}
+
+	function handleDropOnFolder(e: DragEvent, folderId: string, folderName: string) {
+		e.preventDefault();
+		e.stopPropagation();
+		dragOverFolderId = null;
+		const plId = e.dataTransfer?.getData(PLAYLIST_DND_MIME) || e.dataTransfer?.getData('text/plain');
+		if (plId) {
+			movePlaylistToFolder(plId, folderId);
+			toast.success(`Moved to "${folderName}"`);
+		}
+	}
+
+	function handleDropOnRoot(e: DragEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		dragOverRoot = false;
+		const plId = e.dataTransfer?.getData(PLAYLIST_DND_MIME) || e.dataTransfer?.getData('text/plain');
+		if (plId) {
+			movePlaylistToFolder(plId, null);
+			toast.success('Moved to top level');
+		}
 	}
 
 	// Account lives in the titlebar now — see AccountMenu.svelte.
@@ -189,19 +236,19 @@
 		</button>
 	</nav>
 
-	<!-- Playlists. Hidden on the icon rail (needs labels; matches YTM's collapsed rail). flex-1 lets
+	<!-- Playlists & Folders. Hidden on the icon rail (needs labels; matches YTM's collapsed rail). flex-1 lets
 	     the list fill the space and scroll. Signed out the section still appears once there is
 	     something in it: On Repeat, or a playlist saved on this machine. -->
-	{#if auth.account?.signedIn || playlists.length}
+	{#if auth.account?.signedIn || playlists.length || rootFolders.length}
 		<div class="mt-3 hidden min-h-0 flex-1 flex-col border-t pt-3 {wide('lg:flex')}">
-			<!-- Creating one is a YouTube write action, so it needs an account. -->
+			<!-- Action Header -->
 			<div class="mb-2 flex items-center gap-1.5">
 				{#if auth.account?.signedIn}
 					<Button
 						variant="outline"
 						size="sm"
 						class="h-8 flex-1 gap-1.5 text-xs cursor-pointer"
-						onclick={() => (dialogOpen = true)}
+						onclick={() => (playlistDialogOpen = true)}
 					>
 						<HugeiconsIcon icon={Add01Icon} class="h-3.5 w-3.5" />
 						<span>New playlist</span>
@@ -213,6 +260,7 @@
 					class="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer"
 					onclick={() => {
 						newFolderName = '';
+						newFolderParentId = null;
 						folderDialogOpen = true;
 					}}
 					title="New folder"
@@ -220,96 +268,112 @@
 					<HugeiconsIcon icon={FolderAddIcon} class="h-4 w-4" />
 				</Button>
 			</div>
-			<div class="min-h-0 flex-1 overflow-y-auto">
-				{#each playlists as pl, i (pl.id)}
-					<!-- The ⋯ is a sibling of the link, not a child: a <button> inside an <a> is invalid
-					     HTML. pr-9 keeps the title clear of the button that overlays the row on hover. -->
-					<div class="group/row relative" data-ctx>
-						<a
-							href={playlistHref(pl)}
-							title={pl.title}
-							class="flex items-center gap-2.5 rounded-lg py-1.5 pl-2 pr-9 transition-colors hover:bg-sidebar-accent/50"
-						>
-							<div
-								class="relative h-10 w-10 shrink-0 overflow-hidden bg-muted {pl.kind === 'artist'
-									? 'rounded-full'
-									: 'rounded-md'}"
+
+			<div class="min-h-0 flex-1 overflow-y-auto space-y-1">
+				<!-- Playlist Folders Section -->
+				{#each rootFolders as folder (folder.id)}
+					{@const folderPlaylists = playlists.filter((p) => folder.playlistIds.includes(p.id))}
+					{@const isDragTarget = dragOverFolderId === folder.id}
+					<div
+						class="group/folder rounded-lg transition-all {isDragTarget
+							? 'bg-primary/15 ring-1 ring-primary/50'
+							: ''}"
+						ondragover={(e) => {
+							if (e.dataTransfer?.types.includes(PLAYLIST_DND_MIME)) {
+								e.preventDefault();
+								dragOverFolderId = folder.id;
+							}
+						}}
+						ondragleave={() => {
+							if (dragOverFolderId === folder.id) dragOverFolderId = null;
+						}}
+						ondrop={(e) => handleDropOnFolder(e, folder.id, folder.name)}
+					>
+						<!-- Folder Row -->
+						<div class="relative flex items-center justify-between rounded-lg py-1 pl-1.5 pr-8 hover:bg-sidebar-accent/50">
+							<button
+								type="button"
+								class="flex min-w-0 flex-1 items-center gap-2 text-left cursor-pointer"
+								onclick={() => toggleFolderCollapsed(folder.id)}
 							>
-								{#if pl.thumbnail && pl.id !== ON_REPEAT_ID}
-									<img
-										src={thumb(pl.thumbnail, 96)}
-										alt=""
-										class="h-full w-full object-cover"
-										loading="lazy"
-									/>
-								{:else}
-									<!-- On Repeat has no artwork by nature: icon tile, same as its card. -->
-									<div
-										class="flex h-full w-full items-center justify-center {pl.id === ON_REPEAT_ID
-											? 'bg-primary/10 text-primary'
-											: 'text-muted-foreground/50'}"
-									>
-										<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
-										<HugeiconsIcon
-											icon={MusicNote01Icon}
-											altIcon={ListRestartIcon}
-											showAlt={pl.id === ON_REPEAT_ID}
-											class={pl.id === ON_REPEAT_ID ? 'h-5 w-5' : 'h-4 w-4'}
-										/>
-									</div>
-								{/if}
-							</div>
-							{#if personal.pins.includes(pl.id)}
-								<span
-									class="absolute left-9 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground shadow"
-								>
-									<HugeiconsIcon icon={PinIcon} class="h-2.5 w-2.5" />
+								<HugeiconsIcon
+									icon={folder.collapsed ? ArrowRight01Icon : ArrowDown01Icon}
+									class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
+								/>
+								<HugeiconsIcon
+									icon={folder.collapsed ? Folder01Icon : FolderOpenIcon}
+									class="h-4 w-4 shrink-0 text-primary"
+								/>
+								<span class="truncate text-[13px] font-semibold">{folder.name}</span>
+								<span class="rounded-full bg-muted px-1.5 py-0.2 text-[10px] font-medium text-muted-foreground">
+									{folderPlaylists.length}
 								</span>
-							{/if}
-							<div class="min-w-0 flex-1">
-								<div class="truncate text-[13px] font-medium">{pl.title}</div>
-								{#if pl.subtitle}
-									<div class="truncate text-xs text-muted-foreground">{rowSubtitle(pl.subtitle)}</div>
-								{/if}
+							</button>
+							<FolderMenu
+								{folder}
+								onNewPlaylist={() => {
+									playlistDialogOpen = true;
+								}}
+								onNewSubfolder={(parent) => {
+									newFolderName = '';
+									newFolderParentId = parent;
+									folderDialogOpen = true;
+								}}
+								onRename={openRenameFolder}
+							/>
+						</div>
+
+						<!-- Folder Contents (Nested Playlists) -->
+						{#if !folder.collapsed}
+							<div class="ml-2 border-l border-border/50 pl-1 space-y-0.5 py-0.5">
+								{#each folderPlaylists as pl (pl.id)}
+									{@render playlistRow(pl, true)}
+								{:else}
+									<p class="py-1 pl-6 text-xs text-muted-foreground/60 italic">
+										Drop playlists here
+									</p>
+								{/each}
 							</div>
-						</a>
-						<PlaylistMenu item={pl} />
+						{/if}
 					</div>
-					{#if pinnedCount && i === pinnedCount - 1}
-						<div class="mx-3 my-1.5 h-px bg-border"></div>
-					{/if}
-				{:else}
-					{#if library.loading}
-						<p class="px-3 py-1.5 text-xs text-muted-foreground">Loading…</p>
-					{/if}
 				{/each}
+
+				<!-- Top Level / Unfiled Playlists Drop Zone & List -->
+				<div
+					class="rounded-lg transition-colors {dragOverRoot ? 'bg-primary/10 ring-1 ring-primary/40' : ''}"
+					ondragover={(e) => {
+						if (e.dataTransfer?.types.includes(PLAYLIST_DND_MIME)) {
+							e.preventDefault();
+							dragOverRoot = true;
+						}
+					}}
+					ondragleave={() => (dragOverRoot = false)}
+					ondrop={handleDropOnRoot}
+				>
+					{#if rootFolders.length > 0 && unfiledPlaylists.length > 0}
+						<div class="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+							Playlists
+						</div>
+					{/if}
+
+					{#each unfiledPlaylists as pl, i (pl.id)}
+						{@render playlistRow(pl, false)}
+						{#if pinnedCount && i === pinnedCount - 1}
+							<div class="mx-3 my-1.5 h-px bg-border"></div>
+						{/if}
+					{:else}
+						{#if library.loading && !rootFolders.length}
+							<p class="px-3 py-1.5 text-xs text-muted-foreground">Loading…</p>
+						{/if}
+					{/each}
+				</div>
 			</div>
 		</div>
 
-		<Dialog.Root bind:open={dialogOpen}>
-			<Dialog.Content class="sm:max-w-md">
-				<Dialog.Header>
-					<Dialog.Title>New playlist</Dialog.Title>
-					<Dialog.Description>Give your playlist a name to get started.</Dialog.Description>
-				</Dialog.Header>
-				<form
-					class="flex flex-col gap-4"
-					onsubmit={(e) => {
-						e.preventDefault();
-						createNew();
-					}}
-				>
-					<Input bind:value={newTitle} placeholder="Playlist name" autofocus />
-					<Dialog.Footer>
-						<Button type="button" variant="outline" onclick={() => (dialogOpen = false)}>Cancel</Button>
-						<Button type="submit" disabled={creating || !newTitle.trim()}>
-							{creating ? 'Creating…' : 'Create'}
-						</Button>
-					</Dialog.Footer>
-				</form>
-			</Dialog.Content>
-		</Dialog.Root>
+		<!-- New Playlist Modal with Picture & Description -->
+		<CreatePlaylistDialog bind:open={playlistDialogOpen} />
 
+		<!-- New Folder Modal -->
 		<Dialog.Root bind:open={folderDialogOpen}>
 			<Dialog.Content class="sm:max-w-md">
 				<Dialog.Header>
@@ -331,6 +395,90 @@
 				</form>
 			</Dialog.Content>
 		</Dialog.Root>
-	{/if}
 
+		<!-- Rename Folder Modal -->
+		<Dialog.Root bind:open={renameDialogOpen}>
+			<Dialog.Content class="sm:max-w-md">
+				<Dialog.Header>
+					<Dialog.Title>Rename Folder</Dialog.Title>
+					<Dialog.Description>Enter a new name for this folder.</Dialog.Description>
+				</Dialog.Header>
+				<form
+					class="flex flex-col gap-4"
+					onsubmit={(e) => {
+						e.preventDefault();
+						handleRenameFolder();
+					}}
+				>
+					<Input bind:value={renameFolderName} placeholder="Folder name" autofocus />
+					<Dialog.Footer>
+						<Button type="button" variant="outline" onclick={() => (renameDialogOpen = false)}>Cancel</Button>
+						<Button type="submit" disabled={!renameFolderName.trim()}>Rename</Button>
+					</Dialog.Footer>
+				</form>
+			</Dialog.Content>
+		</Dialog.Root>
+	{/if}
 </aside>
+
+{#snippet playlistRow(pl: BrowseItem, inFolder: boolean = false)}
+	<!-- The ⋯ is a sibling of the link, not a child: a <button> inside an <a> is invalid HTML -->
+	<div
+		class="group/row relative"
+		data-ctx
+		draggable="true"
+		ondragstart={(e) => {
+			setDragPlaylist(e, pl.id);
+			setDragItem(e, pl);
+		}}
+	>
+		<a
+			href={playlistHref(pl)}
+			title={pl.title}
+			class="flex items-center gap-2.5 rounded-lg py-1.5 pr-9 transition-colors hover:bg-sidebar-accent/50 {inFolder ? 'pl-2' : 'pl-2'}"
+		>
+			<div
+				class="relative h-9 w-9 shrink-0 overflow-hidden bg-muted {pl.kind === 'artist'
+					? 'rounded-full'
+					: 'rounded-md'}"
+			>
+				{#if pl.thumbnail && pl.id !== ON_REPEAT_ID}
+					<img
+						src={thumb(pl.thumbnail, 96)}
+						alt=""
+						class="h-full w-full object-cover"
+						loading="lazy"
+					/>
+				{:else}
+					<!-- On Repeat has no artwork by nature: icon tile, same as its card. -->
+					<div
+						class="flex h-full w-full items-center justify-center {pl.id === ON_REPEAT_ID
+							? 'bg-primary/10 text-primary'
+							: 'text-muted-foreground/50'}"
+					>
+						<HugeiconsIcon
+							icon={MusicNote01Icon}
+							altIcon={ListRestartIcon}
+							showAlt={pl.id === ON_REPEAT_ID}
+							class={pl.id === ON_REPEAT_ID ? 'h-4 w-4' : 'h-3.5 w-3.5'}
+						/>
+					</div>
+				{/if}
+			</div>
+			{#if personal.pins.includes(pl.id)}
+				<span
+					class="absolute left-8 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow"
+				>
+					<HugeiconsIcon icon={PinIcon} class="h-2 w-2" />
+				</span>
+			{/if}
+			<div class="min-w-0 flex-1">
+				<div class="truncate text-[13px] font-medium leading-tight">{pl.title}</div>
+				{#if pl.subtitle}
+					<div class="truncate text-[11px] text-muted-foreground">{rowSubtitle(pl.subtitle)}</div>
+				{/if}
+			</div>
+		</a>
+		<PlaylistMenu item={pl} />
+	</div>
+{/snippet}

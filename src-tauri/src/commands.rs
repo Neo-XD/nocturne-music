@@ -919,9 +919,34 @@ pub async fn remove_from_playlist(
 }
 
 #[tauri::command]
-pub async fn create_playlist(state: St<'_>, title: String) -> Result<String, String> {
+pub async fn create_playlist(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    title: String,
+    description: Option<String>,
+    public: Option<bool>,
+    cover_path: Option<String>,
+) -> Result<String, String> {
     let client = require_login(&state)?;
-    state.it.create_playlist(client, &title).await.map_err(|e| e.to_string())
+    let privacy = if public.unwrap_or(false) { "PUBLIC" } else { "PRIVATE" };
+    let playlist_id = state
+        .it
+        .create_playlist(
+            client,
+            &title,
+            description.as_deref().filter(|d| !d.trim().is_empty()),
+            Some(privacy),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(path) = cover_path {
+        if !path.trim().is_empty() {
+            let _ = set_playlist_cover(app, state.clone(), playlist_id.clone(), Some(path)).await;
+        }
+    }
+
+    Ok(playlist_id)
 }
 
 /// Edit a playlist you own, from the "Edit playlist" dialog: name, description, visibility.

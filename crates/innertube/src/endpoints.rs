@@ -787,23 +787,28 @@ impl InnerTube {
         }
     }
 
-    /// Create a private playlist; returns the new playlistId. context/01 `playlist/create`.
+    /// Create a playlist (public or private) with optional description; returns the new playlistId. context/01 `playlist/create`.
     pub async fn create_playlist(
         &self,
         client: &YouTubeClient,
         title: &str,
+        description: Option<&str>,
+        privacy_status: Option<&str>,
     ) -> Result<String, Error> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
-        struct CreateBody {
+        struct CreateBody<'a> {
             context: Context,
-            title: String,
-            privacy_status: String,
+            title: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            description: Option<&'a str>,
+            privacy_status: &'a str,
         }
         let body = CreateBody {
             context: self.context_for(client),
-            title: title.to_owned(),
-            privacy_status: "PRIVATE".to_owned(),
+            title,
+            description,
+            privacy_status: privacy_status.unwrap_or("PRIVATE"),
         };
         let value = self.post("playlist/create", client, &body, true).await?;
         metadata::find_first_str(&value, "playlistId")

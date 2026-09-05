@@ -23,6 +23,7 @@
 		playback,
 		prefs,
 		np,
+		lyricsSync,
 		toggleNowPlayingLike,
 		openAddToPlaylist,
 		wheelVolume,
@@ -37,6 +38,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import AnimatedArtwork from './AnimatedArtwork.svelte';
 	import { appearance } from '$lib/theme.svelte';
+	import LyricsSyncDock from './LyricsSyncDock.svelte';
 
 	// --- Lyrics Loading & Sync ---
 	let lyrics = $state<api.Lyrics | null>(null);
@@ -134,7 +136,7 @@
 		return () => cancelAnimationFrame(frameId);
 	});
 
-	const posMs = $derived(interpolatedPosSecs * 1000);
+	const posMs = $derived(interpolatedPosSecs * 1000 + lyricsSync.currentOffsetMs);
 
 	const activeIndex = $derived.by(() => {
 		if (!lyrics?.synced) return -1;
@@ -539,13 +541,13 @@
 										data-line={i}
 										onclick={() => seekTo(line)}
 										style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
-										class="block w-full origin-left cursor-pointer text-left font-extrabold leading-snug transition-all duration-300 ease-out hover:text-foreground
+										class="group/lyric-line block w-full origin-left cursor-pointer text-left font-extrabold leading-snug transition-all duration-300 ease-out hover:text-foreground
 											text-2xl sm:text-3xl lg:text-4xl
 											{isActive
-											? 'text-foreground opacity-100 scale-[1.02]'
+											? 'text-foreground opacity-100 scale-[1.03] drop-shadow-[0_0_24px_var(--primary)]'
 											: isPast
-												? 'text-muted-foreground/35 opacity-50'
-												: 'text-muted-foreground/75 opacity-75'}"
+												? 'text-muted-foreground/35 opacity-50 blur-[0.3px] hover:blur-none hover:opacity-85'
+												: 'text-muted-foreground/75 opacity-75 blur-[0.2px] hover:blur-none hover:opacity-100'}"
 									>
 										{#if line.words && line.words.length > 0}
 											<span class="inline-flex flex-wrap items-baseline">
@@ -557,7 +559,7 @@
 														{@const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)}
 														{@const isCurrentWord = progress > 0 && progress < 1}
 														<span
-															class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord ? 'scale-[1.03]' : ''}"
+															class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord ? 'scale-[1.04] drop-shadow-[0_0_14px_var(--primary)]' : ''}"
 															style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
 														>
 															{cleanText}
@@ -570,7 +572,7 @@
 												{/each}
 											</span>
 										{:else}
-											<span>{line.text || '♪'}</span>
+											<span class="{isActive ? 'bg-gradient-to-r from-foreground via-foreground to-primary/80 bg-clip-text' : ''}">{line.text || '♪'}</span>
 										{/if}
 
 										{#if line.translation}
@@ -602,6 +604,13 @@
 							</div>
 						{/if}
 					</div>
+
+					<!-- BetterLyrics Sync Dock in bottom corner of Fullscreen Lyrics -->
+					{#if lyrics && !loadingLyrics}
+						<div class="absolute bottom-4 right-6 z-20 pointer-events-auto">
+							<LyricsSyncDock />
+						</div>
+					{/if}
 				</section>
 			</main>
 		{:else}

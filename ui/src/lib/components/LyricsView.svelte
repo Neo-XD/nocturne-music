@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as api from '$lib/api';
-	import { playback } from '$lib/player.svelte';
+	import { playback, lyricsSync } from '$lib/player.svelte';
+	import LyricsSyncDock from '$lib/components/LyricsSyncDock.svelte';
 
 	// `expanded` only sizes the type and centres the column. The owner of the extra room (the side
 	// panel, or the now-playing view) decides how much there is. Toggling it must not remount this
@@ -60,6 +61,38 @@
 			});
 	});
 
+	// mpv's position arrives ~4x a second. Run a local clock forward from each one so the karaoke
+	// sweep moves every frame instead of stepping four times a second.
+	let interpolatedPosSecs = $state(playback.position);
+
+	/** The rAF clock exists for the word sweep and nothing else. Unsynced lyrics have no cues, and
+	 *  line-level-only lyrics move at most once a line, so both are served perfectly well by the
+	 *  position tick they already get. Without this gate the loop ran at refresh rate for any
+	 *  mounted lyrics panel, on every track, for the whole session, which meant the app never
+	 *  reached an idle frame. */
+	const needsFrameClock = $derived(
+		!!lyrics?.synced && lyrics.lines.some((l) => (l.words?.length ?? 0) > 0)
+	);
+
+	$effect(() => {
+		const pos = playback.position;
+		if (playback.paused || !needsFrameClock) {
+			interpolatedPosSecs = pos;
+			return;
+		}
+		const base = pos;
+		const baseAt = performance.now();
+		interpolatedPosSecs = pos;
+		let frameId = requestAnimationFrame(function tick() {
+			interpolatedPosSecs = base + (performance.now() - baseAt) / 1000;
+			frameId = requestAnimationFrame(tick);
+		});
+		return () => cancelAnimationFrame(frameId);
+	});
+
+	// Offset adjusted position in ms (BetterLyrics style offset sync)
+	const posMs = $derived(interpolatedPosSecs * 1000 + lyricsSync.currentOffsetMs);
+
 	// Last synced line whose cue has passed (lines arrive sorted by time).
 	const activeIndex = $derived.by(() => {
 		if (!lyrics?.synced) return -1;
@@ -110,40 +143,6 @@
 		api.seek(secs);
 	}
 
-	// mpv's position arrives ~4x a second. Run a local clock forward from each one so the karaoke
-	// sweep moves every frame instead of stepping four times a second.
-	let interpolatedPosSecs = $state(playback.position);
-
-	/** The rAF clock exists for the word sweep and nothing else. Unsynced lyrics have no cues, and
-	 *  line-level-only lyrics move at most once a line, so both are served perfectly well by the
-	 *  position tick they already get. Without this gate the loop ran at refresh rate for any
-	 *  mounted lyrics panel, on every track, for the whole session, which meant the app never
-	 *  reached an idle frame. */
-	const needsFrameClock = $derived(
-		!!lyrics?.synced && lyrics.lines.some((l) => (l.words?.length ?? 0) > 0)
-	);
-
-	$effect(() => {
-		const pos = playback.position;
-		if (playback.paused || !needsFrameClock) {
-			interpolatedPosSecs = pos;
-			return;
-		}
-		// Rebase on every run. Rebasing only when the value moved kept the base timestamp from
-		// before a pause, so resuming after N seconds paused ran the clock N seconds fast until
-		// the next tick corrected it.
-		const base = pos;
-		const baseAt = performance.now();
-		interpolatedPosSecs = pos;
-		let frameId = requestAnimationFrame(function tick() {
-			interpolatedPosSecs = base + (performance.now() - baseAt) / 1000;
-			frameId = requestAnimationFrame(tick);
-		});
-		return () => cancelAnimationFrame(frameId);
-	});
-
-	const posMs = $derived(interpolatedPosSecs * 1000);
-
 	function getWordProgress(word: api.LyricWord, currentMs: number): number {
 		if (currentMs <= word.start_ms) return 0;
 		if (currentMs >= word.end_ms) return 1;
@@ -183,16 +182,16 @@
 					data-line={i}
 					onclick={() => seekTo(line)}
 					style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
-					class="block w-full origin-left cursor-pointer text-left font-bold leading-snug transition-[color,transform] duration-300 ease-out hover:text-foreground
-						{expanded ? 'py-3 text-3xl' : compact ? 'py-1 text-sm' : 'py-2 text-xl'}
+					class="group/lyric-line block w-full origin-left cursor-pointer text-left font-bold leading-snug transition-all duration-300 ease-out hover:text-foreground
+						{expanded ? 'py-3.5 text-3xl sm:text-4xl' : compact ? 'py-1 text-sm' : 'py-2.5 text-xl'}
 						{isActive
-						? 'scale-[1.04] text-foreground'
+						? 'scale-[1.03] text-foreground opacity-100 drop-shadow-[0_0_24px_var(--primary)]'
 						: isPast
-							? 'text-muted-foreground/40'
-							: 'text-muted-foreground/70'}"
+							? 'text-muted-foreground/45 opacity-60 blur-[0.3px] hover:blur-none hover:opacity-90'
+							: 'text-muted-foreground/75 opacity-75 blur-[0.2px] hover:blur-none hover:opacity-100'}"
 				>
 					{#if line.words && line.words.length > 0}
-						<!-- Word-by-Word Karaoke Sweep Animation (Better-Lyrics style, highly optimized) -->
+						<!-- Word-by-Word Karaoke Sweep Animation (Glassy Turbo luminous syllable sweep) -->
 						<span class="inline-flex flex-wrap items-baseline">
 							{#each line.words as word, wIdx (wIdx)}
 								{@const isWordEnd = word.text.endsWith(' ')}
@@ -201,13 +200,9 @@
 									{@const progress = getWordProgress(word, posMs)}
 									{@const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)}
 									{@const isCurrentWord = progress > 0 && progress < 1}
-									<!-- Only the gradient stop moves per frame; the clip/fill are static, so they
-									     live in the class and aren't re-serialised 60 times a second. Both
-									     colours are theme tokens: the sung half was hardcoded white, which is
-									     invisible on every light theme. -->
 									<span
 										class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord
-											? 'scale-[1.03]'
+											? 'scale-[1.04] drop-shadow-[0_0_12px_var(--primary)]'
 											: ''}"
 										style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
 									>
@@ -221,7 +216,7 @@
 							{/each}
 						</span>
 					{:else}
-						<span>{line.text || '♪'}</span>
+						<span class="{isActive ? 'bg-gradient-to-r from-foreground via-foreground to-primary/80 bg-clip-text' : ''}">{line.text || '♪'}</span>
 					{/if}
 
 					<!-- Translation line rendering -->
@@ -260,8 +255,9 @@
 	{/if}
 </div>
 {#if lyrics && !loading && !compact}
-	<p class="border-t px-4 py-2 text-xs text-muted-foreground">
-		{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}
-	</p>
+	<div class="flex items-center justify-between border-t border-border/40 px-4 py-2 text-xs text-muted-foreground">
+		<span>{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}</span>
+		<LyricsSyncDock />
+	</div>
 {/if}
 

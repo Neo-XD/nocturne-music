@@ -28,6 +28,7 @@
 		playback,
 		prefs,
 		np,
+		lyricsSync,
 		toggleNowPlayingLike,
 		openAddToPlaylist,
 		wheelVolume
@@ -37,6 +38,7 @@
 	import ArtistLine from './ArtistLine.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
+	import LyricsSyncDock from './LyricsSyncDock.svelte';
 
 	let {
 		onClose,
@@ -161,7 +163,7 @@
 		return () => cancelAnimationFrame(frameId);
 	});
 
-	const posMs = $derived(interpolatedPosSecs * 1000);
+	const posMs = $derived(interpolatedPosSecs * 1000 + lyricsSync.currentOffsetMs);
 
 	function getWordProgress(word: api.LyricWord, currentMs: number): number {
 		if (currentMs <= word.start_ms) return 0;
@@ -252,45 +254,34 @@
 		};
 	});
 
-	function mpvNow() {
-		if (playback.paused) return playback.position;
-		const since = (performance.now() - playback.positionAt) / 1000;
-		if (since > 0.4) return playback.position;
-		return playback.position + since * playback.speed;
-	}
-
-	function syncVideo() {
-		const el = videoEl;
-		if (!el || !showVideo || el.seeking || el.readyState < 1) return;
-		const drift = mpvNow() - el.currentTime;
-		if (Math.abs(drift) > 2.5) {
-			el.playbackRate = playback.speed;
-			el.currentTime = mpvNow() + (playback.paused ? 0 : 1);
+	$effect(() => {
+		if (videoEl && showVideo) {
+			const onTimeUpdate = () => {
+				if (!videoEl || playback.paused) return;
+				const audioPos = playback.position;
+				const videoPos = videoEl.currentTime;
+				if (Math.abs(audioPos - videoPos) > 0.3) {
+					videoEl.currentTime = audioPos;
+				}
+			};
+			videoEl.addEventListener('timeupdate', onTimeUpdate);
+			return () => videoEl?.removeEventListener('timeupdate', onTimeUpdate);
 		}
-	}
-
-	$effect(() => {
-		playback.position;
-		playback.paused;
-		syncVideo();
 	});
 
 	$effect(() => {
-		const paused = playback.paused;
-		const el = videoEl;
-		if (!el || !showVideo) return;
-		if (paused) el.pause();
-		else el.play().catch(() => {});
+		if (videoEl) {
+			if (playback.paused) {
+				videoEl.pause();
+			} else if (showVideo) {
+				videoEl.play().catch(() => {});
+			}
+		}
 	});
-
-	function openFullscreen() {
-		np.fullscreenOpen = true;
-	}
 
 	const sourceTitle = $derived(playback.queue.sourceName || 'Now Playing');
 </script>
 
-<!-- Below lg: Backdrop scrim dismisses the sidebar overlay -->
 <button
 	class="fixed inset-0 z-30 cursor-default bg-black/20 backdrop-blur-xs lg:hidden"
 	onclick={onClose}
@@ -298,26 +289,24 @@
 	transition:fade={{ duration: 150 }}
 ></button>
 
-<!-- Docked in-flow sidebar on lg+, overlay on smaller screens -->
 <aside
-	transition:fly={{ x: 32, duration: 220, easing: cubicOut }}
-	class="info-sidebar fixed inset-y-0 right-0 z-40 flex h-full w-80 max-w-[85vw] flex-col border-l border-border/70 bg-card/85 dark:bg-card/80 backdrop-blur-2xl shadow-2xl lg:relative lg:inset-auto lg:z-10 lg:w-84 xl:w-92 2xl:w-96 lg:shrink-0 lg:shadow-none overflow-x-hidden"
+	transition:fly={{ x: 320, duration: 250, easing: cubicOut }}
+	class="info-sidebar flex h-full w-80 max-w-[90vw] shrink-0 flex-col border-l border-border/70 bg-card/90 shadow-2xl backdrop-blur-2xl transition-all select-none overflow-hidden z-20"
 >
 	<!-- Header -->
-	<div class="flex items-center justify-between border-b px-4 py-3">
-		<div class="min-w-0 flex-1 pr-2">
-			<div class="truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-				{sourceTitle}
-			</div>
+	<div class="flex items-center justify-between border-b px-4 py-3 shrink-0">
+		<div class="flex items-center gap-2">
+			<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4 text-primary" />
+			<h2 class="font-heading text-sm font-semibold tracking-tight">Now Playing</h2>
 		</div>
 		<div class="flex items-center gap-1">
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				onclick={openFullscreen}
+				onclick={() => (np.fullscreenOpen = true)}
 				aria-label="Open fullscreen player"
-				title="Fullscreen player"
-				class="cursor-pointer hover:text-foreground"
+				class="hover:text-foreground"
+				title="Fullscreen (F)"
 			>
 				<HugeiconsIcon icon={FullScreenIcon} class="h-4 w-4" />
 			</Button>
@@ -325,84 +314,78 @@
 				variant="ghost"
 				size="icon-sm"
 				onclick={onClose}
-				aria-label="Close sidebar"
-				title="Close"
-				class="cursor-pointer hover:text-foreground"
+				aria-label="Close now playing"
+				class="hover:text-foreground"
 			>
 				<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
 			</Button>
 		</div>
 	</div>
 
-	<!-- Scrollable Body (Strictly no horizontal scroll) -->
-	<div class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-5">
-		<!-- Artwork / Video Card -->
-		<div class="relative group overflow-hidden rounded-xl bg-muted shadow-lg" onwheel={wheelVolume}>
+	<!-- Scrollable Content Body -->
+	<div class="min-h-0 flex-1 overflow-y-auto p-4 space-y-5">
+		<!-- Large Artwork / Music Video Header -->
+		<div class="group relative aspect-square w-full overflow-hidden rounded-2xl border bg-muted shadow-lg">
 			{#if showVideo}
 				<!-- svelte-ignore a11y_media_has_caption -->
 				<video
 					bind:this={videoEl}
-					src={videoUrl}
+					src={videoUrl ?? ''}
+					autoplay
 					muted
 					playsinline
-					preload="auto"
-					onloadedmetadata={syncVideo}
-					oncanplay={syncVideo}
-					onerror={() => (videoUrl = null)}
-					class="aspect-square w-full bg-black object-contain"
+					class="h-full w-full object-cover"
 				></video>
-			{:else if playback.now?.thumbnail}
-				<img
-					src={thumb(playback.now.thumbnail, 400)}
-					alt={playback.now.title}
-					class="aspect-square w-full object-cover transition-transform duration-300 group-hover:scale-105"
-				/>
-			{:else}
-				<div class="flex aspect-square w-full items-center justify-center bg-muted text-muted-foreground/40">
-					<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
-				</div>
-			{/if}
-
-			<!-- Video toggle button -->
-			{#if canVideo}
 				<button
-					type="button"
-					onclick={() => (wantVideo = !wantVideo)}
-					aria-label={showVideo ? 'Show artwork' : 'Show video'}
-					class="absolute right-2 top-2 z-10 cursor-pointer rounded-md bg-black/50 p-1.5 text-white/80 transition-colors hover:text-white"
+					onclick={() => (wantVideo = false)}
+					class="absolute right-2 top-2 z-10 flex h-7 items-center gap-1 rounded-full bg-black/60 px-2 text-[11px] font-medium text-white backdrop-blur-md transition hover:bg-black/80"
+					title="Switch to album artwork"
 				>
-					<HugeiconsIcon
-						icon={Video01Icon}
-						altIcon={VideoOffIcon}
-						showAlt={showVideo}
-						class="h-4 w-4"
-					/>
+					<HugeiconsIcon icon={VideoOffIcon} class="h-3.5 w-3.5" />
+					<span>Audio</span>
 				</button>
+			{:else}
+				{#if playback.now?.thumbnail}
+					<img
+						src={thumb(playback.now.thumbnail, 600)}
+						alt={playback.now?.title ?? 'Album Art'}
+						class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+					/>
+				{:else}
+					<div class="flex h-full w-full items-center justify-center text-muted-foreground">
+						<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
+					</div>
+				{/if}
+
+				{#if canVideo}
+					<button
+						onclick={() => (wantVideo = true)}
+						class="absolute right-2 top-2 z-10 flex h-7 items-center gap-1 rounded-full bg-black/60 px-2 text-[11px] font-medium text-white backdrop-blur-md transition hover:bg-black/80"
+						title="Watch music video"
+					>
+						<HugeiconsIcon icon={Video01Icon} class="h-3.5 w-3.5 text-primary" />
+						<span>Video</span>
+					</button>
+				{/if}
 			{/if}
 		</div>
 
-		<!-- Track Title & Artist Info -->
-		<div class="space-y-1.5">
-			<div class="flex items-start justify-between gap-2">
+		<!-- Track Title, Artists & Primary Actions -->
+		<div class="space-y-2">
+			<div class="flex items-start justify-between gap-3">
 				<div class="min-w-0 flex-1">
-					<Marquee
-						text={playback.now?.title ?? 'Nothing playing'}
-						class="text-base font-bold tracking-tight text-foreground"
-					/>
-					<div class="flex items-center gap-1.5 min-w-0">
-						{#if playback.now?.explicit}
-							<ExplicitIcon class="h-3.5 w-3.5 shrink-0" />
-						{/if}
+					<h3 class="font-heading text-lg font-bold leading-tight text-foreground truncate">
+						{playback.now?.title ?? 'Nothing playing'}
+					</h3>
+					<div class="mt-0.5 truncate text-sm text-muted-foreground">
 						<ArtistLine
 							runs={playback.now?.artistRuns}
-							text={playback.now?.artists ?? ''}
-							marquee
+							text={playback.now?.artists ?? 'Unknown artist'}
 							class="block max-w-full text-sm text-muted-foreground hover:text-foreground"
 						/>
 					</div>
 				</div>
 
-				<!-- Track Action Buttons (Like, Add to playlist, Menu) -->
 				{#if playback.now}
 					<div class="flex items-center gap-0.5 shrink-0 pt-0.5">
 						{#if !api.isLocalId(playback.now.videoId)}
@@ -457,8 +440,8 @@
 			</div>
 		</div>
 
-		<!-- Spotify-style Synced Lyrics Card -->
-		<div class="overflow-hidden rounded-xl border bg-muted/40 p-4 transition-all">
+		<!-- Spotify-style Synced Lyrics Card with Glassy Turbo Fluid Styling -->
+		<div class="overflow-hidden rounded-xl border border-border/80 bg-muted/40 p-4 transition-all shadow-sm">
 			<div class="flex items-center justify-between pb-3">
 				<div class="flex items-center gap-1.5">
 					<HugeiconsIcon icon={Mic01Icon} class="h-4 w-4 text-primary" />
@@ -467,7 +450,7 @@
 				<div class="flex items-center gap-1">
 					<button
 						onclick={() => (expandedLyrics = !expandedLyrics)}
-						class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold text-primary hover:bg-primary/10"
+						class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold text-primary hover:bg-primary/10 cursor-pointer"
 					>
 						{expandedLyrics ? 'Collapse' : 'Expand'}
 						<HugeiconsIcon icon={expandedLyrics ? Minimize01Icon : Maximize01Icon} class="h-3 w-3" />
@@ -502,12 +485,12 @@
 							<button
 								data-line={i}
 								onclick={() => seekTo(line)}
-								class="block w-full origin-left cursor-pointer text-left font-heading text-sm font-bold leading-snug transition-all duration-200 hover:text-foreground
+								class="block w-full origin-left cursor-pointer text-left font-heading text-sm font-bold leading-snug transition-all duration-300 hover:text-foreground
 									{isActive
-									? 'scale-[1.02] text-foreground'
+									? 'scale-[1.03] text-foreground opacity-100 drop-shadow-[0_0_18px_var(--primary)]'
 									: isPast
-										? 'text-muted-foreground/45'
-										: 'text-muted-foreground/75'}"
+										? 'text-muted-foreground/45 opacity-60 blur-[0.2px] hover:blur-none hover:opacity-90'
+										: 'text-muted-foreground/75 opacity-75 blur-[0.15px] hover:blur-none hover:opacity-100'}"
 							>
 								{#if line.words && line.words.length > 0}
 									<span class="inline-flex flex-wrap items-baseline">
@@ -519,20 +502,20 @@
 												{@const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)}
 												{@const isCurrentWord = progress > 0 && progress < 1}
 												<span
-													class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] {isWordEnd ? 'mr-[0.22em]' : ''} {isCurrentWord ? 'scale-[1.03]' : ''}"
+													class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.22em]' : ''} {isCurrentWord ? 'scale-[1.04] drop-shadow-[0_0_10px_var(--primary)]' : ''}"
 													style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
 												>
 													{cleanText}
 												</span>
 											{:else}
-												<span class="inline-block {isWordEnd ? 'mr-[0.22em]' : ''}">
+												<span class="inline-block {isWordEnd ? 'mr-[0.22em]' : ''} {isPast ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}">
 													{cleanText}
 												</span>
 											{/if}
 										{/each}
 									</span>
 								{:else}
-									<span>{line.text || '♪'}</span>
+									<span class="{isActive ? 'bg-gradient-to-r from-foreground to-primary/80 bg-clip-text' : ''}">{line.text || '♪'}</span>
 								{/if}
 
 								{#if line.translation}
@@ -564,8 +547,9 @@
 			</div>
 
 			{#if lyrics && !loadingLyrics}
-				<div class="mt-2 border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
-					{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}
+				<div class="mt-3 flex items-center justify-between border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
+					<span>{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}</span>
+					<LyricsSyncDock />
 				</div>
 			{/if}
 		</div>
