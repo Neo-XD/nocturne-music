@@ -372,13 +372,20 @@ async fn handle_connection(
                             match wire_msg {
                                 SyncWireMessage::PlaybackAction { action } => {
                                     if let Some(app_state) = state_ref.read().await.as_ref() {
+                                        let is_track_change = matches!(
+                                            action.kind.as_str(),
+                                            "change_track" | "transfer_to_desktop" | "next_track" | "next" | "previous_track" | "prev" | "previous"
+                                        );
                                         apply_remote_action(app_state, action).await;
-                                        // Broadcast updated state immediately
-                                        let snapshot = app_state.playback_snapshot().await;
-                                        let state = room_state_from_snapshot(&snapshot);
-                                        let msg = SyncWireMessage::SyncState { state };
-                                        if let Ok(json) = serde_json::to_string(&msg) {
-                                            let _ = b_tx.send(json);
+                                        // Broadcast updated state immediately for control actions.
+                                        // (Track changes broadcast the true loaded track from emit_now_playing once resolved)
+                                        if !is_track_change {
+                                            let snapshot = app_state.playback_snapshot().await;
+                                            let state = room_state_from_snapshot(&snapshot);
+                                            let msg = SyncWireMessage::SyncState { state };
+                                            if let Ok(json) = serde_json::to_string(&msg) {
+                                                let _ = b_tx.send(json);
+                                            }
                                         }
                                     }
                                 }
@@ -407,14 +414,25 @@ async fn handle_connection(
 
 async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction) {
     match action.kind.as_str() {
-        "play" | "toggle" => {
+        "play" => {
+            let _ = state.player.play();
+            state.media_set_playing(true);
+            crate::tray::set_playing(&state.app, true);
+            let _ = state.app.emit("playback-state", "playing");
+        }
+        "toggle" => {
             state.resume_or_toggle().await;
         }
         "pause" | "transfer_to_phone" => {
             let _ = state.player.pause();
+            state.media_set_playing(false);
+            crate::tray::set_playing(&state.app, false);
+            let _ = state.app.emit("playback-state", "paused");
         }
         "seek" => {
-            let _ = state.user_seek(action.position_ms as f64 / 1000.0).await;
+            let pos = action.position_ms as f64 / 1000.0;
+            let _ = state.user_seek(pos).await;
+            let _ = state.app.emit("position", serde_json::json!({ "position": pos }));
         }
         "next_track" | "next" => {
             state.next_in_queue().await;
@@ -434,7 +452,9 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
                 };
                 state.play_song(song).await;
                 if action.position_ms > 0 {
-                    let _ = state.user_seek(action.position_ms as f64 / 1000.0).await;
+                    let pos = action.position_ms as f64 / 1000.0;
+                    let _ = state.user_seek(pos).await;
+                    let _ = state.app.emit("position", serde_json::json!({ "position": pos }));
                 }
             }
         }

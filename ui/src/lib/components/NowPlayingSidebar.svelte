@@ -487,7 +487,7 @@
 								onclick={() => seekTo(line)}
 								class="block w-full origin-left cursor-pointer text-left font-heading text-sm font-bold leading-snug transition-all duration-300 hover:text-foreground
 									{isActive
-									? 'scale-[1.03] text-foreground opacity-100 drop-shadow-[0_0_18px_var(--primary)]'
+									? 'scale-[1.03] text-foreground opacity-100'
 									: isPast
 										? 'text-muted-foreground/45 opacity-60 blur-[0.2px] hover:blur-none hover:opacity-90'
 										: 'text-muted-foreground/75 opacity-75 blur-[0.15px] hover:blur-none hover:opacity-100'}"
@@ -502,7 +502,7 @@
 												{@const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)}
 												{@const isCurrentWord = progress > 0 && progress < 1}
 												<span
-													class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.22em]' : ''} {isCurrentWord ? 'scale-[1.04] drop-shadow-[0_0_10px_var(--primary)]' : ''}"
+													class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.22em]' : ''} {isCurrentWord ? 'scale-[1.04]' : ''}"
 													style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
 												>
 													{cleanText}

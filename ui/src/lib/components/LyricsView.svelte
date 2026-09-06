@@ -185,7 +185,7 @@
 					class="group/lyric-line block w-full origin-left cursor-pointer text-left font-bold leading-snug transition-all duration-300 ease-out hover:text-foreground
 						{expanded ? 'py-3.5 text-3xl sm:text-4xl' : compact ? 'py-1 text-sm' : 'py-2.5 text-xl'}
 						{isActive
-						? 'scale-[1.03] text-foreground opacity-100 drop-shadow-[0_0_24px_var(--primary)]'
+						? 'scale-[1.03] text-foreground opacity-100'
 						: isPast
 							? 'text-muted-foreground/45 opacity-60 blur-[0.3px] hover:blur-none hover:opacity-90'
 							: 'text-muted-foreground/75 opacity-75 blur-[0.2px] hover:blur-none hover:opacity-100'}"
@@ -202,7 +202,7 @@
 									{@const isCurrentWord = progress > 0 && progress < 1}
 									<span
 										class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord
-											? 'scale-[1.04] drop-shadow-[0_0_12px_var(--primary)]'
+											? 'scale-[1.04]'
 											: ''}"
 										style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
 									>

@@ -781,13 +781,13 @@
 <svelte:window onkeydown={recordingAction ? onKeyRecord : undefined} />
 
 <Dialog.Root bind:open={ui.settingsOpen}>
-	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl bg-background/70 dark:bg-background/60 backdrop-blur-2xl border border-border/80 shadow-2xl rounded-2xl">
+	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl border border-border/80 shadow-2xl rounded-2xl">
 		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
 		<div class="flex h-[min(38rem,80vh)]">
 			<!-- Tab rail -->
-			<nav class="flex w-52 shrink-0 flex-col border-r border-border/50 bg-muted/30 dark:bg-muted/15 p-3 backdrop-blur-md">
-				<Dialog.Title class="px-3 pt-1 pb-4 font-heading text-base font-semibold">
+			<nav class="settings-nav-rail flex w-52 shrink-0 flex-col border-r border-border/30 p-3 backdrop-blur-3xl">
+				<Dialog.Title class="px-3 pt-3 pb-4 font-heading text-base font-semibold text-foreground">
 					Settings
 				</Dialog.Title>
 				<div class="flex flex-col gap-0.5">
@@ -797,8 +797,8 @@
 							aria-current={tab === t.id}
 							class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors {tab ===
 							t.id
-								? 'bg-background/85 dark:bg-background/70 text-foreground shadow-xs ring-1 ring-border/60 font-semibold'
-								: 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}"
+								? 'bg-white/15 dark:bg-white/10 text-foreground shadow-xs ring-1 ring-white/10 font-semibold'
+								: 'text-muted-foreground hover:bg-white/5 hover:text-foreground'}"
 						>
 							<HugeiconsIcon
 								icon={t.icon}
@@ -817,14 +817,30 @@
 
 			<!-- Content pane. min-w-0: a flex child's min-width is auto, so without it one wide row
 			     (a long font name, a long path) widens the pane and pushes every tab off the modal. -->
-			<div class="flex min-w-0 flex-1 flex-col bg-background/80 dark:bg-background/80 backdrop-blur-xl">
-				<!-- h-14 also keeps the dialog's close button clear of the first row. -->
-				<header class="flex h-14 shrink-0 flex-col justify-center border-b border-border/60 px-6 pr-14 bg-background/35 dark:bg-background/25 backdrop-blur-md">
-					<h2 class="text-sm font-semibold">{currentTab.label}</h2>
-					<p class="truncate text-xs text-muted-foreground">{currentTab.hint}</p>
+			<div class="settings-content-pane relative flex min-w-0 flex-1 flex-col overflow-hidden">
+				<!-- Header with generous top padding matching desired.png and no dividing border -->
+				<header class="shrink-0 px-8 pt-8 pb-3 pr-16">
+					<h2 class="text-base font-bold tracking-tight text-foreground">{currentTab.label}</h2>
+					<p class="mt-0.5 truncate text-xs text-muted-foreground">{currentTab.hint}</p>
 				</header>
 
-				<div class="min-w-0 flex-1 overflow-y-auto px-6 py-5 pb-10">
+				<div
+					class="relative min-w-0 flex-1 overflow-y-auto px-8 {tab === 'themes' ? 'pr-14' : ''} pb-12"
+					onscroll={(e) => {
+						if (tab !== 'themes') return;
+						const target = e.currentTarget;
+						const containerRect = target.getBoundingClientRect();
+						for (const s of APPEARANCE_SECTIONS) {
+							const el = document.getElementById(s.id);
+							if (el) {
+								const rect = el.getBoundingClientRect();
+								if (rect.top - containerRect.top <= 140 && rect.bottom - containerRect.top > 40) {
+									activeAppearanceSection = s.id;
+								}
+							}
+						}
+					}}
+				>
 					{#if !loaded}
 						<p class="text-sm text-muted-foreground">Loading…</p>
 					{:else if tab === 'general'}
@@ -890,25 +906,6 @@
 							</div>
 						</section>
 					{:else if tab === 'themes'}
-						<!-- Quick Section Dots Navigation (Anchored on the right) -->
-						<nav class="sticky top-0 float-right -mr-2 ml-3 mb-2 hidden sm:flex flex-col items-center gap-1.5 rounded-full border border-border/60 bg-card/75 dark:bg-card/60 p-1.5 shadow-sm backdrop-blur-md z-20" aria-label="Appearance section dots">
-							{#each APPEARANCE_SECTIONS as sec}
-								<button
-									type="button"
-									onclick={() => scrollToAppearanceSection(sec.id)}
-									class="group relative flex size-5 items-center justify-center rounded-full cursor-pointer transition-transform hover:scale-110 active:scale-95"
-									title={sec.label}
-									aria-label="Jump to {sec.label}"
-								>
-									<span class="size-2 rounded-full transition-all duration-200 {activeAppearanceSection === sec.id ? 'size-2.5 bg-primary ring-2 ring-primary/40' : 'bg-muted-foreground/35 group-hover:bg-foreground/70'}"></span>
-									<!-- Tooltip on hover -->
-									<span class="pointer-events-none absolute right-7 whitespace-nowrap rounded-md border border-border/70 bg-popover/95 px-2 py-0.5 text-[10px] font-semibold text-popover-foreground opacity-0 shadow-sm backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100">
-										{sec.label}
-									</span>
-								</button>
-							{/each}
-						</nav>
-
 						<!-- Expand / Collapse all controls header -->
 						<div class="mb-4 flex items-center justify-between px-1">
 							<span class="text-xs text-muted-foreground">Customize colors, fonts, translucency, and visuals.</span>
@@ -931,8 +928,9 @@
 							</div>
 						</div>
 
-						<!-- 1. Theme & Accent Color -->
-						<section id="sec-theme" class="{GROUP} scroll-mt-3">
+						<div class="space-y-6">
+							<!-- 1. Theme & Accent Color -->
+							<section id="sec-theme" class="{GROUP} scroll-mt-3">
 							<button
 								type="button"
 								onclick={() => (collapsedCategories['sec-theme'] = !collapsedCategories['sec-theme'])}
@@ -1270,6 +1268,7 @@
 								</div>
 							{/if}
 						</section>
+					</div>
 					{:else if tab === 'playback'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Audio</h3>
@@ -1676,6 +1675,27 @@
 						</section>
 					{/if}
 				</div>
+
+				<!-- Quick Section Dots Navigation (Sticky & pinned on the right of Appearance tab) -->
+				{#if tab === 'themes'}
+					<nav class="absolute right-3.5 top-24 z-30 hidden sm:flex flex-col items-center gap-2 rounded-full border border-white/15 dark:border-white/10 bg-card/50 dark:bg-black/50 py-2.5 px-1.5 shadow-lg backdrop-blur-2xl" aria-label="Appearance section dots">
+						{#each APPEARANCE_SECTIONS as sec}
+							<button
+								type="button"
+								onclick={() => scrollToAppearanceSection(sec.id)}
+								class="group relative flex size-5 items-center justify-center rounded-full cursor-pointer transition-transform hover:scale-110 active:scale-95"
+								title={sec.label}
+								aria-label="Jump to {sec.label}"
+							>
+								<span class="rounded-full transition-all duration-200 {activeAppearanceSection === sec.id ? 'size-2.5 bg-white dark:bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]' : 'size-1.5 bg-white/25 dark:bg-white/25 group-hover:bg-white/60'}"></span>
+								<!-- Tooltip on hover -->
+								<span class="pointer-events-none absolute right-8 whitespace-nowrap rounded-[--radius] border border-border/70 bg-popover/95 px-2 py-0.5 text-[10px] font-semibold text-popover-foreground opacity-0 shadow-sm backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100">
+									{sec.label}
+								</span>
+							</button>
+						{/each}
+					</nav>
+				{/if}
 			</div>
 		</div>
 	</Dialog.Content>

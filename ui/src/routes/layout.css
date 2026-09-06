@@ -598,16 +598,23 @@
 	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.4), 0 8px 24px 0 rgba(0, 0, 0, 0.08);
 }
 
-/* Sidebar is now an absolute overlay; add backdrop blur + respect the --sidebar-opacity slider.
-   Glassy theme overrides bg-sidebar with a semi-transparent value + its own stronger blur above. */
+/* Sidebar is an absolute overlay; backdrop blur + translucent background driven by --sidebar-opacity */
 aside:not(.info-sidebar) {
-	backdrop-filter: blur(16px) saturate(180%);
-	-webkit-backdrop-filter: blur(16px) saturate(180%);
-	opacity: var(--sidebar-opacity, 1);
+	backdrop-filter: blur(24px) saturate(190%);
+	-webkit-backdrop-filter: blur(24px) saturate(190%);
+	background-color: color-mix(in oklab, var(--sidebar) calc(var(--sidebar-opacity, 0.6) * 100%), transparent) !important;
 }
-/* Don't dim the glassy sidebar again — it's already translucent via --sidebar token */
-.theme-glassy aside:not(.info-sidebar) {
-	opacity: 1;
+
+.settings-nav-rail {
+	backdrop-filter: blur(36px) saturate(190%);
+	-webkit-backdrop-filter: blur(36px) saturate(190%);
+	background-color: color-mix(in oklab, var(--background) calc(var(--sidebar-opacity, 0.35) * 100%), transparent) !important;
+}
+
+.settings-content-pane {
+	backdrop-filter: blur(36px) saturate(190%);
+	-webkit-backdrop-filter: blur(36px) saturate(190%);
+	background-color: color-mix(in oklab, var(--background) calc(var(--dialog-opacity, 0.78) * 100%), transparent) !important;
 }
 
 /* backdrop-filter over the titlebar's opaque bg-background is a no-op, and --sidebar keeps the corner where the two meet from reading as a seam. */
@@ -647,8 +654,9 @@ aside.info-sidebar {
 }
 
 .settings-dialog {
-	backdrop-filter: blur(32px) saturate(190%) brightness(1.04);
-	-webkit-backdrop-filter: blur(32px) saturate(190%) brightness(1.04);
+	backdrop-filter: blur(36px) saturate(190%) brightness(1.04);
+	-webkit-backdrop-filter: blur(36px) saturate(190%) brightness(1.04);
+	background-color: transparent !important;
 }
 
 .theme-glassy .settings-dialog {
@@ -658,6 +666,7 @@ aside.info-sidebar {
 .dark.theme-glassy .settings-dialog {
 	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.12), 0 24px 60px 0 rgba(0, 0, 0, 0.45);
 }
+
 
 /* The blurred cover behind a hero (HomeHero, NowPlaying, the album and library headers), on its
    own compositing layer. That promotion is the whole point of the class: left unpromoted,

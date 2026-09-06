@@ -12,7 +12,7 @@ use innertube::{
 };
 use listen_protocol::{Playback, PlaybackKind, Track};
 use player::Player;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
 use crate::db::{now_secs, Db};
@@ -1817,6 +1817,22 @@ impl AppState {
         // New track ⇒ let the next position tick through immediately instead of waiting out the
         // ~1s throttle, so a restored seek position (and the play-state self-heal) lands at once.
         self.last_media_push.store(0, Ordering::Relaxed);
+
+        let snapshot = serde_json::json!({
+            "now": Self::now_playing_json(item, stream_client),
+            "paused": false,
+            "position": 0.0,
+            "duration": 0.0,
+            "volume": saved_volume(&self.db),
+        });
+        if let Some(rs) =
+            self.app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
+        {
+            if rs.is_running() {
+                let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+                rs.broadcast_state(st);
+            }
+        }
     }
 
     /// Push play/pause state + the current position to the OS media controls (context/16) and
