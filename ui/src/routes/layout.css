@@ -598,6 +598,18 @@
 	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.4), 0 8px 24px 0 rgba(0, 0, 0, 0.08);
 }
 
+/* Sidebar is now an absolute overlay; add backdrop blur + respect the --sidebar-opacity slider.
+   Glassy theme overrides bg-sidebar with a semi-transparent value + its own stronger blur above. */
+aside:not(.info-sidebar) {
+	backdrop-filter: blur(16px) saturate(180%);
+	-webkit-backdrop-filter: blur(16px) saturate(180%);
+	opacity: var(--sidebar-opacity, 1);
+}
+/* Don't dim the glassy sidebar again — it's already translucent via --sidebar token */
+.theme-glassy aside:not(.info-sidebar) {
+	opacity: 1;
+}
+
 /* backdrop-filter over the titlebar's opaque bg-background is a no-op, and --sidebar keeps the corner where the two meet from reading as a seam. */
 .theme-glassy .app-titlebar {
 	background-color: var(--sidebar);

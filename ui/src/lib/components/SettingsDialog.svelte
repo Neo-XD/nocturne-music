@@ -16,6 +16,7 @@
 		KeyboardIcon,
 		ArrowUp01Icon,
 		ArrowDown01Icon,
+		ArrowRight01Icon,
 		Mic01Icon,
 		RotateLeft01Icon,
 		FlashIcon,
@@ -696,6 +697,39 @@
 		});
 		toast.success('Reset Fullscreen player background settings');
 	}
+
+	function resetTranslucencyVisuals() {
+		setAppearance({
+			dialogOpacity: 0.80,
+			sidebarOpacity: 0.60,
+			cardOpacity: 0.80,
+			overlayDimming: 0.25
+		});
+		toast.success('Reset translucency & opacity settings');
+	}
+
+	const APPEARANCE_SECTIONS = [
+		{ id: 'sec-theme', label: 'Theme & Accent' },
+		{ id: 'sec-translucency', label: 'Translucency' },
+		{ id: 'sec-typography', label: 'Typography' },
+		{ id: 'sec-player', label: 'Player & Visuals' },
+		{ id: 'sec-glassy', label: 'Glassy Theme' },
+		{ id: 'sec-fullscreen', label: 'Fullscreen Player' }
+	];
+	let activeAppearanceSection = $state('sec-theme');
+	let collapsedCategories = $state<Record<string, boolean>>({});
+
+	function scrollToAppearanceSection(id: string) {
+		activeAppearanceSection = id;
+		const el = document.getElementById(id);
+		el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	function toggleAllCategories(collapse: boolean) {
+		for (const s of APPEARANCE_SECTIONS) {
+			collapsedCategories[s.id] = collapse;
+		}
+	}
 </script>
 
 <!-- One row shape for the whole modal: label and description on the left, the control on the right,
@@ -856,202 +890,385 @@
 							</div>
 						</section>
 					{:else if tab === 'themes'}
-						<section class={GROUP}>
-							<h3 class={LABEL}>Theme</h3>
-							<div class={CARD}>
-								{@render row({
-									title: 'Preset',
-									desc: 'Accent colors tint the default look; palettes swap every color.',
-									control: presetSelect
-								})}
-								{@render row({
-									title: 'Accent color',
-									desc: 'Buttons, highlights and the progress bar. Applies over any preset.',
-									control: accentSwatch,
-									below: pickerOpen ? accentPicker : undefined
-								})}
-								{@render row({
-									title: 'Background tint',
-									desc:
-										currentTheme.kind === 'palette'
-											? `Only shades the default palette, ${currentTheme.label} brings its own colors.`
-											: 'Shades the greys: surfaces, borders and secondary text.',
-									control: tintSlider
-								})}
-								{@render row({
-									title: 'Roundness',
-									desc: 'Corner radius of cards, buttons and artwork.',
-									control: radiusSlider
-								})}
-							</div>
-						</section>
+						<!-- Quick Section Dots Navigation (Anchored on the right) -->
+						<nav class="sticky top-0 float-right -mr-2 ml-3 mb-2 hidden sm:flex flex-col items-center gap-1.5 rounded-full border border-border/60 bg-card/75 dark:bg-card/60 p-1.5 shadow-sm backdrop-blur-md z-20" aria-label="Appearance section dots">
+							{#each APPEARANCE_SECTIONS as sec}
+								<button
+									type="button"
+									onclick={() => scrollToAppearanceSection(sec.id)}
+									class="group relative flex size-5 items-center justify-center rounded-full cursor-pointer transition-transform hover:scale-110 active:scale-95"
+									title={sec.label}
+									aria-label="Jump to {sec.label}"
+								>
+									<span class="size-2 rounded-full transition-all duration-200 {activeAppearanceSection === sec.id ? 'size-2.5 bg-primary ring-2 ring-primary/40' : 'bg-muted-foreground/35 group-hover:bg-foreground/70'}"></span>
+									<!-- Tooltip on hover -->
+									<span class="pointer-events-none absolute right-7 whitespace-nowrap rounded-md border border-border/70 bg-popover/95 px-2 py-0.5 text-[10px] font-semibold text-popover-foreground opacity-0 shadow-sm backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100">
+										{sec.label}
+									</span>
+								</button>
+							{/each}
+						</nav>
 
-						<section class={GROUP}>
-							<h3 class={LABEL}>Typography</h3>
-							<div class={CARD}>
-								{#each FONT_ROWS as fr (fr.key)}
-									<!-- Zero-arg wrappers: a snippet passed as a value can't carry arguments. -->
-									{#snippet pick()}{@render fontSelect(fr.key, fr.label)}{/snippet}
-									{#snippet type()}{@render fontInput(fr.key, fr.label)}{/snippet}
+						<!-- Expand / Collapse all controls header -->
+						<div class="mb-4 flex items-center justify-between px-1">
+							<span class="text-xs text-muted-foreground">Customize colors, fonts, translucency, and visuals.</span>
+							<div class="flex items-center gap-2">
+								<button
+									type="button"
+									onclick={() => toggleAllCategories(false)}
+									class="text-[11px] font-medium text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+								>
+									Expand all
+								</button>
+								<span class="text-border text-xs">•</span>
+								<button
+									type="button"
+									onclick={() => toggleAllCategories(true)}
+									class="text-[11px] font-medium text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+								>
+									Collapse all
+								</button>
+							</div>
+						</div>
+
+						<!-- 1. Theme & Accent Color -->
+						<section id="sec-theme" class="{GROUP} scroll-mt-3">
+							<button
+								type="button"
+								onclick={() => (collapsedCategories['sec-theme'] = !collapsedCategories['sec-theme'])}
+								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<div class="flex items-center gap-1.5">
+									<HugeiconsIcon
+										icon={collapsedCategories['sec-theme'] ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+									/>
+									<span>Theme & Accent</span>
+								</div>
+								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+									{collapsedCategories['sec-theme'] ? 'expand' : 'collapse'}
+								</span>
+							</button>
+							{#if !collapsedCategories['sec-theme']}
+								<div class={CARD}>
 									{@render row({
-										title: fr.label,
-										desc: fr.hint,
-										control: pick,
-										below: isCustomFont[fr.key] ? type : undefined
+										title: 'Preset',
+										desc: 'Accent colors tint the default look; palettes swap every color.',
+										control: presetSelect
 									})}
-								{/each}
-								{@render row({
-									title: 'Font files',
-									desc: 'Load a .ttf, .otf or .woff from anywhere on this computer. It joins both dropdowns above.',
-									control: addFontButton,
-									below: custom.fontFiles.length ? fontFileList : undefined
-								})}
-							</div>
+									{@render row({
+										title: 'Accent color',
+										desc: 'Buttons, highlights and the progress bar. Applies over any preset.',
+										control: accentSwatch,
+										below: pickerOpen ? accentPicker : undefined
+									})}
+									{@render row({
+										title: 'Background tint',
+										desc:
+											currentTheme.kind === 'palette'
+												? `Only shades the default palette, ${currentTheme.label} brings its own colors.`
+												: 'Shades the greys: surfaces, borders and secondary text.',
+										control: tintSlider
+									})}
+									{@render row({
+										title: 'Roundness',
+										desc: 'Corner radius of cards, buttons and artwork.',
+										control: radiusSlider
+									})}
+								</div>
+							{/if}
 						</section>
 
-						<section class={GROUP}>
-							<h3 class={LABEL}>Player view & effects</h3>
-							<div class={CARD}>
-								{@render row({
-									title: 'Open the player when you press play',
-									desc: 'On, playing a song, album or playlist opens the now playing sidebar beside the main content. Off, it starts playing and you stay on the current page.',
-									control: openPlayerSwitch,
-									tall: true
-								})}
-								{@render row({
-									title: 'Queue and lyrics in the player view',
-									desc: "On, the player view carries them as tabs and the bar's two buttons switch between them. Off, those buttons only ever open the side panels, which stay open over the player view so you can see both at once.",
-									control: tabbedSwitch,
-									tall: true
-								})}
-								{@render row({
-									title: 'Artwork background',
-									badge: 'Moderate GPU',
-									badgeVariant: 'performance',
-									desc: "Tint the player view with the playing track's cover, blurred. Off leaves it plain.",
-									control: artworkBgSwitch,
-									tall: true
-								})}
-								{@render row({
-									title: 'Animated Fullscreen Background',
-									badge: 'High GPU',
-									badgeVariant: 'performance',
-									desc: 'Display real-time fluid GPU shaders and domain-warped blur behind the fullscreen player.',
-									control: animatedArtworkSwitch,
-									tall: true
-								})}
-								{@render row({
-									title: 'Adapt colors to artwork',
-									badge: 'CPU Sampling',
-									badgeVariant: 'warning',
-									desc: "Recolor the app from the playing track's cover: accent, surfaces and borders, fading between tracks. Off keeps the selected theme's own colors.",
-									control: artworkAccentSwitch,
-									tall: true
-								})}
-								{@render row({
-									title: 'Reduce transparency & blur',
-									badge: 'Saves GPU & Battery',
-									badgeVariant: 'saving',
-									desc: 'Disables full-window backdrop-filter blurs and translucent glass surfaces across the app for significant rendering performance gains.',
-									control: reduceTransparencySwitch,
-									tall: true
-								})}
-								{@render row({
-									title: 'Reduce animations & motion',
-									badge: 'Saves CPU',
-									badgeVariant: 'saving',
-									desc: 'Disables UI transitions, marquee auto-scroll tickers, and spring animations for instant, lightweight response.',
-									control: reduceMotionSwitch,
-									tall: true
-								})}
-								{@render row({
-									title: 'Reset customization',
-									desc: 'Drop the color, roundness and font overrides. Keeps the preset.',
-									control: resetButton
-								})}
-							</div>
+						<!-- 2. Translucency & Opacity -->
+						<section id="sec-translucency" class="{GROUP} scroll-mt-3">
+							<button
+								type="button"
+								onclick={() => (collapsedCategories['sec-translucency'] = !collapsedCategories['sec-translucency'])}
+								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<div class="flex items-center gap-1.5">
+									<HugeiconsIcon
+										icon={collapsedCategories['sec-translucency'] ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+									/>
+									<span>Translucency & Opacity</span>
+								</div>
+								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+									{collapsedCategories['sec-translucency'] ? 'expand' : 'collapse'}
+								</span>
+							</button>
+							{#if !collapsedCategories['sec-translucency']}
+								<div class={CARD}>
+									{@render row({
+										title: 'Settings content opacity',
+										desc: 'Controls how translucent or opaque the settings content panel is (macOS vibrant style).',
+										control: dialogOpacitySlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Navigation sidebar rail opacity',
+										desc: 'Controls the transparency level of the left navigation sidebar column.',
+										control: sidebarOpacitySlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Card & surface opacity',
+										desc: 'Adjusts background opacity for settings cards and elevated rows.',
+										control: cardOpacitySlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Dialog backdrop dimming',
+										desc: 'Dimming intensity applied behind open modals and dialogs.',
+										control: overlayDimmingSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Reset translucency',
+										desc: 'Restore default settings window opacity (80% content, 60% sidebar, 25% scrim).',
+										control: resetTranslucencyButton
+									})}
+								</div>
+							{/if}
 						</section>
 
-						<section class={GROUP}>
-							<h3 class={LABEL}>Glassy Theme Background (Ambient App Wash)</h3>
-							<div class={CARD}>
-								{@render row({
-									title: 'Warping intensity',
-									desc: 'Controls the fluid wave distortion and liquid displacement in the ambient app background.',
-									control: glassyWarpSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Animation speed',
-									desc: 'Sets the speed of fluid wave motion and liquid warping in the ambient background.',
-									control: glassySpeedSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Brightness & opacity',
-									desc: 'Adjusts how brightly the ambient album art shines through behind the UI.',
-									control: glassyLightnessSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Blur radius',
-									desc: 'Sets the gaussian blur radius applied over the ambient background art.',
-									control: glassyBlurSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Saturation',
-									desc: 'Controls color vibrancy in the background wash.',
-									control: glassySaturationSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Reset Glassy background',
-									desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
-									control: resetGlassyButton
-								})}
-							</div>
+						<!-- 3. Typography -->
+						<section id="sec-typography" class="{GROUP} scroll-mt-3">
+							<button
+								type="button"
+								onclick={() => (collapsedCategories['sec-typography'] = !collapsedCategories['sec-typography'])}
+								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<div class="flex items-center gap-1.5">
+									<HugeiconsIcon
+										icon={collapsedCategories['sec-typography'] ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+									/>
+									<span>Typography</span>
+								</div>
+								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+									{collapsedCategories['sec-typography'] ? 'expand' : 'collapse'}
+								</span>
+							</button>
+							{#if !collapsedCategories['sec-typography']}
+								<div class={CARD}>
+									{#each FONT_ROWS as fr (fr.key)}
+										{#snippet pick()}{@render fontSelect(fr.key, fr.label)}{/snippet}
+										{#snippet type()}{@render fontInput(fr.key, fr.label)}{/snippet}
+										{@render row({
+											title: fr.label,
+											desc: fr.hint,
+											control: pick,
+											below: isCustomFont[fr.key] ? type : undefined
+										})}
+									{/each}
+									{@render row({
+										title: 'Font files',
+										desc: 'Load a .ttf, .otf or .woff from anywhere on this computer. It joins both dropdowns above.',
+										control: addFontButton,
+										below: custom.fontFiles.length ? fontFileList : undefined
+									})}
+								</div>
+							{/if}
 						</section>
 
-						<section class={GROUP}>
-							<h3 class={LABEL}>Fullscreen Player Background</h3>
-							<div class={CARD}>
-								{@render row({
-									title: 'Warping intensity',
-									desc: 'Controls the fluid wave distortion behind fullscreen lyrics and player.',
-									control: fullscreenWarpSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Animation speed',
-									desc: 'Sets the speed of fluid wave motion behind the fullscreen player.',
-									control: fullscreenSpeedSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Brightness & opacity',
-									desc: 'Adjusts background brightness and opacity in fullscreen mode.',
-									control: fullscreenLightnessSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Blur radius',
-									desc: 'Sets the gaussian blur radius applied over fullscreen background artwork.',
-									control: fullscreenBlurSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Saturation',
-									desc: 'Controls color vibrancy behind fullscreen playback.',
-									control: fullscreenSaturationSlider,
-									tall: true
-								})}
-								{@render row({
-									title: 'Reset Fullscreen background',
-									desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
-									control: resetFullscreenButton
-								})}
-							</div>
+						<!-- 4. Player View & Effects -->
+						<section id="sec-player" class="{GROUP} scroll-mt-3">
+							<button
+								type="button"
+								onclick={() => (collapsedCategories['sec-player'] = !collapsedCategories['sec-player'])}
+								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<div class="flex items-center gap-1.5">
+									<HugeiconsIcon
+										icon={collapsedCategories['sec-player'] ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+									/>
+									<span>Player View & Effects</span>
+								</div>
+								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+									{collapsedCategories['sec-player'] ? 'expand' : 'collapse'}
+								</span>
+							</button>
+							{#if !collapsedCategories['sec-player']}
+								<div class={CARD}>
+									{@render row({
+										title: 'Open the player when you press play',
+										desc: 'On, playing a song, album or playlist opens the now playing sidebar beside the main content. Off, it starts playing and you stay on the current page.',
+										control: openPlayerSwitch,
+										tall: true
+									})}
+									{@render row({
+										title: 'Queue and lyrics in the player view',
+										desc: "On, the player view carries them as tabs and the bar's two buttons switch between them. Off, those buttons only ever open the side panels, which stay open over the player view so you can see both at once.",
+										control: tabbedSwitch,
+										tall: true
+									})}
+									{@render row({
+										title: 'Artwork background',
+										badge: 'Moderate GPU',
+										badgeVariant: 'performance',
+										desc: "Tint the player view with the playing track's cover, blurred. Off leaves it plain.",
+										control: artworkBgSwitch,
+										tall: true
+									})}
+									{@render row({
+										title: 'Animated Fullscreen Background',
+										badge: 'High GPU',
+										badgeVariant: 'performance',
+										desc: 'Display real-time fluid GPU shaders and domain-warped blur behind the fullscreen player.',
+										control: animatedArtworkSwitch,
+										tall: true
+									})}
+									{@render row({
+										title: 'Adapt colors to artwork',
+										badge: 'CPU Sampling',
+										badgeVariant: 'warning',
+										desc: "Recolor the app from the playing track's cover: accent, surfaces and borders, fading between tracks. Off keeps the selected theme's own colors.",
+										control: artworkAccentSwitch,
+										tall: true
+									})}
+									{@render row({
+										title: 'Reduce transparency & blur',
+										badge: 'Saves GPU & Battery',
+										badgeVariant: 'saving',
+										desc: 'Disables full-window backdrop-filter blurs and translucent glass surfaces across the app for significant rendering performance gains.',
+										control: reduceTransparencySwitch,
+										tall: true
+									})}
+									{@render row({
+										title: 'Reduce animations & motion',
+										badge: 'Saves CPU',
+										badgeVariant: 'saving',
+										desc: 'Disables UI transitions, marquee auto-scroll tickers, and spring animations for instant, lightweight response.',
+										control: reduceMotionSwitch,
+										tall: true
+									})}
+									{@render row({
+										title: 'Reset customization',
+										desc: 'Drop the color, roundness and font overrides. Keeps the preset.',
+										control: resetButton
+									})}
+								</div>
+							{/if}
+						</section>
+
+						<!-- 5. Glassy Theme Background -->
+						<section id="sec-glassy" class="{GROUP} scroll-mt-3">
+							<button
+								type="button"
+								onclick={() => (collapsedCategories['sec-glassy'] = !collapsedCategories['sec-glassy'])}
+								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<div class="flex items-center gap-1.5">
+									<HugeiconsIcon
+										icon={collapsedCategories['sec-glassy'] ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+									/>
+									<span>Glassy Theme Background (Ambient App Wash)</span>
+								</div>
+								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+									{collapsedCategories['sec-glassy'] ? 'expand' : 'collapse'}
+								</span>
+							</button>
+							{#if !collapsedCategories['sec-glassy']}
+								<div class={CARD}>
+									{@render row({
+										title: 'Warping intensity',
+										desc: 'Controls the fluid wave distortion and liquid displacement in the ambient app background.',
+										control: glassyWarpSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Animation speed',
+										desc: 'Sets the speed of fluid wave motion and liquid warping in the ambient background.',
+										control: glassySpeedSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Brightness & opacity',
+										desc: 'Adjusts how brightly the ambient album art shines through behind the UI.',
+										control: glassyLightnessSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Blur radius',
+										desc: 'Sets the gaussian blur radius applied over the ambient background art.',
+										control: glassyBlurSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Saturation',
+										desc: 'Controls color vibrancy in the background wash.',
+										control: glassySaturationSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Reset Glassy background',
+										desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
+										control: resetGlassyButton
+									})}
+								</div>
+							{/if}
+						</section>
+
+						<!-- 6. Fullscreen Player Background -->
+						<section id="sec-fullscreen" class="{GROUP} scroll-mt-3">
+							<button
+								type="button"
+								onclick={() => (collapsedCategories['sec-fullscreen'] = !collapsedCategories['sec-fullscreen'])}
+								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<div class="flex items-center gap-1.5">
+									<HugeiconsIcon
+										icon={collapsedCategories['sec-fullscreen'] ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+									/>
+									<span>Fullscreen Player Background</span>
+								</div>
+								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+									{collapsedCategories['sec-fullscreen'] ? 'expand' : 'collapse'}
+								</span>
+							</button>
+							{#if !collapsedCategories['sec-fullscreen']}
+								<div class={CARD}>
+									{@render row({
+										title: 'Warping intensity',
+										desc: 'Controls the fluid wave distortion behind fullscreen lyrics and player.',
+										control: fullscreenWarpSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Animation speed',
+										desc: 'Sets the speed of fluid wave motion behind the fullscreen player.',
+										control: fullscreenSpeedSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Brightness & opacity',
+										desc: 'Adjusts background brightness and opacity in fullscreen mode.',
+										control: fullscreenLightnessSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Blur radius',
+										desc: 'Sets the gaussian blur radius applied over fullscreen background artwork.',
+										control: fullscreenBlurSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Saturation',
+										desc: 'Controls color vibrancy behind fullscreen playback.',
+										control: fullscreenSaturationSlider,
+										tall: true
+									})}
+									{@render row({
+										title: 'Reset Fullscreen background',
+										desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
+										control: resetFullscreenButton
+									})}
+								</div>
+							{/if}
 						</section>
 					{:else if tab === 'playback'}
 						<section class={GROUP}>
@@ -1821,6 +2038,78 @@
 
 {#snippet resetFullscreenButton()}
 	<Button variant="outline" size="sm" onclick={resetFullscreenVisuals}>Reset Fullscreen visuals</Button>
+{/snippet}
+
+{#snippet dialogOpacitySlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.dialogOpacity - 0.3) / 0.7) * 100}%"
+			min="0.30"
+			max="1.0"
+			step="0.05"
+			value={appearance.dialogOpacity}
+			oninput={(e) => setAppearance({ dialogOpacity: parseFloat(e.currentTarget.value) })}
+			aria-label="Dialog content opacity"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{Math.round(appearance.dialogOpacity * 100)}%</span>
+	</div>
+{/snippet}
+
+{#snippet sidebarOpacitySlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.sidebarOpacity - 0.1) / 0.9) * 100}%"
+			min="0.10"
+			max="1.0"
+			step="0.05"
+			value={appearance.sidebarOpacity}
+			oninput={(e) => setAppearance({ sidebarOpacity: parseFloat(e.currentTarget.value) })}
+			aria-label="Sidebar rail opacity"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{Math.round(appearance.sidebarOpacity * 100)}%</span>
+	</div>
+{/snippet}
+
+{#snippet cardOpacitySlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{((appearance.cardOpacity - 0.2) / 0.8) * 100}%"
+			min="0.20"
+			max="1.0"
+			step="0.05"
+			value={appearance.cardOpacity}
+			oninput={(e) => setAppearance({ cardOpacity: parseFloat(e.currentTarget.value) })}
+			aria-label="Card surface opacity"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{Math.round(appearance.cardOpacity * 100)}%</span>
+	</div>
+{/snippet}
+
+{#snippet overlayDimmingSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<input
+			type="range"
+			class="range flex-1"
+			style="--pct:{(appearance.overlayDimming / 0.8) * 100}%"
+			min="0.0"
+			max="0.80"
+			step="0.05"
+			value={appearance.overlayDimming}
+			oninput={(e) => setAppearance({ overlayDimming: parseFloat(e.currentTarget.value) })}
+			aria-label="Dialog backdrop dimming"
+		/>
+		<span class="w-10 text-right text-xs font-mono text-muted-foreground">{Math.round(appearance.overlayDimming * 100)}%</span>
+	</div>
+{/snippet}
+
+{#snippet resetTranslucencyButton()}
+	<Button variant="outline" size="sm" onclick={resetTranslucencyVisuals}>Reset translucency</Button>
 {/snippet}
 
 {#snippet presetSelect()}

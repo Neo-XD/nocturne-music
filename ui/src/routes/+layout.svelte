@@ -239,7 +239,7 @@
 			<Sidebar />
 			<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from anywhere in
 			     the feed, so aiming at the top edge scrolls this container while the drag is in flight. -->
-			<main class="min-w-0 flex-1 overflow-y-auto" {@attach dragScroll}>
+			<main class="min-w-0 flex-1 overflow-y-auto pl-16 {ui.sidebarCollapsed ? '' : 'lg:pl-60'}" {@attach dragScroll}>
 				<!-- Remount the current page on sign-in/out so it refetches with the new account. -->
 				{#key auth.epoch}
 					{@render children()}

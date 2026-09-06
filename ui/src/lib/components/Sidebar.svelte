@@ -160,7 +160,7 @@
 </script>
 
 <aside
-	class="flex h-full w-16 shrink-0 flex-col border-r bg-sidebar p-3 text-sidebar-foreground {wide(
+	class="absolute inset-y-0 left-0 z-20 flex h-full w-16 flex-col border-r bg-sidebar p-3 text-sidebar-foreground {wide(
 		'lg:w-60'
 	)}"
 >

@@ -1337,6 +1337,20 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v071_note = ReleaseNote {
+        version: "0.7.1".to_string(),
+        date: "2026-09-06".to_string(),
+        body: r#"### Nocturne Music v0.7.1
+
+- **Glassy Turbo Syllable Karaoke Sweeps**: High-performance real-time word and syllable sweep animations with glowing focal sweep, soft blur depth, and smooth inertia scroll across Fullscreen Player, Info Sidebar, and Lyrics Panel.
+- **Millisecond-Precision Lyrics Sync Dock**: Interactive BetterLyrics-style sync timing dock with single-millisecond and 25ms/100ms stepper buttons, press-and-hold repeat, wheel scrubbing, click-to-reset, and a compact mini mode for sidebars.
+- **Appearance Translucency & Opacity Controls**: Fine-grained sliders in Settings (Appearance) for Dialog Content Opacity (80%), Sidebar Rail Opacity (60%), Card Opacity (80%), and Dialog Scrim Dimming (25%), with an instant reset button.
+- **Collapsible Settings Categories & Section Dot Navigation**: Collapsible accordion categories with expand/collapse-all controls and a vertical dot navigation rail on the Appearance page for instant section jumping.
+- **Rich Playlist Creation**: Create playlists with custom Title, Description, Public/Private visibility toggles, and local cover image file uploads with live preview.
+- **Sidebar Playlist Folders & Drag-and-Drop**: Organize playlists into nested, collapsible folders directly in the left sidebar with drag-and-drop filing/unfiling.
+- **Stream Client Prioritization & Latency Benchmark**: Custom client ordering, automatic latency ranking, and an on-demand benchmark runner in Settings ▸ Playback."#.to_string(),
+    };
+
     let v07d_note = ReleaseNote {
         version: "0.7d".to_string(),
         date: "2026-09-02".to_string(),
@@ -1459,8 +1473,8 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note,
-        v06_note,
+        v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note,
+        v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> =

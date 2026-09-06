@@ -127,14 +127,33 @@ export const appearance = $state({
 	/** Fullscreen player background blur radius in px (0 to 100). */
 	fullscreenBlur: 64,
 	/** Fullscreen player background saturation (0.0 to 2.0). */
-	fullscreenSaturation: 1.0
+	fullscreenSaturation: 1.0,
+
+	/** Dialog content panel opacity (0.30 to 1.0). */
+	dialogOpacity: 0.80,
+	/** Navigation sidebar rail opacity (0.10 to 1.0). */
+	sidebarOpacity: 0.60,
+	/** Cards and list items surface opacity (0.20 to 1.0). */
+	cardOpacity: 0.80,
+	/** Modal dialog backdrop scrim dimming opacity (0.0 to 0.80). */
+	overlayDimming: 0.25
 });
+
+export function applyTranslucencyVars(): void {
+	if (typeof document === 'undefined') return;
+	const root = document.documentElement;
+	root.style.setProperty('--dialog-opacity', String(appearance.dialogOpacity));
+	root.style.setProperty('--sidebar-opacity', String(appearance.sidebarOpacity));
+	root.style.setProperty('--card-opacity', String(appearance.cardOpacity));
+	root.style.setProperty('--overlay-dimming', String(appearance.overlayDimming));
+}
 
 export function applyPerformanceClasses(): void {
 	if (typeof document === 'undefined') return;
 	const root = document.documentElement;
 	root.classList.toggle('reduce-transparency', appearance.reduceTransparency);
 	root.classList.toggle('reduce-motion', appearance.reduceMotion);
+	applyTranslucencyVars();
 }
 
 export function setAppearance(patch: Partial<typeof appearance>): void {
@@ -480,7 +499,11 @@ export function initTheme(): void {
 			'fullscreenWarp',
 			'fullscreenLightness',
 			'fullscreenBlur',
-			'fullscreenSaturation'
+			'fullscreenSaturation',
+			'dialogOpacity',
+			'sidebarOpacity',
+			'cardOpacity',
+			'overlayDimming'
 		] as const) {
 			if (typeof saved?.[k] === 'number') appearance[k] = saved[k];
 		}
