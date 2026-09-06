@@ -549,7 +549,7 @@
 			{#if lyrics && !loadingLyrics}
 				<div class="mt-3 flex items-center justify-between border-t border-border/40 pt-2 text-[10px] text-muted-foreground">
 					<span>{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}</span>
-					<LyricsSyncDock />
+					<LyricsSyncDock compact />
 				</div>
 			{/if}
 		</div>

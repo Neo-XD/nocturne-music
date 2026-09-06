@@ -95,7 +95,8 @@
 	const GROUP = 'mb-7 last:mb-1';
 	const LABEL =
 		'mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground';
-	const CARD = 'divide-y divide-border/60 overflow-hidden rounded-xl border bg-card';
+	const CARD =
+		'divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-card/80 dark:bg-card/65 backdrop-blur-md shadow-xs';
 
 	const ACCENT_THEMES = THEMES.filter((t) => t.kind === 'accent');
 	const PALETTE_THEMES = THEMES.filter((t) => t.kind === 'palette');
@@ -746,12 +747,12 @@
 <svelte:window onkeydown={recordingAction ? onKeyRecord : undefined} />
 
 <Dialog.Root bind:open={ui.settingsOpen}>
-	<Dialog.Content class="gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl">
+	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl bg-background/70 dark:bg-background/60 backdrop-blur-2xl border border-border/80 shadow-2xl rounded-2xl">
 		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
 		<div class="flex h-[min(38rem,80vh)]">
 			<!-- Tab rail -->
-			<nav class="flex w-52 shrink-0 flex-col border-r bg-muted/40 p-3">
+			<nav class="flex w-52 shrink-0 flex-col border-r border-border/50 bg-muted/30 dark:bg-muted/15 p-3 backdrop-blur-md">
 				<Dialog.Title class="px-3 pt-1 pb-4 font-heading text-base font-semibold">
 					Settings
 				</Dialog.Title>
@@ -762,7 +763,7 @@
 							aria-current={tab === t.id}
 							class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors {tab ===
 							t.id
-								? 'bg-background text-foreground shadow-sm ring-1 ring-border/70'
+								? 'bg-background/85 dark:bg-background/70 text-foreground shadow-xs ring-1 ring-border/60 font-semibold'
 								: 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}"
 						>
 							<HugeiconsIcon
@@ -782,9 +783,9 @@
 
 			<!-- Content pane. min-w-0: a flex child's min-width is auto, so without it one wide row
 			     (a long font name, a long path) widens the pane and pushes every tab off the modal. -->
-			<div class="flex min-w-0 flex-1 flex-col">
+			<div class="flex min-w-0 flex-1 flex-col bg-background/80 dark:bg-background/80 backdrop-blur-xl">
 				<!-- h-14 also keeps the dialog's close button clear of the first row. -->
-				<header class="flex h-14 shrink-0 flex-col justify-center border-b px-6 pr-14">
+				<header class="flex h-14 shrink-0 flex-col justify-center border-b border-border/60 px-6 pr-14 bg-background/35 dark:bg-background/25 backdrop-blur-md">
 					<h2 class="text-sm font-semibold">{currentTab.label}</h2>
 					<p class="truncate text-xs text-muted-foreground">{currentTab.hint}</p>
 				</header>
@@ -797,7 +798,7 @@
 						     first: two stacked dialogs would trap focus in the wrong one. -->
 						<button
 							type="button"
-							class="mb-5 inline-flex items-center gap-2 rounded-full border bg-muted/50 px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+							class="mb-5 inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 dark:bg-muted/20 backdrop-blur-xs px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
 							onclick={() => {
 								ui.settingsOpen = false;
 								ui.shortcutsOpen = true;
@@ -1406,7 +1407,7 @@
 						</section>
 					{:else if tab === 'about'}
 						<div
-							class="mb-7 rounded-xl border bg-gradient-to-br from-primary/8 to-transparent px-4 py-4"
+							class="mb-7 rounded-xl border border-border/60 bg-gradient-to-br from-primary/10 via-card/75 to-card/45 backdrop-blur-md px-4 py-4"
 						>
 							<div class="flex items-center gap-2">
 								<span class="font-heading text-lg font-bold">Nocturne Music</span>
@@ -1477,7 +1478,7 @@
 {/snippet}
 {#snippet remoteSyncSwitch()}<Switch checked={remoteSyncOn} onCheckedChange={setRemoteSync} />{/snippet}
 {#snippet remoteSyncConfig()}
-	<div class="mt-2.5 space-y-3 rounded-xl border border-border/60 bg-muted/30 p-3.5">
+	<div class="mt-2.5 space-y-3 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3.5 backdrop-blur-md">
 		<div class="flex items-center justify-between gap-2">
 			<div>
 				<span class="text-xs font-semibold text-foreground">Host Connection Info</span>
@@ -1498,7 +1499,7 @@
 			{/if}
 		</div>
 
-		<div class="space-y-2 rounded-lg border bg-card/60 p-3 text-xs">
+		<div class="space-y-2 rounded-lg border border-border/60 bg-card/75 dark:bg-card/60 backdrop-blur-sm p-3 text-xs">
 			<div class="flex items-center justify-between">
 				<span class="text-muted-foreground">Device Name:</span>
 				<span class="font-medium text-foreground">{syncInfo?.device_name || 'Nocturne PC'}</span>
@@ -1561,7 +1562,7 @@
 			<div class="space-y-1.5 pt-1">
 				<span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Connected Devices</span>
 				{#each syncInfo.connected_clients as client (client.id)}
-					<div class="flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2 text-xs">
+					<div class="flex items-center justify-between rounded-lg border border-border/60 bg-muted/40 dark:bg-muted/20 px-3 py-2 text-xs">
 						<div class="flex items-center gap-2">
 							<HugeiconsIcon icon={SmartPhone01Icon} class="h-3.5 w-3.5 text-primary" />
 							<span class="font-medium text-foreground">{client.name}</span>
@@ -1616,7 +1617,7 @@
 			settings.aggressive_memory_trimming = on ? 'true' : 'false';
 			await api.setSetting('aggressive_memory_trimming', settings.aggressive_memory_trimming);
 			if (on) {
-				toast.warning('Aggressive memory trimming enabled. Note: May cause random crashes on some Linux distributions while idle.');
+				toast('Aggressive memory trimming enabled. Note: May cause random crashes on some Linux distributions while idle.');
 			} else {
 				toast.info('Aggressive memory trimming disabled.');
 			}
@@ -2022,7 +2023,7 @@
 	<p class="mb-3 max-w-prose text-xs leading-relaxed text-muted-foreground">
 		Clients provide playback streams. You can benchmark connection latencies or specify custom fallback priority.
 	</p>
-	<div class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 p-2.5">
+	<div class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/40 dark:bg-muted/20 backdrop-blur-sm p-2.5">
 		<div class="flex items-center gap-2">
 			<Button
 				variant="outline"
@@ -2043,7 +2044,7 @@
 	<div class="flex flex-col gap-2">
 		{#each clients as name, i (name)}
 			{@const stat = clientStats[name]}
-			<div class="flex items-center justify-between rounded-lg bg-muted/60 py-1.5 pr-2 pl-3">
+			<div class="flex items-center justify-between rounded-lg bg-muted/50 dark:bg-muted/30 py-1.5 pr-2 pl-3">
 				<div class="flex items-center gap-2">
 					{#if !autoRankClients}
 						<div class="flex flex-col gap-0.5">

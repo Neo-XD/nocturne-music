@@ -43,6 +43,15 @@
 		});
 	});
 
+	/** Live reorder while dragging: the row moves as you pass over its neighbours, no drop marker. */
+	function moveTo(to: number) {
+		if (dragging === null || dragging === to) return;
+		const next = rows.slice();
+		next.splice(to, 0, ...next.splice(dragging, 1));
+		rows = next;
+		dragging = to;
+	}
+
 	/** Live reorder while dragging: check that the cursor crossed the midpoint before swapping */
 	function handleDragOver(e: DragEvent, to: number) {
 		if (dragging === null || dragging === to) return;

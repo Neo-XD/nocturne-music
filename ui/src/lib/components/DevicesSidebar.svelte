@@ -45,16 +45,16 @@
 </script>
 
 <aside
-	class="absolute right-0 top-0 bottom-0 z-30 flex w-80 max-w-[90vw] flex-col border-l bg-background/95 backdrop-blur-xl shadow-2xl"
+	class="info-sidebar absolute right-0 top-0 bottom-0 z-30 flex w-80 max-w-[90vw] flex-col border-l border-border/70 bg-background/80 dark:bg-background/75 backdrop-blur-2xl shadow-2xl"
 	transition:fly={{ x: 320, duration: 250, easing: cubicOut }}
 >
 	<!-- Header -->
-	<div class="flex items-center justify-between border-b px-4 py-3.5">
+	<div class="flex items-center justify-between border-b border-border/60 bg-background/35 dark:bg-background/20 backdrop-blur-md px-4 py-3.5">
 		<div class="flex items-center gap-2">
 			<HugeiconsIcon icon={ComputerIcon} class="h-5 w-5 text-primary" />
 			<h2 class="text-sm font-semibold">Select Playback Device</h2>
 		</div>
-		<Button variant="ghost" size="icon-sm" onclick={onClose} aria-label="Close">
+		<Button variant="ghost" size="icon-sm" onclick={onClose} aria-label="Close" class="cursor-pointer hover:bg-foreground/10">
 			<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
 		</Button>
 	</div>
@@ -67,10 +67,10 @@
 				Current Output Device
 			</div>
 			<div
-				class="flex items-center justify-between rounded-xl border border-primary/30 bg-primary/10 p-3.5 cursor-default"
+				class="flex items-center justify-between rounded-xl border border-primary/40 bg-primary/10 dark:bg-primary/15 backdrop-blur-md p-3.5 cursor-default shadow-xs"
 			>
 				<div class="flex items-center gap-3">
-					<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+					<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs">
 						<HugeiconsIcon icon={ComputerIcon} class="h-5 w-5" />
 					</div>
 					<div>
@@ -95,7 +95,7 @@
 				<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 					Connected Mobile Devices
 				</span>
-				<Button variant="ghost" size="icon-sm" onclick={fetchStatus} aria-label="Refresh" class="h-6 w-6">
+				<Button variant="ghost" size="icon-sm" onclick={fetchStatus} aria-label="Refresh" class="h-6 w-6 cursor-pointer hover:bg-foreground/10">
 					<HugeiconsIcon icon={RefreshIcon} class="h-3.5 w-3.5 text-muted-foreground" />
 				</Button>
 			</div>
@@ -104,10 +104,10 @@
 				<div class="space-y-2">
 					{#each syncInfo.connected_clients as client (client.id)}
 						<div
-							class="flex items-center justify-between rounded-xl border bg-muted/40 p-3.5 transition-colors hover:bg-muted/70"
+							class="flex items-center justify-between rounded-xl border border-border/60 bg-card/80 dark:bg-card/60 backdrop-blur-md p-3.5 transition-colors hover:bg-card/95 shadow-xs"
 						>
 							<div class="flex items-center gap-3">
-								<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-foreground">
+								<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-foreground shadow-xs">
 									<HugeiconsIcon icon={SmartPhone01Icon} class="h-4 w-4" />
 								</div>
 								<div>
@@ -123,7 +123,7 @@
 					{/each}
 				</div>
 			{:else}
-				<div class="rounded-xl border border-dashed p-4 text-center">
+				<div class="rounded-xl border border-dashed border-border/60 bg-muted/25 dark:bg-muted/15 backdrop-blur-xs p-4 text-center">
 					<div class="mx-auto mb-1.5 flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
 						<HugeiconsIcon icon={SmartPhone01Icon} class="h-4 w-4" />
 					</div>
