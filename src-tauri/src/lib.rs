@@ -343,7 +343,7 @@ pub fn run() {
             }
 
             // Pump mpv events → UI events + queue advance. context/11 events, context/14 §TrackEnded.
-            spawn_event_pump(app_state, handle, events);
+            spawn_event_pump(app_state.clone(), handle.clone(), events);
 
             // Prewarm the webviews off the first-play path (context/04 §startup). The delays let
             // the event loop come up first (run_on_main_thread needs it pumping).
