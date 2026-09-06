@@ -179,9 +179,9 @@ impl ClientRanker {
         let base_order: Vec<String> = if let Some(custom) = custom_priority {
             let mut list: Vec<String> =
                 custom.iter().filter(|k| !disabled.contains(*k)).cloned().collect();
-            for &k in STREAM_FALLBACK_ORDER {
-                if !disabled.contains(k) && !list.iter().any(|x| x == k) {
-                    list.push(k.to_string());
+            for key in STREAM_FALLBACK_ORDER {
+                if !disabled.contains(key) && !list.iter().any(|x| x.as_str() == key) {
+                    list.push(key.to_string());
                 }
             }
             list
