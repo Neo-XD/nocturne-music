@@ -45,13 +45,16 @@ fn spawn_heap_trimmer(db: Arc<Db>) {
             tokio::time::sleep(Duration::from_secs(180)).await;
             if db.get_setting("aggressive_memory_trimming").as_deref() == Some("true") {
                 #[cfg(target_os = "linux")]
-                unsafe { libc::malloc_trim(0) };
+                unsafe {
+                    libc::malloc_trim(0)
+                };
 
                 #[cfg(target_os = "windows")]
                 {
                     extern "system" {
                         fn GetCurrentProcess() -> isize;
-                        fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize) -> i32;
+                        fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize)
+                            -> i32;
                     }
                     unsafe {
                         let proc = GetCurrentProcess();
@@ -578,7 +581,11 @@ pub fn run() {
                             {
                                 extern "system" {
                                     fn GetCurrentProcess() -> isize;
-                                    fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize) -> i32;
+                                    fn SetProcessWorkingSetSize(
+                                        hProcess: isize,
+                                        min: usize,
+                                        max: usize,
+                                    ) -> i32;
                                 }
                                 unsafe {
                                     let proc = GetCurrentProcess();
@@ -602,7 +609,8 @@ pub fn run() {
                 if window.is_minimized().unwrap_or(false) {
                     extern "system" {
                         fn GetCurrentProcess() -> isize;
-                        fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize) -> i32;
+                        fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize)
+                            -> i32;
                     }
                     unsafe {
                         let proc = GetCurrentProcess();
