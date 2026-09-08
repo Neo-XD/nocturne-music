@@ -116,6 +116,32 @@
 		e.stopPropagation();
 		menuOpen = false;
 	}
+
+	async function downloadThisPlaylist() {
+		try {
+			toast.info(`Fetching tracks for "${item.title}"...`);
+			let tracks: api.SongItem[] = [];
+			if (item.kind === 'album') {
+				const album = await api.getAlbum(item.id);
+				tracks = album.items;
+			} else {
+				const playlist = await api.getPlaylist(item.id);
+				tracks = playlist.items;
+			}
+			if (!tracks.length) {
+				toast.error('No downloadable tracks found');
+				return;
+			}
+			toast.info(`Downloading ${tracks.length} tracks from "${item.title}"...`);
+			const dest = await api.downloadPlaylist({
+				items: tracks,
+				playlistName: item.title
+			});
+			toast.success(`Downloaded ${tracks.length} tracks to ${dest}`);
+		} catch (e) {
+			toast.error(`Playlist download failed: ${e}`);
+		}
+	}
 </script>
 
 <button
@@ -202,6 +228,17 @@
 				onclick={(e) => run(e, () => startRadio(item.kind as 'artist' | 'album' | 'playlist', item.id, item.title))}
 			>
 				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> Start radio
+			</button>
+		{/if}
+		{#if item.kind === 'album' || item.kind === 'playlist'}
+			<button
+				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, downloadThisPlaylist)}
+			>
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+				</svg>
+				Download {item.kind === 'album' ? 'album' : 'playlist'}
 			</button>
 		{/if}
 		<button

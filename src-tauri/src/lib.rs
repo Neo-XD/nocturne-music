@@ -536,6 +536,7 @@ pub fn run() {
             commands::can_self_update,
             commands::open_external,
             commands::download_song,
+            commands::download_playlist,
             commands::show_downloaded_file,
             commands::get_custom_lyric_providers,
             commands::save_custom_lyric_providers,

@@ -686,6 +686,25 @@
 			confirmingDelete = false;
 		}
 	}
+
+	async function downloadPlaylistTracks() {
+		if (!pl?.items.length) return;
+		try {
+			if (pl.continuation && !moreError) {
+				toast.info(`Fetching all tracks for "${pl.title}"...`);
+				await loadAll();
+			}
+			const count = pl.items.length;
+			toast.info(`Downloading ${count} tracks from "${pl.title || 'Playlist'}"...`);
+			const dest = await api.downloadPlaylist({
+				items: pl.items,
+				playlistName: pl.title || 'Playlist'
+			});
+			toast.success(`Downloaded ${count} tracks to ${dest}`);
+		} catch (e) {
+			toast.error(`Playlist download failed: ${e}`);
+		}
+	}
 </script>
 
 <div class="flex h-full flex-col">
@@ -957,6 +976,14 @@
 				onclick={() => run(() => startRadio('playlist', id, pl?.title))}
 			>
 				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> Start radio
+			</button>
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={() => run(downloadPlaylistTracks)}
+			>
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+				</svg> Download playlist
 			</button>
 		{/if}
 		<button

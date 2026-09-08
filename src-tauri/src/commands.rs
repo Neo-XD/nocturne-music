@@ -1654,6 +1654,24 @@ pub async fn download_song(
 }
 
 #[tauri::command]
+pub async fn download_playlist(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    items: Vec<innertube::SongItem>,
+    playlist_name: String,
+    custom_dir: Option<String>,
+) -> Result<String, String> {
+    crate::download::download_full_playlist(
+        app,
+        state.inner().clone(),
+        items,
+        playlist_name,
+        custom_dir,
+    )
+    .await
+}
+
+#[tauri::command]
 pub fn show_downloaded_file(path: String) -> Result<(), String> {
     crate::download::show_in_folder(&path)
 }

@@ -191,6 +191,107 @@ pub async fn download_song_track(
     Ok(saved_path_str)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistDownloadProgress {
+    pub playlist_name: String,
+    pub total_tracks: usize,
+    pub completed_tracks: usize,
+    pub current_track: Option<String>,
+    pub status: String, // "starting", "downloading", "complete", "error"
+    pub error: Option<String>,
+    pub destination_dir: String,
+}
+
+pub async fn download_full_playlist(
+    app: AppHandle,
+    state: std::sync::Arc<AppState>,
+    items: Vec<innertube::SongItem>,
+    playlist_name: String,
+    custom_dir: Option<String>,
+) -> Result<String, String> {
+    if items.is_empty() {
+        return Err("Playlist has no tracks to download".into());
+    }
+
+    let base_dir = match custom_dir {
+        Some(d) if !d.trim().is_empty() => PathBuf::from(d),
+        _ => get_default_download_dir(&app),
+    };
+
+    let playlist_dir = base_dir.join(sanitize_filename(&playlist_name));
+    std::fs::create_dir_all(&playlist_dir)
+        .map_err(|e| format!("Could not create folder {:?}: {e}", playlist_dir))?;
+
+    let playlist_dir_str = playlist_dir.to_string_lossy().to_string();
+    let total_tracks = items.len();
+
+    let _ = app.emit(
+        "download-playlist-progress",
+        PlaylistDownloadProgress {
+            playlist_name: playlist_name.clone(),
+            total_tracks,
+            completed_tracks: 0,
+            current_track: None,
+            status: "starting".into(),
+            error: None,
+            destination_dir: playlist_dir_str.clone(),
+        },
+    );
+
+    let mut completed_tracks = 0;
+    for item in items {
+        let title = item.title.clone();
+        let artist = item.artists.clone();
+        let video_id = item.video_id.clone();
+
+        let _ = app.emit(
+            "download-playlist-progress",
+            PlaylistDownloadProgress {
+                playlist_name: playlist_name.clone(),
+                total_tracks,
+                completed_tracks,
+                current_track: Some(format!("{} - {}", artist, title)),
+                status: "downloading".into(),
+                error: None,
+                destination_dir: playlist_dir_str.clone(),
+            },
+        );
+
+        match download_song_track(
+            app.clone(),
+            state.clone(),
+            video_id,
+            title,
+            artist,
+            Some(playlist_dir_str.clone()),
+        )
+        .await
+        {
+            Ok(_) => {
+                completed_tracks += 1;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to download track in playlist");
+            }
+        }
+    }
+
+    let _ = app.emit(
+        "download-playlist-progress",
+        PlaylistDownloadProgress {
+            playlist_name: playlist_name.clone(),
+            total_tracks,
+            completed_tracks,
+            current_track: None,
+            status: "complete".into(),
+            error: None,
+            destination_dir: playlist_dir_str.clone(),
+        },
+    );
+
+    Ok(playlist_dir_str)
+}
+
 pub fn show_in_folder(path: &str) -> Result<(), String> {
     let p = Path::new(path);
     #[cfg(target_os = "windows")]

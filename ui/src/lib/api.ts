@@ -751,6 +751,31 @@ export const downloadSong = (args: {
 	customDir?: string;
 }) => invoke<string>('download_song', args);
 
+export interface PlaylistDownloadProgress {
+	playlist_name: string;
+	total_tracks: number;
+	completed_tracks: number;
+	current_track: string | null;
+	status: string;
+	error: string | null;
+	destination_dir: string;
+}
+
+export const downloadPlaylist = (args: {
+	items: SongItem[];
+	playlistName?: string;
+	customDir?: string;
+}) => invoke<string>('download_playlist', {
+	items: args.items,
+	playlistName: args.playlistName || 'Playlist',
+	customDir: args.customDir
+});
+
+export const onPlaylistDownloadProgress = (
+	cb: (p: PlaylistDownloadProgress) => void
+): Promise<UnlistenFn> =>
+	listen<PlaylistDownloadProgress>('download-playlist-progress', (e) => cb(e.payload));
+
 export const showDownloadedFile = (path: string) =>
 	invoke<void>('show_downloaded_file', { path });
 

@@ -214,6 +214,22 @@
         openAddManyToPlaylist(album.items);
     }
 
+    async function downloadAlbumTracks() {
+        if (!album?.items.length) return;
+        menuOpen = false;
+        try {
+            const count = album.items.length;
+            toast.info(`Downloading ${count} tracks from "${album.title || 'Album'}"...`);
+            const dest = await api.downloadPlaylist({
+                items: album.items,
+                playlistName: album.title || 'Album'
+            });
+            toast.success(`Downloaded ${count} tracks to ${dest}`);
+        } catch (e) {
+            toast.error(`Album download failed: ${e}`);
+        }
+    }
+
     // A shelf's "See all" opens the same grid route the artist page uses.
     function showMore(s: { title: string; moreBrowseId?: string; moreParams?: string }) {
         const q = new URLSearchParams({ id: s.moreBrowseId!, title: s.title });
@@ -450,6 +466,14 @@
                                     icon={PlayListAddIcon}
                                     class="h-4 w-4"
                                 /> Save to playlist
+                            </button>
+                            <button
+                                class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+                                onclick={downloadAlbumTracks}
+                            >
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg> Download album
                             </button>
                         {/if}
                         <button
