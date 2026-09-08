@@ -335,6 +335,9 @@ fn get_url(map: &VideoUrls, id: &str, now: i64) -> Option<String> {
     (*expires_at > now).then(|| url.clone())
 }
 
+/// How far into a track Previous stops meaning "go back" and starts meaning "start this one over".
+const PREV_REWIND_SECS: f64 = 3.0;
+
 impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -773,7 +776,11 @@ impl AppState {
 
     /// `is_upload` comes off the queue row, never off `/player`: the response that has to be
     /// handled here (LOGIN_REQUIRED) carries no `videoDetails` to read it from. Issue #71.
-    async fn resolve(&self, video_id: &str, is_upload: bool) -> Result<PlaybackData, ResolveError> {
+    pub(crate) async fn resolve(
+        &self,
+        video_id: &str,
+        is_upload: bool,
+    ) -> Result<PlaybackData, ResolveError> {
         // A local file is its own "stream": no network, no cache, no extraction (local.rs).
         if let Some(path) = crate::local::song_path(video_id) {
             return crate::local::playback_data(video_id, path).map_err(|_| {
@@ -1277,6 +1284,9 @@ impl AppState {
             q.seek_to(index);
             q.lookahead_loaded = None;
         }
+        // The next mpv tick is seconds away (a resolve has to finish first); until then
+        // `current_position` would still report the outgoing track's position.
+        self.latest_position.store(0f64.to_bits(), Ordering::SeqCst);
         if self.start_current(gen).await {
             self.prime_lookahead(gen).await;
         }
@@ -1891,7 +1901,15 @@ impl AppState {
         }
     }
 
+    /// Previous: rewind first, step back second (issue #187). Past the first few seconds of a
+    /// track, Previous restarts it, the convention every other transport follows, so reaching the
+    /// earlier track means pressing it again from the top. Guests fall through to `play_index`,
+    /// which is where they get the host-only hint.
     pub async fn prev_in_queue(self: &std::sync::Arc<Self>) {
+        if self.current_position() > PREV_REWIND_SECS && !self.lt.is_guest().await {
+            let _ = self.user_seek(0.0).await;
+            return;
+        }
         let i = self.queue.lock().await.current.saturating_sub(1);
         self.play_index(i).await;
     }

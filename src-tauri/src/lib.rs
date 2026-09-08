@@ -1,10 +1,13 @@
 //! Nocturne Music Tauri app. Wires transport + player + db + orchestrator behind the command boundary.
 
+pub mod cache;
 mod cipher;
 mod commands;
 mod db;
 mod discord;
+pub mod download;
 mod http;
+pub mod installer;
 mod lastfm;
 mod listentogether;
 mod local;
@@ -211,6 +214,11 @@ pub fn run() {
             // Before anything can play: the first track of a restored queue has to come out at the
             // level the user left, not at 100.
             let _ = player.set_volume(state::saved_volume(&db));
+            if let Some(dev) = db.get_setting("audio_device") {
+                if !dev.is_empty() {
+                    let _ = player.set_audio_device(&dev);
+                }
+            }
             let events = player.take_events().expect("player events");
 
             // Phase 2 extraction stack: cipher + PoToken hidden webviews behind the orchestrator.
@@ -527,6 +535,19 @@ pub fn run() {
             commands::release_notes,
             commands::can_self_update,
             commands::open_external,
+            commands::download_song,
+            commands::show_downloaded_file,
+            commands::get_custom_lyric_providers,
+            commands::save_custom_lyric_providers,
+            commands::search_lyrics_candidates,
+            commands::apply_selected_lyric,
+            commands::get_cache_stats,
+            commands::set_cache_limit,
+            commands::clear_cache_data,
+            commands::install_app_update,
+            commands::get_audio_devices,
+            commands::set_audio_device,
+            commands::get_desktop_environment,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is

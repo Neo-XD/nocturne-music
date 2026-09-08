@@ -305,10 +305,125 @@
 			proxyInput = s.proxy ?? '';
 			remoteSyncPort = s.remote_sync_port ?? '8080';
 			initLyricsProviders(s.lyrics_providers ?? s.lyrics_priority);
+			await Promise.all([loadCustomProviders(), loadCacheStats()]);
 		} catch (e) {
 			toast.error(String(e));
 		}
 		loaded = true;
+	}
+
+	// Custom lyric providers state
+	let customProviders = $state<api.CustomLyricProvider[]>([]);
+	let newCustomName = $state('');
+	let newCustomUrl = $state('');
+	let newCustomFormat = $state<'lrclib' | 'ttml' | 'lrc' | 'json'>('lrclib');
+	let showAddCustom = $state(false);
+
+	async function loadCustomProviders() {
+		try {
+			customProviders = await api.getCustomLyricProviders();
+		} catch (e) {
+			console.error('Failed to load custom lyric providers', e);
+		}
+	}
+
+	async function addCustomProvider() {
+		if (!newCustomName.trim() || !newCustomUrl.trim()) {
+			toast.error('Provider name and URL are required');
+			return;
+		}
+		const id = 'custom_' + Date.now();
+		const updated = [
+			...customProviders,
+			{
+				id,
+				name: newCustomName.trim(),
+				url: newCustomUrl.trim(),
+				format: newCustomFormat,
+				enabled: true
+			}
+		];
+		try {
+			await api.saveCustomLyricProviders(updated);
+			customProviders = updated;
+			newCustomName = '';
+			newCustomUrl = '';
+			showAddCustom = false;
+			toast.success('Custom lyric provider added');
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	async function toggleCustomProvider(id: string, on: boolean) {
+		const updated = customProviders.map((p) => (p.id === id ? { ...p, enabled: on } : p));
+		try {
+			await api.saveCustomLyricProviders(updated);
+			customProviders = updated;
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	async function removeCustomProvider(id: string) {
+		const updated = customProviders.filter((p) => p.id !== id);
+		try {
+			await api.saveCustomLyricProviders(updated);
+			customProviders = updated;
+			toast.success('Custom lyric provider removed');
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	// Cache stats & limit state
+	let cacheStats = $state<api.CacheStats | null>(null);
+	let cacheLimitMb = $state<number | null>(null);
+
+	function formatBytes(bytes: number): string {
+		if (!bytes || bytes === 0) return '0 B';
+		const k = 1024;
+		const sizes = ['B', 'KB', 'MB', 'GB'];
+		const i = Math.floor(Math.log(bytes) / Math.log(k));
+		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+	}
+
+	async function loadCacheStats() {
+		try {
+			const stats = await api.getCacheStats();
+			cacheStats = stats;
+			cacheLimitMb = stats.limit_mb;
+		} catch (e) {
+			console.error('Failed to load cache stats', e);
+		}
+	}
+
+	async function updateCacheLimit(mb: number | null) {
+		cacheLimitMb = mb;
+		try {
+			await api.setCacheLimit(mb);
+			toast.success(
+				mb
+					? `Cache limit set to ${mb >= 1024 ? mb / 1024 + ' GB' : mb + ' MB'}`
+					: 'Cache limit set to Unlimited'
+			);
+			await loadCacheStats();
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	async function clearCacheKind(which: 'audio' | 'cipher' | 'covers' | 'all') {
+		clearing = true;
+		try {
+			await api.clearCacheData(which);
+			toast.success(`${which === 'all' ? 'All caches' : which + ' cache'} cleared`);
+			await loadCacheStats();
+		} catch (e) {
+			toast.error(String(e));
+		} finally {
+			clearing = false;
+		}
 	}
 
 	interface LyricsProviderInfo {
@@ -667,14 +782,28 @@
 		toast.success('Applied Maximum Performance profile');
 	}
 
-	function restoreHighQuality() {
+	function applyBalanced() {
+		if (theme.id === 'glassy') {
+			toggleGlassyTheme(false);
+		}
+		setAppearance({
+			reduceTransparency: false,
+			reduceMotion: false,
+			artworkBackground: false
+		});
+		setAnimatedArtwork(false);
+		toast.success('Applied Balanced profile (Default)');
+	}
+
+	function applyHighQuality() {
+		toggleGlassyTheme(true);
+		setAnimatedArtwork(true);
 		setAppearance({
 			reduceTransparency: false,
 			reduceMotion: false,
 			artworkBackground: true
 		});
-		setAnimatedArtwork(true);
-		toast.success('Restored High Quality Visuals');
+		toast.success('Applied High Quality profile (Glassy theme, Animated BG, Artwork Wash)');
 	}
 	function resetGlassyVisuals() {
 		setAppearance({
@@ -1499,6 +1628,109 @@
 								{/each}
 							</div>
 						</section>
+
+						<section class={GROUP}>
+							<div class="flex items-center justify-between px-1 mb-2">
+								<div>
+									<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+										Custom Lyric Providers
+									</h3>
+									<p class="text-xs text-muted-foreground mt-0.5">
+										Add external APIs with URL templates like <code>{'{title}'}</code>, <code>{'{artist}'}</code>, <code>{'{duration}'}</code>, <code>{'{videoId}'}</code>.
+									</p>
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => (showAddCustom = !showAddCustom)}
+									class="text-xs cursor-pointer"
+								>
+									{showAddCustom ? 'Cancel' : 'Add provider'}
+								</Button>
+							</div>
+
+							{#if showAddCustom}
+								<div class="mb-4 rounded-xl border border-primary/40 bg-muted/30 p-4 space-y-3">
+									<h4 class="text-xs font-semibold text-foreground">New Custom Lyric Provider</h4>
+									<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+										<div>
+											<label class="text-[11px] text-muted-foreground block mb-1">Provider Name</label>
+											<Input
+												placeholder="e.g. My Lyrics API"
+												bind:value={newCustomName}
+												class="text-xs"
+											/>
+										</div>
+										<div>
+											<label class="text-[11px] text-muted-foreground block mb-1">Response Format</label>
+											<select
+												bind:value={newCustomFormat}
+												class="w-full h-9 rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+											>
+												<option value="lrclib">LRCLIB JSON (syncedLyrics/plainLyrics)</option>
+												<option value="ttml">TTML / XML (Timed Text)</option>
+												<option value="lrc">Plain LRC ([00:12.34] text)</option>
+												<option value="json">Generic JSON (lyrics / lines)</option>
+											</select>
+										</div>
+									</div>
+									<div>
+										<label class="text-[11px] text-muted-foreground block mb-1">
+											URL Template (supports <code>{'{title}'}</code>, <code>{'{artist}'}</code>, <code>{'{duration}'}</code>, <code>{'{videoId}'}</code>)
+										</label>
+										<Input
+											placeholder={'https://example.com/api/lyrics?title={title}&artist={artist}&duration={duration}'}
+											bind:value={newCustomUrl}
+											class="text-xs font-mono"
+										/>
+									</div>
+									<div class="flex justify-end gap-2 pt-1">
+										<Button variant="ghost" size="sm" onclick={() => (showAddCustom = false)}>
+											Cancel
+										</Button>
+										<Button size="sm" onclick={addCustomProvider}>
+											Save Provider
+										</Button>
+									</div>
+								</div>
+							{/if}
+
+							<div class={CARD}>
+								{#if customProviders.length === 0}
+									<div class="p-4 text-center text-xs text-muted-foreground">
+										No custom lyric providers configured. Click "Add provider" above to connect one.
+									</div>
+								{:else}
+									{#each customProviders as cp (cp.id)}
+										<div class="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/10">
+											<div class="min-w-0 flex-1">
+												<div class="flex items-center gap-2">
+													<span class="text-xs font-semibold text-foreground">{cp.name}</span>
+													<span class="rounded bg-muted px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground uppercase">
+														{cp.format}
+													</span>
+												</div>
+												<p class="text-[11px] font-mono text-muted-foreground truncate mt-0.5">{cp.url}</p>
+											</div>
+											<div class="flex items-center gap-3 shrink-0">
+												<button
+													type="button"
+													onclick={() => removeCustomProvider(cp.id)}
+													title="Delete provider"
+													class="text-muted-foreground hover:text-destructive text-xs cursor-pointer p-1 transition-colors"
+												>
+													<HugeiconsIcon icon={Cancel01Icon} class="h-3.5 w-3.5" />
+												</button>
+												<Switch
+													checked={cp.enabled}
+													onCheckedChange={(on) => toggleCustomProvider(cp.id, on)}
+												/>
+											</div>
+										</div>
+									{/each}
+								{/if}
+							</div>
+						</section>
 					{:else if tab === 'keybindings'}
 						<div class="mb-5 flex items-center justify-between px-1">
 							<div>
@@ -1612,12 +1844,20 @@
 							</div>
 						</section>
 						<section class={GROUP}>
-							<h3 class={LABEL}>Storage</h3>
+							<h3 class={LABEL}>Storage & Cache Management</h3>
 							<div class={CARD}>
 								{@render row({
-									title: 'Cache',
-									desc: 'Clear cached stream URLs and downloaded audio bytes.',
-									control: clearButton
+									title: 'Cache Usage',
+									desc: cacheStats
+										? `Currently using ${formatBytes(cacheStats.total_bytes)} of storage.`
+										: 'Calculating storage usage...',
+									control: clearButton,
+									below: cacheStatsBreakdown
+								})}
+								{@render row({
+									title: 'Cache storage limit',
+									desc: 'Nocturne automatically prunes oldest audio chunks when the cache exceeds this limit.',
+									control: cacheLimitSelector
 								})}
 							</div>
 						</section>
@@ -1870,9 +2110,13 @@
 			<HugeiconsIcon icon={FlashIcon} class="mr-1.5 h-3.5 w-3.5 text-amber-500" />
 			Maximum Performance
 		</Button>
-		<Button variant="outline" size="sm" onclick={restoreHighQuality} class="text-xs cursor-pointer">
+		<Button variant="outline" size="sm" onclick={applyBalanced} class="text-xs cursor-pointer">
+			<HugeiconsIcon icon={ComputerIcon} class="mr-1.5 h-3.5 w-3.5 text-sky-500" />
+			Balanced (Default)
+		</Button>
+		<Button variant="outline" size="sm" onclick={applyHighQuality} class="text-xs cursor-pointer">
 			<HugeiconsIcon icon={PaintBoardIcon} class="mr-1.5 h-3.5 w-3.5 text-primary" />
-			High Quality Visuals
+			High Quality
 		</Button>
 	</div>
 {/snippet}
@@ -2410,9 +2654,70 @@
 	</form>
 {/snippet}
 
+{#snippet cacheStatsBreakdown()}
+	{#if cacheStats}
+		<div class="grid grid-cols-3 gap-2 pt-1 pb-1">
+			<div class="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-center">
+				<span class="text-[10px] uppercase font-semibold text-muted-foreground block">Audio Buffers</span>
+				<span class="text-xs font-mono font-medium text-foreground mt-0.5 block">{formatBytes(cacheStats.audio_cache_bytes)}</span>
+				<button
+					type="button"
+					onclick={() => clearCacheKind('audio')}
+					disabled={clearing || cacheStats.audio_cache_bytes === 0}
+					class="mt-1.5 text-[10px] text-destructive hover:underline cursor-pointer disabled:opacity-40"
+				>
+					Clear audio
+				</button>
+			</div>
+			<div class="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-center">
+				<span class="text-[10px] uppercase font-semibold text-muted-foreground block">Cipher Cache</span>
+				<span class="text-xs font-mono font-medium text-foreground mt-0.5 block">{formatBytes(cacheStats.cipher_cache_bytes)}</span>
+				<button
+					type="button"
+					onclick={() => clearCacheKind('cipher')}
+					disabled={clearing || cacheStats.cipher_cache_bytes === 0}
+					class="mt-1.5 text-[10px] text-destructive hover:underline cursor-pointer disabled:opacity-40"
+				>
+					Clear cipher
+				</button>
+			</div>
+			<div class="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-center">
+				<span class="text-[10px] uppercase font-semibold text-muted-foreground block">Local Covers</span>
+				<span class="text-xs font-mono font-medium text-foreground mt-0.5 block">{formatBytes(cacheStats.covers_cache_bytes)}</span>
+				<button
+					type="button"
+					onclick={() => clearCacheKind('covers')}
+					disabled={clearing || cacheStats.covers_cache_bytes === 0}
+					class="mt-1.5 text-[10px] text-destructive hover:underline cursor-pointer disabled:opacity-40"
+				>
+					Clear covers
+				</button>
+			</div>
+		</div>
+	{/if}
+{/snippet}
+
+{#snippet cacheLimitSelector()}
+	<select
+		value={cacheLimitMb ?? 0}
+		onchange={(e) => {
+			const val = parseInt(e.currentTarget.value, 10);
+			updateCacheLimit(val === 0 ? null : val);
+		}}
+		class="h-8 rounded-md border border-border bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+	>
+		<option value={0}>Unlimited</option>
+		<option value={512}>512 MB</option>
+		<option value={1024}>1 GB</option>
+		<option value={2048}>2 GB</option>
+		<option value={4096}>4 GB</option>
+		<option value={8192}>8 GB</option>
+	</select>
+{/snippet}
+
 {#snippet clearButton()}
-	<Button variant="destructive" size="sm" onclick={doClearCaches} disabled={clearing}>
-		{clearing ? 'Clearing…' : 'Clear caches'}
+	<Button variant="destructive" size="sm" onclick={() => clearCacheKind('all')} disabled={clearing}>
+		{clearing ? 'Clearing…' : 'Clear all caches'}
 	</Button>
 {/snippet}
 

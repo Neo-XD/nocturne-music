@@ -260,7 +260,9 @@ pub fn parse_search(root: &Value) -> SearchResult {
 /// Parse a `next` response into the up-next queue + continuation token. context/08.
 pub fn parse_next(root: &Value) -> NextResult {
     let mut items = Vec::new();
-    for node in find_all(root, "playlistPanelVideoRenderer") {
+    let mut rows = Vec::new();
+    panel_rows(root, &mut rows);
+    for node in rows {
         if let Some(item) = parse_panel_video(node) {
             items.push(item);
         }
@@ -279,6 +281,28 @@ pub fn parse_next(root: &Value) -> NextResult {
         // Scoped to the overlay on purpose: a bare `find_first_str` over the whole response would
         // read whatever a future panel row starts carrying instead of the requested video's own.
         rating: root.get("playerOverlays").and_then(like_status),
+    }
+}
+
+/// Every panel row in order, ignoring the `counterpart` arm of a
+/// `playlistPanelVideoWrapperRenderer`. A signed-in radio wraps each track's audio row together
+/// with its music-video twin (what YouTube's own Song/Video toggle switches between), so a plain
+/// [`find_all`] takes both and the queue gets every song twice. Issue #170.
+fn panel_rows<'a>(node: &'a Value, out: &mut Vec<&'a Value>) {
+    match node {
+        Value::Object(map) => {
+            for (k, v) in map {
+                if k == "counterpart" {
+                    continue;
+                }
+                if k == "playlistPanelVideoRenderer" {
+                    out.push(v);
+                }
+                panel_rows(v, out);
+            }
+        }
+        Value::Array(arr) => arr.iter().for_each(|e| panel_rows(e, out)),
+        _ => {}
     }
 }
 

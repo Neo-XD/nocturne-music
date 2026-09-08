@@ -56,7 +56,7 @@ export function openItem(item: BrowseItem): void {
  * first, so callers own the in-flight state (the pulsing button). Never throws — a failure toasts
  * and the user stays where they were.
  */
-export async function playItem(item: BrowseItem): Promise<void> {
+export async function playItem(item: BrowseItem, shuffle = false): Promise<void> {
 	touchPick(item.id);
 	if (item.kind === 'song') {
 		playSong(asSong(item));
@@ -65,7 +65,7 @@ export async function playItem(item: BrowseItem): Promise<void> {
 	try {
 		if (item.kind === 'album') {
 			const album = await api.getAlbum(item.id);
-			await playFrom(item, album.items, null, album.playlistId ?? undefined);
+			await playFrom(item, album.items, null, album.playlistId ?? undefined, shuffle);
 		} else {
 			const pl = await api.getPlaylist(item.id);
 			// `sourceId` seeds autoplay off that playlist's radio. On Repeat is local, so there is
@@ -76,7 +76,7 @@ export async function playItem(item: BrowseItem): Promise<void> {
 				pl.items,
 				null,
 				item.id === api.ON_REPEAT_ID ? undefined : item.id,
-				undefined,
+				shuffle,
 				pl.continuation
 			);
 		}

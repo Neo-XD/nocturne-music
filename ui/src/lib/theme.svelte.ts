@@ -13,9 +13,9 @@
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { hexToHsv, isLight, nearestHue } from './color';
 import { artworkAccent, warmAccent } from './artcolor';
-import { allowFontFile } from './api';
+import { allowFontFile, getDesktopEnvironment } from './api';
 
-export type ThemeId = 'monochrome' | 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze' | 'glassy';
+export type ThemeId = 'monochrome' | 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze' | 'glassy' | 'native';
 
 // `fg` (accent themes only) is the text/icon colour that sits ON the accent: light accents (lime,
 // teal) need a dark foreground; dark accents keep the light one. `color` is just the picker swatch.
@@ -34,7 +34,8 @@ export const THEMES: Theme[] = [
 	{ id: 'caffeine', label: 'Caffeine', kind: 'palette', color: 'oklch(0.4341 0.0392 41.9938)' },
 	{ id: 'neon', label: 'Neon', kind: 'palette', color: 'oklch(0.6726 0.2904 341.4084)' },
 	{ id: 'breeze', label: 'Breeze', kind: 'palette', color: 'oklch(0.7227 0.1920 149.5793)' },
-	{ id: 'glassy', label: 'Glassy', kind: 'palette', color: 'oklch(0.7 0.15 220)' }
+	{ id: 'glassy', label: 'Glassy', kind: 'palette', color: 'oklch(0.7 0.15 220)' },
+	{ id: 'native', label: 'Native', kind: 'palette', color: 'oklch(0.58 0.18 250)' }
 ];
 
 /** Font stacks bundled with the app (imported in layout.css). "System" needs no download. */
@@ -226,6 +227,29 @@ function setAccentVars(color: string): void {
 	root.style.setProperty('--accent-foreground', fg);
 }
 
+let currentDesktopEnv = 'windows';
+
+export function detectDesktopEnvironment(): void {
+	if (typeof window === 'undefined') return;
+	getDesktopEnvironment()
+		.then((de) => {
+			currentDesktopEnv = de;
+			document.documentElement.setAttribute('data-native-de', de);
+			if (theme.id === 'native') apply();
+		})
+		.catch(() => {
+			if (navigator.userAgent.includes('Macintosh') || navigator.userAgent.includes('Mac OS')) {
+				currentDesktopEnv = 'macos';
+			} else if (navigator.userAgent.includes('Linux')) {
+				currentDesktopEnv = 'gnome';
+			} else {
+				currentDesktopEnv = 'windows';
+			}
+			document.documentElement.setAttribute('data-native-de', currentDesktopEnv);
+			if (theme.id === 'native') apply();
+		});
+}
+
 function apply(): void {
 	const t = THEMES.find((x) => x.id === theme.id) ?? THEMES[0];
 	const root = document.documentElement;
@@ -241,6 +265,33 @@ function apply(): void {
 		root.style.setProperty('--accent-foreground', t.fg);
 	} else {
 		root.classList.add(`theme-${t.id}`);
+	}
+
+	if (t.id === 'native') {
+		root.setAttribute('data-native-de', currentDesktopEnv);
+		if (custom.radius === null) {
+			const deRadius =
+				currentDesktopEnv === 'kde'
+					? '0.3rem'
+					: currentDesktopEnv === 'gnome'
+					? '0.75rem'
+					: currentDesktopEnv === 'macos'
+					? '0.65rem'
+					: '0.5rem';
+			root.style.setProperty('--radius', deRadius);
+		}
+		if (!custom.fontSans) {
+			const deFont =
+				currentDesktopEnv === 'kde'
+					? "'Noto Sans', system-ui, sans-serif"
+					: currentDesktopEnv === 'gnome'
+					? "'Cantarell', 'Inter', system-ui, sans-serif"
+					: currentDesktopEnv === 'macos'
+					? "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif"
+					: "'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif";
+			root.style.setProperty('--font-sans', deFont);
+			root.style.setProperty('--font-heading', deFont);
+		}
 	}
 
 	if (custom.accent) setAccentVars(custom.accent);
@@ -440,7 +491,14 @@ export function applyArtworkAccent(url: string | undefined | null): void {
 		return;
 	}
 	artworkAccent(url).then((hex) => {
-		if (!hex || wanted !== url) return; // colourless cover, or a faster track change already won
+		if (wanted !== url) return; // a faster track change already won
+		if (!hex) {
+			if (art) {
+				art = null;
+				apply();
+			}
+			return;
+		}
 		if (art?.hex === hex) return; // same colour (a repeat, or the queue moved under us)
 		const hsv = hexToHsv(hex);
 		if (!hsv) return;
@@ -512,6 +570,7 @@ export function initTheme(): void {
 	}
 	apply();
 	applyPerformanceClasses();
+	detectDesktopEnvironment();
 	// Async (each file needs its URL granted first), so the app paints in the fallback font for a
 	// frame or two before a loaded font swaps in.
 	if (custom.fontFiles.length) registerFontFiles();

@@ -97,25 +97,8 @@
 			});
 	});
 
-	// Check if track is instrumental or has no usable lyrics
-	const isInstrumental = $derived.by(() => {
-		if (loadingLyrics) return false;
-		if (!lyrics) return true;
-		if (lyrics.instrumental) return true;
-		if (!lyrics.lines || lyrics.lines.length === 0) return true;
-		const nonTrivial = lyrics.lines.filter((l) => l.text && l.text.trim());
-		if (nonTrivial.length === 0) return true;
-		if (
-			nonTrivial.length <= 2 &&
-			nonTrivial.every((l) => /^\s*(\[?instrumental\]?|[♪♫♩♬\s-]+)\s*$/i.test(l.text))
-		) {
-			return true;
-		}
-		return false;
-	});
-
-	// Effective visibility: user preference & not instrumental & has lyrics
-	const showLyrics = $derived(userShowLyrics && !isInstrumental && (lyrics !== null || loadingLyrics));
+	// Effective visibility: user preference
+	const showLyrics = $derived(userShowLyrics);
 
 	// High-precision clock for 60fps karaoke word sweep
 	let interpolatedPosSecs = $state(playback.position);
@@ -231,10 +214,8 @@
 			e.preventDefault();
 			nudgeVolume(-5);
 		} else if (e.key.toLowerCase() === 'l') {
-			if (!isInstrumental) {
-				e.preventDefault();
-				userShowLyrics = !userShowLyrics;
-			}
+			e.preventDefault();
+			userShowLyrics = !userShowLyrics;
 		}
 	}
 
@@ -294,30 +275,28 @@
 
 		<!-- Top Right Action Cluster (Lyrics Toggle + Exit) -->
 		<div class="flex items-center gap-2.5 shrink-0">
-			{#if !isInstrumental}
-				<Button
-					variant="outline"
-					size="sm"
-					onclick={() => (userShowLyrics = !userShowLyrics)}
-					aria-label={userShowLyrics ? 'Hide lyrics (L)' : 'Show lyrics (L)'}
-					class="gap-1.5 rounded-full border-border/70 bg-background/70 px-3.5 py-1.5 text-xs font-medium text-foreground backdrop-blur-md transition hover:bg-background cursor-pointer shadow-md"
-				>
-					<HugeiconsIcon icon={showLyrics ? Mic01Icon : MicOff01Icon} class="h-3.5 w-3.5 {showLyrics ? 'text-primary' : 'text-muted-foreground'}" />
-					<span>{showLyrics ? 'Hide lyrics' : 'Show lyrics'}</span>
-					<kbd class="ml-0.5 rounded bg-muted/80 px-1 py-0.5 text-[10px] text-muted-foreground">L</kbd>
-				</Button>
-			{/if}
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={() => (userShowLyrics = !userShowLyrics)}
+				aria-label={userShowLyrics ? 'Hide lyrics (L)' : 'Show lyrics (L)'}
+				class="gap-1.5 rounded-full border-white/20 dark:border-white/10 bg-white/10 dark:bg-black/25 px-3.5 py-1.5 text-xs font-medium text-foreground backdrop-blur-xl transition-all duration-200 hover:bg-white/20 dark:hover:bg-black/40 hover:scale-[1.02] cursor-pointer shadow-lg"
+			>
+				<HugeiconsIcon icon={showLyrics ? Mic01Icon : MicOff01Icon} class="h-3.5 w-3.5 {showLyrics ? 'text-primary' : 'text-muted-foreground'}" />
+				<span>{showLyrics ? 'Hide lyrics' : 'Show lyrics'}</span>
+				<kbd class="ml-0.5 rounded bg-white/15 dark:bg-white/10 px-1 py-0.5 text-[10px] text-foreground/80 border border-white/10">L</kbd>
+			</Button>
 
 			<Button
 				variant="outline"
 				size="sm"
 				onclick={() => (np.fullscreenOpen = false)}
 				aria-label="Exit Fullscreen (Esc)"
-				class="gap-1.5 rounded-full border-border/70 bg-background/70 px-3.5 py-1.5 text-xs font-medium text-foreground backdrop-blur-md transition hover:bg-background cursor-pointer shadow-md"
+				class="gap-1.5 rounded-full border-white/20 dark:border-white/10 bg-white/10 dark:bg-black/25 px-3.5 py-1.5 text-xs font-medium text-foreground backdrop-blur-xl transition-all duration-200 hover:bg-white/20 dark:hover:bg-black/40 hover:scale-[1.02] cursor-pointer shadow-lg"
 			>
 				<HugeiconsIcon icon={Cancel01Icon} class="h-3.5 w-3.5" />
 				<span>Exit</span>
-				<kbd class="ml-0.5 rounded bg-muted/80 px-1 py-0.5 text-[10px] text-muted-foreground">Esc</kbd>
+				<kbd class="ml-0.5 rounded bg-white/15 dark:bg-white/10 px-1 py-0.5 text-[10px] text-foreground/80 border border-white/10">Esc</kbd>
 			</Button>
 		</div>
 	</header>
@@ -602,6 +581,10 @@
 									{/if}
 								{/each}
 							</div>
+						{:else}
+							<div class="flex h-full min-h-[40vh] flex-col items-center justify-center py-20 text-center">
+								<p class="text-xl font-semibold text-muted-foreground/80">No lyrics found for this track</p>
+							</div>
 						{/if}
 					</div>
 
@@ -648,11 +631,6 @@
 								class="text-muted-foreground hover:text-foreground transition-colors"
 							/>
 						</div>
-						{#if isInstrumental}
-							<span class="mt-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-								Instrumental ♪
-							</span>
-						{/if}
 					</div>
 
 					<!-- Upstream-style Seek Scrubber -->

@@ -730,3 +730,110 @@ export const onLtState = (cb: (s: LtState) => void): Promise<UnlistenFn> =>
 	listen<LtState>('lt-state', (e) => cb(e.payload));
 export const onLtNotice = (cb: (msg: string) => void): Promise<UnlistenFn> =>
 	listen<string>('lt-notice', (e) => cb(e.payload));
+
+// --- Download & cache & update & custom lyrics -----------------------------------------------
+
+export interface DownloadProgress {
+	video_id: string;
+	title: string;
+	artist: string;
+	downloaded_bytes: number;
+	total_bytes: number | null;
+	percent: number;
+	status: 'downloading' | 'complete' | 'error';
+	path: string | null;
+}
+
+export const downloadSong = (args: {
+	videoId: string;
+	title: string;
+	artist: string;
+	customDir?: string;
+}) => invoke<string>('download_song', args);
+
+export const showDownloadedFile = (path: string) =>
+	invoke<void>('show_downloaded_file', { path });
+
+export const onDownloadProgress = (cb: (p: DownloadProgress) => void): Promise<UnlistenFn> =>
+	listen<DownloadProgress>('download-progress', (e) => cb(e.payload));
+
+export interface CustomLyricProvider {
+	id: string;
+	name: string;
+	url: string;
+	format: 'lrclib' | 'ttml' | 'lrc' | 'json';
+	enabled: boolean;
+}
+
+export const getCustomLyricProviders = () =>
+	invoke<CustomLyricProvider[]>('get_custom_lyric_providers');
+
+export const saveCustomLyricProviders = (providers: CustomLyricProvider[]) =>
+	invoke<void>('save_custom_lyric_providers', { providers });
+
+export interface LyricCandidate {
+	source: string;
+	title: string;
+	artist: string;
+	album?: string;
+	duration?: number;
+	synced: boolean;
+	has_words: boolean;
+	lyrics: Lyrics;
+}
+
+export const searchLyricsCandidates = (args: {
+	title: string;
+	artist: string;
+	duration?: number;
+	videoId?: string;
+}) => invoke<LyricCandidate[]>('search_lyrics_candidates', args);
+
+export const applySelectedLyric = (args: { videoId: string; lyrics: Lyrics }) =>
+	invoke<void>('apply_selected_lyric', args);
+
+export interface CacheStats {
+	total_bytes: number;
+	audio_cache_bytes: number;
+	cipher_cache_bytes: number;
+	covers_cache_bytes: number;
+	limit_mb: number | null;
+}
+
+export const getCacheStats = () => invoke<CacheStats>('get_cache_stats');
+
+export const setCacheLimit = (limitMb: number | null) =>
+	invoke<void>('set_cache_limit', { limitMb });
+
+export const clearCacheData = (which?: 'audio' | 'cipher' | 'covers' | 'all') =>
+	invoke<void>('clear_cache_data', { which });
+
+export interface UpdateDownloadProgress {
+	downloaded_bytes: number;
+	total_bytes: number | null;
+	percent: number;
+	status: string;
+}
+
+export const installAppUpdate = (version: string, directUrl?: string) =>
+	invoke<void>('install_app_update', { version, directUrl });
+
+export const onUpdateDownloadProgress = (
+	cb: (p: UpdateDownloadProgress) => void
+): Promise<UnlistenFn> =>
+	listen<UpdateDownloadProgress>('update-download-progress', (e) => cb(e.payload));
+
+// --- Audio Output Devices -------------------------------------------------------------------
+export interface AudioDevice {
+	name: string;
+	description: string;
+}
+
+export interface AudioDeviceInfo {
+	devices: AudioDevice[];
+	current: string;
+}
+
+export const getAudioDevices = () => invoke<AudioDeviceInfo>('get_audio_devices');
+export const setAudioDevice = (device: string) => invoke<void>('set_audio_device', { device });
+export const getDesktopEnvironment = () => invoke<string>('get_desktop_environment');

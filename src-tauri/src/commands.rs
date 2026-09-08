@@ -168,6 +168,56 @@ pub async fn set_playback_params(state: St<'_>, speed: f64, semitones: i32) -> R
     state.player.set_speed(speed).map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AudioDeviceInfo {
+    pub devices: Vec<player::AudioDevice>,
+    pub current: String,
+}
+
+#[tauri::command]
+pub async fn get_audio_devices(state: St<'_>) -> Result<AudioDeviceInfo, String> {
+    let devices = state.player.get_audio_devices().map_err(|e| e.to_string())?;
+    let current = state.player.get_current_audio_device().unwrap_or_else(|_| "auto".into());
+    Ok(AudioDeviceInfo { devices, current })
+}
+
+#[tauri::command]
+pub async fn set_audio_device(state: St<'_>, device: String) -> Result<(), String> {
+    state.player.set_audio_device(&device).map_err(|e| e.to_string())?;
+    state.db.set_setting("audio_device", &device);
+    let _ = state.app.emit("audio_device_changed", &device);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_desktop_environment() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        Ok("windows".into())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Ok("macos".into())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let de = std::env::var("XDG_CURRENT_DESKTOP")
+            .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
+            .or_else(|_| std::env::var("DESKTOP_SESSION"))
+            .unwrap_or_default()
+            .to_lowercase();
+        if de.contains("kde") || de.contains("plasma") {
+            Ok("kde".into())
+        } else {
+            Ok("gnome".into())
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Ok("generic".into())
+    }
+}
+
 #[tauri::command]
 pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
     Ok(state.queue_snapshot().await)
@@ -178,7 +228,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 26] = [
+const UI_SETTINGS: [&str; 27] = [
     "volume",
     "proxy",
     "quality",
@@ -205,6 +255,7 @@ const UI_SETTINGS: [&str; 26] = [
     "remote_sync_port",
     "remote_sync_pin",
     "hardware_acceleration",
+    "audio_device",
 ];
 
 /// Resolve the music video for `video_id` and hand back a proxy URL the player view
@@ -1337,6 +1388,20 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v072_note = ReleaseNote {
+        version: "0.7.2".to_string(),
+        date: "2026-09-08".to_string(),
+        body: r#"### Nocturne Music v0.7.2
+
+- **Song Downloader**: Download songs directly to your device from any track context menu. Downloads audio with metadata and allows immediate access in your system file explorer.
+- **Custom Lyric Providers**: Add, configure, and manage custom lyric providers with template URL endpoints and formats (LRCLIB, TTML, LRC, and JSON).
+- **BetterLyrics Fix & Lyric Selector**: Restored BetterLyrics integration with dual-endpoint TTML fallbacks and added an interactive BetterLyrics-style Lyric Selector to search, preview, and apply lyrics from multiple sources.
+- **Upstream Features & Fixes**: Merged upstream 0.6.10–0.7.0 improvements including signed-in radio queue fixes, 3-second smart rewind on Previous button, and auto-scroll stabilization.
+- **Cache Limit & Storage Management**: View detailed cache storage breakdown (audio buffers, cipher cache, covers) and configure custom storage limits with automatic pruning.
+- **In-App Updater**: Direct in-app update downloading and seamless installation.
+- **Quality Presets**: Balanced quality profile as default, plus an enhanced High Quality preset enabling Glassy themes, animated artwork backgrounds, and dynamic background wash."#.to_string(),
+    };
+
     let v071_note = ReleaseNote {
         version: "0.7.1".to_string(),
         date: "2026-09-06".to_string(),
@@ -1473,8 +1538,8 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note,
-        v061_note, v06_note,
+        v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note,
+        v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> =
@@ -1564,6 +1629,107 @@ pub async fn lastfm_disconnect(state: St<'_>) -> Result<(), String> {
 #[tauri::command]
 pub async fn lastfm_status(state: St<'_>) -> Result<serde_json::Value, String> {
     Ok(crate::lastfm::status(&state))
+}
+
+// --- Song downloader ------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn download_song(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    video_id: String,
+    title: String,
+    artist: String,
+    custom_dir: Option<String>,
+) -> Result<String, String> {
+    crate::download::download_song_track(
+        app,
+        state.inner().clone(),
+        video_id,
+        title,
+        artist,
+        custom_dir,
+    )
+    .await
+}
+
+#[tauri::command]
+pub fn show_downloaded_file(path: String) -> Result<(), String> {
+    crate::download::show_in_folder(&path)
+}
+
+// --- Custom lyrics & Lyric Selector ---------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_custom_lyric_providers(
+    state: St<'_>,
+) -> Result<Vec<crate::lyrics::CustomLyricProvider>, String> {
+    Ok(crate::lyrics::get_custom_providers(&state.db))
+}
+
+#[tauri::command]
+pub async fn save_custom_lyric_providers(
+    state: St<'_>,
+    providers: Vec<crate::lyrics::CustomLyricProvider>,
+) -> Result<(), String> {
+    crate::lyrics::save_custom_providers(&state.db, &providers);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn search_lyrics_candidates(
+    state: St<'_>,
+    title: String,
+    artist: String,
+    duration: Option<f64>,
+    video_id: Option<String>,
+) -> Result<Vec<crate::lyrics::LyricCandidate>, String> {
+    Ok(crate::lyrics::search_all_lyrics(&state, title, artist, duration, video_id).await)
+}
+
+#[tauri::command]
+pub async fn apply_selected_lyric(
+    state: St<'_>,
+    video_id: String,
+    lyrics: crate::lyrics::Lyrics,
+) -> Result<(), String> {
+    crate::lyrics::apply_selected_lyrics(&state, video_id, lyrics);
+    Ok(())
+}
+
+// --- Cache management -----------------------------------------------------------------------
+
+#[tauri::command]
+pub fn get_cache_stats(
+    app: tauri::AppHandle,
+    state: St<'_>,
+) -> Result<crate::cache::CacheStats, String> {
+    Ok(crate::cache::get_cache_stats(&app, &state.db))
+}
+
+#[tauri::command]
+pub fn set_cache_limit(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    limit_mb: Option<u64>,
+) -> Result<(), String> {
+    crate::cache::set_cache_limit(&app, &state.db, limit_mb)
+}
+
+#[tauri::command]
+pub fn clear_cache_data(app: tauri::AppHandle, which: Option<String>) -> Result<(), String> {
+    crate::cache::clear_cache(&app, which.as_deref())
+}
+
+// --- In-App Updates -------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn install_app_update(
+    app: tauri::AppHandle,
+    version: String,
+    direct_url: Option<String>,
+) -> Result<(), String> {
+    crate::installer::download_and_install_update(app, version, direct_url).await
 }
 
 #[cfg(test)]

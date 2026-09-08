@@ -1445,6 +1445,15 @@ dependencies = [
 
 [[package]]
 name = "dirs"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
+dependencies = [
+ "dirs-sys 0.4.1",
+]
+
+[[package]]
+name = "dirs"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
@@ -1461,6 +1470,18 @@ dependencies = [
  "libc",
  "redox_users 0.4.6",
  "winapi",
+]
+
+[[package]]
+name = "dirs-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
+dependencies = [
+ "libc",
+ "option-ext",
+ "redox_users 0.4.6",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2757,7 +2778,7 @@ dependencies = [
 
 [[package]]
 name = "innertube"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "reqwest 0.12.28",
@@ -3143,7 +3164,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listen-protocol"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures-util",
  "serde",
@@ -3408,10 +3429,11 @@ dependencies = [
 
 [[package]]
 name = "nocturne-app"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "dirs 5.0.1",
  "discord-rich-presence",
  "futures-util",
  "http-body-util",
@@ -4048,10 +4070,12 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "player"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "libc",
  "libmpv2",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -5563,7 +5587,7 @@ dependencies = [
 
 [[package]]
 name = "sync-server"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures-util",
  "listen-protocol",

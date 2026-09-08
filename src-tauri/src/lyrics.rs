@@ -16,6 +16,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 
 use crate::state::AppState;
 
@@ -83,6 +84,32 @@ fn forced_provider() -> Option<String> {
 }
 
 pub const DEFAULT_PROVIDERS: [&str; 5] = ["betterlyrics", "lrclib", "ytm", "qq", "kugou"];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomLyricProvider {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub format: String, // "lrclib", "ttml", "lrc", "json"
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+pub fn get_custom_providers(db: &crate::db::Db) -> Vec<CustomLyricProvider> {
+    db.get_setting("custom_lyric_providers")
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_custom_providers(db: &crate::db::Db, list: &[CustomLyricProvider]) {
+    if let Ok(json) = serde_json::to_string(list) {
+        let _ = db.set_setting("custom_lyric_providers", &json);
+    }
+}
 
 pub fn resolve_providers(db: &crate::db::Db) -> Vec<String> {
     if let Some(s) =
@@ -230,7 +257,29 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                     return (Some(l), req.duration.is_some());
                 }
             }
-            _ => {}
+            other => {
+                let customs = get_custom_providers(&state.db);
+                if let Some(c) =
+                    customs.iter().find(|c| c.id == other || c.name.to_lowercase() == other)
+                {
+                    if c.enabled {
+                        if let Ok(Some(l)) = custom_provider_get(c, req).await {
+                            return (Some(l), req.duration.is_some());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let customs = get_custom_providers(&state.db);
+    for c in &customs {
+        if c.enabled
+            && !providers.iter().any(|p| p == &c.id || p.to_lowercase() == c.name.to_lowercase())
+        {
+            if let Ok(Some(l)) = custom_provider_get(c, req).await {
+                return (Some(l), req.duration.is_some());
+            }
         }
     }
 
@@ -294,6 +343,14 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LrclibTrack {
+    #[serde(default)]
+    id: Option<i64>,
+    #[serde(default)]
+    track_name: Option<String>,
+    #[serde(default)]
+    artist_name: Option<String>,
+    #[serde(default)]
+    album_name: Option<String>,
     #[serde(default)]
     instrumental: bool,
     #[serde(default)]
@@ -603,69 +660,290 @@ async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest
         query_variants.push((req.title.clone(), req.artists.clone()));
     }
 
-    const ENDPOINT: &str = "https://lyrics-api.boidu.dev/getLyrics";
+    const ENDPOINTS: [&str; 2] =
+        ["https://lyrics-api.boidu.dev/getLyrics", "https://lyrics-api.boidu.dev/ttml/getLyrics"];
     const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
-    for (title, artist) in query_variants {
-        let mut q: Vec<(&str, String)> = vec![("s", title.clone()), ("a", artist.clone())];
-        if let Some(album) = &req.album {
-            q.push(("al", album.clone()));
-        }
-        if let Some(d) = req.duration.filter(|d| *d > 0.0) {
-            q.push(("d", format!("{}", d.round() as i64)));
-        }
+    for endpoint in ENDPOINTS {
+        for (title, artist) in &query_variants {
+            let dur_opts = if req.duration.filter(|d| *d > 0.0).is_some() {
+                vec![req.duration, None]
+            } else {
+                vec![None]
+            };
 
-        tracing::debug!(title = %title, artist = %artist, url = %ENDPOINT, "lyrics: querying Better Lyrics provider");
-        let resp_opt: Option<serde_json::Value> = match crate::http::client()
-            .get(ENDPOINT)
-            .query(&q)
-            .header("User-Agent", BROWSER_UA)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-        {
-            Ok(r) => r.json().await.ok(),
-            Err(e) => {
-                tracing::debug!(url = %ENDPOINT, error = %e, "lyrics: Better Lyrics request failed");
-                None
-            }
-        };
+            for dur in dur_opts {
+                let mut q: Vec<(&str, String)> = vec![("s", title.clone()), ("a", artist.clone())];
+                if !req.video_id.is_empty() {
+                    q.push(("v", req.video_id.clone()));
+                }
+                if let Some(album) = &req.album {
+                    q.push(("al", album.clone()));
+                }
+                if let Some(d) = dur.filter(|d| *d > 0.0) {
+                    q.push(("d", format!("{}", d.round() as i64)));
+                }
 
-        let Some(resp) = resp_opt else {
-            continue;
-        };
+                tracing::debug!(title = %title, artist = %artist, url = %endpoint, "lyrics: querying Better Lyrics provider");
+                let resp_opt: Option<serde_json::Value> = match crate::http::client()
+                    .get(endpoint)
+                    .query(&q)
+                    .header("User-Agent", BROWSER_UA)
+                    .timeout(Duration::from_secs(12))
+                    .send()
+                    .await
+                {
+                    Ok(r) => r.json().await.ok(),
+                    Err(e) => {
+                        tracing::debug!(url = %endpoint, error = %e, "lyrics: Better Lyrics request failed");
+                        None
+                    }
+                };
 
-        let lrc_str = resp
-            .get("ttml")
-            .or_else(|| resp.get("syncedLyrics"))
-            .or_else(|| resp.get("lyrics"))
-            .or_else(|| resp.get("lrc"))
-            .and_then(|v| {
-                if let Some(s) = v.as_str() {
-                    if !s.trim().is_empty() {
-                        return Some(s.to_string());
+                let Some(resp) = resp_opt else {
+                    continue;
+                };
+
+                let lrc_str = resp
+                    .get("ttml")
+                    .or_else(|| resp.get("syncedLyrics"))
+                    .or_else(|| resp.get("lyrics"))
+                    .or_else(|| resp.get("lrc"))
+                    .and_then(|v| {
+                        if let Some(s) = v.as_str() {
+                            if !s.trim().is_empty() {
+                                return Some(s.to_string());
+                            }
+                        }
+                        if v.is_array() {
+                            return serde_json::to_string(v).ok();
+                        }
+                        None
+                    });
+
+                if let Some(lrc) = lrc_str {
+                    let hit = from_parsed("Better Lyrics", parse_lrc_or_ttml(&lrc));
+                    if let Some(l) = hit {
+                        tracing::debug!(
+                            count = l.lines.len(),
+                            synced = l.synced,
+                            "lyrics: Better Lyrics hit"
+                        );
+                        return Ok(Some(l));
                     }
                 }
-                if v.is_array() {
-                    return serde_json::to_string(v).ok();
-                }
-                None
-            });
-
-        if let Some(lrc) = lrc_str {
-            let hit = from_parsed("Better Lyrics", parse_lrc_or_ttml(&lrc));
-            if let Some(l) = hit {
-                tracing::debug!(
-                    count = l.lines.len(),
-                    synced = l.synced,
-                    "lyrics: Better Lyrics hit"
-                );
-                return Ok(Some(l));
             }
         }
     }
 
     Ok(None)
+}
+
+pub async fn custom_provider_get(
+    provider: &CustomLyricProvider,
+    req: &LyricsRequest,
+) -> Result<Option<Lyrics>, reqwest::Error> {
+    let clean_title = clean_lyrics_title(&req.title);
+    let clean_artist = clean_lyrics_artist(&req.artists);
+    let dur_str = req.duration.map(|d| format!("{}", d.round() as i64)).unwrap_or_default();
+
+    let mut target_url = provider.url.clone();
+    target_url = target_url.replace("{title}", &urlencoding::encode(&clean_title));
+    target_url = target_url.replace("{artist}", &urlencoding::encode(&clean_artist));
+    target_url = target_url.replace("{raw_title}", &urlencoding::encode(&req.title));
+    target_url = target_url.replace("{raw_artist}", &urlencoding::encode(&req.artists));
+    target_url = target_url.replace("{duration}", &dur_str);
+    target_url = target_url.replace("{videoId}", &req.video_id);
+    target_url = target_url.replace("{video_id}", &req.video_id);
+    if let Some(alb) = &req.album {
+        target_url = target_url.replace("{album}", &urlencoding::encode(alb));
+    } else {
+        target_url = target_url.replace("{album}", "");
+    }
+
+    const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+    let resp = match crate::http::client()
+        .get(&target_url)
+        .header("User-Agent", BROWSER_UA)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
+        _ => return Ok(None),
+    };
+
+    if resp.trim().is_empty() {
+        return Ok(None);
+    }
+
+    match provider.format.to_lowercase().as_str() {
+        "lrclib" | "json" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&resp) {
+                let lrc_str = v
+                    .get("syncedLyrics")
+                    .or_else(|| v.get("ttml"))
+                    .or_else(|| v.get("lyrics"))
+                    .or_else(|| v.get("plainLyrics"))
+                    .or_else(|| v.get("lrc"))
+                    .and_then(|x| x.as_str());
+                if let Some(lrc) = lrc_str {
+                    return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(lrc)));
+                }
+                return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(&resp)));
+            }
+        }
+        "ttml" | "xml" => {
+            return Ok(from_parsed(&provider.name, parse_ttml_aaml(&resp)));
+        }
+        _ => {
+            return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(&resp)));
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LyricCandidate {
+    pub id: String,
+    pub provider: String,
+    pub title: String,
+    pub artist: String,
+    pub album: Option<String>,
+    pub duration_seconds: Option<f64>,
+    pub synced: bool,
+    pub has_words: bool,
+    pub lyrics: Lyrics,
+}
+
+pub async fn search_all_lyrics(
+    state: &AppState,
+    title: String,
+    artist: String,
+    duration: Option<f64>,
+    video_id: Option<String>,
+) -> Vec<LyricCandidate> {
+    let mut candidates = Vec::new();
+    let req = LyricsRequest {
+        video_id: video_id.unwrap_or_default(),
+        title: title.clone(),
+        artists: artist.clone(),
+        album: None,
+        duration,
+    };
+
+    // 1. BetterLyrics
+    if let Ok(Some(l)) = betterlyrics_get(&req).await {
+        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        candidates.push(LyricCandidate {
+            id: format!("betterlyrics-{}", candidates.len()),
+            provider: "Better Lyrics".into(),
+            title: title.clone(),
+            artist: artist.clone(),
+            album: None,
+            duration_seconds: duration,
+            synced: l.synced,
+            has_words,
+            lyrics: l,
+        });
+    }
+
+    // 2. LRCLIB exact match
+    if let Ok(Some(hit)) = lrclib_get(&req).await {
+        if let Some(l) = lrclib_to_lyrics(&hit) {
+            candidates.push(LyricCandidate {
+                id: format!("lrclib-{}", hit.id.unwrap_or(0)),
+                provider: "LRCLIB".into(),
+                title: hit.track_name.unwrap_or_else(|| title.clone()),
+                artist: hit.artist_name.unwrap_or_else(|| artist.clone()),
+                album: hit.album_name,
+                duration_seconds: hit.duration,
+                synced: l.synced,
+                has_words: false,
+                lyrics: l,
+            });
+        }
+    }
+
+    // 3. LRCLIB search (up to 5 results)
+    if let Ok(Some(hit)) = lrclib_search(&req).await {
+        if let Some(l) = lrclib_to_lyrics(&hit) {
+            if !candidates.iter().any(|c| c.provider == "LRCLIB") {
+                candidates.push(LyricCandidate {
+                    id: format!("lrclib-search-{}", hit.id.unwrap_or(0)),
+                    provider: "LRCLIB (Search)".into(),
+                    title: hit.track_name.unwrap_or_else(|| title.clone()),
+                    artist: hit.artist_name.unwrap_or_else(|| artist.clone()),
+                    album: hit.album_name,
+                    duration_seconds: hit.duration,
+                    synced: l.synced,
+                    has_words: false,
+                    lyrics: l,
+                });
+            }
+        }
+    }
+
+    // 4. QQ Music
+    if let Ok(Some(l)) = qqmusic_get(&req).await {
+        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        candidates.push(LyricCandidate {
+            id: format!("qq-{}", candidates.len()),
+            provider: "QQ Music".into(),
+            title: title.clone(),
+            artist: artist.clone(),
+            album: None,
+            duration_seconds: duration,
+            synced: l.synced,
+            has_words,
+            lyrics: l,
+        });
+    }
+
+    // 5. Kugou
+    if let Ok(Some(l)) = kugou_get(&req).await {
+        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        candidates.push(LyricCandidate {
+            id: format!("kugou-{}", candidates.len()),
+            provider: "Kugou".into(),
+            title: title.clone(),
+            artist: artist.clone(),
+            album: None,
+            duration_seconds: duration,
+            synced: l.synced,
+            has_words,
+            lyrics: l,
+        });
+    }
+
+    // 6. Custom providers
+    for c in get_custom_providers(&state.db) {
+        if c.enabled {
+            if let Ok(Some(l)) = custom_provider_get(&c, &req).await {
+                let has_words = l.lines.iter().any(|line| line.words.is_some());
+                candidates.push(LyricCandidate {
+                    id: format!("custom-{}-{}", c.id, candidates.len()),
+                    provider: c.name,
+                    title: title.clone(),
+                    artist: artist.clone(),
+                    album: None,
+                    duration_seconds: duration,
+                    synced: l.synced,
+                    has_words,
+                    lyrics: l,
+                });
+            }
+        }
+    }
+
+    candidates
+}
+
+pub fn apply_selected_lyrics(state: &AppState, video_id: String, lyrics: Lyrics) {
+    if let Ok(json) = serde_json::to_string(&lyrics) {
+        state.db.put_lyrics(&video_id, Some(&json), now_secs());
+        let _ = state.app.emit("lyrics-updated", &lyrics);
+    }
 }
 
 /// How far a search hit's length may sit from the track we're actually playing. Same tolerance the

@@ -102,14 +102,32 @@ function scratchCtx(): CanvasRenderingContext2D | null {
 async function read(url: string): Promise<string | null> {
 	try {
 		const img = new Image();
-		img.crossOrigin = 'anonymous';
+		if (/^https?:\/\//i.test(url) && !url.includes('asset.localhost')) {
+			img.crossOrigin = 'anonymous';
+		}
 		img.src = url;
-		await img.decode();
-		const ctx = scratchCtx();
+
+		const loadPromise = new Promise<void>((resolve, reject) => {
+			img.onload = () => resolve();
+			img.onerror = () => reject(new Error('Image failed to load'));
+		});
+
+		const timeoutPromise = new Promise<void>((_, reject) =>
+			setTimeout(() => reject(new Error('Image decode timeout')), 3500)
+		);
+
+		await Promise.race([
+			typeof img.decode === 'function' ? img.decode().catch(() => loadPromise) : loadPromise,
+			timeoutPromise
+		]);
+
+		const canvas = document.createElement('canvas');
+		canvas.width = canvas.height = SIZE;
+		const ctx = canvas.getContext('2d', { willReadFrequently: true });
 		if (!ctx) return null;
 		ctx.drawImage(img, 0, 0, SIZE, SIZE);
 		return pickAccent(ctx.getImageData(0, 0, SIZE, SIZE).data);
 	} catch {
-		return null; // offline, 404, throttled, tainted — the current accent just stays
+		return null;
 	}
 }

@@ -6,7 +6,7 @@ import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
 import { toast } from './player.svelte';
-import { canSelfUpdate, getSettings, openExternal } from './api';
+import { canSelfUpdate, getSettings, openExternal, installAppUpdate } from './api';
 
 const RELEASES_URL = 'https://github.com/Neo-XD/nocturne-music/releases/latest';
 
@@ -54,7 +54,7 @@ async function look(): Promise<boolean> {
 			const tag = (data.tag_name || '').replace(/^v/, '');
 			const current = await getVersion().catch(() => '');
 			if (tag && current && isNewer(tag, current)) {
-				updateState.canInstall = false;
+				updateState.canInstall = true;
 				updateState.available = { version: tag };
 				return true;
 			}
@@ -100,11 +100,16 @@ export function openDownloadPage() {
 
 /** Download + install the pending update, then relaunch into the new version. */
 export async function installUpdate() {
-	if (!pending) return;
+	if (!updateState.available) return;
 	updateState.installing = true;
 	try {
-		await pending.downloadAndInstall();
-		await relaunch();
+		if (pending) {
+			await pending.downloadAndInstall();
+			await relaunch();
+		} else {
+			toast.info(`Downloading update v${updateState.available.version}...`);
+			await installAppUpdate(updateState.available.version);
+		}
 	} catch (e) {
 		toast.error(`Update failed: ${e}`);
 		updateState.installing = false;

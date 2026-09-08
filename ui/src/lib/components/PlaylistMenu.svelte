@@ -6,6 +6,8 @@
 	import {
 		MoreHorizontalIcon,
 		MoreVerticalIcon,
+		PlayIcon,
+		ShuffleIcon,
 		PinIcon,
 		PinOffIcon,
 		Radio02Icon,
@@ -19,7 +21,7 @@
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { BrowseItem } from '$lib/api';
-	import { enqueueItem } from '$lib/browse';
+	import { enqueueItem, playItem } from '$lib/browse';
 	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 	import {
 		addPick,
@@ -102,6 +104,12 @@
 		menuOpen = false;
 		action?.();
 	}
+	function play(e: MouseEvent, shuffle: boolean) {
+		e.stopPropagation();
+		menuOpen = false;
+		playItem(item, shuffle);
+	}
+
 	// Right-clicking off the menu dismisses it, same as a left click.
 	function close(e: MouseEvent) {
 		e.preventDefault();
@@ -139,6 +147,24 @@
 		{@attach toBody}
 		{@attach fitMenu(anchor)}
 	>
+		{#if item.kind === 'album' || item.kind === 'playlist'}
+			<div class="flex items-center rounded-md hover:bg-accent/10">
+				<button
+					class="flex flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-primary"
+					onclick={(e) => play(e, false)}
+				>
+					<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> Play
+				</button>
+				<button
+					class="mr-1 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-accent/20"
+					title="Shuffle play"
+					aria-label="Shuffle play"
+					onclick={(e) => play(e, true)}
+				>
+					<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" />
+				</button>
+			</div>
+		{/if}
 		{#if showPin}
 			<button
 				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"

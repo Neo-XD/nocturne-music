@@ -210,23 +210,20 @@ export async function createLibraryPlaylist(
 	return browseId;
 }
 
-// --- Lyrics Sync Offset Store (BetterLyrics style) ---
+// --- Lyrics Sync Offset Store (BetterLyrics style - per-song ONLY) ---
 const LYRICS_OFFSET_KEY_PREFIX = 'nocturne_lyrics_offset_';
 
-export const lyricsSync = $state({
-	offsets: {} as Record<string, number>,
-	currentOffsetMs: 0
-});
+const offsetsStore = $state<Record<string, number>>({});
 
 export function getLyricsOffset(videoId: string): number {
 	if (!videoId) return 0;
-	if (lyricsSync.offsets[videoId] !== undefined) return lyricsSync.offsets[videoId];
+	if (offsetsStore[videoId] !== undefined) return offsetsStore[videoId];
 	try {
 		const raw = localStorage.getItem(LYRICS_OFFSET_KEY_PREFIX + videoId);
 		if (raw !== null) {
 			const num = parseFloat(raw);
 			if (!isNaN(num)) {
-				lyricsSync.offsets[videoId] = num;
+				offsetsStore[videoId] = num;
 				return num;
 			}
 		}
@@ -237,8 +234,7 @@ export function getLyricsOffset(videoId: string): number {
 export function setLyricsOffset(videoId: string, offsetMs: number): void {
 	if (!videoId) return;
 	const clamped = Math.max(-10000, Math.min(10000, Math.round(offsetMs)));
-	lyricsSync.offsets[videoId] = clamped;
-	lyricsSync.currentOffsetMs = clamped;
+	offsetsStore[videoId] = clamped;
 	try {
 		if (clamped === 0) {
 			localStorage.removeItem(LYRICS_OFFSET_KEY_PREFIX + videoId);
@@ -247,6 +243,23 @@ export function setLyricsOffset(videoId: string, offsetMs: number): void {
 		}
 	} catch {}
 }
+
+export const lyricsSync = {
+	get offsets(): Record<string, number> {
+		return offsetsStore;
+	},
+	get currentOffsetMs(): number {
+		const vid = playback.now?.videoId;
+		if (!vid) return 0;
+		return getLyricsOffset(vid);
+	},
+	set currentOffsetMs(val: number) {
+		const vid = playback.now?.videoId;
+		if (vid) {
+			setLyricsOffset(vid, val);
+		}
+	}
+};
 
 export function adjustCurrentLyricsOffset(deltaMs: number): void {
 	const videoId = playback.now?.videoId;

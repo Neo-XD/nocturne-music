@@ -17,6 +17,15 @@ pub enum Error {
     /// the user as a toast.
     #[error("Pitch shifting isn't available in this build")]
     NoPitchFilter,
+    #[error("Failed to parse json: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+/// Output audio device description from mpv.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AudioDevice {
+    pub name: String,
+    pub description: String,
 }
 
 /// Events pumped from mpv's event thread. context/14 §player surface.
@@ -258,6 +267,25 @@ impl Player {
         self.mpv.set_property("af", af_chain(gain_db, semitones).as_str())?;
         Ok(())
     }
+
+    /// List output audio devices discovered by mpv.
+    pub fn get_audio_devices(&self) -> Result<Vec<AudioDevice>, Error> {
+        let json_str = self.mpv.get_property::<String>("audio-device-list")?;
+        let devices: Vec<AudioDevice> = serde_json::from_str(&json_str)?;
+        Ok(devices)
+    }
+
+    /// Current active output audio device name ("auto" or driver/device identifier).
+    pub fn get_current_audio_device(&self) -> Result<String, Error> {
+        let dev = self.mpv.get_property::<String>("audio-device")?;
+        Ok(dev)
+    }
+
+    /// Set output audio device ("auto" or specific device name from `get_audio_devices`).
+    pub fn set_audio_device(&self, device: &str) -> Result<(), Error> {
+        self.mpv.set_property("audio-device", device)?;
+        Ok(())
+    }
 }
 
 /// The whole `af` chain: loudness gain, then pitch. Empty when neither is in play, so the default
@@ -426,6 +454,10 @@ mod tests {
         let dir = std::env::temp_dir().join("nocturne-af-test");
         std::fs::create_dir_all(&dir).unwrap();
         let p = Player::new(dir.to_str().unwrap()).expect("libmpv");
+        let dev = p.mpv.get_property::<String>("audio-device");
+        println!("current audio-device: {:?}", dev);
+        let dev_list_str = p.mpv.get_property::<String>("audio-device-list");
+        println!("audio-device-list string: {:?}", dev_list_str);
         let af = || p.mpv.get_property::<String>("af").unwrap();
 
         // 1. Loudness normalization, then a pitch round trip. The gain has to survive both steps.

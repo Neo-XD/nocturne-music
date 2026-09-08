@@ -38,9 +38,11 @@
 		removePick,
 		startRadio,
 		toggleItemLibrary,
-		toggleRating
+		toggleRating,
+		toast
 	} from '$lib/player.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
+	import LyricSelectorModal from './LyricSelectorModal.svelte';
 
 	let {
 		song,
@@ -69,7 +71,22 @@
 	let menuOpen = $state(false);
 	// Player-bar only: tempo/pitch belong to playback, not to a row you happen to be pointing at.
 	let advancedOpen = $state(false);
+	let lyricModalOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
+
+	async function startDownload() {
+		try {
+			toast.info(`Downloading "${song.title}"...`);
+			const destPath = await api.downloadSong({
+				videoId: song.video_id,
+				title: song.title,
+				artist: song.artists
+			});
+			toast.success(`Downloaded to ${destPath}`);
+		} catch (err) {
+			toast.error(`Download failed: ${err}`);
+		}
+	}
 
 	// Click on the ⋯ opens under the button; right-click on the host row opens at the pointer.
 	function openMenu(e: MouseEvent) {
@@ -246,6 +263,24 @@
 			>
 				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
 			</button>
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, startDownload)}
+			>
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+				</svg>
+				Download song
+			</button>
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+				onclick={(e) => run(e, () => (lyricModalOpen = true))}
+			>
+				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+				</svg>
+				Find lyrics...
+			</button>
 		{/if}
 		{#if linksOnly}
 			<button
@@ -278,4 +313,13 @@
 
 {#if linksOnly}
 	<TempoPitchDialog bind:open={advancedOpen} />
+{/if}
+
+{#if !isLocal}
+	<LyricSelectorModal
+		bind:open={lyricModalOpen}
+		videoId={song.video_id}
+		initialTitle={song.title}
+		initialArtist={song.artists}
+	/>
 {/if}

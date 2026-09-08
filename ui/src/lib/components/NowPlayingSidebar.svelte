@@ -473,10 +473,6 @@
 							<div class="h-4 animate-pulse rounded bg-muted-foreground/20" style="width:{60 + ((i * 15) % 35)}%"></div>
 						{/each}
 					</div>
-				{:else if lyrics?.instrumental}
-					<div class="py-6 text-center text-sm font-medium text-muted-foreground">
-						Instrumental ♪
-					</div>
 				{:else if lyrics && lyrics.synced}
 					<div class="space-y-3 py-4">
 						{#each lyrics.lines as line, i (i)}

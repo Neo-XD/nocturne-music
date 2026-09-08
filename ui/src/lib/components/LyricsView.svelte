@@ -2,6 +2,8 @@
 	import * as api from '$lib/api';
 	import { playback, lyricsSync } from '$lib/player.svelte';
 	import LyricsSyncDock from '$lib/components/LyricsSyncDock.svelte';
+	import LyricSelectorModal from '$lib/components/LyricSelectorModal.svelte';
+	import { listen } from '@tauri-apps/api/event';
 
 	// `expanded` only sizes the type and centres the column. The owner of the extra room (the side
 	// panel, or the now-playing view) decides how much there is. Toggling it must not remount this
@@ -21,7 +23,17 @@
 
 	let lyrics = $state<api.Lyrics | null>(null);
 	let loading = $state(true);
+	let selectorOpen = $state(false);
 	let scroller: HTMLElement | undefined = $state();
+
+	$effect(() => {
+		const unlisten = listen<api.Lyrics>('lyrics-updated', (e) => {
+			lyrics = e.payload;
+		});
+		return () => {
+			unlisten.then((u) => u());
+		};
+	});
 
 	// videoId of the fetch whose result is (or will be) shown — guards stale responses.
 	let requested = '';
@@ -127,10 +139,14 @@
 			userScrollUntil = 0;
 		}
 		if (i < 0 || !scroller || Date.now() < userScrollUntil) return;
-		scroller.querySelector(`[data-line="${i}"]`)?.scrollIntoView({
-			// Opening mid-song jumps straight to the line; after that, glide.
-			behavior: hasScrolled ? 'smooth' : 'instant',
-			block: 'center'
+		const line = scroller.querySelector(`[data-line="${i}"]`);
+		if (!line) return;
+		const lineRect = line.getBoundingClientRect();
+		const boxRect = scroller.getBoundingClientRect();
+		scroller.scrollTo({
+			top:
+				scroller.scrollTop + (lineRect.top - boxRect.top) - (boxRect.height - lineRect.height) / 2,
+			behavior: hasScrolled ? 'smooth' : 'instant'
 		});
 		hasScrolled = true;
 	});
@@ -170,8 +186,6 @@
 				<div class="h-5 animate-pulse rounded bg-muted" style="width:{55 + ((i * 17) % 40)}%"></div>
 			{/each}
 		</div>
-	{:else if lyrics?.instrumental}
-		<p class="py-8 text-center text-lg text-muted-foreground">Instrumental ♪</p>
 	{:else if lyrics && lyrics.synced}
 		<!-- Padding lets the first/last lines center-scroll. -->
 		<div class="py-[35vh] {expanded ? 'mx-auto max-w-3xl' : ''}">
@@ -251,13 +265,51 @@
 			{/each}
 		</div>
 	{:else}
-		<p class="py-8 text-center text-sm text-muted-foreground">No lyrics found for this track.</p>
+		<div class="py-8 text-center flex flex-col items-center gap-2">
+			<p class="text-sm text-muted-foreground">No lyrics found for this track.</p>
+			{#if !loading && playback.now}
+				<button
+					onclick={() => (selectorOpen = true)}
+					class="px-3 py-1.5 rounded-lg bg-muted/60 hover:bg-muted text-xs font-medium text-foreground transition-colors inline-flex items-center gap-1.5"
+				>
+					<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+					</svg>
+					Search other lyric sources
+				</button>
+			{/if}
+		</div>
 	{/if}
 </div>
 {#if lyrics && !loading && !compact}
 	<div class="flex items-center justify-between border-t border-border/40 px-4 py-2 text-xs text-muted-foreground">
-		<span>{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}</span>
+		<div class="flex items-center gap-2">
+			<span>{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}</span>
+			<button
+				onclick={() => (selectorOpen = true)}
+				class="hover:text-foreground inline-flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded hover:bg-foreground/5 text-[11px]"
+				title="Change lyrics / search other sources"
+			>
+				<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+				</svg>
+				Change source
+			</button>
+		</div>
 		<LyricsSyncDock />
 	</div>
+{/if}
+
+{#if playback.now}
+	<LyricSelectorModal
+		bind:open={selectorOpen}
+		videoId={playback.now.videoId}
+		initialTitle={playback.now.title}
+		initialArtist={playback.now.artists}
+		duration={durationSecs(playback.now.duration)}
+		onApplied={(l) => {
+			lyrics = l;
+		}}
+	/>
 {/if}
 
