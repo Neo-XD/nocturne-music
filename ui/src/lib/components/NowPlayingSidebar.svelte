@@ -347,7 +347,7 @@
 			{:else}
 				{#if playback.now?.thumbnail}
 					<img
-						src={thumb(playback.now.thumbnail, 600)}
+						src={thumb(playback.now.thumbnail, 1080)}
 						alt={playback.now?.title ?? 'Album Art'}
 						class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
 					/>

@@ -258,7 +258,7 @@
 
 		gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-		if (!playback.paused) {
+		if (!playback.paused && isVisible && !document.hidden) {
 			animId = requestAnimationFrame(render);
 		}
 	}
@@ -266,7 +266,7 @@
 	// Playback pause / resume handling
 	$effect(() => {
 		const paused = playback.paused;
-		if (paused) {
+		if (paused || (typeof document !== 'undefined' && document.hidden)) {
 			pausedAt = performance.now();
 			cancelAnimationFrame(animId);
 		} else {
@@ -298,17 +298,30 @@
 		const obs = new IntersectionObserver((entries) => {
 			const entry = entries[0];
 			isVisible = entry ? entry.isIntersecting : true;
-			if (isVisible && !playback.paused) {
+			if (isVisible && !playback.paused && !document.hidden) {
 				cancelAnimationFrame(animId);
 				animId = requestAnimationFrame(render);
 			}
 		});
 		obs.observe(canvasEl);
 
+		const onVisibility = () => {
+			if (document.hidden) {
+				cancelAnimationFrame(animId);
+			} else if (isVisible && !playback.paused) {
+				cancelAnimationFrame(animId);
+				animId = requestAnimationFrame(render);
+			}
+		};
+		document.addEventListener('visibilitychange', onVisibility);
+
 		if (src) updateImage(src);
-		animId = requestAnimationFrame(render);
+		if (!document.hidden) {
+			animId = requestAnimationFrame(render);
+		}
 
 		return () => {
+			document.removeEventListener('visibilitychange', onVisibility);
 			obs.disconnect();
 			cancelAnimationFrame(animId);
 			if (gl) {

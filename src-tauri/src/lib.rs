@@ -38,15 +38,26 @@ use orchestrator::Orchestrator;
 use potoken::PoTokenGenerator;
 use state::AppState;
 
-/// Hand glibc's freed-but-retained heap back to the OS every few minutes if enabled in settings.
-#[cfg(target_os = "linux")]
+/// Hand freed-but-retained heap back to the OS every few minutes if enabled in settings.
 fn spawn_heap_trimmer(db: Arc<Db>) {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(180)).await;
             if db.get_setting("aggressive_memory_trimming").as_deref() == Some("true") {
-                // Safe: no arguments, no allocation, glibc walks its own arenas.
+                #[cfg(target_os = "linux")]
                 unsafe { libc::malloc_trim(0) };
+
+                #[cfg(target_os = "windows")]
+                {
+                    extern "system" {
+                        fn GetCurrentProcess() -> isize;
+                        fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize) -> i32;
+                    }
+                    unsafe {
+                        let proc = GetCurrentProcess();
+                        SetProcessWorkingSetSize(proc, usize::MAX, usize::MAX);
+                    }
+                }
             }
         }
     });
@@ -442,10 +453,8 @@ pub fn run() {
             }
 
             #[cfg(target_os = "linux")]
-            {
-                tune_webview_labelled(app.handle(), "main", true);
-                spawn_heap_trimmer(app_state.db.clone());
-            }
+            tune_webview_labelled(app.handle(), "main", true);
+            spawn_heap_trimmer(app_state.db.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -565,6 +574,17 @@ pub fn run() {
                         if hide {
                             api.prevent_close();
                             let _ = window.hide();
+                            #[cfg(target_os = "windows")]
+                            {
+                                extern "system" {
+                                    fn GetCurrentProcess() -> isize;
+                                    fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize) -> i32;
+                                }
+                                unsafe {
+                                    let proc = GetCurrentProcess();
+                                    SetProcessWorkingSetSize(proc, usize::MAX, usize::MAX);
+                                }
+                            }
                         }
                     }
                     // Nothing in the widget closes it, but a WM shortcut still can. Turn that into
@@ -575,6 +595,19 @@ pub fn run() {
                         tray::show_main(window.app_handle());
                     }
                     _ => {}
+                }
+            }
+            #[cfg(target_os = "windows")]
+            if let tauri::WindowEvent::Focused(false) = event {
+                if window.is_minimized().unwrap_or(false) {
+                    extern "system" {
+                        fn GetCurrentProcess() -> isize;
+                        fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize) -> i32;
+                    }
+                    unsafe {
+                        let proc = GetCurrentProcess();
+                        SetProcessWorkingSetSize(proc, usize::MAX, usize::MAX);
+                    }
                 }
             }
         })

@@ -12,7 +12,7 @@ export function thumb(
 	// Local library artwork is a path on this machine, not a URL. Hand it through Tauri's asset protocol.
 	if (url.startsWith('/') || /^[A-Za-z]:[\\/]/.test(url)) return convertFileSrc(url);
 
-	const targetPx = exact ? px : Math.max(px, 1080);
+	const targetPx = px;
 	if (/=w\d+-h\d+/.test(url)) return url.replace(/=w\d+-h\d+/, `=w${targetPx}-h${targetPx}`);
 	if (/=s\d+/.test(url)) return url.replace(/=s\d+/, `=s${targetPx}`);
 	return url;

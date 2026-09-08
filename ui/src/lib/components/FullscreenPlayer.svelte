@@ -225,7 +225,7 @@
 		toggleNowPlayingLike();
 	}
 
-	const coverSrc = $derived(thumb(playback.now?.thumbnail, 720));
+	const coverSrc = $derived(thumb(playback.now?.thumbnail, 1080));
 
 </script>
 
