@@ -5,15 +5,16 @@
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
 		Cancel01Icon,
-		ComputerIcon,
 		SmartPhone01Icon,
 		CheckmarkCircle02Icon,
 		RefreshIcon,
 		VolumeHighIcon
 	} from '@hugeicons/core-free-icons';
+	import SpeakerIcon from './SpeakerIcon.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import type { RemoteSyncInfo, AudioDeviceInfo } from '$lib/api';
+	import { prefs } from '$lib/player.svelte';
 
 	let {
 		onClose
@@ -71,8 +72,10 @@
 </script>
 
 <aside
-	class="info-sidebar absolute right-0 top-0 bottom-0 z-30 flex w-88 max-w-[90vw] flex-col border-l border-border/70 bg-background/80 dark:bg-background/75 backdrop-blur-2xl shadow-2xl"
-	transition:fly={{ x: 320, duration: 250, easing: cubicOut }}
+	style={prefs.floatingSidebarRight ? 'height: calc(100% - 1rem);' : 'height: 100%;'}
+	class="info-sidebar relative flex w-full max-w-[90vw] shrink-0 flex-col transition-[border-radius,margin] duration-200 {prefs.floatingSidebarRight
+		? 'app-floating-panel m-2 rounded-2xl border border-border/70 bg-card/90 shadow-2xl backdrop-blur-xl'
+		: 'border-l border-border/70 bg-background/80 dark:bg-background/75 backdrop-blur-2xl shadow-2xl rounded-none m-0'}"
 >
 	<!-- Header -->
 	<div class="flex items-center justify-between border-b border-border/60 bg-background/35 dark:bg-background/20 backdrop-blur-md px-4 py-3.5">
@@ -160,7 +163,7 @@
 			>
 				<div class="flex items-center gap-3">
 					<div class="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-secondary-foreground shadow-xs">
-						<HugeiconsIcon icon={ComputerIcon} class="h-4.5 w-4.5" />
+						<SpeakerIcon class="h-4.5 w-4.5" />
 					</div>
 					<div>
 						<div class="text-xs font-semibold text-foreground">

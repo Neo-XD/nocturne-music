@@ -575,7 +575,7 @@
 .theme-glassy .bg-popover,
 .theme-glassy aside,
 .theme-glassy footer,
-.theme-glassy .app-titlebar,
+.theme-glassy .app-titlebar.app-floating-panel,
 .theme-glassy .info-sidebar,
 .theme-glassy .media-card {
 	backdrop-filter: blur(28px) saturate(200%);
@@ -596,6 +596,22 @@
 .theme-glassy footer,
 .theme-glassy .info-sidebar {
 	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.4), 0 8px 24px 0 rgba(0, 0, 0, 0.08);
+}
+
+.theme-glassy .app-floating-panel {
+	background-color: color-mix(in oklab, var(--card) 45%, transparent) !important;
+	backdrop-filter: blur(36px) saturate(220%) !important;
+	-webkit-backdrop-filter: blur(36px) saturate(220%) !important;
+	border: 1px solid rgba(255, 255, 255, 0.22) !important;
+	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.35), 0 12px 36px 0 rgba(0, 0, 0, 0.12) !important;
+}
+
+.dark.theme-glassy .app-floating-panel {
+	background-color: color-mix(in oklab, var(--card) 35%, transparent) !important;
+	backdrop-filter: blur(36px) saturate(220%) !important;
+	-webkit-backdrop-filter: blur(36px) saturate(220%) !important;
+	border: 1px solid rgba(255, 255, 255, 0.14) !important;
+	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.18), 0 14px 40px 0 rgba(0, 0, 0, 0.45) !important;
 }
 
 /* --- Native Theme (Adaptive to Desktop Environment: WinUI3 Fluent, KDE Breeze Qt, GNOME Adwaita GTK, macOS Cupertino) --- */
@@ -753,10 +769,19 @@ aside:not(.info-sidebar) {
 	background-color: color-mix(in oklab, var(--background) calc(var(--dialog-opacity, 0.78) * 100%), transparent) !important;
 }
 
-/* backdrop-filter over the titlebar's opaque bg-background is a no-op, and --sidebar keeps the corner where the two meet from reading as a seam. */
-.theme-glassy .app-titlebar {
-	background-color: var(--sidebar);
-	border-bottom: 1px solid var(--sidebar-border);
+/* Docked top bar must NOT have blur, translucency, or drop shadow */
+.theme-glassy .app-titlebar:not(.app-floating-panel) {
+	background-color: var(--background) !important;
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+	box-shadow: none !important;
+	border-bottom: 1px solid var(--border) !important;
+}
+
+/* Floating top bar should not cast an outer drop shadow on the sidebars below it */
+.theme-glassy .app-titlebar.app-floating-panel,
+.dark.theme-glassy .app-titlebar.app-floating-panel {
+	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.22) !important;
 }
 
 .bg-popover,

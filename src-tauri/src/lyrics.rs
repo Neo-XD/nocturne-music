@@ -83,7 +83,8 @@ fn forced_provider() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-pub const DEFAULT_PROVIDERS: [&str; 5] = ["betterlyrics", "lrclib", "ytm", "qq", "kugou"];
+pub const DEFAULT_PROVIDERS: [&str; 7] =
+    ["betterlyrics", "youlyplus", "paxsenix", "lrclib", "ytm", "qq", "kugou"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomLyricProvider {
@@ -179,6 +180,8 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     if let Some(only) = forced_provider() {
         let hit = match only.as_str() {
             "betterlyrics" | "boidu" => betterlyrics_get(req).await,
+            "youlyplus" | "lyricsplus" => youlyplus_get(req).await,
+            "paxsenix" => paxsenix_get(req).await,
             "qq" => qqmusic_get(req).await,
             "kugou" => kugou_get(req).await,
             other => {
@@ -206,6 +209,16 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                     if let Ok(Some(l)) = betterlyrics_get(req).await {
                         return (Some(l), req.duration.is_some());
                     }
+                }
+            }
+            "youlyplus" | "lyricsplus" => {
+                if let Ok(Some(l)) = youlyplus_get(req).await {
+                    return (Some(l), req.duration.is_some());
+                }
+            }
+            "paxsenix" => {
+                if let Ok(Some(l)) = paxsenix_get(req).await {
+                    return (Some(l), req.duration.is_some());
                 }
             }
             "lrclib" => {
@@ -739,6 +752,199 @@ async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest
     Ok(None)
 }
 
+/// YouLyPlus KPoe API client (queries multi-server mirrors with syllable-level word timings)
+async fn youlyplus_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    const SERVERS: [&str; 6] = [
+        "https://lyricsplus.prjktla.my.id",
+        "https://lyricsplus.atomix.one",
+        "https://lyricsplus.binimum.org",
+        "https://lyricsplus.prjktla.workers.dev",
+        "https://lyricsplus-seven.vercel.app",
+        "https://lyrics-plus-backend.vercel.app",
+    ];
+
+    let clean_title = clean_lyrics_title(&req.title);
+    let clean_artist = clean_lyrics_artist(&req.artists);
+    let title = if clean_title.is_empty() { &req.title } else { &clean_title };
+    let artist = if clean_artist.is_empty() { &req.artists } else { &clean_artist };
+    let dur = req.duration.unwrap_or(0.0).round() as i64;
+
+    for server in SERVERS {
+        let url = format!("{server}/v2/lyrics/get");
+        let mut q: Vec<(&str, String)> =
+            vec![("title", title.to_string()), ("artist", artist.to_string())];
+        if dur > 0 {
+            q.push(("duration", dur.to_string()));
+        }
+        if let Some(album) = &req.album {
+            q.push(("album", album.clone()));
+        }
+        if !req.video_id.is_empty() {
+            q.push(("id", req.video_id.clone()));
+        }
+
+        let resp_opt: Option<serde_json::Value> = match crate::http::client()
+            .get(&url)
+            .query(&q)
+            .header("User-Agent", "Nocturne/0.7.3")
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r.json().await.ok(),
+            _ => None,
+        };
+
+        if let Some(resp) = resp_opt {
+            if let Some(synced) = resp.get("syncedLyrics").and_then(|v| v.as_str()) {
+                if !synced.trim().is_empty() {
+                    if let Some(hit) = from_parsed("YouLyPlus", parse_lrc_or_ttml(synced)) {
+                        return Ok(Some(hit));
+                    }
+                }
+            }
+            if let Some(lyrics_arr) = resp.get("lyrics").and_then(|v| v.as_array()) {
+                let mut lines = Vec::new();
+                for item in lyrics_arr {
+                    let time_ms = item.get("time").and_then(|v| v.as_u64());
+                    let text = item.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let mut words = Vec::new();
+                    if let Some(syllabus) = item.get("syllabus").and_then(|v| v.as_array()) {
+                        for (i, syl) in syllabus.iter().enumerate() {
+                            let s_time =
+                                syl.get("time").and_then(|v| v.as_u64()).or(time_ms).unwrap_or(0);
+                            let s_text =
+                                syl.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let s_end = syllabus
+                                .get(i + 1)
+                                .and_then(|n| n.get("time").and_then(|v| v.as_u64()))
+                                .unwrap_or(s_time + 400);
+                            if !s_text.is_empty() {
+                                words.push(LyricWord {
+                                    text: s_text,
+                                    start_ms: s_time,
+                                    end_ms: s_end,
+                                });
+                            }
+                        }
+                    }
+                    lines.push(LyricLine {
+                        time_ms,
+                        end_time_ms: None,
+                        text,
+                        words: if !words.is_empty() { Some(words) } else { None },
+                        translation: None,
+                    });
+                }
+                if !lines.is_empty() {
+                    lines.sort_by_key(|l| l.time_ms);
+                    return Ok(Some(Lyrics {
+                        source: "YouLyPlus".into(),
+                        synced: lines.iter().any(|l| l.time_ms.is_some()),
+                        instrumental: false,
+                        lines,
+                    }));
+                }
+            }
+            if let Some(plain) = resp.get("plainLyrics").and_then(|v| v.as_str()) {
+                if !plain.trim().is_empty() {
+                    if let Some(hit) = from_parsed("YouLyPlus", parse_lrc_or_ttml(plain)) {
+                        return Ok(Some(hit));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Paxsenix provider (Apple Music TTML / Syllable-level word timings)
+async fn paxsenix_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    let clean_title = clean_lyrics_title(&req.title);
+    let clean_artist = clean_lyrics_artist(&req.artists);
+    let term = format!("{clean_title} {clean_artist}");
+    let search_url = format!(
+        "https://itunes.apple.com/search?term={}&entity=song&limit=5",
+        urlencoding::encode(&term)
+    );
+    let resp_opt: Option<serde_json::Value> = match crate::http::client()
+        .get(&search_url)
+        .header("User-Agent", "Mozilla/5.0")
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+    {
+        Ok(r) => r.json().await.ok(),
+        _ => None,
+    };
+
+    let Some(resp) = resp_opt else {
+        return Ok(None);
+    };
+
+    let results =
+        resp.get("results").and_then(|r| r.as_array()).map(|v| v.as_slice()).unwrap_or_default();
+    let hit = best_by_duration(req.duration, results, |s| {
+        s.get("trackTimeMillis").and_then(|m| m.as_f64()).map(|ms| ms / 1000.0)
+    });
+
+    let Some(track_id) = hit.and_then(|h| h.get("trackId")).and_then(|id| {
+        if let Some(n) = id.as_i64() {
+            Some(n.to_string())
+        } else {
+            id.as_str().map(str::to_string)
+        }
+    }) else {
+        return Ok(None);
+    };
+
+    let lyrics_url = format!("https://lyrics.paxsenix.org/apple-music/lyrics?id={track_id}");
+    let lyr_resp: Option<serde_json::Value> = match crate::http::client()
+        .get(&lyrics_url)
+        .header("User-Agent", "Nocturne/0.7.3")
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await
+    {
+        Ok(r) => r.json().await.ok(),
+        _ => None,
+    };
+
+    let Some(l_obj) = lyr_resp else {
+        return Ok(None);
+    };
+
+    if let Some(ttml) =
+        l_obj.get("ttmlContent").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty())
+    {
+        if let Some(hit) = from_parsed("Paxsenix", parse_lrc_or_ttml(ttml)) {
+            return Ok(Some(hit));
+        }
+    }
+
+    if let Some(elrc) = l_obj
+        .get("elrcMultiPerson")
+        .or_else(|| l_obj.get("elrc"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        if let Some(hit) = from_parsed("Paxsenix", parse_lrc_or_ttml(elrc)) {
+            return Ok(Some(hit));
+        }
+    }
+
+    if let Some(plain) =
+        l_obj.get("plain").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty())
+    {
+        if let Some(hit) = from_parsed("Paxsenix", parse_lrc_or_ttml(plain)) {
+            return Ok(Some(hit));
+        }
+    }
+
+    Ok(None)
+}
+
 pub async fn custom_provider_get(
     provider: &CustomLyricProvider,
     req: &LyricsRequest,
@@ -838,6 +1044,38 @@ pub async fn search_all_lyrics(
         candidates.push(LyricCandidate {
             id: format!("betterlyrics-{}", candidates.len()),
             provider: "Better Lyrics".into(),
+            title: title.clone(),
+            artist: artist.clone(),
+            album: None,
+            duration_seconds: duration,
+            synced: l.synced,
+            has_words,
+            lyrics: l,
+        });
+    }
+
+    // 1b. YouLyPlus
+    if let Ok(Some(l)) = youlyplus_get(&req).await {
+        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        candidates.push(LyricCandidate {
+            id: format!("youlyplus-{}", candidates.len()),
+            provider: "YouLyPlus".into(),
+            title: title.clone(),
+            artist: artist.clone(),
+            album: None,
+            duration_seconds: duration,
+            synced: l.synced,
+            has_words,
+            lyrics: l,
+        });
+    }
+
+    // 1c. Paxsenix
+    if let Ok(Some(l)) = paxsenix_get(&req).await {
+        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        candidates.push(LyricCandidate {
+            id: format!("paxsenix-{}", candidates.len()),
+            provider: "Paxsenix".into(),
             title: title.clone(),
             artist: artist.clone(),
             album: None,

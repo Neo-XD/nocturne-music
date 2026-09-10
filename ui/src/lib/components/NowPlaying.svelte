@@ -18,7 +18,7 @@
 	} from '@hugeicons/core-free-icons';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as api from '$lib/api';
-	import { np, playback, ui, wheelVolume } from '$lib/player.svelte';
+	import { np, playback, ui, wheelVolume, prefs } from '$lib/player.svelte';
 	import { canVideo, claimVideo, parkVideo, showVideo, video } from '$lib/video.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
@@ -85,6 +85,15 @@
 		volTimer = setTimeout(() => (volFlash = false), 1000);
 	}
 
+	// Left offsets mirror Sidebar's w-16 / lg:w-60 and floating margin.
+	const isSidebarCollapsed = $derived(
+		(ui.sidebarCollapsed || (np.open && !np.fullscreenOpen)) && !ui.sidebarForceExpanded
+	);
+	const sidebarOffset = $derived(
+		prefs.floatingSidebarLeft
+			? (isSidebarCollapsed ? 'left-20' : 'left-20 lg:left-64')
+			: (isSidebarCollapsed ? 'left-16' : 'left-16 lg:left-60')
+	);
 </script>
 
 <!-- Covers the page but not the sidebar (you navigate away to minimise) and not the player bar,
@@ -96,9 +105,7 @@
      if those change. -->
 <div
 	transition:fly={{ y: '100%', duration: 320, easing: cubicOut }}
-	class="absolute inset-y-0 left-16 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {ui.sidebarCollapsed
-		? ''
-		: 'lg:left-60'} {inset}"
+	class="absolute inset-y-0 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {sidebarOffset} {inset}"
 >
 	<!-- The artwork itself, blurred to a wash, is the background: same trick as HomeHero, and it
 	     needs no colour extraction (which a remote image would taint the canvas for anyway). The

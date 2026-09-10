@@ -1,6 +1,7 @@
 //! Tauri commands — the ONLY API the UI calls. context/11 UI contract. No YouTube shapes leak
 //! past here; the UI never sees a stream URL.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use innertube::{
@@ -218,8 +219,16 @@ pub async fn get_desktop_environment() -> Result<String, String> {
     }
 }
 
+fn mark_frontend_bridge_ok() {
+    static ONCE: AtomicBool = AtomicBool::new(false);
+    if !ONCE.swap(true, Ordering::Relaxed) {
+        tracing::info!("webview bridge OK — main window mounted and round-tripped");
+    }
+}
+
 #[tauri::command]
 pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
+    mark_frontend_bridge_ok();
     Ok(state.queue_snapshot().await)
 }
 
@@ -228,7 +237,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 27] = [
+const UI_SETTINGS: [&str; 35] = [
     "volume",
     "proxy",
     "quality",
@@ -256,6 +265,14 @@ const UI_SETTINGS: [&str; 27] = [
     "remote_sync_pin",
     "hardware_acceleration",
     "audio_device",
+    "crossfade_seconds",
+    "discord_rpc_app_id",
+    "discord_rpc_details",
+    "discord_rpc_state",
+    "discord_rpc_show_buttons",
+    "discord_rpc_button_label",
+    "discord_rpc_show_pause",
+    "discord_rpc_show_time",
 ];
 
 /// Resolve the music video for `video_id` and hand back a proxy URL the player view
@@ -299,6 +316,7 @@ pub async fn forget_video_stream(state: St<'_>, video_id: String) -> Result<(), 
 
 #[tauri::command]
 pub async fn get_settings(state: St<'_>) -> Result<serde_json::Value, String> {
+    mark_frontend_bridge_ok();
     let map: serde_json::Map<String, serde_json::Value> = state
         .db
         .all_settings()
@@ -324,6 +342,14 @@ pub async fn set_setting(
     // to see it take effect.
     if key == "discord_rpc" {
         state.set_discord_enabled(value == "true");
+    }
+    if key.starts_with("discord_rpc") {
+        state.reload_discord_config();
+    }
+    if key == "crossfade_seconds" {
+        if let Ok(secs) = value.parse::<f64>() {
+            let _ = state.player.set_crossfade(secs);
+        }
     }
     // Update active Last.fm keys dynamically when changed in settings.
     if key == "lastfm_api_key" || key == "lastfm_api_secret" {
@@ -516,6 +542,7 @@ pub async fn login_webview(state: St<'_>) -> Result<(), String> {
 /// on a cold start, where the queue is restored before the UI subscribes).
 #[tauri::command]
 pub async fn get_playback(state: St<'_>) -> Result<serde_json::Value, String> {
+    mark_frontend_bridge_ok();
     Ok(state.playback_snapshot().await)
 }
 
@@ -1388,6 +1415,37 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v080_note = ReleaseNote {
+        version: "0.8.0".to_string(),
+        date: "2026-09-10".to_string(),
+        body: r#"### Nocturne Music v0.8.0
+
+- **Liquid Glass & Translucent Floating Panels**: Translucent acrylic floating panels with rich backdrop blur (`backdrop-blur-xl`) across Top Titlebar, Bottom Player Bar, Left Navigation Sidebar, and Right Sidebars in the Glassy theme.
+- **Floating Player Bar**: Dedicated floating bottom player bar option with rounded corners, subtle drop shadows, and uniform spacing matching modern desktop aesthetics.
+- **Granular Customization Checkboxes**: Converted icon visibility settings and floating panel toggles to independent, granular checkboxes in Settings (Appearance & Customization).
+- **Smooth Right Sidebar Docking & Animation**: Completely overhauled right sidebar switching (Now Playing, Queue, Lyrics, Devices). Panels glide in place with smooth fly-in animation and fade transitions without pushing content or duplicating flex width.
+- **Dynamic Width Transitions & Zero-Lag Drag Resizing**: Outer docking slot smoothly animates width when switching between panels of different widths (Now Playing 384px, Queue 320px, Devices 352px), while maintaining instant 1:1 mouse tracking when dragging the Now Playing resize handle.
+- **Auto-Resized Height & Consistent Spacing**: Fixed height calculations to ensure exact 8px uniform spacing between floating sidebars, the floating bottom player bar, and window borders.
+- **Clean Sidebar Lifecycle**: Completely eliminated unwanted older sidebar popups when closing a panel — closing properly closes the active panel without resurrecting previous states.
+- **Collapsed Sidebar Playlist Quick Navigation**: Display playlist buttons with artwork/icons directly on the collapsed left sidebar rail, with auto-collapse in the fullscreen now playing view for distraction-free navigation.
+- **Confined Top Bar Scroll Bounds**: Confined home feed scrollbar track and thumb strictly below the floating top bar."#.to_string(),
+    };
+
+    let v073_note = ReleaseNote {
+        version: "0.7.3".to_string(),
+        date: "2026-09-10".to_string(),
+        body: r#"### Nocturne Music v0.7.3
+
+- **Audio Crossfade**: Smooth audio fading between tracks with configurable duration (0–12s) in Playback Settings.
+- **Discord Rich Presence Customization**: Fully customize your Discord activity card including custom application ID, title/artist/album templates, button toggles & custom labels, pause state display, and time elapsed/remaining visibility.
+- **Floating-Style Sidebars**: Modern floating sidebar design mode with rounded corners, elevated borders, and translucent drop shadows.
+- **Resizable Now Playing Sidebar**: Left-edge draggable handle to freely resize the Now Playing panel from 280px to 650px with automatic width persistence.
+- **Word-by-Word Lyric Sources**: Expanded rich karaoke syllable support with YouLyPlus (multi-server mirror network) and Paxsenix Apple Music syllable-level timing.
+- **Automatic Lyrics Top Scroll**: Lyrics automatically reset to top on each song change before line cues commence.
+- **Customizable Interface Bars**: Show or hide individual icon buttons across the top titlebar and bottom playerbar to fit your personal workflow.
+- **Mobile Sync Enhancements**: Seamless bidirectional queue synchronization, speaker device icon alignment with mobile app, and drift-free monotonic playback timing."#.to_string(),
+    };
+
     let v072_note = ReleaseNote {
         version: "0.7.2".to_string(),
         date: "2026-09-08".to_string(),
@@ -1538,12 +1596,24 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note,
-        v062_note, v061_note, v06_note,
+        v080_note, v073_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note,
+        v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
 
-    let known_versions: std::collections::HashSet<String> =
-        notes.iter().map(|n| n.version.clone()).collect();
+    let known_versions: std::collections::HashSet<String> = notes
+        .iter()
+        .map(|n| n.version.clone())
+        .chain([
+            "0.8".to_string(),
+            "0.8.0".to_string(),
+            "0.7".to_string(),
+            "0.7.0".to_string(),
+            "0.7.0-d".to_string(),
+            "0.7d".to_string(),
+            "0.6".to_string(),
+            "0.6.0".to_string(),
+        ])
+        .collect();
 
     let res = crate::http::client()
         .get("https://api.github.com/repos/Neo-XD/nocturne-music/releases?per_page=20")
@@ -1557,7 +1627,18 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         if let Ok(releases) = resp.json::<Vec<GhRelease>>().await {
             for r in releases.into_iter().filter(|r| !r.draft && !r.prerelease) {
                 let ver = r.tag_name.trim_start_matches('v').to_string();
-                if !known_versions.contains(&ver) {
+                let is_redundant = ver == "0.7.0-d"
+                    || ver == "0.7.0"
+                    || ver == "0.7d"
+                    || ver == "0.6"
+                    || ver == "0.6.0"
+                    || ver.starts_with("upstream")
+                    || ver.starts_with("0.5")
+                    || ver.starts_with("0.4")
+                    || ver.starts_with("0.3")
+                    || ver.starts_with("0.2")
+                    || ver.starts_with("0.1");
+                if !is_redundant && !known_versions.contains(&ver) {
                     notes.push(ReleaseNote {
                         version: ver,
                         date: r

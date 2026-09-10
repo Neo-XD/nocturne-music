@@ -43,11 +43,15 @@
 	let {
 		onClose,
 		onOpenQueue,
-		onOpenLyrics
+		onOpenLyrics,
+		onWidthChange,
+		onResizingChange
 	}: {
 		onClose: () => void;
 		onOpenQueue?: () => void;
 		onOpenLyrics?: () => void;
+		onWidthChange?: (width: number) => void;
+		onResizingChange?: (resizing: boolean) => void;
 	} = $props();
 
 	// --- Artist Info Fetching ---
@@ -88,6 +92,56 @@
 	let requestedLyricsId = '';
 	let lyricsScroller: HTMLElement | undefined = $state();
 	let expandedLyrics = $state(false);
+
+	// Resizable sidebar width (280px - 650px)
+	let sidebarWidth = $state(
+		typeof localStorage !== 'undefined'
+			? Math.min(650, Math.max(280, parseInt(localStorage.getItem('nowPlayingSidebarWidth') || '320', 10) || 320))
+			: 320
+	);
+
+	function startResize(e: MouseEvent) {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startWidth = sidebarWidth;
+		onResizingChange?.(true);
+
+		function onMouseMove(ev: MouseEvent) {
+			const delta = startX - ev.clientX;
+			const newWidth = Math.min(650, Math.max(280, Math.round(startWidth + delta)));
+			sidebarWidth = newWidth;
+			onWidthChange?.(newWidth);
+			try {
+				localStorage.setItem('nowPlayingSidebarWidth', newWidth.toString());
+			} catch {}
+		}
+
+		function onMouseUp() {
+			onResizingChange?.(false);
+			window.removeEventListener('mousemove', onMouseMove);
+			window.removeEventListener('mouseup', onMouseUp);
+		}
+
+		window.addEventListener('mousemove', onMouseMove);
+		window.addEventListener('mouseup', onMouseUp);
+	}
+
+	$effect(() => {
+		onWidthChange?.(sidebarWidth);
+	});
+
+	let currentTrackId = '';
+	$effect(() => {
+		const vid = playback.now?.videoId;
+		if (vid && vid !== currentTrackId) {
+			currentTrackId = vid;
+			hasScrolledLyrics = false;
+			userScrollUntil = 0;
+			if (lyricsScroller) {
+				lyricsScroller.scrollTo({ top: 0, behavior: 'instant' });
+			}
+		}
+	});
 
 	$effect(() => {
 		const now = playback.now;
@@ -290,9 +344,21 @@
 ></button>
 
 <aside
-	transition:fly={{ x: 320, duration: 250, easing: cubicOut }}
-	class="info-sidebar flex h-full w-80 max-w-[90vw] shrink-0 flex-col border-l border-border/70 bg-card/90 shadow-2xl backdrop-blur-2xl transition-all select-none overflow-hidden z-20"
+	style="width: 100%; {prefs.floatingSidebarRight ? 'height: calc(100% - 1rem);' : 'height: 100%;'}"
+	class="info-sidebar relative flex max-w-[90vw] shrink-0 flex-col select-none overflow-hidden transition-[border-radius,margin] duration-200 {prefs.floatingSidebarRight
+		? 'app-floating-panel m-2 rounded-2xl border border-border/70 bg-card/90 shadow-2xl backdrop-blur-xl'
+		: 'h-full border-l border-border/70 bg-card/90 shadow-2xl backdrop-blur-2xl rounded-none m-0'}"
 >
+	<!-- Draggable left edge resize handle -->
+	<div
+		class="absolute left-0 top-0 bottom-0 w-1.5 hover:w-2 hover:bg-primary/50 cursor-col-resize z-30 transition-all select-none"
+		onmousedown={startResize}
+		role="separator"
+		aria-orientation="vertical"
+		tabindex="-1"
+		title="Drag to resize sidebar"
+	></div>
+
 	<!-- Header -->
 	<div class="flex items-center justify-between border-b px-4 py-3 shrink-0">
 		<div class="flex items-center gap-2">

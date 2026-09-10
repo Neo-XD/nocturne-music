@@ -32,6 +32,7 @@
 	import FolderMenu from './FolderMenu.svelte';
 	import CreatePlaylistDialog from './CreatePlaylistDialog.svelte';
 	import {
+		prefs,
 		auth,
 		library,
 		personal,
@@ -155,12 +156,16 @@
 	// breakpoint, so the button is hidden there and `wide()` has nothing to drop. Every expanded
 	// style is an `lg:` class, so collapsing is just not emitting them. The flag lives in `ui`
 	// because the overlays that offset by the sidebar's width read it too.
-	const collapsed = $derived(ui.sidebarCollapsed);
+	const isNowPlaying = $derived(np.open && !np.fullscreenOpen);
+	const collapsed = $derived((ui.sidebarCollapsed || isNowPlaying) && !ui.sidebarForceExpanded);
 	const wide = (cls: string) => (collapsed ? '' : cls);
 </script>
 
 <aside
-	class="absolute inset-y-0 left-0 z-20 flex h-full w-16 flex-col border-r bg-sidebar p-3 text-sidebar-foreground {wide(
+	style={prefs.floatingSidebarLeft ? 'height: calc(100% - 1rem);' : 'height: 100%;'}
+	class="relative z-30 flex w-16 shrink-0 flex-col bg-sidebar p-3 text-sidebar-foreground transition-[border-radius,margin,width] duration-200 {prefs.floatingSidebarLeft
+		? 'app-floating-panel m-2 rounded-2xl border border-border/70 shadow-xl backdrop-blur-xl bg-sidebar/80'
+		: 'border-r border-border/70 rounded-none m-0 shadow-none'} {wide(
 		'lg:w-60'
 	)}"
 >
@@ -236,138 +241,166 @@
 		</button>
 	</nav>
 
-	<!-- Playlists & Folders. Hidden on the icon rail (needs labels; matches YTM's collapsed rail). flex-1 lets
-	     the list fill the space and scroll. Signed out the section still appears once there is
-	     something in it: On Repeat, or a playlist saved on this machine. -->
+	<!-- Playlists & Folders. On the collapsed rail, shows playlist icons. On expanded, shows full names & folders. -->
 	{#if auth.account?.signedIn || playlists.length || rootFolders.length}
-		<div class="mt-3 hidden min-h-0 flex-1 flex-col border-t pt-3 {wide('lg:flex')}">
-			<!-- Action Header -->
-			<div class="mb-2 flex items-center gap-1.5">
+		<div class="mt-3 flex min-h-0 flex-1 flex-col border-t border-border/60 pt-3">
+			{#if collapsed}
+				<!-- Collapsed Icon Rail View -->
 				{#if auth.account?.signedIn}
-					<Button
-						variant="outline"
-						size="sm"
-						class="h-8 flex-1 gap-1.5 text-xs cursor-pointer"
-						onclick={() => (playlistDialogOpen = true)}
-					>
-						<HugeiconsIcon icon={Add01Icon} class="h-3.5 w-3.5" />
-						<span>New playlist</span>
-					</Button>
-				{/if}
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					class="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer"
-					onclick={() => {
-						newFolderName = '';
-						newFolderParentId = null;
-						folderDialogOpen = true;
-					}}
-					title="New folder"
-				>
-					<HugeiconsIcon icon={FolderAddIcon} class="h-4 w-4" />
-				</Button>
-			</div>
-
-			<div class="min-h-0 flex-1 overflow-y-auto space-y-1">
-				<!-- Playlist Folders Section -->
-				{#each rootFolders as folder (folder.id)}
-					{@const folderPlaylists = playlists.filter((p) => folder.playlistIds.includes(p.id))}
-					{@const isDragTarget = dragOverFolderId === folder.id}
-					<div
-						class="group/folder rounded-lg transition-all {isDragTarget
-							? 'bg-primary/15 ring-1 ring-primary/50'
-							: ''}"
-						ondragover={(e) => {
-							if (e.dataTransfer?.types.includes(PLAYLIST_DND_MIME)) {
-								e.preventDefault();
-								dragOverFolderId = folder.id;
-							}
-						}}
-						ondragleave={() => {
-							if (dragOverFolderId === folder.id) dragOverFolderId = null;
-						}}
-						ondrop={(e) => handleDropOnFolder(e, folder.id, folder.name)}
-					>
-						<!-- Folder Row -->
-						<div class="relative flex items-center justify-between rounded-lg py-1 pl-1.5 pr-8 hover:bg-sidebar-accent/50">
-							<button
-								type="button"
-								class="flex min-w-0 flex-1 items-center gap-2 text-left cursor-pointer"
-								onclick={() => toggleFolderCollapsed(folder.id)}
-							>
-								<HugeiconsIcon
-									icon={folder.collapsed ? ArrowRight01Icon : ArrowDown01Icon}
-									class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
-								/>
-								<HugeiconsIcon
-									icon={folder.collapsed ? Folder01Icon : FolderOpenIcon}
-									class="h-4 w-4 shrink-0 text-primary"
-								/>
-								<span class="truncate text-[13px] font-semibold">{folder.name}</span>
-								<span class="rounded-full bg-muted px-1.5 py-0.2 text-[10px] font-medium text-muted-foreground">
-									{folderPlaylists.length}
-								</span>
-							</button>
-							<FolderMenu
-								{folder}
-								onNewPlaylist={() => {
-									playlistDialogOpen = true;
-								}}
-								onNewSubfolder={(parent) => {
-									newFolderName = '';
-									newFolderParentId = parent;
-									folderDialogOpen = true;
-								}}
-								onRename={openRenameFolder}
-							/>
-						</div>
-
-						<!-- Folder Contents (Nested Playlists) -->
-						{#if !folder.collapsed}
-							<div class="ml-2 border-l border-border/50 pl-1 space-y-0.5 py-0.5">
-								{#each folderPlaylists as pl (pl.id)}
-									{@render playlistRow(pl, true)}
-								{:else}
-									<p class="py-1 pl-6 text-xs text-muted-foreground/60 italic">
-										Drop playlists here
-									</p>
-								{/each}
-							</div>
-						{/if}
+					<div class="mb-2 flex justify-center">
+						<Button
+							variant="outline"
+							size="icon-sm"
+							class="h-8 w-8 rounded-lg border-dashed border-border/80 text-muted-foreground hover:border-primary hover:text-primary transition-colors cursor-pointer"
+							onclick={() => (playlistDialogOpen = true)}
+							title="New playlist"
+						>
+							<HugeiconsIcon icon={Add01Icon} class="h-3.5 w-3.5" />
+						</Button>
 					</div>
-				{/each}
+				{/if}
 
-				<!-- Top Level / Unfiled Playlists Drop Zone & List -->
-				<div
-					class="rounded-lg transition-colors {dragOverRoot ? 'bg-primary/10 ring-1 ring-primary/40' : ''}"
-					ondragover={(e) => {
-						if (e.dataTransfer?.types.includes(PLAYLIST_DND_MIME)) {
-							e.preventDefault();
-							dragOverRoot = true;
-						}
-					}}
-					ondragleave={() => (dragOverRoot = false)}
-					ondrop={handleDropOnRoot}
-				>
-					{#if rootFolders.length > 0 && unfiledPlaylists.length > 0}
-						<div class="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-							Playlists
-						</div>
-					{/if}
-
-					{#each unfiledPlaylists as pl, i (pl.id)}
-						{@render playlistRow(pl, false)}
+				<div class="min-h-0 flex-1 overflow-y-auto space-y-1.5 py-1 flex flex-col items-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+					{#each playlists as pl, i (pl.id)}
+						{@render collapsedPlaylistButton(pl)}
 						{#if pinnedCount && i === pinnedCount - 1}
-							<div class="mx-3 my-1.5 h-px bg-border"></div>
+							<div class="my-1 h-px w-6 bg-border/60"></div>
 						{/if}
 					{:else}
-						{#if library.loading && !rootFolders.length}
-							<p class="px-3 py-1.5 text-xs text-muted-foreground">Loading…</p>
+						{#if library.loading}
+							<div class="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
 						{/if}
 					{/each}
 				</div>
-			</div>
+			{:else}
+				<!-- Action Header -->
+				<div class="mb-2 flex items-center gap-1.5">
+					{#if auth.account?.signedIn}
+						<Button
+							variant="outline"
+							size="sm"
+							class="h-8 flex-1 gap-1.5 text-xs cursor-pointer"
+							onclick={() => (playlistDialogOpen = true)}
+						>
+							<HugeiconsIcon icon={Add01Icon} class="h-3.5 w-3.5" />
+							<span>New playlist</span>
+						</Button>
+					{/if}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						class="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer"
+						onclick={() => {
+							newFolderName = '';
+							newFolderParentId = null;
+							folderDialogOpen = true;
+						}}
+						title="New folder"
+					>
+						<HugeiconsIcon icon={FolderAddIcon} class="h-4 w-4" />
+					</Button>
+				</div>
+
+				<div class="min-h-0 flex-1 overflow-y-auto space-y-1">
+					<!-- Playlist Folders Section -->
+					{#each rootFolders as folder (folder.id)}
+						{@const folderPlaylists = playlists.filter((p) => folder.playlistIds.includes(p.id))}
+						{@const isDragTarget = dragOverFolderId === folder.id}
+						<div
+							class="group/folder rounded-lg transition-all {isDragTarget
+								? 'bg-primary/15 ring-1 ring-primary/50'
+								: ''}"
+							ondragover={(e) => {
+								if (e.dataTransfer?.types.includes(PLAYLIST_DND_MIME)) {
+									e.preventDefault();
+									dragOverFolderId = folder.id;
+								}
+							}}
+							ondragleave={() => {
+								if (dragOverFolderId === folder.id) dragOverFolderId = null;
+							}}
+							ondrop={(e) => handleDropOnFolder(e, folder.id, folder.name)}
+						>
+							<!-- Folder Row -->
+							<div class="relative flex items-center justify-between rounded-lg py-1 pl-1.5 pr-8 hover:bg-sidebar-accent/50">
+								<button
+									type="button"
+									class="flex min-w-0 flex-1 items-center gap-2 text-left cursor-pointer"
+									onclick={() => toggleFolderCollapsed(folder.id)}
+								>
+									<HugeiconsIcon
+										icon={folder.collapsed ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
+									/>
+									<HugeiconsIcon
+										icon={folder.collapsed ? Folder01Icon : FolderOpenIcon}
+										class="h-4 w-4 shrink-0 text-primary"
+									/>
+									<span class="truncate text-[13px] font-semibold">{folder.name}</span>
+									<span class="rounded-full bg-muted px-1.5 py-0.2 text-[10px] font-medium text-muted-foreground">
+										{folderPlaylists.length}
+									</span>
+								</button>
+								<FolderMenu
+									{folder}
+									onNewPlaylist={() => {
+										playlistDialogOpen = true;
+									}}
+									onNewSubfolder={(parent) => {
+										newFolderName = '';
+										newFolderParentId = parent;
+										folderDialogOpen = true;
+									}}
+									onRename={openRenameFolder}
+								/>
+							</div>
+
+							<!-- Folder Contents (Nested Playlists) -->
+							{#if !folder.collapsed}
+								<div class="ml-2 border-l border-border/50 pl-1 space-y-0.5 py-0.5">
+									{#each folderPlaylists as pl (pl.id)}
+										{@render playlistRow(pl, true)}
+									{:else}
+										<p class="py-1 pl-6 text-xs text-muted-foreground/60 italic">
+											Drop playlists here
+										</p>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/each}
+
+					<!-- Top Level / Unfiled Playlists Drop Zone & List -->
+					<div
+						class="rounded-lg transition-colors {dragOverRoot ? 'bg-primary/10 ring-1 ring-primary/40' : ''}"
+						ondragover={(e) => {
+							if (e.dataTransfer?.types.includes(PLAYLIST_DND_MIME)) {
+								e.preventDefault();
+								dragOverRoot = true;
+							}
+						}}
+						ondragleave={() => (dragOverRoot = false)}
+						ondrop={handleDropOnRoot}
+					>
+						{#if rootFolders.length > 0 && unfiledPlaylists.length > 0}
+							<div class="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+								Playlists
+							</div>
+						{/if}
+
+						{#each unfiledPlaylists as pl, i (pl.id)}
+							{@render playlistRow(pl, false)}
+							{#if pinnedCount && i === pinnedCount - 1}
+								<div class="mx-3 my-1.5 h-px bg-border"></div>
+							{/if}
+						{:else}
+							{#if library.loading && !rootFolders.length}
+								<p class="px-3 py-1.5 text-xs text-muted-foreground">Loading…</p>
+							{/if}
+						{/each}
+					</div>
+				</div>
+			{/if}
 		</div>
 
 		<!-- New Playlist Modal with Picture & Description -->
@@ -482,3 +515,63 @@
 		<PlaylistMenu item={pl} />
 	</div>
 {/snippet}
+
+{#snippet collapsedPlaylistButton(pl: BrowseItem)}
+	<div
+		class="group/cpl relative flex items-center justify-center"
+		data-ctx
+		draggable="true"
+		ondragstart={(e) => {
+			setDragPlaylist(e, pl.id);
+			setDragItem(e, pl);
+		}}
+	>
+		<a
+			href={playlistHref(pl)}
+			title={pl.title}
+			class="relative flex h-9 w-9 items-center justify-center rounded-lg transition-transform duration-150 hover:scale-105 hover:bg-sidebar-accent/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring {isActive(
+				playlistHref(pl)
+			)
+				? 'bg-sidebar-accent/60 ring-1 ring-primary/60'
+				: ''}"
+		>
+			<div
+				class="relative h-7 w-7 shrink-0 overflow-hidden bg-muted {pl.kind === 'artist'
+					? 'rounded-full'
+					: 'rounded-md'} shadow-xs"
+			>
+				{#if pl.thumbnail && pl.id !== ON_REPEAT_ID}
+					<img
+						src={thumb(pl.thumbnail, 96)}
+						alt=""
+						class="h-full w-full object-cover"
+						loading="lazy"
+					/>
+				{:else}
+					<div
+						class="flex h-full w-full items-center justify-center {pl.id === ON_REPEAT_ID
+							? 'bg-primary/10 text-primary'
+							: 'text-muted-foreground/50'}"
+					>
+						<HugeiconsIcon
+							icon={MusicNote01Icon}
+							altIcon={ListRestartIcon}
+							showAlt={pl.id === ON_REPEAT_ID}
+							class={pl.id === ON_REPEAT_ID ? 'h-3.5 w-3.5' : 'h-3 w-3'}
+						/>
+					</div>
+				{/if}
+			</div>
+			{#if personal.pins.includes(pl.id)}
+				<span
+					class="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow"
+					title="Pinned"
+				>
+					<HugeiconsIcon icon={PinIcon} class="h-2 w-2" />
+				</span>
+			{/if}
+		</a>
+		<PlaylistMenu item={pl} triggerClass="hidden" />
+	</div>
+{/snippet}
+

@@ -34,7 +34,16 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import * as api from '$lib/api';
-	import { prefs, ui, toast } from '$lib/player.svelte';
+	import {
+		prefs,
+		ui,
+		toast,
+		setFloatingTopBar,
+		setFloatingSidebarLeft,
+		setFloatingSidebarRight,
+		setFloatingPlayerBar,
+		setVisibleIcon
+	} from '$lib/player.svelte';
 	import {
 		formatKey,
 		keybindings,
@@ -545,6 +554,54 @@
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const discordOn = $derived(settings.discord_rpc === 'true');
+	const crossfadeSecs = $derived(parseInt(settings.crossfade_seconds || '0', 10) || 0);
+	const discordShowTime = $derived(settings.discord_rpc_show_time !== 'false');
+	const discordShowPause = $derived(settings.discord_rpc_show_pause !== 'false');
+	const discordShowButton = $derived(settings.discord_rpc_show_button !== 'false');
+	const discordButtonLabel = $derived(settings.discord_rpc_button_label ?? 'Listen on Nocturne');
+	const discordDetails = $derived(settings.discord_rpc_details ?? '{title}');
+	const discordState = $derived(settings.discord_rpc_state ?? '{artist}');
+	const discordAppId = $derived(settings.discord_rpc_app_id ?? '');
+
+	async function setCrossfade(secs: number) {
+		settings.crossfade_seconds = secs.toString();
+		await api.setSetting('crossfade_seconds', secs.toString());
+	}
+
+	async function setDiscordShowTime(on: boolean) {
+		settings.discord_rpc_show_time = on ? 'true' : 'false';
+		await api.setSetting('discord_rpc_show_time', settings.discord_rpc_show_time);
+	}
+
+	async function setDiscordShowPause(on: boolean) {
+		settings.discord_rpc_show_pause = on ? 'true' : 'false';
+		await api.setSetting('discord_rpc_show_pause', settings.discord_rpc_show_pause);
+	}
+
+	async function setDiscordShowButton(on: boolean) {
+		settings.discord_rpc_show_button = on ? 'true' : 'false';
+		await api.setSetting('discord_rpc_show_button', settings.discord_rpc_show_button);
+	}
+
+	async function setDiscordButtonLabel(label: string) {
+		settings.discord_rpc_button_label = label;
+		await api.setSetting('discord_rpc_button_label', label);
+	}
+
+	async function setDiscordDetails(val: string) {
+		settings.discord_rpc_details = val;
+		await api.setSetting('discord_rpc_details', val);
+	}
+
+	async function setDiscordState(val: string) {
+		settings.discord_rpc_state = val;
+		await api.setSetting('discord_rpc_state', val);
+	}
+
+	async function setDiscordAppId(val: string) {
+		settings.discord_rpc_app_id = val;
+		await api.setSetting('discord_rpc_app_id', val);
+	}
 	const trayOn = $derived(settings.close_to_tray !== 'false');
 	const autostartOn = $derived(settings.autostart === 'true');
 	const disabled = $derived(
@@ -843,7 +900,8 @@
 		{ id: 'sec-typography', label: 'Typography' },
 		{ id: 'sec-player', label: 'Player & Visuals' },
 		{ id: 'sec-glassy', label: 'Glassy Theme' },
-		{ id: 'sec-fullscreen', label: 'Fullscreen Player' }
+		{ id: 'sec-fullscreen', label: 'Fullscreen Player' },
+		{ id: 'sec-layout', label: 'Layout & Icons' }
 	];
 	let activeAppearanceSection = $state('sec-theme');
 	let collapsedCategories = $state<Record<string, boolean>>({});
@@ -997,7 +1055,8 @@
 								{@render row({
 									title: 'Discord rich presence',
 									desc: "Show what you're listening to on your Discord profile. Needs the Discord desktop app running, no login here.",
-									control: discordSwitch
+									control: discordSwitch,
+									below: discordOn ? discordConfig : undefined
 								})}
 								{@render row({
 									title: 'Last.fm scrobbling',
@@ -1397,11 +1456,56 @@
 								</div>
 							{/if}
 						</section>
+
+						<!-- 7. Layout & Icons -->
+						<section id="sec-layout" class="{GROUP} scroll-mt-3">
+							<button
+								type="button"
+								onclick={() => (collapsedCategories['sec-layout'] = !collapsedCategories['sec-layout'])}
+								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<div class="flex items-center gap-1.5">
+									<HugeiconsIcon
+										icon={collapsedCategories['sec-layout'] ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+									/>
+									<span>Layout & Icons</span>
+								</div>
+								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+									{collapsedCategories['sec-layout'] ? 'expand' : 'collapse'}
+								</span>
+							</button>
+							{#if !collapsedCategories['sec-layout']}
+								<div class={CARD}>
+									{@render row({
+										title: 'Floating panels',
+										desc: 'Choose which surfaces float with rounded corners, margins, and translucent blur.',
+										below: floatingPanelsConfig
+									})}
+									{@render row({
+										title: 'Top titlebar icons',
+										desc: 'Choose which action icons appear on the top bar.',
+										below: titlebarIconsConfig
+									})}
+									{@render row({
+										title: 'Bottom player bar icons',
+										desc: 'Choose which controls appear on the bottom player bar.',
+										below: playerbarIconsConfig
+									})}
+								</div>
+							{/if}
+						</section>
 					</div>
 					{:else if tab === 'playback'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Audio</h3>
 							<div class={CARD}>
+								{@render row({
+									title: 'Crossfade',
+									desc: crossfadeSecs === 0 ? 'Off (gapless playback)' : `Smoothly crossfade between songs (${crossfadeSecs}s).`,
+									control: crossfadeSlider,
+									tall: true
+								})}
 								{@render row({
 									title: 'Audio quality',
 									badge: 'Network & CPU',
@@ -1944,6 +2048,338 @@
 <!-- Controls. Split out so the rows above read as a list of settings rather than a wall of markup. -->
 {#snippet historySwitch()}<Switch checked={historyOn} onCheckedChange={setHistory} />{/snippet}
 {#snippet discordSwitch()}<Switch checked={discordOn} onCheckedChange={setDiscord} />{/snippet}
+{#snippet discordConfig()}
+	<div class="mt-2.5 space-y-3 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3.5 backdrop-blur-md">
+		<div class="text-xs font-semibold text-foreground">Discord RPC Customization</div>
+
+		<!-- Details & State Templates -->
+		<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+			<div>
+				<label for="discord-details-input" class="mb-1 block font-medium text-muted-foreground">Top line (Details)</label>
+				<Input
+					id="discord-details-input"
+					type="text"
+					value={discordDetails}
+					oninput={(e) => setDiscordDetails(e.currentTarget.value)}
+					placeholder={'{title}'}
+					class="h-8 text-xs font-mono"
+				/>
+				<div class="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+					<span>Tokens:</span>
+					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{title}')}>{"{title}"}</button>
+					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{artist}')}>{"{artist}"}</button>
+					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{album}')}>{"{album}"}</button>
+				</div>
+			</div>
+			<div>
+				<label for="discord-state-input" class="mb-1 block font-medium text-muted-foreground">Bottom line (State)</label>
+				<Input
+					id="discord-state-input"
+					type="text"
+					value={discordState}
+					oninput={(e) => setDiscordState(e.currentTarget.value)}
+					placeholder={'{artist}'}
+					class="h-8 text-xs font-mono"
+				/>
+				<div class="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+					<span>Tokens:</span>
+					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{title}')}>{"{title}"}</button>
+					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{artist}')}>{"{artist}"}</button>
+					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{album}')}>{"{album}"}</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Toggles -->
+		<div class="space-y-2 rounded-lg border border-border/60 bg-card/75 dark:bg-card/60 backdrop-blur-sm p-3 text-xs">
+			<div class="flex items-center justify-between">
+				<div>
+					<div class="font-medium text-foreground">Show track time</div>
+					<div class="text-[11px] text-muted-foreground">Display elapsed time and progress bar in Discord</div>
+				</div>
+				<Switch checked={discordShowTime} onCheckedChange={setDiscordShowTime} />
+			</div>
+			<div class="flex items-center justify-between border-t border-border/40 pt-2">
+				<div>
+					<div class="font-medium text-foreground">Show presence when paused</div>
+					<div class="text-[11px] text-muted-foreground">Keep profile status active with (Paused) badge</div>
+				</div>
+				<Switch checked={discordShowPause} onCheckedChange={setDiscordShowPause} />
+			</div>
+			<div class="flex items-center justify-between border-t border-border/40 pt-2">
+				<div>
+					<div class="font-medium text-foreground">Show button on Discord</div>
+					<div class="text-[11px] text-muted-foreground">Adds clickable link button to your Discord presence</div>
+				</div>
+				<Switch checked={discordShowButton} onCheckedChange={setDiscordShowButton} />
+			</div>
+		</div>
+
+		<!-- Button Label and App ID -->
+		<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+			{#if discordShowButton}
+				<div>
+					<label for="discord-btn-label" class="mb-1 block font-medium text-muted-foreground">Button label</label>
+					<Input
+						id="discord-btn-label"
+						type="text"
+						value={discordButtonLabel}
+						oninput={(e) => setDiscordButtonLabel(e.currentTarget.value)}
+						placeholder="Listen on Nocturne"
+						class="h-8 text-xs"
+					/>
+				</div>
+			{/if}
+			<div>
+				<label for="discord-app-id" class="mb-1 block font-medium text-muted-foreground">Custom Application ID (optional)</label>
+				<Input
+					id="discord-app-id"
+					type="text"
+					value={discordAppId}
+					oninput={(e) => setDiscordAppId(e.currentTarget.value)}
+					placeholder="Default: Nocturne Music"
+					class="h-8 text-xs font-mono"
+				/>
+			</div>
+		</div>
+	</div>
+{/snippet}
+{#snippet crossfadeSlider()}
+	<div class="flex items-center gap-3 w-48">
+		<Slider
+			type="single"
+			min={0}
+			max={12}
+			step={1}
+			value={crossfadeSecs}
+			onValueChange={(val) => setCrossfade(val)}
+			class="flex-1"
+		/>
+		<span class="w-8 text-right font-mono text-xs text-muted-foreground">{crossfadeSecs === 0 ? 'Off' : `${crossfadeSecs}s`}</span>
+	</div>
+{/snippet}
+{#snippet floatingPanelsConfig()}
+	<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3 backdrop-blur-md text-xs">
+		<label class="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<div>
+				<span class="font-medium text-foreground/90 block">Top bar</span>
+				<span class="text-[10px] text-muted-foreground block">Window titlebar</span>
+			</div>
+			<input
+				type="checkbox"
+				checked={prefs.floatingTopBar}
+				onchange={(e) => setFloatingTopBar(e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<div>
+				<span class="font-medium text-foreground/90 block">Left sidebar</span>
+				<span class="text-[10px] text-muted-foreground block">Navigation rail</span>
+			</div>
+			<input
+				type="checkbox"
+				checked={prefs.floatingSidebarLeft}
+				onchange={(e) => setFloatingSidebarLeft(e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<div>
+				<span class="font-medium text-foreground/90 block">Right sidebar</span>
+				<span class="text-[10px] text-muted-foreground block">Info, queue & lyrics</span>
+			</div>
+			<input
+				type="checkbox"
+				checked={prefs.floatingSidebarRight}
+				onchange={(e) => setFloatingSidebarRight(e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<div>
+				<span class="font-medium text-foreground/90 block">Bottom player bar</span>
+				<span class="text-[10px] text-muted-foreground block">Playback controls</span>
+			</div>
+			<input
+				type="checkbox"
+				checked={prefs.floatingPlayerBar}
+				onchange={(e) => setFloatingPlayerBar(e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+	</div>
+{/snippet}
+{#snippet titlebarIconsConfig()}
+	<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3 backdrop-blur-md text-xs">
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Navigation (Back/Fwd)</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.navigation}
+				onchange={(e) => setVisibleIcon('titlebar', 'navigation', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Search bar</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.search}
+				onchange={(e) => setVisibleIcon('titlebar', 'search', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Open link</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.openLink}
+				onchange={(e) => setVisibleIcon('titlebar', 'openLink', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Listen Together</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.listenTogether}
+				onchange={(e) => setVisibleIcon('titlebar', 'listenTogether', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Discord presence</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.discord}
+				onchange={(e) => setVisibleIcon('titlebar', 'discord', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Last.fm scrobbler</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.lastfm}
+				onchange={(e) => setVisibleIcon('titlebar', 'lastfm', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Mini player</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.miniPlayer}
+				onchange={(e) => setVisibleIcon('titlebar', 'miniPlayer', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Fullscreen</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.fullscreen}
+				onchange={(e) => setVisibleIcon('titlebar', 'fullscreen', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+	</div>
+{/snippet}
+{#snippet playerbarIconsConfig()}
+	<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3 backdrop-blur-md text-xs">
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Favourite / Like</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.like}
+				onchange={(e) => setVisibleIcon('playerbar', 'like', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Shuffle</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.shuffle}
+				onchange={(e) => setVisibleIcon('playerbar', 'shuffle', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Repeat</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.repeat}
+				onchange={(e) => setVisibleIcon('playerbar', 'repeat', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Volume slider</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.volume}
+				onchange={(e) => setVisibleIcon('playerbar', 'volume', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Now Playing info</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.info}
+				onchange={(e) => setVisibleIcon('playerbar', 'info', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Mini player</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.miniPlayer}
+				onchange={(e) => setVisibleIcon('playerbar', 'miniPlayer', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Lyrics view</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.lyrics}
+				onchange={(e) => setVisibleIcon('playerbar', 'lyrics', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Queue panel</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.queue}
+				onchange={(e) => setVisibleIcon('playerbar', 'queue', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Devices / Cast</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.devices}
+				onchange={(e) => setVisibleIcon('playerbar', 'devices', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Open player</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.playerbar.fullscreen}
+				onchange={(e) => setVisibleIcon('playerbar', 'fullscreen', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+	</div>
+{/snippet}
 {#snippet lastfmButton()}
 	{#if lastfmConnected}
 		<Button size="sm" variant="outline" onclick={disconnectLastfm}>Disconnect</Button>

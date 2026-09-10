@@ -70,15 +70,21 @@ fn friendly_error(e: &libmpv2::Error) -> String {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct AudioFilters {
+    gain_db: Option<f64>,
+    semitones: i32,
+    crossfade_secs: f64,
+    track_duration: Option<f64>,
+}
+
 /// The player. Wraps `Arc<Mpv>` (Send+Sync); the event loop runs on a dedicated OS thread and
 /// pumps [`PlayerEvent`]s into a channel taken once via [`Player::take_events`].
 pub struct Player {
     mpv: Arc<Mpv>,
     events: Option<UnboundedReceiver<PlayerEvent>>,
-    /// `(loudness gain dB, pitch semitones)`. mpv's `af` is one global chain, so the two things
-    /// that write to it have to be re-applied together: a bare `set_property("af", ...)` from
-    /// either one would drop the other's filter.
-    af: std::sync::Mutex<(Option<f64>, i32)>,
+    /// Filter state for mpv's global `af` chain (gain, pitch, crossfade).
+    af: std::sync::Mutex<AudioFilters>,
 }
 
 impl Player {
@@ -124,7 +130,7 @@ impl Player {
             .spawn(move || event_loop(ev, tx))
             .expect("spawn mpv event thread");
 
-        Ok(Player { mpv, events: Some(rx), af: std::sync::Mutex::new((None, 0)) })
+        Ok(Player { mpv, events: Some(rx), af: std::sync::Mutex::new(AudioFilters::default()) })
     }
 
     /// Take the event receiver (once).
@@ -140,7 +146,12 @@ impl Player {
         gain_db: Option<f64>,
     ) -> Result<(), Error> {
         self.apply_headers(headers)?;
-        self.set_gain(gain_db)?;
+        {
+            let mut af = self.af.lock().unwrap();
+            af.track_duration = None;
+            af.gain_db = gain_db;
+        }
+        self.apply_af()?;
         self.mpv.command("loadfile", &[&quoted(url), "replace"])?;
         Ok(())
     }
@@ -232,7 +243,7 @@ impl Player {
     // round-trip (a few ms) and the filter chain reinits mid-stream. If that ever clicks audibly,
     // keep one labelled filter (`af=@gain:lavfi=[volume=0dB]`) and retune it with `af-command`.
     pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
-        self.af.lock().unwrap().0 = gain_db;
+        self.af.lock().unwrap().gain_db = gain_db;
         self.apply_af()
     }
 
@@ -251,21 +262,38 @@ impl Player {
     // Windows/macOS build ever turns up without it.
     pub fn set_pitch(&self, semitones: i32) -> Result<(), Error> {
         let wanted = semitones.clamp(-12, 12);
-        let previous = std::mem::replace(&mut self.af.lock().unwrap().1, wanted);
+        let previous = {
+            let mut af = self.af.lock().unwrap();
+            let prev = af.semitones;
+            af.semitones = wanted;
+            prev
+        };
         if let Err(e) = self.apply_af() {
             // No librubberband in this build: mpv rejects the *whole* chain, loudness gain
             // included, so put the old value back rather than leave every later set_gain failing.
             // (mpv never applied the bad chain, so this restores what is already playing.)
-            self.af.lock().unwrap().1 = previous;
+            self.af.lock().unwrap().semitones = previous;
             let _ = self.apply_af();
             return Err(if wanted == 0 { e } else { Error::NoPitchFilter });
         }
         Ok(())
     }
 
+    /// Crossfade duration in seconds (0.0 = disabled).
+    pub fn set_crossfade(&self, secs: f64) -> Result<(), Error> {
+        self.af.lock().unwrap().crossfade_secs = secs.max(0.0);
+        self.apply_af()
+    }
+
+    /// Update current track duration for crossfade out timing.
+    pub fn set_track_duration(&self, dur: Option<f64>) -> Result<(), Error> {
+        self.af.lock().unwrap().track_duration = dur;
+        self.apply_af()
+    }
+
     fn apply_af(&self) -> Result<(), Error> {
-        let (gain_db, semitones) = *self.af.lock().unwrap();
-        self.mpv.set_property("af", af_chain(gain_db, semitones).as_str())?;
+        let filters = self.af.lock().unwrap().clone();
+        self.mpv.set_property("af", af_chain(&filters).as_str())?;
         Ok(())
     }
 
@@ -289,20 +317,29 @@ impl Player {
     }
 }
 
-/// The whole `af` chain: loudness gain, then pitch. Empty when neither is in play, so the default
-/// path stays exactly the filterless one it was before pitch existed.
-fn af_chain(gain_db: Option<f64>, semitones: i32) -> String {
+/// The whole `af` chain: loudness gain, pitch, and crossfade. Empty when none is in play.
+fn af_chain(af: &AudioFilters) -> String {
     let mut chain = Vec::new();
-    if let Some(g) = gain_db {
+    if let Some(g) = af.gain_db {
         chain.push(format!("lavfi=[volume={g}dB]"));
     }
-    if semitones != 0 {
+    if af.semitones != 0 {
         // Semitones → frequency multiplier (equal temperament).
         chain.push(format!(
             "{}=pitch-scale={}",
             pitch_filter(),
-            2f64.powf(semitones as f64 / 12.0)
+            2f64.powf(af.semitones as f64 / 12.0)
         ));
+    }
+    if af.crossfade_secs > 0.0 {
+        let xf = af.crossfade_secs;
+        chain.push(format!("lavfi=[afade=t=in:ss=0:d={xf:.2}]"));
+        if let Some(dur) = af.track_duration {
+            if dur > xf * 2.0 {
+                let start_out = dur - xf;
+                chain.push(format!("lavfi=[afade=t=out:st={start_out:.2}:d={xf:.2}]"));
+            }
+        }
     }
     chain.join(",")
 }

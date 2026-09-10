@@ -1729,9 +1729,9 @@ impl AppState {
     /// player (a second webview, created long after the track started) and the main window on a
     /// cold start both have to ask once instead of guessing.
     pub async fn playback_snapshot(&self) -> serde_json::Value {
-        let (duration, item) = {
+        let (duration, item, queue_items) = {
             let q = self.queue.lock().await;
-            (q.duration, q.items.get(q.current).cloned())
+            (q.duration, q.items.get(q.current).cloned(), q.items.clone())
         };
         serde_json::json!({
             "now": item.as_ref().map(|i| Self::now_playing_json(i, "current")),
@@ -1739,6 +1739,25 @@ impl AppState {
             "position": self.current_position(),
             "duration": duration,
             "volume": saved_volume(&self.db),
+            "queue": queue_items.into_iter().map(|it| {
+                let dur_ms = it.duration.as_deref().map(|d| {
+                    let parts: Vec<&str> = d.split(':').collect();
+                    let mut secs = 0i64;
+                    for p in parts {
+                        if let Ok(n) = p.parse::<i64>() {
+                            secs = secs * 60 + n;
+                        }
+                    }
+                    secs * 1000
+                }).unwrap_or(0);
+                serde_json::json!({
+                    "id": it.video_id,
+                    "title": it.title,
+                    "artist": it.artists,
+                    "thumbnail": it.thumbnail,
+                    "duration_ms": dur_ms,
+                })
+            }).collect::<Vec<_>>(),
         })
     }
 
@@ -1868,6 +1887,19 @@ impl AppState {
         if let Some(d) = &self.discord {
             d.set_enabled(on);
         }
+    }
+
+    /// Update active Discord RPC configuration dynamically.
+    pub fn reload_discord_config(&self) {
+        if let Some(d) = &self.discord {
+            d.update_config(crate::discord::load_discord_config(&self.db));
+        }
+    }
+
+    /// Find the index of a track in the active queue by its video ID.
+    pub async fn find_in_queue(&self, video_id: &str) -> Option<usize> {
+        let q = self.queue.lock().await;
+        q.items.iter().position(|it| it.video_id == video_id)
     }
 
     /// Latest mpv position (secs) — for OS scrubber updates + relative media-key seeks.
@@ -2065,6 +2097,7 @@ impl AppState {
     pub async fn on_duration(&self, secs: f64) {
         if secs.is_finite() && secs > 0.0 {
             self.queue.lock().await.duration = secs;
+            let _ = self.player.set_track_duration(Some(secs));
             if let Some(m) = &self.media {
                 m.set_duration(secs);
             }

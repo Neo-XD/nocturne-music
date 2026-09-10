@@ -21,7 +21,7 @@
 
 <!-- overflow-hidden lives on the backdrop wrapper, not the hero: the scaled blur has to be clipped,
      but the search preview below has to hang out past the bottom edge. -->
-<div class="relative bg-sidebar text-sidebar-foreground">
+<div class="relative bg-transparent text-foreground">
 	<div class="relative p-6 pt-8">
 		<div class="flex items-center justify-between gap-4">
 			<div class="flex min-w-0 items-center gap-3">

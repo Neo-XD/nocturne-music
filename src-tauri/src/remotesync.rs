@@ -442,15 +442,20 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
         }
         "change_track" | "transfer_to_desktop" => {
             if let Some(track) = action.track {
-                let song = innertube::SongItem {
-                    video_id: track.id,
-                    title: track.title,
-                    artists: track.artist,
-                    thumbnail: track.thumbnail,
-                    duration: None,
-                    ..Default::default()
-                };
-                state.play_song(song).await;
+                let queue_idx = state.find_in_queue(&track.id).await;
+                if let Some(idx) = queue_idx {
+                    state.play_index(idx).await;
+                } else {
+                    let song = innertube::SongItem {
+                        video_id: track.id,
+                        title: track.title,
+                        artists: track.artist,
+                        thumbnail: track.thumbnail,
+                        duration: None,
+                        ..Default::default()
+                    };
+                    state.play_song(song).await;
+                }
                 if action.position_ms > 0 {
                     let pos = action.position_ms as f64 / 1000.0;
                     let _ = state.user_seek(pos).await;
@@ -505,6 +510,29 @@ pub fn room_state_from_snapshot(v: &Value) -> RoomState {
         None
     };
 
+    let queue: Vec<Track> = v
+        .get("queue")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let id = item.get("id").and_then(Value::as_str)?.to_string();
+                    let title =
+                        item.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
+                    let artist =
+                        item.get("artist").and_then(Value::as_str).unwrap_or_default().to_string();
+                    let thumbnail =
+                        item.get("thumbnail").and_then(Value::as_str).map(str::to_string);
+                    let duration_ms = item.get("duration_ms").and_then(Value::as_i64).unwrap_or(0);
+                    Some(Track { id, title, artist, thumbnail, duration_ms, queued_by: None })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let now_ms =
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+
     RoomState {
         room_code: "DIRECT".into(),
         host_id: "desktop".into(),
@@ -512,9 +540,9 @@ pub fn room_state_from_snapshot(v: &Value) -> RoomState {
         current_track: track,
         is_playing: playing,
         position_ms: (position * 1000.0) as i64,
-        last_update_ms: crate::db::now_secs() * 1000,
+        last_update_ms: now_ms,
         volume,
-        queue: vec![],
+        queue,
     }
 }
 

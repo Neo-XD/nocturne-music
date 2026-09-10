@@ -233,6 +233,11 @@ pub fn run() {
                     let _ = player.set_audio_device(&dev);
                 }
             }
+            if let Some(cf_str) = db.get_setting("crossfade_seconds") {
+                if let Ok(secs) = cf_str.parse::<f64>() {
+                    let _ = player.set_crossfade(secs);
+                }
+            }
             let events = player.take_events().expect("player events");
 
             // Phase 2 extraction stack: cipher + PoToken hidden webviews behind the orchestrator.
@@ -255,7 +260,11 @@ pub fn run() {
             taskbar::init(&handle);
 
             // Discord rich presence — off unless the user opted in; parks on its channel until then.
-            let discord = discord::spawn(db.get_setting("discord_rpc").as_deref() == Some("true"));
+            let discord_cfg = discord::load_discord_config(&db);
+            let discord = discord::spawn(
+                db.get_setting("discord_rpc").as_deref() == Some("true"),
+                discord_cfg,
+            );
 
             // Last.fm scrobbler — parks until a session key exists (titlebar connect flow).
             let lastfm = lastfm::spawn(&db);

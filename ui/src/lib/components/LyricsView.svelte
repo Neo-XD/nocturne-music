@@ -37,6 +37,19 @@
 
 	// videoId of the fetch whose result is (or will be) shown — guards stale responses.
 	let requested = '';
+	let currentTrackId = '';
+
+	$effect(() => {
+		const vid = playback.now?.videoId;
+		if (vid && vid !== currentTrackId) {
+			currentTrackId = vid;
+			hasScrolled = false;
+			userScrollUntil = 0;
+			if (scroller) {
+				scroller.scrollTo({ top: 0, behavior: 'instant' });
+			}
+		}
+	});
 
 	$effect(() => {
 		const now = playback.now;
@@ -50,6 +63,11 @@
 		const id = (requested = now.videoId);
 		loading = true;
 		lyrics = null;
+		hasScrolled = false;
+		userScrollUntil = 0;
+		if (scroller) {
+			scroller.scrollTo({ top: 0, behavior: 'instant' });
+		}
 		// Album isn't in now-playing, but the queue item usually has it — better LRCLIB matching.
 		const album = playback.queue.items[playback.queue.currentIndex]?.album;
 		api.getLyrics({
@@ -66,6 +84,10 @@
 				lyrics = l;
 				loading = false;
 				hasScrolled = false; // first positioning on a new track is an instant jump
+				userScrollUntil = 0;
+				if (scroller) {
+					scroller.scrollTo({ top: 0, behavior: 'instant' });
+				}
 			})
 			.catch(() => {
 				if (requested !== id) return;
@@ -138,7 +160,21 @@
 			hasScrolled = false;
 			userScrollUntil = 0;
 		}
-		if (i < 0 || !scroller || Date.now() < userScrollUntil) return;
+		if (i < 0) {
+			if (!hasScrolled && scroller) {
+				scroller.scrollTo({ top: 0, behavior: 'instant' });
+			}
+			return;
+		}
+		if (!scroller || Date.now() < userScrollUntil) return;
+		if (i === 0) {
+			scroller.scrollTo({
+				top: 0,
+				behavior: hasScrolled ? 'smooth' : 'instant'
+			});
+			hasScrolled = true;
+			return;
+		}
 		const line = scroller.querySelector(`[data-line="${i}"]`);
 		if (!line) return;
 		const lineRect = line.getBoundingClientRect();

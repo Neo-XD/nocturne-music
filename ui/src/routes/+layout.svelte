@@ -11,7 +11,7 @@
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
-	import { fly } from 'svelte/transition';
+	import { fly, fade, slide } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { theme, appearance, applyArtworkAccent, prewarmArtworkAccent, initTheme } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
@@ -51,75 +51,68 @@
 	} from '$lib/updater.svelte';
 
 	let { children } = $props();
-	// Only 1 sidebar can be visible at a time:
-	let queueOpen = $state(false);
-	let lyricsOpen = $state(false);
-	let devicesOpen = $state(false);
-
-	function toggleQueue() {
-		if (tabbed) {
-			np.tab = 'queue';
-		} else {
-			if (queueOpen) {
-				queueOpen = false;
-			} else {
-				queueOpen = true;
-				lyricsOpen = false;
-				devicesOpen = false;
-				np.sidebarOpen = false;
-			}
-		}
-	}
-
-	function toggleLyrics() {
-		if (tabbed) {
-			np.tab = 'lyrics';
-		} else {
-			if (lyricsOpen) {
-				lyricsOpen = false;
-			} else {
-				lyricsOpen = true;
-				queueOpen = false;
-				devicesOpen = false;
-				np.sidebarOpen = false;
-			}
-		}
-	}
-
-	function toggleDevices() {
-		if (devicesOpen) {
-			devicesOpen = false;
-		} else {
-			devicesOpen = true;
-			queueOpen = false;
-			lyricsOpen = false;
-			np.sidebarOpen = false;
-			np.open = false;
-		}
-	}
-
-	function toggleNowPlayingSidebar() {
-		if (np.sidebarOpen) {
-			np.sidebarOpen = false;
-		} else {
-			np.sidebarOpen = true;
-			queueOpen = false;
-			lyricsOpen = false;
-			devicesOpen = false;
-			np.open = false;
-		}
-	}
-
 	const tabbed = $derived(np.open && appearance.tabbedPlayer);
+
+	// Right sidebar: only 1 right sidebar can be active at a time.
+	// Closing a sidebar cleanly closes it without resurrecting any previous sidebar.
+	type RightSidebarId = 'np' | 'queue' | 'lyrics' | 'devices';
+	let activeRightSidebar = $state<RightSidebarId | null>(np.sidebarOpen ? 'np' : null);
+
+	function toggleRightSidebar(id: RightSidebarId) {
+		if (tabbed && (id === 'queue' || id === 'lyrics')) {
+			np.tab = id;
+			return;
+		}
+		if (id === 'np') {
+			np.open = false;
+		}
+		if (activeRightSidebar === id) {
+			if (id === 'np') np.sidebarOpen = false;
+			activeRightSidebar = null;
+		} else {
+			if (id === 'np') np.sidebarOpen = true;
+			else np.sidebarOpen = false;
+			activeRightSidebar = id;
+		}
+	}
+
+	function closeRightSidebar(id?: RightSidebarId) {
+		if (!id || activeRightSidebar === id) {
+			if (activeRightSidebar === 'np') {
+				np.sidebarOpen = false;
+			}
+			activeRightSidebar = null;
+		}
+	}
+
+	let npSidebarWidth = $state(
+		browser
+			? Math.min(650, Math.max(280, parseInt(localStorage.getItem('nowPlayingSidebarWidth') || '384', 10) || 384))
+			: 384
+	);
+	let isResizingSidebar = $state(false);
+
+	const currentSidebarWidth = $derived.by(() => {
+		if (!activeRightSidebar) return 0;
+		if (activeRightSidebar === 'np') return npSidebarWidth;
+		if (activeRightSidebar === 'devices') return 352;
+		return 320; // queue & lyrics
+	});
+
+	const queueOpen = $derived(!tabbed && activeRightSidebar === 'queue');
+	const lyricsOpen = $derived(!tabbed && activeRightSidebar === 'lyrics');
+	const devicesOpen = $derived(activeRightSidebar === 'devices');
+	const npSidebarOpen = $derived(activeRightSidebar === 'np' && !np.open);
+
 	$effect(() => {
-		if (tabbed) queueOpen = lyricsOpen = devicesOpen = false;
+		if (np.sidebarOpen && activeRightSidebar === null && !np.open) {
+			activeRightSidebar = 'np';
+		} else {
+			np.sidebarOpen = npSidebarOpen;
+		}
 	});
 	$effect(() => {
-		if (np.sidebarOpen) {
-			queueOpen = false;
-			lyricsOpen = false;
-			devicesOpen = false;
-		}
+		np.devicesOpen = devicesOpen;
 	});
 
 	// "Adapt colors to artwork": re-run on every track change and on the toggle itself. The 120px
@@ -239,7 +232,7 @@
 			<Sidebar />
 			<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from anywhere in
 			     the feed, so aiming at the top edge scrolls this container while the drag is in flight. -->
-			<main class="min-w-0 flex-1 overflow-y-auto pl-16 {ui.sidebarCollapsed ? '' : 'lg:pl-60'}" {@attach dragScroll}>
+			<main class="min-w-0 flex-1 overflow-y-auto" {@attach dragScroll}>
 				<!-- Remount the current page on sign-in/out so it refetches with the new account. -->
 				{#key auth.epoch}
 					{@render children()}
@@ -250,29 +243,51 @@
 			     parking container until the view borrows the picture. -->
 			<VideoSurface />
 			{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
-			{#if lyricsOpen}<LyricsPanel onClose={() => (lyricsOpen = false)} {queueOpen} />{/if}
-			{#if queueOpen}<QueuePanel onClose={() => (queueOpen = false)} />{/if}
-			{#if devicesOpen || np.devicesOpen}
-				<DevicesSidebar onClose={() => { devicesOpen = false; np.devicesOpen = false; }} />
-			{/if}
-			{#if np.sidebarOpen && playback.now && !np.open}
-				<NowPlayingSidebar
-					onClose={() => (np.sidebarOpen = false)}
-					onOpenQueue={toggleQueue}
-					onOpenLyrics={toggleLyrics}
-				/>
+			{#if activeRightSidebar && (activeRightSidebar !== 'np' || (playback.now && !np.open))}
+				<div
+					class="relative z-20 flex h-full shrink-0 flex-col overflow-hidden {isResizingSidebar
+						? 'transition-none'
+						: 'transition-[width] duration-250 ease-out'}"
+					style="width: {currentSidebarWidth}px;"
+					transition:slide={{ axis: 'x', duration: 250, easing: cubicOut }}
+				>
+					<div class="relative h-full w-full overflow-hidden">
+						{#key activeRightSidebar}
+							<div
+								class="h-full w-full"
+								in:fly={{ x: 28, duration: 220, easing: cubicOut }}
+							>
+								{#if activeRightSidebar === 'lyrics'}
+									<LyricsPanel onClose={() => closeRightSidebar('lyrics')} />
+								{:else if activeRightSidebar === 'queue'}
+									<QueuePanel onClose={() => closeRightSidebar('queue')} />
+								{:else if activeRightSidebar === 'devices'}
+									<DevicesSidebar onClose={() => closeRightSidebar('devices')} />
+								{:else if activeRightSidebar === 'np'}
+									<NowPlayingSidebar
+										onClose={() => closeRightSidebar('np')}
+										onOpenQueue={() => toggleRightSidebar('queue')}
+										onOpenLyrics={() => toggleRightSidebar('lyrics')}
+										onWidthChange={(w) => (npSidebarWidth = w)}
+										onResizingChange={(r) => (isResizingSidebar = r)}
+									/>
+								{/if}
+							</div>
+						{/key}
+					</div>
+				</div>
 			{/if}
 		</div>
 		{#if playback.now}
-			<div class="relative z-20" in:fly={{ y: 64, duration: 250, easing: cubicOut }}>
+			<div class="relative z-20" transition:fly={{ y: 64, duration: 200, easing: cubicOut }}>
 				<PlayerBar
-					onToggleQueue={toggleQueue}
+					onToggleQueue={() => toggleRightSidebar('queue')}
 					queueOpen={tabbed ? np.tab === 'queue' : queueOpen}
-					onToggleLyrics={toggleLyrics}
+					onToggleLyrics={() => toggleRightSidebar('lyrics')}
 					lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
-					onToggleDevices={toggleDevices}
-					devicesOpen={devicesOpen || np.devicesOpen}
-					onToggleNowPlayingSidebar={toggleNowPlayingSidebar}
+					onToggleDevices={() => toggleRightSidebar('devices')}
+					devicesOpen={devicesOpen}
+					onToggleNowPlayingSidebar={() => toggleRightSidebar('np')}
 				/>
 			</div>
 		{/if}

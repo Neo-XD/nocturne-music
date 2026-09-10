@@ -18,16 +18,17 @@
 		MinimizeScreenIcon,
 		MusicNote01Icon,
 		InformationCircleIcon,
-		ComputerIcon,
 		ArrowUp01Icon,
 		ArrowDown01Icon
 	} from '@hugeicons/core-free-icons';
+	import SpeakerIcon from './SpeakerIcon.svelte';
 	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import {
 		np,
+		prefs,
 		playback,
 		commitVolume,
 		cycleRepeat,
@@ -146,7 +147,9 @@
 <footer
 	onpointerdown={(e) => (pressedControl = isControl(e.target))}
 	onclick={onBarClick}
-	class="flex items-center gap-2 border-t bg-card px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3"
+	class="flex items-center gap-2 px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3 transition-all duration-200 {prefs.floatingPlayerBar
+		? 'app-floating-panel mx-2 mb-2 rounded-2xl border border-border/70 bg-card/80 shadow-2xl backdrop-blur-xl'
+		: 'border-t border-border/60 bg-card'}"
 >
 	<!-- Now playing. data-ctx: right-clicking the cover or the title opens the ⋮ menu for the track
 	     that's playing (not the buttons beside them — those keep their own meaning). -->
@@ -220,24 +223,26 @@
 				     on a narrow window three buttons here leave the title almost no room. lg, not md:
 				     the window's minWidth is 900 (tauri.conf.json), so md never fires. -->
 				{#if !api.isLocalId(playback.now.videoId)}
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						class="hidden lg:inline-flex"
-						onclick={toggleLike}
-						aria-label="Like"
-					>
-						<span
-							class="inline-flex"
-							class:animate-heart-pop={justLiked}
-							onanimationend={() => (justLiked = false)}
+					{#if prefs.visibleIcons.playerbar.like}
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							class="hidden lg:inline-flex"
+							onclick={toggleLike}
+							aria-label="Like"
 						>
-							<HugeiconsIcon
-								icon={FavouriteIcon}
-								class="h-4 w-4 {playback.rating === 'like' ? 'fill-current text-primary' : 'text-muted-foreground'}"
-							/>
-						</span>
-					</Button>
+							<span
+								class="inline-flex"
+								class:animate-heart-pop={justLiked}
+								onanimationend={() => (justLiked = false)}
+							>
+								<HugeiconsIcon
+									icon={FavouriteIcon}
+									class="h-4 w-4 {playback.rating === 'like' ? 'fill-current text-primary' : 'text-muted-foreground'}"
+								/>
+							</span>
+						</Button>
+					{/if}
 					<Button
 						variant="ghost"
 						size="icon-sm"
@@ -273,18 +278,20 @@
 	<!-- Transport -->
 	<div class="flex flex-[1.5] flex-col items-center gap-1">
 		<div class="flex items-center gap-1">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				onclick={() => api.toggleShuffle()}
-				aria-label="Shuffle"
-				aria-pressed={shuffleOn}
-			>
-				<HugeiconsIcon
-					icon={ShuffleIcon}
-					class="h-4 w-4 {shuffleOn ? 'text-primary' : 'text-muted-foreground'}"
-				/>
-			</Button>
+			{#if prefs.visibleIcons.playerbar.shuffle}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					onclick={() => api.toggleShuffle()}
+					aria-label="Shuffle"
+					aria-pressed={shuffleOn}
+				>
+					<HugeiconsIcon
+						icon={ShuffleIcon}
+						class="h-4 w-4 {shuffleOn ? 'text-primary' : 'text-muted-foreground'}"
+					/>
+				</Button>
+			{/if}
 			<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous">
 				<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
 			</Button>
@@ -307,21 +314,23 @@
 			<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next">
 				<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
 			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				onclick={cycleRepeat}
-				aria-label="Repeat: {repeat}"
-				aria-pressed={repeat !== 'off'}
-			>
-				<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount (see play/pause above) -->
-				<HugeiconsIcon
-					icon={RepeatIcon}
-					altIcon={RepeatOne01Icon}
-					showAlt={repeat === 'one'}
-					class="h-4 w-4 {repeat !== 'off' ? 'text-primary' : 'text-muted-foreground'}"
-				/>
-			</Button>
+			{#if prefs.visibleIcons.playerbar.repeat}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					onclick={cycleRepeat}
+					aria-label="Repeat: {repeat}"
+					aria-pressed={repeat !== 'off'}
+				>
+					<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount (see play/pause above) -->
+					<HugeiconsIcon
+						icon={RepeatIcon}
+						altIcon={RepeatOne01Icon}
+						showAlt={repeat === 'one'}
+						class="h-4 w-4 {repeat !== 'off' ? 'text-primary' : 'text-muted-foreground'}"
+					/>
+				</Button>
+			{/if}
 		</div>
 		<div class="flex w-full max-w-md items-center gap-2 text-xs text-muted-foreground">
 			<span class="tabular-nums">{fmt(shownPosition)}</span>
@@ -343,73 +352,83 @@
 	<!-- Volume + queue -->
 	<div class="flex flex-1 items-center justify-end gap-2">
 		<!-- Volume is the first control to drop on a narrow window (OS volume still works). -->
-		<div class="hidden items-center gap-1 md:flex">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				class="text-muted-foreground"
-				onclick={toggleMute}
-				aria-label={playback.volume === 0 ? 'Unmute' : 'Mute'}
-			>
-				<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount (see play/pause above) -->
-				<HugeiconsIcon
-					icon={VolumeHighIcon}
-					altIcon={VolumeMute02Icon}
-					showAlt={playback.volume === 0}
-					class="h-4 w-4"
+		{#if prefs.visibleIcons.playerbar.volume}
+			<div class="hidden items-center gap-1 md:flex">
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					class="text-muted-foreground"
+					onclick={toggleMute}
+					aria-label={playback.volume === 0 ? 'Unmute' : 'Mute'}
+				>
+					<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount (see play/pause above) -->
+					<HugeiconsIcon
+						icon={VolumeHighIcon}
+						altIcon={VolumeMute02Icon}
+						showAlt={playback.volume === 0}
+						class="h-4 w-4"
+					/>
+				</Button>
+				<input
+					type="range"
+					class="range w-24"
+					style="--pct:{playback.volume}%"
+					min="0"
+					max="100"
+					value={playback.volume}
+					oninput={onVolume}
+					onchange={onVolumeCommit}
+					onwheel={wheelVolume}
+					aria-label="Volume"
 				/>
-			</Button>
-			<input
-				type="range"
-				class="range w-24"
-				style="--pct:{playback.volume}%"
-				min="0"
-				max="100"
-				value={playback.volume}
-				oninput={onVolume}
-				onchange={onVolumeCommit}
-				onwheel={wheelVolume}
-				aria-label="Volume"
-			/>
-		</div>
+			</div>
+		{/if}
 		<!-- One cluster, so they sit tighter to each other than to the volume slider. -->
 		<div class="flex items-center gap-0.5">
-			<Button
-				variant={np.sidebarOpen ? 'secondary' : 'ghost'}
-				size="icon-sm"
-				onclick={() => {
-					if (onToggleNowPlayingSidebar) {
-						onToggleNowPlayingSidebar();
-					} else {
-						np.sidebarOpen = !np.sidebarOpen;
-						if (np.sidebarOpen) np.open = false;
-					}
-				}}
-				aria-label="Now playing view"
-				title="Now playing view"
-			>
-				<HugeiconsIcon icon={InformationCircleIcon} class="h-5 w-5" />
-			</Button>
-			<Button variant="ghost" size="icon-sm" onclick={openMiniPlayer} aria-label="Mini player">
-				<HugeiconsIcon icon={MinimizeScreenIcon} class="h-5 w-5" />
-			</Button>
-			<Button
-				variant={lyricsOpen ? 'secondary' : 'ghost'}
-				size="icon-sm"
-				onclick={onToggleLyrics}
-				aria-label="Toggle lyrics"
-			>
-				<HugeiconsIcon icon={Mic01Icon} class="h-5 w-5" />
-			</Button>
-			<Button
-				variant={queueOpen ? 'secondary' : 'ghost'}
-				size="icon-sm"
-				onclick={onToggleQueue}
-				aria-label="Toggle queue"
-			>
-				<HugeiconsIcon icon={Queue01Icon} class="h-5 w-5" />
-			</Button>
-			{#if onToggleDevices}
+			{#if prefs.visibleIcons.playerbar.info}
+				<Button
+					variant={np.sidebarOpen ? 'secondary' : 'ghost'}
+					size="icon-sm"
+					onclick={() => {
+						if (onToggleNowPlayingSidebar) {
+							onToggleNowPlayingSidebar();
+						} else {
+							np.sidebarOpen = !np.sidebarOpen;
+							if (np.sidebarOpen) np.open = false;
+						}
+					}}
+					aria-label="Now playing view"
+					title="Now playing view"
+				>
+					<HugeiconsIcon icon={InformationCircleIcon} class="h-5 w-5" />
+				</Button>
+			{/if}
+			{#if prefs.visibleIcons.playerbar.miniPlayer}
+				<Button variant="ghost" size="icon-sm" onclick={openMiniPlayer} aria-label="Mini player">
+					<HugeiconsIcon icon={MinimizeScreenIcon} class="h-5 w-5" />
+				</Button>
+			{/if}
+			{#if prefs.visibleIcons.playerbar.lyrics}
+				<Button
+					variant={lyricsOpen ? 'secondary' : 'ghost'}
+					size="icon-sm"
+					onclick={onToggleLyrics}
+					aria-label="Toggle lyrics"
+				>
+					<HugeiconsIcon icon={Mic01Icon} class="h-5 w-5" />
+				</Button>
+			{/if}
+			{#if prefs.visibleIcons.playerbar.queue}
+				<Button
+					variant={queueOpen ? 'secondary' : 'ghost'}
+					size="icon-sm"
+					onclick={onToggleQueue}
+					aria-label="Toggle queue"
+				>
+					<HugeiconsIcon icon={Queue01Icon} class="h-5 w-5" />
+				</Button>
+			{/if}
+			{#if onToggleDevices && prefs.visibleIcons.playerbar.devices}
 				<Button
 					variant={devicesOpen ? 'secondary' : 'ghost'}
 					size="icon-sm"
@@ -417,29 +436,31 @@
 					aria-label="Connect to a device"
 					title="Connect to a device"
 				>
-					<HugeiconsIcon icon={ComputerIcon} class="h-5 w-5" />
+					<SpeakerIcon class="h-5 w-5" />
 				</Button>
 			{/if}
 			<!-- The keyboard (and discoverable) way in and out of the now-playing view; clicking the
 			     bar's empty space does the same thing. -->
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				onclick={() => {
-					np.open = !np.open;
-					if (np.open) np.sidebarOpen = false;
-				}}
-				aria-label={np.open ? 'Minimise player' : 'Open player'}
-				aria-expanded={np.open}
-			>
-				<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount (see play/pause above) -->
-				<HugeiconsIcon
-					icon={ArrowUp01Icon}
-					altIcon={ArrowDown01Icon}
-					showAlt={np.open}
-					class="h-5 w-5"
-				/>
-			</Button>
+			{#if prefs.visibleIcons.playerbar.fullscreen}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					onclick={() => {
+						np.open = !np.open;
+						if (np.open) np.sidebarOpen = false;
+					}}
+					aria-label={np.open ? 'Minimise player' : 'Open player'}
+					aria-expanded={np.open}
+				>
+					<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount (see play/pause above) -->
+					<HugeiconsIcon
+						icon={ArrowUp01Icon}
+						altIcon={ArrowDown01Icon}
+						showAlt={np.open}
+						class="h-5 w-5"
+					/>
+				</Button>
+			{/if}
 		</div>
 	</div>
 </footer>

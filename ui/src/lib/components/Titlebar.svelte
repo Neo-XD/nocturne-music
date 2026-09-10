@@ -28,7 +28,7 @@
 	import TopSearchBar from './TopSearchBar.svelte';
 	import logo from '$lib/assets/icon.png';
 	import * as api from '$lib/api';
-	import { np, openMiniPlayer, toast, ui } from '$lib/player.svelte';
+	import { np, prefs, openMiniPlayer, toast, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 
@@ -147,37 +147,45 @@
      at this z — it must outrank the panels below (LyricsPanel/QueuePanel, z-30). -->
 <header
 	data-tauri-drag-region
-	class="app-titlebar relative z-50 flex h-10.5 shrink-0 select-none items-center justify-between border-b border-border/60 bg-background px-1"
+	class="app-titlebar z-40 flex h-10.5 shrink-0 select-none items-center justify-between transition-all duration-200 {prefs.floatingTopBar
+		? 'app-floating-panel mx-2 mt-2 rounded-2xl border border-border/70 bg-card/75 backdrop-blur-xl px-2 shadow-none'
+		: 'relative border-b border-border/60 bg-background px-1 shadow-none'}"
 >
 	<div class="flex h-full items-center shrink-0">
 		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->
 		<img src={logo} alt="" class="pointer-events-none ml-2 mr-1 h-4 w-4" />
 		<!-- Bigger and heavier than the icons on the right: these are navigation, and at their
 		     weight the arrow read as decoration and got missed. -->
-		<button
-			class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
-			onclick={() => history.back()}
-			disabled={depth === 0}
-			title="Back"
-			aria-label="Back"
-		>
-			<HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
-		</button>
-		<button
-			class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
-			onclick={() => history.forward()}
-			disabled={depth === deepest}
-			title="Forward"
-			aria-label="Forward"
-		>
-			<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
-		</button>
+		{#if prefs.visibleIcons.titlebar.navigation}
+			<button
+				class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+				onclick={() => history.back()}
+				disabled={depth === 0}
+				title="Back"
+				aria-label="Back"
+			>
+				<HugeiconsIcon icon={ArrowLeft01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
+			</button>
+			<button
+				class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+				onclick={() => history.forward()}
+				disabled={depth === deepest}
+				title="Forward"
+				aria-label="Forward"
+			>
+				<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
+			</button>
+		{/if}
 	</div>
 
 	<!-- Centered sticky search bar -->
-	<div class="flex-1 max-w-sm md:max-w-md mx-2">
-		<TopSearchBar />
-	</div>
+	{#if prefs.visibleIcons.titlebar.search}
+		<div class="flex-1 max-w-sm md:max-w-md mx-2">
+			<TopSearchBar />
+		</div>
+	{:else}
+		<div class="flex-1"></div>
+	{/if}
 
 	<div class="flex h-full items-center shrink-0">
 		<!-- Account first, then the integrations, then the window controls. The drag region lives on
@@ -187,109 +195,121 @@
 
 		<!-- Paste a YouTube Music link and go to it: the only way into a playlist that is shared by
 		     link and never appears in search or the library (#63). -->
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
-			onclick={() => (ui.linkOpen = true)}
-			title="Open link"
-			aria-label="Open link"
-		>
-			<HugeiconsIcon icon={Link04Icon} class="h-4 w-4" />
-		</button>
+		{#if prefs.visibleIcons.titlebar.openLink}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+				onclick={() => (ui.linkOpen = true)}
+				title="Open link"
+				aria-label="Open link"
+			>
+				<HugeiconsIcon icon={Link04Icon} class="h-4 w-4" />
+			</button>
+		{/if}
 
 		<!-- Opens the same modal as the home hero's button (one dialog, mounted in +layout). -->
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {lt.role !==
-			'none'
-				? 'text-primary'
-				: ''}"
-			onclick={() => (ui.ltOpen = true)}
-			title="Listen Together"
-			aria-label="Listen Together"
-		>
-			<span class="relative">
-				<HugeiconsIcon icon={UserGroup02Icon} class="h-4 w-4" />
-				{#if lt.role !== 'none'}
-					<!-- Discord's status dot with a ping behind it: two layers, because animate-ping
-					     scales and fades the element it's on, so a lone dot would blink out. -->
-					<span class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5">
-						<span class="absolute inset-0 animate-ping rounded-full bg-emerald-500 opacity-75"
-						></span>
-						<span class="absolute inset-0 rounded-full bg-emerald-500 ring-[1.5px] ring-background"
-						></span>
-					</span>
-				{/if}
-			</span>
-		</button>
+		{#if prefs.visibleIcons.titlebar.listenTogether}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {lt.role !==
+				'none'
+					? 'text-primary'
+					: ''}"
+				onclick={() => (ui.ltOpen = true)}
+				title="Listen Together"
+				aria-label="Listen Together"
+			>
+				<span class="relative">
+					<HugeiconsIcon icon={UserGroup02Icon} class="h-4 w-4" />
+					{#if lt.role !== 'none'}
+						<!-- Discord's status dot with a ping behind it: two layers, because animate-ping
+						     scales and fades the element it's on, so a lone dot would blink out. -->
+						<span class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5">
+							<span class="absolute inset-0 animate-ping rounded-full bg-emerald-500 opacity-75"
+							></span>
+							<span class="absolute inset-0 rounded-full bg-emerald-500 ring-[1.5px] ring-background"
+							></span>
+						</span>
+					{/if}
+				</span>
+			</button>
+		{/if}
 
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {discordOn
-				? 'text-foreground'
-				: ''}"
-			onclick={toggleDiscord}
-			title={discordOn ? 'Discord presence on — click to turn off' : 'Show what you play on Discord'}
-			aria-label="Discord Rich Presence"
-		>
-			<span class="relative">
-				<DiscordIcon class="h-4 w-4" />
-				<!-- Presence status dot, Discord-style: green = live, red = off. -->
-				<span
-					class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ring-[1.5px] ring-background {discordOn
-						? 'bg-emerald-500'
-						: 'bg-red-500'}"
-				></span>
-			</span>
-		</button>
+		{#if prefs.visibleIcons.titlebar.discord}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {discordOn
+					? 'text-foreground'
+					: ''}"
+				onclick={toggleDiscord}
+				title={discordOn ? 'Discord presence on — click to turn off' : 'Show what you play on Discord'}
+				aria-label="Discord Rich Presence"
+			>
+				<span class="relative">
+					<DiscordIcon class="h-4 w-4" />
+					<!-- Presence status dot, Discord-style: green = live, red = off. -->
+					<span
+						class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full ring-[1.5px] ring-background {discordOn
+							? 'bg-emerald-500'
+							: 'bg-red-500'}"
+					></span>
+				</span>
+			</button>
+		{/if}
 
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {connected
-				? 'text-foreground'
-				: ''}"
-			onclick={onScrobblerClick}
-			title={scrobblerTitle}
-			aria-label={scrobblerTitle}
-		>
-			<span class="relative">
-				<LastFmIcon class="h-4 w-4 {connecting ? 'animate-pulse opacity-60' : ''}" />
-				{#if connecting}
-					<HugeiconsIcon
-						icon={Loading03Icon}
-						strokeWidth={2.5}
-						class="absolute -bottom-1.5 -right-2 h-3.5 w-3.5 animate-spin text-primary"
-					/>
-				{:else if connected}
-					<!-- bg-background ring so the badge reads over the icon's stroke. -->
-					<HugeiconsIcon
-						icon={CheckmarkCircle01Icon}
-						strokeWidth={2.5}
-						class="absolute -bottom-1.5 -right-2 h-3.5 w-3.5 rounded-full bg-background text-primary"
-					/>
-				{/if}
-			</span>
-		</button>
+		{#if prefs.visibleIcons.titlebar.lastfm}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {connected
+					? 'text-foreground'
+					: ''}"
+				onclick={onScrobblerClick}
+				title={scrobblerTitle}
+				aria-label={scrobblerTitle}
+			>
+				<span class="relative">
+					<LastFmIcon class="h-4 w-4 {connecting ? 'animate-pulse opacity-60' : ''}" />
+					{#if connecting}
+						<HugeiconsIcon
+							icon={Loading03Icon}
+							strokeWidth={2.5}
+							class="absolute -bottom-1.5 -right-2 h-3.5 w-3.5 animate-spin text-primary"
+						/>
+					{:else if connected}
+						<!-- bg-background ring so the badge reads over the icon's stroke. -->
+						<HugeiconsIcon
+							icon={CheckmarkCircle01Icon}
+							strokeWidth={2.5}
+							class="absolute -bottom-1.5 -right-2 h-3.5 w-3.5 rounded-full bg-background text-primary"
+						/>
+					{/if}
+				</span>
+			</button>
+		{/if}
 
 		<!-- Mini player: hides the app to the tray and hands over to the floating widget (mini.rs).
 		     It sits with the integrations rather than the window controls because it swaps what
 		     you're using, not the size of this window. -->
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
-			onclick={openMiniPlayer}
-			title="Mini player"
-			aria-label="Mini player"
-		>
-			<HugeiconsIcon icon={MinimizeScreenIcon} class="h-4 w-4" />
-		</button>
+		{#if prefs.visibleIcons.titlebar.miniPlayer}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+				onclick={openMiniPlayer}
+				title="Mini player"
+				aria-label="Mini player"
+			>
+				<HugeiconsIcon icon={MinimizeScreenIcon} class="h-4 w-4" />
+			</button>
+		{/if}
 
 		<!-- Fullscreen player (F11) -->
-		<button
-			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {np.fullscreenOpen
-				? 'text-primary'
-				: ''}"
-			onclick={() => (np.fullscreenOpen = !np.fullscreenOpen)}
-			title="Fullscreen player (F11)"
-			aria-label="Fullscreen player"
-		>
-			<HugeiconsIcon icon={FullScreenIcon} class="h-4 w-4" />
-		</button>
+		{#if prefs.visibleIcons.titlebar.fullscreen}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {np.fullscreenOpen
+					? 'text-primary'
+					: ''}"
+				onclick={() => (np.fullscreenOpen = !np.fullscreenOpen)}
+				title="Fullscreen player (F11)"
+				aria-label="Fullscreen player"
+			>
+				<HugeiconsIcon icon={FullScreenIcon} class="h-4 w-4" />
+			</button>
+		{/if}
 
 		<div class="mx-1.5 h-4 w-px bg-border"></div>
 

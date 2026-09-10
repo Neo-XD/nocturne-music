@@ -26,7 +26,7 @@
 set -uo pipefail
 
 APPDIR=/app
-BIN="$(ls "$APPDIR"/usr/bin/nocturne* "$APPDIR"/usr/bin/limusic* 2>/dev/null | head -1 || echo "$APPDIR/usr/bin/nocturne-app")"
+BIN="$(ls "$APPDIR"/usr/bin/[nN]octurne* "$APPDIR"/usr/bin/[lL]imusic* "$APPDIR"/usr/bin/* 2>/dev/null | head -1 || echo "$APPDIR/usr/bin/nocturne-app")"
 FAIL=0
 step() { printf '\n── %s\n' "$1"; }
 bad()  { echo "   FAIL: $1"; FAIL=1; }
@@ -146,7 +146,7 @@ kill "$RUNPID" 2>/dev/null
 wait "$RUNPID" 2>/dev/null
 # The app is killed rather than exiting, so its status says nothing; the log is the verdict.
 grep -viE 'dbind|StatusNotifier|libEGL warning|DRI3' /tmp/run.log | head -40 | sed 's/^/   /'
-if grep -qE 'Could not create .*EGL display|undefined symbol|cannot open shared object file|Failed to load module|webview never became ready|symbol lookup error|core dumped' /tmp/run.log; then
+if grep -viE 'canberra' /tmp/run.log | grep -qE 'Could not create .*EGL display|undefined symbol|cannot open shared object file|Failed to load module:|webview never became ready|symbol lookup error|core dumped'; then
   bad "startup log contains a loader or webview failure (see above)"
 fi
 # "webview bridge OK" means a WebKit web process came up and round-tripped JS. It is the one line

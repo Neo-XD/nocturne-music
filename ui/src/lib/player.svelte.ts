@@ -65,7 +65,122 @@ export const toggleDevicesSidebar = () => {
 	}
 };
 
-export const prefs = $state({ musicVideos: false, filterExplicit: false, animatedArtwork: true });
+export type FloatingSidebarMode = 'both' | 'left' | 'right' | 'none';
+
+function getInitialFloatingMode(): FloatingSidebarMode {
+	if (!browser) return 'both';
+	const savedMode = localStorage.getItem('floating_sidebar_mode') as FloatingSidebarMode | null;
+	if (savedMode && ['both', 'left', 'right', 'none'].includes(savedMode)) {
+		return savedMode;
+	}
+	const legacy = localStorage.getItem('floating_sidebar');
+	if (legacy === 'false') return 'none';
+	return 'both';
+}
+
+const initialMode = getInitialFloatingMode();
+
+export const prefs = $state({
+	musicVideos: false,
+	filterExplicit: false,
+	animatedArtwork: true,
+	floatingSidebarMode: initialMode,
+	floatingSidebarLeft: initialMode === 'both' || initialMode === 'left',
+	floatingSidebarRight: initialMode === 'both' || initialMode === 'right',
+	floatingSidebar: initialMode !== 'none',
+	floatingTopBar: browser ? localStorage.getItem('floating_topbar') === 'true' : false,
+	floatingPlayerBar: browser ? localStorage.getItem('floating_playerbar') === 'true' : false,
+	visibleIcons: {
+		titlebar: {
+			navigation: browser ? localStorage.getItem('icon_tb_navigation') !== 'false' : true,
+			search: browser ? localStorage.getItem('icon_tb_search') !== 'false' : true,
+			openLink: browser ? localStorage.getItem('icon_tb_openLink') !== 'false' : true,
+			listenTogether: browser ? localStorage.getItem('icon_tb_listenTogether') !== 'false' : true,
+			discord: browser ? localStorage.getItem('icon_tb_discord') !== 'false' : true,
+			lastfm: browser ? localStorage.getItem('icon_tb_lastfm') !== 'false' : true,
+			miniPlayer: browser ? localStorage.getItem('icon_tb_miniPlayer') !== 'false' : true,
+			fullscreen: browser ? localStorage.getItem('icon_tb_fullscreen') !== 'false' : true,
+			settings: browser ? localStorage.getItem('icon_tb_settings') !== 'false' : true,
+		},
+		playerbar: {
+			like: browser ? localStorage.getItem('icon_pb_like') !== 'false' : true,
+			shuffle: browser ? localStorage.getItem('icon_pb_shuffle') !== 'false' : true,
+			repeat: browser ? localStorage.getItem('icon_pb_repeat') !== 'false' : true,
+			volume: browser ? localStorage.getItem('icon_pb_volume') !== 'false' : true,
+			info: browser ? localStorage.getItem('icon_pb_info') !== 'false' : true,
+			miniPlayer: browser ? localStorage.getItem('icon_pb_miniPlayer') !== 'false' : true,
+			lyrics: browser ? localStorage.getItem('icon_pb_lyrics') !== 'false' : true,
+			queue: browser ? localStorage.getItem('icon_pb_queue') !== 'false' : true,
+			devices: browser ? localStorage.getItem('icon_pb_devices') !== 'false' : true,
+			fullscreen: browser ? localStorage.getItem('icon_pb_fullscreen') !== 'false' : true,
+		}
+	}
+});
+
+export function setFloatingSidebarLeft(enabled: boolean) {
+	prefs.floatingSidebarLeft = enabled;
+	if (prefs.floatingSidebarLeft && prefs.floatingSidebarRight) prefs.floatingSidebarMode = 'both';
+	else if (prefs.floatingSidebarLeft) prefs.floatingSidebarMode = 'left';
+	else if (prefs.floatingSidebarRight) prefs.floatingSidebarMode = 'right';
+	else prefs.floatingSidebarMode = 'none';
+	prefs.floatingSidebar = prefs.floatingSidebarLeft || prefs.floatingSidebarRight;
+	if (browser) {
+		localStorage.setItem('floating_sidebar_mode', prefs.floatingSidebarMode);
+		localStorage.setItem('floating_sidebar_left', enabled ? 'true' : 'false');
+		localStorage.setItem('floating_sidebar', prefs.floatingSidebar ? 'true' : 'false');
+	}
+}
+
+export function setFloatingSidebarRight(enabled: boolean) {
+	prefs.floatingSidebarRight = enabled;
+	if (prefs.floatingSidebarLeft && prefs.floatingSidebarRight) prefs.floatingSidebarMode = 'both';
+	else if (prefs.floatingSidebarLeft) prefs.floatingSidebarMode = 'left';
+	else if (prefs.floatingSidebarRight) prefs.floatingSidebarMode = 'right';
+	else prefs.floatingSidebarMode = 'none';
+	prefs.floatingSidebar = prefs.floatingSidebarLeft || prefs.floatingSidebarRight;
+	if (browser) {
+		localStorage.setItem('floating_sidebar_mode', prefs.floatingSidebarMode);
+		localStorage.setItem('floating_sidebar_right', enabled ? 'true' : 'false');
+		localStorage.setItem('floating_sidebar', prefs.floatingSidebar ? 'true' : 'false');
+	}
+}
+
+export function setFloatingPlayerBar(enabled: boolean) {
+	prefs.floatingPlayerBar = enabled;
+	if (browser) localStorage.setItem('floating_playerbar', enabled ? 'true' : 'false');
+}
+
+export function setFloatingSidebarMode(mode: FloatingSidebarMode) {
+	prefs.floatingSidebarMode = mode;
+	prefs.floatingSidebarLeft = mode === 'both' || mode === 'left';
+	prefs.floatingSidebarRight = mode === 'both' || mode === 'right';
+	prefs.floatingSidebar = mode !== 'none';
+	if (browser) {
+		localStorage.setItem('floating_sidebar_mode', mode);
+		localStorage.setItem('floating_sidebar_left', prefs.floatingSidebarLeft ? 'true' : 'false');
+		localStorage.setItem('floating_sidebar_right', prefs.floatingSidebarRight ? 'true' : 'false');
+		localStorage.setItem('floating_sidebar', mode !== 'none' ? 'true' : 'false');
+	}
+}
+
+export function setFloatingSidebar(enabled: boolean) {
+	setFloatingSidebarMode(enabled ? 'both' : 'none');
+}
+
+export function setFloatingTopBar(enabled: boolean) {
+	prefs.floatingTopBar = enabled;
+	if (browser) localStorage.setItem('floating_topbar', enabled ? 'true' : 'false');
+}
+
+export function setVisibleIcon(bar: 'titlebar' | 'playerbar', icon: string, visible: boolean) {
+	if (bar === 'titlebar' && icon in prefs.visibleIcons.titlebar) {
+		(prefs.visibleIcons.titlebar as Record<string, boolean>)[icon] = visible;
+		if (browser) localStorage.setItem(`icon_tb_${icon}`, visible ? 'true' : 'false');
+	} else if (bar === 'playerbar' && icon in prefs.visibleIcons.playerbar) {
+		(prefs.visibleIcons.playerbar as Record<string, boolean>)[icon] = visible;
+		if (browser) localStorage.setItem(`icon_pb_${icon}`, visible ? 'true' : 'false');
+	}
+}
 
 export function setAnimatedArtwork(enabled: boolean) {
 	prefs.animatedArtwork = enabled;
@@ -1013,7 +1128,8 @@ export const ui = $state({
 	// Manual sidebar collapse, lg and up (below that the rail is already collapsed by the
 	// breakpoint). Here rather than in Sidebar because the now-playing view and the fullscreen
 	// lyrics panel are overlays that offset themselves by the sidebar's width.
-	sidebarCollapsed: browser && localStorage.getItem('sidebar_collapsed') === '1'
+	sidebarCollapsed: browser && localStorage.getItem('sidebar_collapsed') === '1',
+	sidebarForceExpanded: false
 });
 
 export function openChannelPicker(required = false) {
@@ -1023,8 +1139,12 @@ export function openChannelPicker(required = false) {
 }
 
 export function toggleSidebar() {
-	ui.sidebarCollapsed = !ui.sidebarCollapsed;
-	localStorage.setItem('sidebar_collapsed', ui.sidebarCollapsed ? '1' : '0');
+	if (np.open && !np.fullscreenOpen) {
+		ui.sidebarForceExpanded = !ui.sidebarForceExpanded;
+	} else {
+		ui.sidebarCollapsed = !ui.sidebarCollapsed;
+		localStorage.setItem('sidebar_collapsed', ui.sidebarCollapsed ? '1' : '0');
+	}
 }
 
 export type Toast = { msg: string; kind: 'info' | 'success' | 'error' };
