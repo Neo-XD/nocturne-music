@@ -1428,22 +1428,12 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
 - **Auto-Resized Height & Consistent Spacing**: Fixed height calculations to ensure exact 8px uniform spacing between floating sidebars, the floating bottom player bar, and window borders.
 - **Clean Sidebar Lifecycle**: Completely eliminated unwanted older sidebar popups when closing a panel — closing properly closes the active panel without resurrecting previous states.
 - **Collapsed Sidebar Playlist Quick Navigation**: Display playlist buttons with artwork/icons directly on the collapsed left sidebar rail, with auto-collapse in the fullscreen now playing view for distraction-free navigation.
-- **Confined Top Bar Scroll Bounds**: Confined home feed scrollbar track and thumb strictly below the floating top bar."#.to_string(),
-    };
-
-    let v073_note = ReleaseNote {
-        version: "0.7.3".to_string(),
-        date: "2026-09-10".to_string(),
-        body: r#"### Nocturne Music v0.7.3
-
-- **Audio Crossfade**: Smooth audio fading between tracks with configurable duration (0–12s) in Playback Settings.
+- **Confined Top Bar Scroll Bounds**: Confined home feed scrollbar track and thumb strictly below the floating top bar.
+- **Smooth Audio Crossfade**: Seamless audio crossfading between consecutive tracks with configurable duration (0–12s) in Playback Settings utilizing native mpv `lavfi=[afade=...]` audio filtering.
 - **Discord Rich Presence Customization**: Fully customize your Discord activity card including custom application ID, title/artist/album templates, button toggles & custom labels, pause state display, and time elapsed/remaining visibility.
-- **Floating-Style Sidebars**: Modern floating sidebar design mode with rounded corners, elevated borders, and translucent drop shadows.
-- **Resizable Now Playing Sidebar**: Left-edge draggable handle to freely resize the Now Playing panel from 280px to 650px with automatic width persistence.
-- **Word-by-Word Lyric Sources**: Expanded rich karaoke syllable support with YouLyPlus (multi-server mirror network) and Paxsenix Apple Music syllable-level timing.
+- **Word-by-Word Lyric Sources**: Expanded rich karaoke syllable support with YouLyPlus (multi-server mirror network) and Paxsenix Apple Music syllable-level timing parser.
 - **Automatic Lyrics Top Scroll**: Lyrics automatically reset to top on each song change before line cues commence.
-- **Customizable Interface Bars**: Show or hide individual icon buttons across the top titlebar and bottom playerbar to fit your personal workflow.
-- **Mobile Sync Enhancements**: Seamless bidirectional queue synchronization, speaker device icon alignment with mobile app, and drift-free monotonic playback timing."#.to_string(),
+- **Device Icon Harmony & Mobile Sync**: Updated output device selector icon to match Nocturne Mobile's speaker graphic (`SpeakerIcon.svelte`), alongside seamless bidirectional queue synchronization and sub-second millisecond timestamp tracking."#.to_string(),
     };
 
     let v072_note = ReleaseNote {
@@ -1596,8 +1586,8 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v080_note, v073_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note,
-        v064_note, v063_note, v062_note, v061_note, v06_note,
+        v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note,
+        v063_note, v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
@@ -1606,6 +1596,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         .chain([
             "0.8".to_string(),
             "0.8.0".to_string(),
+            "0.7.3".to_string(),
             "0.7".to_string(),
             "0.7.0".to_string(),
             "0.7.0-d".to_string(),
@@ -1627,7 +1618,8 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         if let Ok(releases) = resp.json::<Vec<GhRelease>>().await {
             for r in releases.into_iter().filter(|r| !r.draft && !r.prerelease) {
                 let ver = r.tag_name.trim_start_matches('v').to_string();
-                let is_redundant = ver == "0.7.0-d"
+                let is_redundant = ver == "0.7.3"
+                    || ver == "0.7.0-d"
                     || ver == "0.7.0"
                     || ver == "0.7d"
                     || ver == "0.6"

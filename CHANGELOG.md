@@ -14,19 +14,10 @@ All notable changes to Nocturne Desktop are documented in this file.
 - **Clean Sidebar Lifecycle**: Completely eliminated unwanted older sidebar popups when closing a panel — closing properly closes the active panel without resurrecting previous states.
 - **Collapsed Sidebar Playlist Quick Navigation**: Display playlist buttons with artwork/icons directly on the collapsed left sidebar rail, with auto-collapse in the fullscreen now playing view for distraction-free navigation.
 - **Confined Top Bar Scroll Bounds**: Confined home feed scrollbar track and thumb strictly below the floating top bar.
-
----
-
-## [v0.7.3] - 2026-09-10
-
-### ✨ New Features
 - **Smooth Audio Crossfade**: Configurable crossfade (0–12s) in Playback Settings utilizing native mpv `lavfi=[afade=...]` audio filtering.
 - **Discord RPC Customization**: Full Discord Rich Presence customization suite including custom application ID, title/artist/album format templates, toggleable buttons with custom labels, pause state display, and elapsed/remaining/hidden time options.
-- **Floating-Style Sidebars**: Toggle between docked sidebars and modern floating sidebars with rounded corners, translucent acrylic glass, and subtle drop shadows.
-- **Resizable Now Playing Sidebar**: Left-edge draggable handle to resize the Now Playing panel from 280px to 650px with local storage memory persistence.
 - **Word-by-Word Lyric Sources**: Integration for YouLyPlus API and Paxsenix Apple Music TTML syllable parser for synchronized karaoke highlighting.
 - **Automatic Lyrics Top Scroll**: Automatically resets lyrics scroll position to the top upon track transition.
-- **Interface Bar Customization**: Granular toggles to customize visible buttons across the top titlebar and bottom playerbar.
 - **Device Icon Harmony**: Updated output device selector icon to match Nocturne Mobile's speaker graphic (`SpeakerIcon.svelte`).
 - **Enhanced Mobile Remote Sync**: Bidirectional queue synchronization and sub-second millisecond timestamp tracking.
 
