@@ -13,8 +13,8 @@
   <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white">
 </p>
 
-**Nocturne Music** (short: **Nocturne**) talks directly to YouTube's internal API and plays audio through libmpv — no bundled
-browser runtime, no backend server, no ads in the audio. Started as a fork of [Limusic](https://github.com/SimoHypers/limusic) and was built from that to my taste and hopefully others' tastes too. [Limusic](https://github.com/SimoHypers/limusic) itself started as a desktop rebuild of the playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android YouTube Music client, and grew from there.
+**Nocturne Music** talks directly to YouTube's internal API and plays audio through libmpv — no bundled
+browser runtime, no backend server, no ads in the audio and **Extremely Customizable**. Started as a fork of [Limusic](https://github.com/SimoHypers/limusic) and was built from that to my taste and hopefully others' tastes too. [Limusic](https://github.com/SimoHypers/limusic) itself started as a desktop rebuild of the playback engine behind [Metrolist](https://github.com/mostafaalagamy/Metrolist), an Android YouTube Music client, and grew from there.
 
 </div>
 
@@ -77,25 +77,10 @@ Nocturne resolves audio streams through high-speed official YouTube clients with
 
 ## Performance & Linux Stability
 
-- **Linux Idle Crash Fix**: Periodic background glibc heap compaction (`malloc_trim`) is now disabled by default to prevent multi-threaded arena heap corruption during idle audio/webview states. Linux users who explicitly want aggressive memory reclamation can opt in via **Settings > Performance > Aggressive Memory Trimming (Experimental - Linux)**.
+- **Heavily RAM Optimised**: Extremely well optimised so that the Client Interface does't occupy >80MB of your RAM.
 - **Native GPU Acceleration**: Hardware acceleration uses native auto-detection (NVIDIA explicit sync + DMABUF renderer rules on Linux, Direct3D/WebView2 native GPU on Windows, Metal/WebKit on macOS) without manual flag overhead.
 
 ---
-
-## Upstream Bugfix Integration (v0.6.7 & v0.6.8)
-
-Nocturne integrates the stability and authentication fixes from upstream v0.6.7 and v0.6.8:
-
-- **Session Keep-Alive**: InnerTube transport automatically absorbs `Set-Cookie` rotation headers from API responses and persists updated session cookies to disk. If YouTube rejects an expired cookie, the backend transparently re-mints a fresh token from the persistent login webview session jar without requiring re-login.
-- **Serialized Authentication**: Added concurrency locking across `sign_in`, `switch_account`, and `sign_out` to prevent race conditions during multi-channel identity selection.
-- **Native Windows Login**: Removed Safari User-Agent spoofing in WebView2 on Windows so Google sign-in no longer triggers "This browser or app may not be secure".
-- **Upload Album Artwork**: Uploaded tracks inherit album cover artwork and playlist rows no longer display artist avatars for user-uploaded content.
-- **Home Shelf Dragging**: Midpoint hysteresis thresholding prevents list ping-ponging while dragging shelves in the Home layout editor.
-- **Singles & EPs "Go to Album"**: Track context menus now offer "Go to album" for songs on single and EP releases by stamping parent release IDs onto album tracks.
-- **Perceived Brightness Theme Banding**: Artwork accent generation uses bounded perceived brightness targets for high text and icon contrast across Light, Dark, and Glassy themes.
-- **Self-Updater Fallback**: Missing platform entries in `latest.json` fall back to querying the GitHub Releases API.
-- **openSUSE Certificate Trust**: AppImage runner automatically falls back to `/etc/ssl/ca-bundle.pem` and `/var/lib/ca-certificates/ca-bundle.pem` for system root certificate authorities.
-
 ## Scrobbling & Discord
 
 Both live in the title bar, next to the window controls.
@@ -122,19 +107,15 @@ Open the panel with the microphone button in the player bar, next to the queue
 button. It takes the same side of the window as the queue, so opening one closes
 the other.
 
-Lyrics come from [Boidu](https://boidu.dev) first, then
-[LRCLIB](https://lrclib.net), then YouTube Music's own timed lyrics, then
-Netease, QQ Music and Kugou, falling back to plain un-timed text when nobody has
+Lyrics come from [BetterLyrics](https://boidu.dev) first, then
+[LRCLIB](https://lrclib.net), then YouTube Music's own timed lyrics, 
+QQ Music and Kugou, falling back to plain un-timed text when nobody has
 a synced version. Matching is keyed on the track's exact length, because popular
 songs exist as several cuts and the wrong one drifts a few seconds out. Results
 are cached locally, so replaying a track is instant.
 
-Boidu is the only source with per-word timings, which is what lets a line
-highlight word by word as it's sung. It goes first for that reason, which also
-means it is asked about every track you play. Turn it off in **Settings ->
-Playback -> Word-by-word lyrics** and the other sources still provide
-line-by-line lyrics. Netease additionally supplies translations, shown under
-each line where it has them.
+If you would like to add, remove or customize the lyrics sources and its priorities, 
+the option is availible in Settings > Lyrics.
 
 Note that YouTube Music's lyrics are licensed per region and are missing
 entirely in some countries — where that's the case, LRCLIB does all the work.
