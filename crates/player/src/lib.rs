@@ -70,12 +70,23 @@ fn friendly_error(e: &libmpv2::Error) -> String {
     }
 }
 
+/// Single band in a parametric equalizer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EqBand {
+    pub freq: f64,
+    pub gain: f64,
+    pub q: f64,
+}
+
 #[derive(Debug, Clone, Default)]
 struct AudioFilters {
     gain_db: Option<f64>,
     semitones: i32,
     crossfade_secs: f64,
     track_duration: Option<f64>,
+    eq_enabled: bool,
+    eq_preamp_db: f64,
+    eq_bands: Vec<EqBand>,
 }
 
 /// The player. Wraps `Arc<Mpv>` (Send+Sync); the event loop runs on a dedicated OS thread and
@@ -291,6 +302,22 @@ impl Player {
         self.apply_af()
     }
 
+    /// Apply parametric equalizer bands and preamp.
+    pub fn set_equalizer(
+        &self,
+        enabled: bool,
+        preamp_db: f64,
+        bands: Vec<EqBand>,
+    ) -> Result<(), Error> {
+        {
+            let mut af = self.af.lock().unwrap();
+            af.eq_enabled = enabled;
+            af.eq_preamp_db = preamp_db;
+            af.eq_bands = bands;
+        }
+        self.apply_af()
+    }
+
     fn apply_af(&self) -> Result<(), Error> {
         let filters = self.af.lock().unwrap().clone();
         self.mpv.set_property("af", af_chain(&filters).as_str())?;
@@ -317,12 +344,41 @@ impl Player {
     }
 }
 
-/// The whole `af` chain: loudness gain, pitch, and crossfade. Empty when none is in play.
+/// The whole `af` chain: loudness gain, pitch, crossfade, and parametric equalizer. Empty when none is in play.
 fn af_chain(af: &AudioFilters) -> String {
     let mut chain = Vec::new();
-    if let Some(g) = af.gain_db {
-        chain.push(format!("lavfi=[volume={g}dB]"));
+
+    // Volume / Preamp / ReplayGain
+    let total_gain = match (af.gain_db, af.eq_enabled && af.eq_preamp_db.abs() > 0.01) {
+        (Some(g), true) => Some(g + af.eq_preamp_db),
+        (Some(g), false) => Some(g),
+        (None, true) => Some(af.eq_preamp_db),
+        (None, false) => None,
+    };
+    if let Some(g) = total_gain {
+        chain.push(format!("lavfi=[volume={g:.2}dB]"));
     }
+
+    // Parametric Equalizer bands (using FFmpeg's biquad peaking equalizer filter)
+    if af.eq_enabled && !af.eq_bands.is_empty() {
+        let active_bands: Vec<String> = af
+            .eq_bands
+            .iter()
+            .filter(|b| b.gain.abs() > 0.05)
+            .map(|b| {
+                format!(
+                    "equalizer=f={:.1}:t=q:w={:.2}:g={:.2}",
+                    b.freq,
+                    b.q.clamp(0.1, 10.0),
+                    b.gain.clamp(-24.0, 24.0)
+                )
+            })
+            .collect();
+        if !active_bands.is_empty() {
+            chain.push(format!("lavfi=[{}]", active_bands.join(",")));
+        }
+    }
+
     if af.semitones != 0 {
         // Semitones → frequency multiplier (equal temperament).
         chain.push(format!(

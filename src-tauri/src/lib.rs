@@ -242,6 +242,16 @@ pub fn run() {
                     let _ = player.set_crossfade(secs);
                 }
             }
+            let eq_enabled = db.get_setting("equalizer_enabled").as_deref() == Some("true");
+            let preamp = db
+                .get_setting("equalizer_preamp")
+                .and_then(|p| p.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            if let Some(bands_json) = db.get_setting("equalizer_bands") {
+                if let Ok(bands) = serde_json::from_str::<Vec<player::EqBand>>(&bands_json) {
+                    let _ = player.set_equalizer(eq_enabled, preamp, bands);
+                }
+            }
             let events = player.take_events().expect("player events");
 
             // Phase 2 extraction stack: cipher + PoToken hidden webviews behind the orchestrator.
@@ -498,6 +508,7 @@ pub fn run() {
             commands::forget_video_stream,
             commands::get_settings,
             commands::set_setting,
+            commands::set_equalizer,
             commands::get_stream_clients,
             commands::get_client_latencies,
             commands::benchmark_stream_clients,

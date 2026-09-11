@@ -23,6 +23,7 @@
 	let program: WebGLProgram | null = null;
 	let currentTexture: WebGLTexture | null = null;
 	let nextTexture: WebGLTexture | null = null;
+	let dummyTexture: WebGLTexture | null = null;
 	let textureMix = 1.0;
 	let currentSrc = '';
 	let animId = 0;
@@ -87,22 +88,22 @@
 
 			// Dual-octave domain warping (Kawarp style)
 			vec2 q = vec2(
-				snoise(uv * 2.0 + vec2(t * 0.35, t * 0.25)),
-				snoise(uv * 2.0 + vec2(t * 0.25 + 4.3, t * 0.35 + 2.1))
+				snoise(uv * 1.8 + vec2(t * 0.35, t * 0.25)),
+				snoise(uv * 1.8 + vec2(t * 0.25 + 4.3, t * 0.35 + 2.1))
 			);
 
 			vec2 r = vec2(
-				snoise(uv * 2.8 + 4.0 * q + vec2(t * 0.4 + 1.7, t * 0.45 + 9.2)),
-				snoise(uv * 2.8 + 4.0 * q + vec2(t * 0.35 + 8.3, t * 0.4 + 2.8))
+				snoise(uv * 2.4 + 3.6 * q + vec2(t * 0.4 + 1.7, t * 0.45 + 9.2)),
+				snoise(uv * 2.4 + 3.6 * q + vec2(t * 0.35 + 8.3, t * 0.4 + 2.8))
 			);
 
 			// Fluid offset with boundary clamp - enhanced displacement for visible organic liquid movement
-			vec2 warpedUv = uv + r * (0.24 * max(u_intensity, 0.25));
+			vec2 warpedUv = uv + r * (0.34 * max(u_intensity, 0.40));
 			warpedUv = clamp(warpedUv, 0.002, 0.998);
 
 			// Chromatic dispersion for liquid depth
-			vec2 rOffset = clamp(warpedUv + vec2(0.012 * r.x * max(u_intensity, 0.25), 0.004 * r.y), 0.002, 0.998);
-			vec2 bOffset = clamp(warpedUv - vec2(0.012 * r.y * max(u_intensity, 0.25), 0.004 * r.x), 0.002, 0.998);
+			vec2 rOffset = clamp(warpedUv + vec2(0.020 * r.x * max(u_intensity, 0.35), 0.008 * r.y), 0.002, 0.998);
+			vec2 bOffset = clamp(warpedUv - vec2(0.020 * r.y * max(u_intensity, 0.35), 0.008 * r.x), 0.002, 0.998);
 
 			vec4 color;
 
@@ -139,9 +140,10 @@
 				}
 			}
 
-			// Gentle breathing pulse
+			// Subtle liquid caustic highlights for organic flow
+			float caustic = pow(clamp(dot(r, q) * 0.5 + 0.5, 0.0, 1.0), 3.0) * 0.15 * max(u_intensity, 0.2);
 			float pulse = sin(t * 0.7) * 0.03 + 1.0;
-			gl_FragColor = vec4(color.rgb * pulse, color.a);
+			gl_FragColor = vec4((color.rgb + vec3(caustic)) * pulse, color.a);
 		}
 	`;
 
@@ -192,6 +194,7 @@
 			gl.enableVertexAttribArray(posLoc);
 			gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
+			dummyTexture = createDummyTexture(gl);
 			return true;
 		} catch (e) {
 			console.error('Failed to init WebGL:', e);
@@ -199,7 +202,29 @@
 		}
 	}
 
-	function loadTexture(gl: WebGLRenderingContext, img: HTMLImageElement): WebGLTexture | null {
+	function createDummyTexture(gl: WebGLRenderingContext): WebGLTexture | null {
+		const tex = gl.createTexture();
+		if (!tex) return null;
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.texImage2D(
+			gl.TEXTURE_2D,
+			0,
+			gl.RGBA,
+			1,
+			1,
+			0,
+			gl.RGBA,
+			gl.UNSIGNED_BYTE,
+			new Uint8Array([0, 0, 0, 0])
+		);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		return tex;
+	}
+
+	function uploadTex(gl: WebGLRenderingContext, source: TexImageSource): WebGLTexture | null {
 		const tex = gl.createTexture();
 		if (!tex) return null;
 		gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -207,59 +232,73 @@
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
 		return tex;
 	}
 
-	function updateImage(newSrc: string) {
+	async function updateImage(newSrc: string) {
 		if (!gl || !program || !newSrc) return;
 		currentSrc = newSrc;
-		const img = new Image();
-		img.crossOrigin = 'anonymous';
-		img.onload = () => {
-			if (!gl || !program || currentSrc !== newSrc) return;
-			const newTex = loadTexture(gl, img);
-			if (!newTex) {
-				webglFailed = true;
-				return;
+		const reqSrc = newSrc;
+
+		try {
+			let newTex: WebGLTexture | null = null;
+			let fetchUrl = newSrc;
+			if (/^https?:\/\//i.test(newSrc) && !newSrc.includes('asset.localhost')) {
+				fetchUrl = newSrc.includes('?') ? `${newSrc}&cors=1` : `${newSrc}?cors=1`;
 			}
 
-			if (!currentTexture) {
-				currentTexture = newTex;
-				textureMix = 1.0;
-			} else {
-				nextTexture = newTex;
-				textureMix = 0.0;
-			}
-		};
-		img.onerror = () => {
-			// CORS fallback for hosts disallowing anonymous crossOrigin
-			const fallbackImg = new Image();
-			fallbackImg.onload = () => {
-				if (!gl || !program || currentSrc !== newSrc) return;
-				try {
-					const newTex = loadTexture(gl, fallbackImg);
-					if (!newTex) {
-						webglFailed = true;
-						return;
-					}
-					if (!currentTexture) {
-						currentTexture = newTex;
-						textureMix = 1.0;
+			try {
+				const res = await fetch(fetchUrl);
+				if (res.ok) {
+					const blob = await res.blob();
+					if (typeof createImageBitmap === 'function') {
+						const bitmap = await createImageBitmap(blob);
+						if (!gl || !program || currentSrc !== reqSrc) return;
+						newTex = uploadTex(gl, bitmap);
 					} else {
-						nextTexture = newTex;
-						textureMix = 0.0;
+						const blobUrl = URL.createObjectURL(blob);
+						const img = new Image();
+						await new Promise((resolve, reject) => {
+							img.onload = resolve;
+							img.onerror = reject;
+							img.src = blobUrl;
+						});
+						URL.revokeObjectURL(blobUrl);
+						if (!gl || !program || currentSrc !== reqSrc) return;
+						newTex = uploadTex(gl, img);
 					}
-				} catch {
-					webglFailed = true;
 				}
-			};
-			fallbackImg.onerror = () => {
-				webglFailed = true;
-			};
-			fallbackImg.src = newSrc;
-		};
-		img.src = newSrc;
+			} catch {
+				// fetch fallback
+			}
+
+			if (!newTex) {
+				const img = new Image();
+				if (/^https?:\/\//i.test(newSrc) && !newSrc.includes('asset.localhost')) {
+					img.crossOrigin = 'anonymous';
+				}
+				await new Promise((resolve, reject) => {
+					img.onload = resolve;
+					img.onerror = reject;
+					img.src = newSrc;
+				});
+				if (!gl || !program || currentSrc !== reqSrc) return;
+				newTex = uploadTex(gl, img);
+			}
+
+			if (newTex) {
+				if (!currentTexture) {
+					currentTexture = newTex;
+					textureMix = 1.0;
+				} else {
+					nextTexture = newTex;
+					textureMix = 0.0;
+				}
+			}
+		} catch (err) {
+			console.warn('AnimatedArtwork texture loading warning:', err);
+		}
 	}
 
 	function render() {
@@ -295,16 +334,19 @@
 		const hasImage = currentTexture ? 1.0 : 0.0;
 		gl.uniform1f(gl.getUniformLocation(program, 'u_has_image'), hasImage);
 
-		if (currentTexture) {
-			gl.activeTexture(gl.TEXTURE0);
-			gl.bindTexture(gl.TEXTURE_2D, currentTexture);
-			gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+		const activeTex = currentTexture ?? dummyTexture;
+		const secondTex = nextTexture ?? dummyTexture;
 
-			if (nextTexture) {
-				gl.activeTexture(gl.TEXTURE1);
-				gl.bindTexture(gl.TEXTURE_2D, nextTexture);
-				gl.uniform1i(gl.getUniformLocation(program, 'u_next_image'), 1);
-			}
+		if (activeTex) {
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, activeTex);
+			gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+		}
+
+		if (secondTex) {
+			gl.activeTexture(gl.TEXTURE1);
+			gl.bindTexture(gl.TEXTURE_2D, secondTex);
+			gl.uniform1i(gl.getUniformLocation(program, 'u_next_image'), 1);
 		}
 
 		gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -389,6 +431,7 @@
 			if (gl) {
 				if (currentTexture) gl.deleteTexture(currentTexture);
 				if (nextTexture) gl.deleteTexture(nextTexture);
+				if (dummyTexture) gl.deleteTexture(dummyTexture);
 				if (program) gl.deleteProgram(program);
 			}
 		};

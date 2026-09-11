@@ -104,8 +104,18 @@
      (the compositor can't round an undecorated window for us — same trick as the main window). -->
 <div
 	data-tauri-drag-region="deep"
-	class="group relative flex h-screen w-screen select-none overflow-hidden rounded-2xl border border-border/60 bg-card text-foreground"
+	class="group relative flex h-screen w-screen select-none overflow-hidden rounded-2xl border border-border/60 bg-card/75 dark:bg-card/65 backdrop-blur-2xl text-foreground shadow-2xl"
+	style="background-color: color-mix(in oklab, var(--card) 72%, transparent); backdrop-filter: blur(28px) saturate(190%); -webkit-backdrop-filter: blur(28px) saturate(190%);"
 >
+	<!-- Ambient blurred album art wash across the miniplayer card -->
+	{#if now?.thumbnail}
+		<img
+			src={thumb(now.thumbnail, 320)}
+			alt=""
+			class="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-35 dark:opacity-25 filter blur-2xl scale-150 transition-opacity duration-700"
+		/>
+	{/if}
+
 	<!-- Cover art under the left half, masked so it dissolves into the card instead of ending on a
 	     seam. Keyed so a track change cross-fades. -->
 	{#key now?.videoId}

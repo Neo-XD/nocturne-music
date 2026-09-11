@@ -237,7 +237,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 35] = [
+const UI_SETTINGS: [&str; 39] = [
     "volume",
     "proxy",
     "quality",
@@ -266,6 +266,10 @@ const UI_SETTINGS: [&str; 35] = [
     "hardware_acceleration",
     "audio_device",
     "crossfade_seconds",
+    "equalizer_enabled",
+    "equalizer_preamp",
+    "equalizer_bands",
+    "equalizer_preset",
     "discord_rpc_app_id",
     "discord_rpc_details",
     "discord_rpc_state",
@@ -350,6 +354,20 @@ pub async fn set_setting(
         if let Ok(secs) = value.parse::<f64>() {
             let _ = state.player.set_crossfade(secs);
         }
+    }
+    if key == "equalizer_enabled" || key == "equalizer_preamp" || key == "equalizer_bands" {
+        let enabled = state.db.get_setting("equalizer_enabled").as_deref() == Some("true");
+        let preamp = state
+            .db
+            .get_setting("equalizer_preamp")
+            .and_then(|p| p.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let bands = state
+            .db
+            .get_setting("equalizer_bands")
+            .and_then(|b| serde_json::from_str::<Vec<player::EqBand>>(&b).ok())
+            .unwrap_or_default();
+        let _ = state.player.set_equalizer(enabled, preamp, bands);
     }
     // Update active Last.fm keys dynamically when changed in settings.
     if key == "lastfm_api_key" || key == "lastfm_api_secret" {
@@ -1483,6 +1501,19 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v081_note = ReleaseNote {
+        version: "0.8.1".to_string(),
+        date: "2026-09-11".to_string(),
+        body: r#"### Nocturne Music v0.8.1
+
+- **10-Band Parametric Equalizer**: Studio-grade parametric audio equalizer powered by FFmpeg peaking filter chains with configurable preamp (-12 dB to +6 dB), real-time SVG frequency response curve visualization, and 12 built-in presets (Flat, Bass Boost, Bass Reducer, Treble Boost, Treble Reducer, Vocal Boost, Electronic, Rock, Classical, Pop, Acoustic, Hip Hop) with instant custom curve tuning.
+- **Glassy Theme & Liquid Warp Polish**: Optimized GPU domain warping WebGL shader with fluid caustics, CORS cache-safe texture streaming, and enhanced background visibility in the Glassy theme.
+- **Backdrop Blur & Acrylic Polish**: Added rich frosted glass backdrop blur and ambient album art wash to MiniPlayer and search preview popups.
+- **Artist Blocking**: Block artists directly from track context menus to automatically skip and exclude their songs from auto-generated mixes and radio queues.
+- **Multi-Account Switcher**: Seamlessly switch between multiple YouTube Music profiles with per-account caching, persistent credentials, and avatar badging.
+- **Remote Sync Device Favorites**: Star and pin preferred synchronization targets with persistent reconnect prioritization for smooth cross-device playback control."#.to_string(),
+    };
+
     let v080_note = ReleaseNote {
         version: "0.8.0".to_string(),
         date: "2026-09-10".to_string(),
@@ -1654,14 +1685,15 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note,
-        v063_note, v062_note, v061_note, v06_note,
+        v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note,
+        v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "0.8.1".to_string(),
             "0.8".to_string(),
             "0.8.0".to_string(),
             "0.7.3".to_string(),
@@ -1889,6 +1921,21 @@ pub async fn install_app_update(
     direct_url: Option<String>,
 ) -> Result<(), String> {
     crate::installer::download_and_install_update(app, version, direct_url).await
+}
+
+#[tauri::command]
+pub async fn set_equalizer(
+    state: St<'_>,
+    enabled: bool,
+    preamp_db: f64,
+    bands: Vec<player::EqBand>,
+) -> Result<(), String> {
+    state.db.set_setting("equalizer_enabled", if enabled { "true" } else { "false" });
+    state.db.set_setting("equalizer_preamp", &preamp_db.to_string());
+    if let Ok(bands_json) = serde_json::to_string(&bands) {
+        state.db.set_setting("equalizer_bands", &bands_json);
+    }
+    state.player.set_equalizer(enabled, preamp_db, bands).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

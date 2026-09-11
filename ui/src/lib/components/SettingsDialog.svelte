@@ -321,6 +321,23 @@
 			proxyInput = s.proxy ?? '';
 			remoteSyncPort = s.remote_sync_port ?? '8080';
 			initLyricsProviders(s.lyrics_providers ?? s.lyrics_priority);
+			eqEnabled = s.equalizer_enabled === 'true';
+			eqPreamp = parseFloat(s.equalizer_preamp || '0') || 0;
+			eqPreset = s.equalizer_preset || 'Flat';
+			if (s.equalizer_bands) {
+				try {
+					const parsed = JSON.parse(s.equalizer_bands);
+					if (Array.isArray(parsed) && parsed.length === EQ_FREQUENCIES.length) {
+						eqBands = parsed;
+					} else {
+						eqBands = EQ_FREQUENCIES.map((freq) => ({ freq, gain: 0, q: 1.4 }));
+					}
+				} catch {
+					eqBands = EQ_FREQUENCIES.map((freq) => ({ freq, gain: 0, q: 1.4 }));
+				}
+			} else {
+				eqBands = EQ_FREQUENCIES.map((freq) => ({ freq, gain: 0, q: 1.4 }));
+			}
 			await Promise.all([loadCustomProviders(), loadCacheStats()]);
 		} catch (e) {
 			toast.error(String(e));
@@ -585,6 +602,135 @@
 	async function setCrossfade(secs: number) {
 		settings.crossfade_seconds = secs.toString();
 		await api.setSetting('crossfade_seconds', secs.toString());
+	}
+
+	// --- Equalizer state ---
+	const EQ_FREQUENCIES = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+	const EQ_LABELS = ['32Hz', '64Hz', '125Hz', '250Hz', '500Hz', '1kHz', '2kHz', '4kHz', '8kHz', '16kHz'];
+
+	interface EqPreset {
+		name: string;
+		preamp: number;
+		gains: number[];
+	}
+
+	const EQ_PRESETS: EqPreset[] = [
+		{ name: 'Flat', preamp: 0, gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+		{ name: 'Bass Boost', preamp: -2, gains: [5.0, 4.5, 3.5, 2.0, 0.5, 0, 0, 0, 0, 0] },
+		{ name: 'Bass Reducer', preamp: 0, gains: [-5.0, -4.0, -3.0, -1.5, 0, 0, 0, 0, 0, 0] },
+		{ name: 'Treble Boost', preamp: -2, gains: [0, 0, 0, 0, 0, 0.5, 2.0, 3.5, 4.5, 5.0] },
+		{ name: 'Treble Reducer', preamp: 0, gains: [0, 0, 0, 0, 0, -0.5, -2.0, -3.0, -4.0, -5.0] },
+		{ name: 'Vocal Boost', preamp: -1.5, gains: [-2.0, -1.5, 0, 1.5, 3.0, 3.5, 3.0, 1.5, 0, -1.0] },
+		{ name: 'Electronic', preamp: -2, gains: [4.5, 4.0, 2.0, 0, -1.5, 1.5, 0, 1.0, 3.5, 4.0] },
+		{ name: 'Rock', preamp: -2, gains: [4.5, 3.0, 1.5, 0, -1.0, -0.5, 1.5, 3.0, 3.5, 4.0] },
+		{ name: 'Classical', preamp: -1.5, gains: [3.5, 3.0, 2.5, 1.5, -1.0, -1.0, 0, 2.0, 3.0, 3.5] },
+		{ name: 'Pop', preamp: -2, gains: [-1.5, 1.5, 3.5, 4.0, 3.0, 0, -1.0, -1.0, 1.5, 2.0] },
+		{ name: 'Acoustic', preamp: -1.5, gains: [3.5, 3.0, 1.5, 1.0, 1.5, 1.5, 2.0, 3.0, 2.5, 2.0] },
+		{ name: 'Hip Hop', preamp: -2.5, gains: [5.5, 4.5, 2.5, 1.0, -0.5, 1.5, -1.0, 1.0, 2.0, 3.0] }
+	];
+
+	let eqEnabled = $state(false);
+	let eqPreamp = $state(0);
+	let eqPreset = $state('Flat');
+	let eqBands = $state<api.EqBand[]>(
+		EQ_FREQUENCIES.map((freq) => ({ freq, gain: 0, q: 1.4 }))
+	);
+
+	const eqCurvePath = $derived.by(() => {
+		const points: { x: number; y: number }[] = [];
+		const w = 400;
+		const h = 80;
+		const midY = 40;
+		const scaleY = 30 / 12;
+
+		for (let i = 0; i < eqBands.length; i++) {
+			const x = 20 + i * 40;
+			const gain = eqBands[i]?.gain ?? 0;
+			const y = Math.max(8, Math.min(72, midY - gain * scaleY));
+			points.push({ x, y });
+		}
+
+		if (points.length === 0) return { line: '', area: '', points: [] };
+
+		const allPts = [{ x: 0, y: points[0].y }, ...points, { x: w, y: points[points.length - 1].y }];
+
+		let linePath = `M ${allPts[0].x} ${allPts[0].y}`;
+		for (let i = 0; i < allPts.length - 1; i++) {
+			const p0 = allPts[Math.max(0, i - 1)];
+			const p1 = allPts[i];
+			const p2 = allPts[i + 1];
+			const p3 = allPts[Math.min(allPts.length - 1, i + 2)];
+
+			const cp1x = p1.x + (p2.x - p0.x) / 6;
+			const cp1y = p1.y + (p2.y - p0.y) / 6;
+			const cp2x = p2.x - (p3.x - p1.x) / 6;
+			const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+			linePath += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+		}
+
+		const areaPath = `${linePath} L ${w} ${h} L 0 ${h} Z`;
+		return { line: linePath, area: areaPath, points };
+	});
+
+	let eqDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+	function triggerApplyEqualizer(debounceMs = 50) {
+		if (eqDebounceTimer) clearTimeout(eqDebounceTimer);
+		if (debounceMs <= 0) {
+			applyEqualizer();
+		} else {
+			eqDebounceTimer = setTimeout(() => {
+				applyEqualizer();
+			}, debounceMs);
+		}
+	}
+
+	async function applyEqualizer() {
+		try {
+			const bandsCopy = $state.snapshot(eqBands);
+			settings.equalizer_enabled = eqEnabled ? 'true' : 'false';
+			settings.equalizer_preamp = eqPreamp.toString();
+			settings.equalizer_bands = JSON.stringify(bandsCopy);
+			settings.equalizer_preset = eqPreset;
+			await api.setEqualizer(eqEnabled, eqPreamp, bandsCopy);
+			await api.setSetting('equalizer_preset', eqPreset);
+		} catch (e) {
+			console.error('Failed to update equalizer:', e);
+		}
+	}
+
+	function setEqBandGain(index: number, gain: number) {
+		if (index < 0 || index >= eqBands.length) return;
+		eqBands[index].gain = Math.round(gain * 10) / 10;
+		eqPreset = 'Custom';
+		triggerApplyEqualizer(50);
+	}
+
+	function setEqPreamp(preamp: number) {
+		eqPreamp = Math.round(preamp * 10) / 10;
+		triggerApplyEqualizer(50);
+	}
+
+	function toggleEqualizer(enabled: boolean) {
+		eqEnabled = enabled;
+		triggerApplyEqualizer(0);
+	}
+
+	function selectEqPreset(presetName: string) {
+		const p = EQ_PRESETS.find((x) => x.name === presetName);
+		if (!p) return;
+		eqPreset = p.name;
+		eqPreamp = p.preamp;
+		eqBands = EQ_FREQUENCIES.map((freq, i) => ({
+			freq,
+			gain: p.gains[i] ?? 0,
+			q: 1.4
+		}));
+		triggerApplyEqualizer(0);
+	}
+
+	function resetEqualizer() {
+		selectEqPreset('Flat');
 	}
 
 	async function setDiscordShowTime(on: boolean) {
@@ -1628,6 +1774,152 @@
 							</div>
 						</section>
 						<section class={GROUP}>
+							<div class="mb-2 flex items-center justify-between px-1">
+								<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Equalizer</h3>
+								<div class="flex items-center gap-2">
+									{#if eqEnabled}
+										<span class="text-[11px] font-medium text-primary">Active</span>
+									{:else}
+										<span class="text-[11px] text-muted-foreground">Disabled</span>
+									{/if}
+								</div>
+							</div>
+							<div class={CARD}>
+								{@render row({
+									title: 'Parametric equalizer',
+									badge: '10-Band EQ',
+									badgeVariant: 'default',
+									desc: 'Custom 10-band equalizer with adjustable frequency gains, preamp, and acoustic genre presets.',
+									control: eqSwitch
+								})}
+								{#if eqEnabled}
+									<div class="p-4 space-y-4">
+										<!-- Preset and Preamp Header Row -->
+										<div class="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 pb-3">
+											<div class="flex items-center gap-2">
+												<span class="text-xs font-medium text-muted-foreground">Preset:</span>
+												<Select.Root
+													type="single"
+													value={eqPreset}
+													onValueChange={(v) => selectEqPreset(v)}
+												>
+													<Select.Trigger class="h-8 w-36 text-xs bg-muted/40" aria-label="Equalizer preset">
+														{eqPreset}
+													</Select.Trigger>
+													<Select.Content class="max-h-56">
+														<Select.Group>
+															{#if eqPreset === 'Custom'}
+																<Select.Item value="Custom" label="Custom" class="text-xs">Custom</Select.Item>
+															{/if}
+															{#each EQ_PRESETS as p}
+																<Select.Item value={p.name} label={p.name} class="text-xs">{p.name}</Select.Item>
+															{/each}
+														</Select.Group>
+													</Select.Content>
+												</Select.Root>
+												<Button
+													variant="ghost"
+													size="icon"
+													class="h-8 w-8 cursor-pointer text-muted-foreground hover:text-foreground"
+													title="Reset Equalizer to Flat"
+													onclick={resetEqualizer}
+												>
+													<HugeiconsIcon icon={RotateLeft01Icon} size={14} />
+												</Button>
+											</div>
+
+											<div class="flex items-center gap-2.5">
+												<span class="text-xs font-medium text-muted-foreground">Preamp:</span>
+												<div class="w-28 sm:w-36">
+													<Slider
+														type="single"
+														min={-12}
+														max={6}
+														step={0.5}
+														value={eqPreamp}
+														onValueChange={(val) => setEqPreamp(val)}
+														class="cursor-pointer"
+													/>
+												</div>
+												<span class="w-14 text-right font-mono text-xs font-medium {eqPreamp < 0 ? 'text-amber-500/90' : eqPreamp > 0 ? 'text-primary' : 'text-muted-foreground'}">
+													{eqPreamp > 0 ? `+${eqPreamp.toFixed(1)}` : eqPreamp.toFixed(1)} dB
+												</span>
+											</div>
+										</div>
+
+										<!-- Frequency Response Curve SVG -->
+										<div class="relative overflow-hidden rounded-lg border border-border/40 bg-muted/20 p-2">
+											<svg viewBox="0 0 400 80" class="h-20 w-full overflow-visible" preserveAspectRatio="none">
+												<defs>
+													<linearGradient id="eq-curve-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+														<stop offset="0%" stop-color="var(--color-primary, #6366f1)" stop-opacity="0.25" />
+														<stop offset="100%" stop-color="var(--color-primary, #6366f1)" stop-opacity="0.0" />
+													</linearGradient>
+												</defs>
+												<!-- 0 dB reference line -->
+												<line x1="0" y1="40" x2="400" y2="40" stroke="currentColor" stroke-dasharray="3 3" class="text-muted-foreground/30" stroke-width="1" />
+												<!-- +6 dB reference line -->
+												<line x1="0" y1="25" x2="400" y2="25" stroke="currentColor" stroke-dasharray="2 4" class="text-muted-foreground/15" stroke-width="0.75" />
+												<!-- -6 dB reference line -->
+												<line x1="0" y1="55" x2="400" y2="55" stroke="currentColor" stroke-dasharray="2 4" class="text-muted-foreground/15" stroke-width="0.75" />
+												<!-- Area Fill -->
+												{#if eqCurvePath.area}
+													<path d={eqCurvePath.area} fill="url(#eq-curve-grad)" />
+												{/if}
+												<!-- Curve Stroke -->
+												{#if eqCurvePath.line}
+													<path d={eqCurvePath.line} fill="none" stroke="var(--color-primary, #6366f1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+												{/if}
+												<!-- Data Points -->
+												{#each eqCurvePath.points as pt}
+													<circle cx={pt.x} cy={pt.y} r="2.5" class="fill-primary stroke-background" stroke-width="1" />
+												{/each}
+											</svg>
+											<div class="mt-1 flex items-center justify-between px-1 text-[9px] text-muted-foreground/60 font-mono">
+												<span>+12 dB</span>
+												<span>0 dB (flat)</span>
+												<span>-12 dB</span>
+											</div>
+										</div>
+
+										<!-- 10 Band Vertical Sliders -->
+										<div class="grid grid-cols-10 gap-1 sm:gap-2 pt-1">
+											{#each eqBands as band, i}
+												<div
+													class="group flex flex-col items-center gap-1.5 rounded-lg p-1 transition-colors hover:bg-muted/30"
+													ondblclick={() => setEqBandGain(i, 0)}
+													title="Double-click to reset band to 0 dB"
+												>
+													<span class="h-4 text-[10px] font-mono font-medium leading-none {band.gain > 0 ? 'text-primary' : band.gain < 0 ? 'text-muted-foreground' : 'text-muted-foreground/60'}">
+														{band.gain > 0 ? `+${band.gain}` : `${band.gain}`}
+													</span>
+													<div class="h-28 flex items-center justify-center py-1">
+														<Slider
+															type="single"
+															orientation="vertical"
+															min={-12}
+															max={12}
+															step={0.5}
+															value={band.gain}
+															onValueChange={(val) => setEqBandGain(i, val)}
+															class="h-24 min-h-0 data-vertical:min-h-0 cursor-pointer"
+														/>
+													</div>
+													<span class="text-[10px] font-medium tracking-tight text-muted-foreground group-hover:text-foreground">
+														{EQ_LABELS[i]}
+													</span>
+												</div>
+											{/each}
+										</div>
+
+										<p class="text-center text-[10px] text-muted-foreground/60">
+											Tip: Double-click any band slider to quickly reset it to 0 dB.
+										</p>
+									</div>
+								{/if}
+							</div>
+						</section>
+						<section class={GROUP}>
 							<h3 class={LABEL}>Blocked Artists</h3>
 							<div class={CARD}>
 								{#if blockedArtists.length === 0}
@@ -2275,6 +2567,9 @@
 		/>
 		<span class="w-8 text-right font-mono text-xs text-muted-foreground">{crossfadeSecs === 0 ? 'Off' : `${crossfadeSecs}s`}</span>
 	</div>
+{/snippet}
+{#snippet eqSwitch()}
+	<Switch checked={eqEnabled} onCheckedChange={(val) => toggleEqualizer(val)} />
 {/snippet}
 {#snippet floatingPanelsConfig()}
 	<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3 backdrop-blur-md text-xs">

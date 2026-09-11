@@ -199,7 +199,8 @@
 			id="top-search-suggest"
 			role="listbox"
 			aria-label="Search preview"
-			class="absolute top-full left-0 right-0 z-50 mt-1.5 max-h-[75vh] overflow-y-auto rounded-xl border border-border/80 bg-popover text-popover-foreground shadow-2xl backdrop-blur-xl animate-in fade-in-0 zoom-in-95 duration-150"
+			class="absolute top-full left-0 right-0 z-50 mt-1.5 max-h-[75vh] overflow-y-auto rounded-xl border border-border/80 bg-popover/80 dark:bg-popover/75 text-popover-foreground shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150"
+			style="background-color: color-mix(in oklab, var(--popover) 80%, transparent); backdrop-filter: blur(28px) saturate(190%); -webkit-backdrop-filter: blur(28px) saturate(190%);"
 		>
 			{#if loading && !items.length}
 				{#each Array(4) as _, i (i)}

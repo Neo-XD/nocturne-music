@@ -378,9 +378,16 @@ export interface PlaybackSnapshot {
 export const getPlayback = () => invoke<PlaybackSnapshot>('get_playback');
 
 // --- settings (context/11) -----------------------------------------------------------------
+export interface EqBand {
+	freq: number;
+	gain: number;
+	q: number;
+}
 export const getSettings = () => invoke<Record<string, string>>('get_settings');
 export const setSetting = (key: string, value: string) =>
 	invoke<void>('set_setting', { key, value });
+export const setEqualizer = (enabled: boolean, preamp_db: number, bands: EqBand[]) =>
+	invoke<void>('set_equalizer', { enabled, preampDb: preamp_db, bands });
 export interface ClientStats {
 	key: string;
 	latency_ms: number;

@@ -197,13 +197,13 @@
 			: 'rounded-lg'}"
 	>
 		<!-- Glassy Theme: Solid Base Underlayer + Warped/Blurred Animated Album Art Background -->
-		{#if theme.id === 'glassy'}
+		{#if theme.id === 'glassy' || appearance.artworkBackground}
 			<div class="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none bg-background">
 				{#if !appearance.reduceMotion && appearance.glassyWarp > 0}
 					<AnimatedArtwork
 						src={playback.now?.thumbnail ? thumb(playback.now.thumbnail, 720) : null}
 						class="absolute inset-0 h-full w-full scale-125 object-cover transition-all duration-700"
-						style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
+						style="opacity: {appearance.glassyLightness}; filter: blur({Math.min(appearance.glassyBlur, 24)}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
 						intensity={appearance.glassyWarp}
 						speed={appearance.glassySpeed}
 					/>
@@ -212,7 +212,7 @@
 						src={thumb(playback.now.thumbnail, 720)}
 						alt=""
 						class="absolute inset-0 h-full w-full object-cover scale-125 transition-all duration-700"
-						style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
+						style="opacity: {appearance.glassyLightness}; filter: blur({Math.min(appearance.glassyBlur, 24)}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
 					/>
 				{:else}
 					<div

@@ -2,6 +2,18 @@
 
 All notable changes to Nocturne Desktop are documented in this file.
 
+## [v0.8.1] - 2026-09-11
+
+### ✨ New Features
+- **10-Band Parametric Equalizer**: Studio-grade parametric audio equalizer powered by FFmpeg peaking filter chains (`equalizer=f=FREQ:t=q:w=Q:g=GAIN`) with configurable preamp gain (-12 dB to +6 dB), real-time SVG frequency response curve visualization with cubic bezier smoothing, 10 vertical band sliders (-12 dB to +12 dB), and 12 built-in presets (Flat, Bass Boost, Bass Reducer, Treble Boost, Treble Reducer, Vocal Boost, Electronic, Rock, Classical, Pop, Acoustic, Hip Hop) with instant custom curve tuning.
+- **Glassy Theme & Liquid Warp Polish**: Optimized GPU domain warping WebGL shader with fluid caustics, dual-octave organic simplex displacement, and CORS cache-safe texture streaming for vivid animated waves in the Glassy theme background.
+- **Backdrop Blur & Acrylic Polish**: Added rich frosted glass backdrop blur and ambient album art wash to MiniPlayer and search preview popups (`TopSearchBar` and `SearchSuggest`).
+- **Artist Blocking**: Block artists directly from track context menus to automatically skip and exclude their songs from auto-generated mixes and radio queues.
+- **Multi-Account Switcher**: Seamlessly switch between multiple YouTube Music profiles with per-account caching, persistent credentials, and avatar badging.
+- **Remote Sync Device Favorites**: Star and pin preferred synchronization targets with persistent reconnect prioritization for smooth cross-device playback control.
+
+---
+
 ## [v0.8.0] - 2026-09-10
 
 ### ✨ New Features
