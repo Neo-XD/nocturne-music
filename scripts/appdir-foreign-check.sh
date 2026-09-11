@@ -26,7 +26,14 @@
 set -uo pipefail
 
 APPDIR=/app
-BIN="$(ls "$APPDIR"/usr/bin/[nN]octurne* "$APPDIR"/usr/bin/[lL]imusic* "$APPDIR"/usr/bin/* 2>/dev/null | head -1 || echo "$APPDIR/usr/bin/nocturne-app")"
+BIN=""
+for b in "$APPDIR"/usr/bin/nocturne-app "$APPDIR"/usr/bin/nocturne "$APPDIR"/usr/bin/Nocturne "$APPDIR"/usr/bin/[nN]octurne* "$APPDIR"/usr/bin/[lL]imusic*; do
+  if [ -f "$b" ] && [ -x "$b" ]; then
+    BIN="$b"
+    break
+  fi
+done
+[ -n "$BIN" ] || BIN="$APPDIR/usr/bin/nocturne-app"
 FAIL=0
 step() { printf '\n── %s\n' "$1"; }
 bad()  { echo "   FAIL: $1"; FAIL=1; }

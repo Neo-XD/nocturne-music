@@ -115,7 +115,7 @@ export const appearance = $state({
 	/** Glassy theme background opacity/lightness (0.10 to 1.0). */
 	glassyLightness: 0.45,
 	/** Glassy theme background blur radius in px (0 to 100). */
-	glassyBlur: 64,
+	glassyBlur: 18,
 	/** Glassy theme background saturation (0.0 to 2.0). */
 	glassySaturation: 1.0,
 

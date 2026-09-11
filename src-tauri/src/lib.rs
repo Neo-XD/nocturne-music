@@ -113,13 +113,17 @@ fn tune_webview(win: &tauri::WebviewWindow, media: bool) {
             settings.set_enable_encrypted_media(false);
             settings.set_enable_webaudio(false);
             settings.set_enable_webrtc(false);
-            settings.set_enable_webgl(false);
+            settings.set_enable_webgl(true);
             settings.set_enable_html5_database(false); // WebSQL. localStorage is a separate switch.
         }
     });
     match res {
         Ok(()) => {
-            tracing::info!(label, media, "webkit: DocumentBrowser cache, page cache + webgl off")
+            tracing::info!(
+                label,
+                media,
+                "webkit: DocumentBrowser cache, page cache off, webgl enabled"
+            )
         }
         Err(e) => tracing::warn!(label, error = %e, "webkit tuning failed (continuing)"),
     }

@@ -477,10 +477,7 @@ pub async fn set_remote_sync_device_favorite(
 }
 
 #[tauri::command]
-pub async fn remove_remote_sync_device(
-    app: tauri::AppHandle,
-    id: String,
-) -> Result<(), String> {
+pub async fn remove_remote_sync_device(app: tauri::AppHandle, id: String) -> Result<(), String> {
     use tauri::Manager;
     if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
         rs.remove_device(&id).await
@@ -586,7 +583,10 @@ pub async fn get_saved_accounts(state: St<'_>) -> Result<Vec<crate::state::Saved
 }
 
 #[tauri::command]
-pub async fn switch_saved_account(state: St<'_>, account_id: String) -> Result<serde_json::Value, String> {
+pub async fn switch_saved_account(
+    state: St<'_>,
+    account_id: String,
+) -> Result<serde_json::Value, String> {
     state.switch_saved_account(&account_id).await
 }
 

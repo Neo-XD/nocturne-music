@@ -199,29 +199,27 @@
 		<!-- Glassy Theme: Solid Base Underlayer + Warped/Blurred Animated Album Art Background -->
 		{#if theme.id === 'glassy'}
 			<div class="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none bg-background">
-				{#if playback.now?.thumbnail}
-					{#if prefs.animatedArtwork}
-						<AnimatedArtwork
-							src={thumb(playback.now.thumbnail, 720)}
-							class="absolute inset-0 h-full w-full scale-125 object-cover transition-all duration-700"
-							style="opacity: {appearance.glassyLightness}; filter: blur({Math.min(appearance.glassyBlur, 18)}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
-							intensity={appearance.glassyWarp}
-							speed={appearance.glassySpeed}
-						/>
-					{:else}
-						<img
-							src={thumb(playback.now.thumbnail, 720)}
-							alt=""
-							class="absolute inset-0 h-full w-full object-cover scale-125 transition-all duration-700"
-							style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
-						/>
-					{/if}
+				{#if !appearance.reduceMotion && appearance.glassyWarp > 0}
+					<AnimatedArtwork
+						src={playback.now?.thumbnail ? thumb(playback.now.thumbnail, 720) : null}
+						class="absolute inset-0 h-full w-full scale-125 object-cover transition-all duration-700"
+						style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
+						intensity={appearance.glassyWarp}
+						speed={appearance.glassySpeed}
+					/>
+				{:else if playback.now?.thumbnail}
+					<img
+						src={thumb(playback.now.thumbnail, 720)}
+						alt=""
+						class="absolute inset-0 h-full w-full object-cover scale-125 transition-all duration-700"
+						style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
+					/>
 				{:else}
 					<div
 						class="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-secondary/30"
 					></div>
 				{/if}
-				<div class="absolute inset-0 bg-background/45 dark:bg-black/40 {prefs.animatedArtwork ? 'backdrop-blur-sm' : 'backdrop-blur-2xl'}"></div>
+				<div class="absolute inset-0 bg-background/25 dark:bg-black/25"></div>
 			</div>
 		{/if}
 

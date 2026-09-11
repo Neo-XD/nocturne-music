@@ -51,6 +51,7 @@
 		uniform float u_time;
 		uniform float u_speed;
 		uniform float u_intensity;
+		uniform float u_has_image;
 
 		// 2D Simplex Noise for organic fluid domain warping
 		vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -82,7 +83,7 @@
 
 		void main() {
 			vec2 uv = v_uv;
-			float t = u_time * u_speed * 0.45;
+			float t = u_time * u_speed * 0.7;
 
 			// Dual-octave domain warping (Kawarp style)
 			vec2 q = vec2(
@@ -96,26 +97,46 @@
 			);
 
 			// Fluid offset with boundary clamp - enhanced displacement for visible organic liquid movement
-			vec2 warpedUv = uv + r * (0.12 * max(u_intensity, 0.25));
+			vec2 warpedUv = uv + r * (0.24 * max(u_intensity, 0.25));
 			warpedUv = clamp(warpedUv, 0.002, 0.998);
 
 			// Chromatic dispersion for liquid depth
-			vec2 rOffset = warpedUv + vec2(0.008 * r.x * max(u_intensity, 0.25), 0.0);
-			vec2 bOffset = warpedUv - vec2(0.008 * r.y * max(u_intensity, 0.25), 0.0);
+			vec2 rOffset = clamp(warpedUv + vec2(0.012 * r.x * max(u_intensity, 0.25), 0.004 * r.y), 0.002, 0.998);
+			vec2 bOffset = clamp(warpedUv - vec2(0.012 * r.y * max(u_intensity, 0.25), 0.004 * r.x), 0.002, 0.998);
 
-			vec4 curR = texture2D(u_image, clamp(rOffset, 0.002, 0.998));
-			vec4 curG = texture2D(u_image, warpedUv);
-			vec4 curB = texture2D(u_image, clamp(bOffset, 0.002, 0.998));
-			vec4 curColor = vec4(curR.r, curG.g, curB.b, curG.a);
+			vec4 color;
 
-			vec4 color = curColor;
+			if (u_has_image < 0.5) {
+				// Procedural generative liquid mesh when no artwork texture is available
+				vec3 c1 = vec3(0.32, 0.55, 0.96); // royal sky/blue
+				vec3 c2 = vec3(0.86, 0.32, 0.65); // vibrant magenta/rose
+				vec3 c3 = vec3(0.18, 0.78, 0.72); // luminous emerald/teal
+				vec3 c4 = vec3(0.10, 0.12, 0.22); // deep midnight space
 
-			if (u_mix < 1.0) {
-				vec4 nxtR = texture2D(u_next_image, clamp(rOffset, 0.002, 0.998));
-				vec4 nxtG = texture2D(u_next_image, warpedUv);
-				vec4 nxtB = texture2D(u_next_image, clamp(bOffset, 0.002, 0.998));
-				vec4 nextColor = vec4(nxtR.r, nxtG.g, nxtB.b, nxtG.a);
-				color = mix(curColor, nextColor, u_mix);
+				float n1 = snoise(warpedUv * 1.8 + vec2(t * 0.25, -t * 0.20)) * 0.5 + 0.5;
+				float n2 = snoise(warpedUv * 2.6 - vec2(-t * 0.20, t * 0.24)) * 0.5 + 0.5;
+				float n3 = snoise(warpedUv * 3.4 + vec2(t * 0.18, t * 0.14)) * 0.5 + 0.5;
+
+				vec3 grad = mix(c1, c2, n1);
+				grad = mix(grad, c3, n2 * 0.75);
+				grad = mix(grad, c4, (1.0 - n3) * 0.45);
+
+				color = vec4(grad, 1.0);
+			} else {
+				vec4 curR = texture2D(u_image, rOffset);
+				vec4 curG = texture2D(u_image, warpedUv);
+				vec4 curB = texture2D(u_image, bOffset);
+				vec4 curColor = vec4(curR.r, curG.g, curB.b, curG.a);
+
+				color = curColor;
+
+				if (u_mix < 1.0) {
+					vec4 nxtR = texture2D(u_next_image, rOffset);
+					vec4 nxtG = texture2D(u_next_image, warpedUv);
+					vec4 nxtB = texture2D(u_next_image, bOffset);
+					vec4 nextColor = vec4(nxtR.r, nxtG.g, nxtB.b, nxtG.a);
+					color = mix(curColor, nextColor, u_mix);
+				}
 			}
 
 			// Gentle breathing pulse
@@ -263,40 +284,39 @@
 			}
 		}
 
-		if (!currentTexture) {
-			animId = requestAnimationFrame(render);
-			return;
-		}
-
 		gl.useProgram(program);
 
 		const elapsed = (performance.now() - startTime - totalPausedDuration) / 1000;
 		gl.uniform1f(gl.getUniformLocation(program, 'u_time'), elapsed);
-		gl.uniform1f(gl.getUniformLocation(program, 'u_speed'), speed);
+		const effectiveSpeed = playback.paused ? speed * 0.6 : speed;
+		gl.uniform1f(gl.getUniformLocation(program, 'u_speed'), effectiveSpeed);
 		gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), intensity);
 		gl.uniform1f(gl.getUniformLocation(program, 'u_mix'), textureMix);
+		const hasImage = currentTexture ? 1.0 : 0.0;
+		gl.uniform1f(gl.getUniformLocation(program, 'u_has_image'), hasImage);
 
-		gl.activeTexture(gl.TEXTURE0);
-		gl.bindTexture(gl.TEXTURE_2D, currentTexture);
-		gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+		if (currentTexture) {
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, currentTexture);
+			gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
 
-		if (nextTexture) {
-			gl.activeTexture(gl.TEXTURE1);
-			gl.bindTexture(gl.TEXTURE_2D, nextTexture);
-			gl.uniform1i(gl.getUniformLocation(program, 'u_next_image'), 1);
+			if (nextTexture) {
+				gl.activeTexture(gl.TEXTURE1);
+				gl.bindTexture(gl.TEXTURE_2D, nextTexture);
+				gl.uniform1i(gl.getUniformLocation(program, 'u_next_image'), 1);
+			}
 		}
 
 		gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-		if (!playback.paused && isVisible && !document.hidden) {
+		if (isVisible && !document.hidden) {
 			animId = requestAnimationFrame(render);
 		}
 	}
 
-	// Playback pause / resume handling
+	// Document visibility handling (pause RAF when window is hidden to save battery)
 	$effect(() => {
-		const paused = playback.paused;
-		if (paused || (typeof document !== 'undefined' && document.hidden)) {
+		if (typeof document !== 'undefined' && document.hidden) {
 			pausedAt = performance.now();
 			cancelAnimationFrame(animId);
 		} else {
@@ -311,8 +331,20 @@
 
 	// React to source image changes
 	$effect(() => {
-		if (src && src !== currentSrc) {
-			updateImage(src);
+		if (src !== currentSrc) {
+			if (src) {
+				updateImage(src);
+			} else {
+				currentSrc = '';
+				if (currentTexture && gl) {
+					gl.deleteTexture(currentTexture);
+					currentTexture = null;
+				}
+				if (nextTexture && gl) {
+					gl.deleteTexture(nextTexture);
+					nextTexture = null;
+				}
+			}
 		}
 	});
 
@@ -328,7 +360,7 @@
 		const obs = new IntersectionObserver((entries) => {
 			const entry = entries[0];
 			isVisible = entry ? entry.isIntersecting : true;
-			if (isVisible && !playback.paused && !document.hidden) {
+			if (isVisible && !document.hidden) {
 				cancelAnimationFrame(animId);
 				animId = requestAnimationFrame(render);
 			}
@@ -338,7 +370,7 @@
 		const onVisibility = () => {
 			if (document.hidden) {
 				cancelAnimationFrame(animId);
-			} else if (isVisible && !playback.paused) {
+			} else if (isVisible) {
 				cancelAnimationFrame(animId);
 				animId = requestAnimationFrame(render);
 			}
@@ -364,7 +396,11 @@
 </script>
 
 {#if webglFailed}
-	<img {src} {alt} class="{className} object-cover" {style} />
+	{#if src}
+		<img {src} {alt} class="{className} object-cover" {style} />
+	{:else}
+		<div class="{className} bg-gradient-to-br from-primary/30 via-accent/20 to-secondary/30" {style}></div>
+	{/if}
 {:else}
 	<canvas
 		bind:this={canvasEl}

@@ -928,7 +928,7 @@
 			glassyWarp: 1.5,
 			glassySpeed: 0.5,
 			glassyLightness: 0.45,
-			glassyBlur: 64,
+			glassyBlur: 18,
 			glassySaturation: 1.0
 		});
 		toast.success('Reset Glassy theme background settings');
@@ -1667,14 +1667,6 @@
 									badgeVariant: 'performance',
 									desc: 'When a track is a music video, the player shows the video instead of the artwork. Uses noticeably more data, hardware video decoding, and battery than audio alone.',
 									control: musicVideoSwitch,
-									tall: true
-								})}
-								{@render row({
-									title: 'Animated Fullscreen Background',
-									badge: 'High GPU',
-									badgeVariant: 'performance',
-									desc: 'Display real-time fluid GPU shaders and domain-warped blur behind the fullscreen player.',
-									control: animatedArtworkSwitch,
 									tall: true
 								})}
 								{@render row({

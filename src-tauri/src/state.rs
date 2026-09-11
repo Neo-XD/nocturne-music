@@ -749,7 +749,10 @@ impl AppState {
         for acc in &mut saved_accounts {
             acc.is_active = false;
         }
-        if let Some(existing) = saved_accounts.iter_mut().find(|a| a.id == account_id || (a.email.is_some() && a.email == selected.email)) {
+        if let Some(existing) = saved_accounts
+            .iter_mut()
+            .find(|a| a.id == account_id || (a.email.is_some() && a.email == selected.email))
+        {
             existing.id = account_id.clone();
             existing.name = selected.name.clone();
             existing.handle = selected.handle.clone();
@@ -816,7 +819,10 @@ impl AppState {
         stored
     }
 
-    pub async fn switch_saved_account(&self, account_id: &str) -> Result<serde_json::Value, String> {
+    pub async fn switch_saved_account(
+        &self,
+        account_id: &str,
+    ) -> Result<serde_json::Value, String> {
         let _turn = self.auth.lock().await;
         let mut accounts = self.get_saved_accounts();
         let target_idx = accounts
