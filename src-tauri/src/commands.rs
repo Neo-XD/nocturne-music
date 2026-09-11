@@ -580,6 +580,21 @@ pub async fn sign_out(state: St<'_>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub async fn get_saved_accounts(state: St<'_>) -> Result<Vec<crate::state::SavedAccount>, String> {
+    Ok(state.get_saved_accounts())
+}
+
+#[tauri::command]
+pub async fn switch_saved_account(state: St<'_>, account_id: String) -> Result<serde_json::Value, String> {
+    state.switch_saved_account(&account_id).await
+}
+
+#[tauri::command]
+pub async fn remove_saved_account(state: St<'_>, account_id: String) -> Result<(), String> {
+    state.remove_saved_account(&account_id).await
+}
+
 /// Open the in-app Google sign-in webview (context/15 Path A). Completes asynchronously; the UI
 /// hears back via `auth-changed` (success) or `login-error`.
 #[tauri::command]

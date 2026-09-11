@@ -250,7 +250,7 @@
 			</div>
 		{:else}
 		<div
-			class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden"
+			class="app-floating-panel flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden rounded-xl border border-border/70 bg-card/65 dark:bg-card/45 backdrop-blur-xl p-1 shadow-sm"
 			style="mask-image:linear-gradient(to bottom,#000 0,#000 78%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,#000 0,#000 78%,transparent 100%)"
 		>
 			{#each upcoming as { item, index } (item.video_id + index)}
@@ -285,12 +285,15 @@
 		     own: at 180px tall, a row for it would cost the queue a track and a half. -->
 		<div class="relative flex shrink-0 items-center justify-center gap-2.5">
 			<button
-				class="{panelBtn} {shuffleOn ? 'text-primary' : 'text-muted-foreground'}"
+				class="{panelBtn} relative {shuffleOn ? 'text-primary' : 'text-muted-foreground'}"
 				onclick={() => api.toggleShuffle()}
 				aria-label="Shuffle"
 				aria-pressed={shuffleOn}
 			>
 				<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" />
+				{#if shuffleOn}
+					<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
+				{/if}
 			</button>
 			<button
 				class="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/80"
@@ -302,7 +305,7 @@
 				<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-4 w-4" />
 			</button>
 			<button
-				class="{panelBtn} {repeat !== 'off' ? 'text-primary' : 'text-muted-foreground'}"
+				class="{panelBtn} relative {repeat !== 'off' ? 'text-primary' : 'text-muted-foreground'}"
 				onclick={cycleRepeat}
 				aria-label="Repeat: {repeat}"
 				aria-pressed={repeat !== 'off'}
@@ -313,6 +316,9 @@
 					showAlt={repeat === 'one'}
 					class="h-4 w-4"
 				/>
+				{#if repeat !== 'off'}
+					<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
+				{/if}
 			</button>
 			<button
 				class="{panelBtn} absolute right-0 {tab === 'lyrics'

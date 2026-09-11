@@ -415,10 +415,13 @@
 								variant="ghost"
 								size="icon-sm"
 								onclick={() => api.toggleShuffle()}
-								class="text-muted-foreground hover:text-foreground cursor-pointer"
+								class="relative text-muted-foreground hover:text-foreground cursor-pointer"
 								aria-label="Shuffle"
 							>
 								<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4 {playback.queue.shuffle ? 'text-primary' : ''}" />
+								{#if playback.queue.shuffle}
+									<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
+								{/if}
 							</Button>
 							<Button
 								variant="ghost"
@@ -450,13 +453,16 @@
 								variant="ghost"
 								size="icon-sm"
 								onclick={cycleRepeat}
-								class="text-muted-foreground hover:text-foreground cursor-pointer"
+								class="relative text-muted-foreground hover:text-foreground cursor-pointer"
 								aria-label="Repeat: {repeat}"
 							>
 								<HugeiconsIcon
 									icon={repeat === 'one' ? RepeatOne01Icon : RepeatIcon}
 									class="h-4 w-4 {repeat !== 'off' ? 'text-primary' : ''}"
 								/>
+								{#if repeat !== 'off'}
+									<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
+								{/if}
 							</Button>
 						</div>
 
@@ -658,10 +664,13 @@
 							variant="ghost"
 							size="icon-sm"
 							onclick={() => api.toggleShuffle()}
-							class="text-muted-foreground hover:text-foreground cursor-pointer"
+							class="relative text-muted-foreground hover:text-foreground cursor-pointer"
 							aria-label="Shuffle"
 						>
 							<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4 {playback.queue.shuffle ? 'text-primary' : ''}" />
+							{#if playback.queue.shuffle}
+								<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
+							{/if}
 						</Button>
 						<Button
 							variant="ghost"
@@ -693,13 +702,16 @@
 							variant="ghost"
 							size="icon-sm"
 							onclick={cycleRepeat}
-							class="text-muted-foreground hover:text-foreground cursor-pointer"
+							class="relative text-muted-foreground hover:text-foreground cursor-pointer"
 							aria-label="Repeat: {repeat}"
 						>
 							<HugeiconsIcon
 								icon={repeat === 'one' ? RepeatOne01Icon : RepeatIcon}
 								class="h-4 w-4 {repeat !== 'off' ? 'text-primary' : ''}"
 							/>
+							{#if repeat !== 'off'}
+								<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
+							{/if}
 						</Button>
 					</div>
 

@@ -2,10 +2,10 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 
 // Rewrite image URLs to high-resolution by default.
 // Google CDN (googleusercontent / yt3) supports arbitrary sizes up to 1080p/1200p dynamically.
-// By default, upgrade sizes to at least 1080px so album art is always razor-sharp.
+// By default, upgrade sizes to 544px which provides crisp retina fidelity while loading dramatically faster.
 export function thumb(
 	url: string | undefined | null,
-	px: number = 1080,
+	px: number = 544,
 	exact: boolean = false
 ): string | undefined {
 	if (!url) return undefined;

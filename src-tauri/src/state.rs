@@ -133,6 +133,29 @@ struct SelectedIdentity {
     has_multiple_identities: bool,
 }
 
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedAccount {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub handle: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub data_sync_id: Option<String>,
+    pub session_cookie: String,
+    #[serde(default)]
+    pub visitor_data: Option<String>,
+    #[serde(default)]
+    pub is_active: bool,
+}
+
 pub enum SignInOutcome {
     Complete,
     SelectionRequired,
@@ -710,8 +733,161 @@ impl AppState {
         self.persist_visitor_data(visitor_data);
         self.forget_playlist_index();
         self.it.set_data_sync_id(selected.data_sync_id.clone());
+
+        let account_id = selected
+            .email
+            .clone()
+            .or_else(|| selected.channel_id.clone())
+            .or_else(|| selected.data_sync_id.clone())
+            .unwrap_or_else(|| {
+                let mut hasher = DefaultHasher::new();
+                session_cookie.hash(&mut hasher);
+                format!("account-{:016x}", hasher.finish())
+            });
+
+        let mut saved_accounts = self.get_saved_accounts();
+        for acc in &mut saved_accounts {
+            acc.is_active = false;
+        }
+        if let Some(existing) = saved_accounts.iter_mut().find(|a| a.id == account_id || (a.email.is_some() && a.email == selected.email)) {
+            existing.id = account_id.clone();
+            existing.name = selected.name.clone();
+            existing.handle = selected.handle.clone();
+            existing.email = selected.email.clone();
+            existing.thumbnail = selected.thumbnail.clone();
+            existing.channel_id = selected.channel_id.clone();
+            existing.data_sync_id = selected.data_sync_id.clone();
+            existing.session_cookie = session_cookie.clone();
+            existing.visitor_data = visitor_data.map(str::to_owned);
+            existing.is_active = true;
+        } else {
+            saved_accounts.push(SavedAccount {
+                id: account_id,
+                name: selected.name.clone(),
+                handle: selected.handle.clone(),
+                email: selected.email.clone(),
+                thumbnail: selected.thumbnail.clone(),
+                channel_id: selected.channel_id.clone(),
+                data_sync_id: selected.data_sync_id.clone(),
+                session_cookie: session_cookie.clone(),
+                visitor_data: visitor_data.map(str::to_owned),
+                is_active: true,
+            });
+        }
+        if let Ok(json) = serde_json::to_string(&saved_accounts) {
+            self.db.set_setting("saved_accounts_json", &json);
+        }
+
         let _ = self.app.emit("auth-changed", &account);
         Ok(account)
+    }
+
+    pub fn get_saved_accounts(&self) -> Vec<SavedAccount> {
+        let stored = self
+            .db
+            .get_setting("saved_accounts_json")
+            .and_then(|json| serde_json::from_str::<Vec<SavedAccount>>(&json).ok())
+            .unwrap_or_default();
+
+        if stored.is_empty() {
+            if let Some(cookie) = self.db.get_setting("session_cookie") {
+                if let Some(sel) = selected_identity_from_db(&self.db) {
+                    let id = sel
+                        .email
+                        .clone()
+                        .or_else(|| sel.channel_id.clone())
+                        .or_else(|| sel.data_sync_id.clone())
+                        .unwrap_or_else(|| "account-default".into());
+                    return vec![SavedAccount {
+                        id,
+                        name: sel.name,
+                        handle: sel.handle,
+                        email: sel.email,
+                        thumbnail: sel.thumbnail,
+                        channel_id: sel.channel_id,
+                        data_sync_id: sel.data_sync_id,
+                        session_cookie: cookie,
+                        visitor_data: self.db.get_setting("visitor_data"),
+                        is_active: self.it.is_logged_in(),
+                    }];
+                }
+            }
+        }
+        stored
+    }
+
+    pub async fn switch_saved_account(&self, account_id: &str) -> Result<serde_json::Value, String> {
+        let _turn = self.auth.lock().await;
+        let mut accounts = self.get_saved_accounts();
+        let target_idx = accounts
+            .iter()
+            .position(|a| a.id == account_id)
+            .ok_or_else(|| format!("Account {} not found", account_id))?;
+
+        for a in &mut accounts {
+            a.is_active = false;
+        }
+        accounts[target_idx].is_active = true;
+        let target = accounts[target_idx].clone();
+
+        if let Ok(json) = serde_json::to_string(&accounts) {
+            self.db.set_setting("saved_accounts_json", &json);
+        }
+
+        self.it.set_cookie(Some(target.session_cookie.clone()));
+        self.it.set_data_sync_id(target.data_sync_id.clone());
+        if let Some(ref vd) = target.visitor_data {
+            self.it.set_visitor_data(Some(vd.clone()));
+            self.db.set_setting("visitor_data", vd);
+        }
+
+        let selected = SelectedIdentity {
+            data_sync_id: target.data_sync_id.clone(),
+            name: target.name.clone(),
+            handle: target.handle.clone(),
+            email: target.email.clone(),
+            thumbnail: target.thumbnail.clone(),
+            channel_id: target.channel_id.clone(),
+            has_multiple_identities: false,
+        };
+        let account = selected.account_json(true);
+        let selected_json = serde_json::to_string(&selected).map_err(|e| e.to_string())?;
+        let account_json = account.to_string();
+
+        self.db
+            .set_auth_identity(
+                &target.session_cookie,
+                &selected_json,
+                target.data_sync_id.as_deref(),
+                &account_json,
+            )
+            .map_err(|e| format!("Failed to update auth identity: {e}"))?;
+
+        self.forget_playlist_index();
+        let _ = self.app.emit("auth-changed", &account);
+        Ok(account)
+    }
+
+    pub async fn remove_saved_account(&self, account_id: &str) -> Result<(), String> {
+        let mut accounts = self.get_saved_accounts();
+        let target = accounts.iter().find(|a| a.id == account_id).cloned();
+        accounts.retain(|a| a.id != account_id);
+
+        if let Ok(json) = serde_json::to_string(&accounts) {
+            self.db.set_setting("saved_accounts_json", &json);
+        }
+
+        if let Some(t) = target {
+            if t.is_active {
+                if let Some(next) = accounts.first() {
+                    let next_id = next.id.clone();
+                    let _ = Box::pin(self.switch_saved_account(&next_id)).await;
+                } else {
+                    self.sign_out().await;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The playlist membership index belongs to one account, so a sign-out or a channel switch
@@ -748,6 +924,13 @@ impl AppState {
         self.db.delete_setting("session_cookie");
         self.forget_playlist_index();
         let _ = self.db.clear_auth_identity();
+        let mut accounts = self.get_saved_accounts();
+        for a in &mut accounts {
+            a.is_active = false;
+        }
+        if let Ok(json) = serde_json::to_string(&accounts) {
+            self.db.set_setting("saved_accounts_json", &json);
+        }
         let _ = self.app.emit("auth-changed", serde_json::json!({ "signedIn": false }));
     }
 

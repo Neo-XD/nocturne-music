@@ -46,7 +46,10 @@
 		setFloatingSidebarLeft,
 		setFloatingSidebarRight,
 		setFloatingPlayerBar,
-		setVisibleIcon
+		setVisibleIcon,
+		setCustomizationMode,
+		blockedArtists,
+		unblockArtist
 	} from '$lib/player.svelte';
 	import {
 		formatKey,
@@ -1152,6 +1155,34 @@
 							</div>
 						</section>
 					{:else if tab === 'themes'}
+						<!-- Customization Mode Segmented Switch -->
+						<div class="mb-4 flex items-center justify-between rounded-xl border border-border/80 bg-card/60 p-3 backdrop-blur-md">
+							<div>
+								<div class="text-xs font-semibold uppercase tracking-wider text-foreground">Customization Mode</div>
+								<div class="text-xs text-muted-foreground">
+									{prefs.customizationMode === 'basic'
+										? 'Basic mode: Clean, curated defaults without overwhelming knobs.'
+										: 'Extreme mode: Unlocks all fine-grained sliders, shader controls, and individual toggles.'}
+								</div>
+							</div>
+							<div class="flex items-center rounded-lg border border-border/80 bg-muted/60 p-0.5">
+								<button
+									type="button"
+									class="px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer {prefs.customizationMode === 'basic' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => setCustomizationMode('basic')}
+								>
+									Basic
+								</button>
+								<button
+									type="button"
+									class="px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer {prefs.customizationMode === 'extreme' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => setCustomizationMode('extreme')}
+								>
+									Extreme
+								</button>
+							</div>
+						</div>
+
 						<!-- Expand / Collapse all controls header -->
 						<div class="mb-4 flex items-center justify-between px-1">
 							<span class="text-xs text-muted-foreground">Customize colors, fonts, translucency, and visuals.</span>
@@ -1223,58 +1254,60 @@
 							{/if}
 						</section>
 
-						<!-- 2. Translucency & Opacity -->
-						<section id="sec-translucency" class="{GROUP} scroll-mt-3">
-							<button
-								type="button"
-								onclick={() => (collapsedCategories['sec-translucency'] = !collapsedCategories['sec-translucency'])}
-								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
-							>
-								<div class="flex items-center gap-1.5">
-									<HugeiconsIcon
-										icon={collapsedCategories['sec-translucency'] ? ArrowRight01Icon : ArrowDown01Icon}
-										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
-									/>
-									<span>Translucency & Opacity</span>
-								</div>
-								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
-									{collapsedCategories['sec-translucency'] ? 'expand' : 'collapse'}
-								</span>
-							</button>
-							{#if !collapsedCategories['sec-translucency']}
-								<div class={CARD}>
-									{@render row({
-										title: 'Settings content opacity',
-										desc: 'Controls how translucent or opaque the settings content panel is (macOS vibrant style).',
-										control: dialogOpacitySlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Navigation sidebar rail opacity',
-										desc: 'Controls the transparency level of the left navigation sidebar column.',
-										control: sidebarOpacitySlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Card & surface opacity',
-										desc: 'Adjusts background opacity for settings cards and elevated rows.',
-										control: cardOpacitySlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Dialog backdrop dimming',
-										desc: 'Dimming intensity applied behind open modals and dialogs.',
-										control: overlayDimmingSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Reset translucency',
-										desc: 'Restore default settings window opacity (80% content, 60% sidebar, 25% scrim).',
-										control: resetTranslucencyButton
-									})}
-								</div>
-							{/if}
-						</section>
+						{#if prefs.customizationMode === 'extreme'}
+							<!-- 2. Translucency & Opacity -->
+							<section id="sec-translucency" class="{GROUP} scroll-mt-3">
+								<button
+									type="button"
+									onclick={() => (collapsedCategories['sec-translucency'] = !collapsedCategories['sec-translucency'])}
+									class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+								>
+									<div class="flex items-center gap-1.5">
+										<HugeiconsIcon
+											icon={collapsedCategories['sec-translucency'] ? ArrowRight01Icon : ArrowDown01Icon}
+											class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+										/>
+										<span>Translucency & Opacity</span>
+									</div>
+									<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+										{collapsedCategories['sec-translucency'] ? 'expand' : 'collapse'}
+									</span>
+								</button>
+								{#if !collapsedCategories['sec-translucency']}
+									<div class={CARD}>
+										{@render row({
+											title: 'Settings content opacity',
+											desc: 'Controls how translucent or opaque the settings content panel is (macOS vibrant style).',
+											control: dialogOpacitySlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Navigation sidebar rail opacity',
+											desc: 'Controls the transparency level of the left navigation sidebar column.',
+											control: sidebarOpacitySlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Card & surface opacity',
+											desc: 'Adjusts background opacity for settings cards and elevated rows.',
+											control: cardOpacitySlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Dialog backdrop dimming',
+											desc: 'Dimming intensity applied behind open modals and dialogs.',
+											control: overlayDimmingSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Reset translucency',
+											desc: 'Restore default settings window opacity (80% content, 60% sidebar, 25% scrim).',
+											control: resetTranslucencyButton
+										})}
+									</div>
+								{/if}
+							</section>
+						{/if}
 
 						<!-- 3. Typography -->
 						<section id="sec-typography" class="{GROUP} scroll-mt-3">
@@ -1397,123 +1430,125 @@
 							{/if}
 						</section>
 
-						<!-- 5. Glassy Theme Background -->
-						<section id="sec-glassy" class="{GROUP} scroll-mt-3">
-							<button
-								type="button"
-								onclick={() => (collapsedCategories['sec-glassy'] = !collapsedCategories['sec-glassy'])}
-								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
-							>
-								<div class="flex items-center gap-1.5">
-									<HugeiconsIcon
-										icon={collapsedCategories['sec-glassy'] ? ArrowRight01Icon : ArrowDown01Icon}
-										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
-									/>
-									<span>Glassy Theme Background (Ambient App Wash)</span>
-								</div>
-								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
-									{collapsedCategories['sec-glassy'] ? 'expand' : 'collapse'}
-								</span>
-							</button>
-							{#if !collapsedCategories['sec-glassy']}
-								<div class={CARD}>
-									{@render row({
-										title: 'Warping intensity',
-										desc: 'Controls the fluid wave distortion and liquid displacement in the ambient app background.',
-										control: glassyWarpSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Animation speed',
-										desc: 'Sets the speed of fluid wave motion and liquid warping in the ambient background.',
-										control: glassySpeedSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Brightness & opacity',
-										desc: 'Adjusts how brightly the ambient album art shines through behind the UI.',
-										control: glassyLightnessSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Blur radius',
-										desc: 'Sets the gaussian blur radius applied over the ambient background art.',
-										control: glassyBlurSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Saturation',
-										desc: 'Controls color vibrancy in the background wash.',
-										control: glassySaturationSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Reset Glassy background',
-										desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
-										control: resetGlassyButton
-									})}
-								</div>
-							{/if}
-						</section>
+						{#if prefs.customizationMode === 'extreme'}
+							<!-- 5. Glassy Theme Background -->
+							<section id="sec-glassy" class="{GROUP} scroll-mt-3">
+								<button
+									type="button"
+									onclick={() => (collapsedCategories['sec-glassy'] = !collapsedCategories['sec-glassy'])}
+									class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+								>
+									<div class="flex items-center gap-1.5">
+										<HugeiconsIcon
+											icon={collapsedCategories['sec-glassy'] ? ArrowRight01Icon : ArrowDown01Icon}
+											class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+										/>
+										<span>Glassy Theme Background (Ambient App Wash)</span>
+									</div>
+									<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+										{collapsedCategories['sec-glassy'] ? 'expand' : 'collapse'}
+									</span>
+								</button>
+								{#if !collapsedCategories['sec-glassy']}
+									<div class={CARD}>
+										{@render row({
+											title: 'Warping intensity',
+											desc: 'Controls the fluid wave distortion and liquid displacement in the ambient app background.',
+											control: glassyWarpSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Animation speed',
+											desc: 'Sets the speed of fluid wave motion and liquid warping in the ambient background.',
+											control: glassySpeedSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Brightness & opacity',
+											desc: 'Adjusts how brightly the ambient album art shines through behind the UI.',
+											control: glassyLightnessSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Blur radius',
+											desc: 'Sets the gaussian blur radius applied over the ambient background art.',
+											control: glassyBlurSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Saturation',
+											desc: 'Controls color vibrancy in the background wash.',
+											control: glassySaturationSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Reset Glassy background',
+											desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
+											control: resetGlassyButton
+										})}
+									</div>
+								{/if}
+							</section>
 
-						<!-- 6. Fullscreen Player Background -->
-						<section id="sec-fullscreen" class="{GROUP} scroll-mt-3">
-							<button
-								type="button"
-								onclick={() => (collapsedCategories['sec-fullscreen'] = !collapsedCategories['sec-fullscreen'])}
-								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
-							>
-								<div class="flex items-center gap-1.5">
-									<HugeiconsIcon
-										icon={collapsedCategories['sec-fullscreen'] ? ArrowRight01Icon : ArrowDown01Icon}
-										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
-									/>
-									<span>Fullscreen Player Background</span>
-								</div>
-								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
-									{collapsedCategories['sec-fullscreen'] ? 'expand' : 'collapse'}
-								</span>
-							</button>
-							{#if !collapsedCategories['sec-fullscreen']}
-								<div class={CARD}>
-									{@render row({
-										title: 'Warping intensity',
-										desc: 'Controls the fluid wave distortion behind fullscreen lyrics and player.',
-										control: fullscreenWarpSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Animation speed',
-										desc: 'Sets the speed of fluid wave motion behind the fullscreen player.',
-										control: fullscreenSpeedSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Brightness & opacity',
-										desc: 'Adjusts background brightness and opacity in fullscreen mode.',
-										control: fullscreenLightnessSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Blur radius',
-										desc: 'Sets the gaussian blur radius applied over fullscreen background artwork.',
-										control: fullscreenBlurSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Saturation',
-										desc: 'Controls color vibrancy behind fullscreen playback.',
-										control: fullscreenSaturationSlider,
-										tall: true
-									})}
-									{@render row({
-										title: 'Reset Fullscreen background',
-										desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
-										control: resetFullscreenButton
-									})}
-								</div>
-							{/if}
-						</section>
+							<!-- 6. Fullscreen Player Background -->
+							<section id="sec-fullscreen" class="{GROUP} scroll-mt-3">
+								<button
+									type="button"
+									onclick={() => (collapsedCategories['sec-fullscreen'] = !collapsedCategories['sec-fullscreen'])}
+									class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+								>
+									<div class="flex items-center gap-1.5">
+										<HugeiconsIcon
+											icon={collapsedCategories['sec-fullscreen'] ? ArrowRight01Icon : ArrowDown01Icon}
+											class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+										/>
+										<span>Fullscreen Player Background</span>
+									</div>
+									<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+										{collapsedCategories['sec-fullscreen'] ? 'expand' : 'collapse'}
+									</span>
+								</button>
+								{#if !collapsedCategories['sec-fullscreen']}
+									<div class={CARD}>
+										{@render row({
+											title: 'Warping intensity',
+											desc: 'Controls the fluid wave distortion behind fullscreen lyrics and player.',
+											control: fullscreenWarpSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Animation speed',
+											desc: 'Sets the speed of fluid wave motion behind the fullscreen player.',
+											control: fullscreenSpeedSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Brightness & opacity',
+											desc: 'Adjusts background brightness and opacity in fullscreen mode.',
+											control: fullscreenLightnessSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Blur radius',
+											desc: 'Sets the gaussian blur radius applied over fullscreen background artwork.',
+											control: fullscreenBlurSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Saturation',
+											desc: 'Controls color vibrancy behind fullscreen playback.',
+											control: fullscreenSaturationSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Reset Fullscreen background',
+											desc: 'Restore default warp intensity, speed, brightness, blur radius and saturation.',
+											control: resetFullscreenButton
+										})}
+									</div>
+								{/if}
+							</section>
+						{/if}
 
 						<!-- 7. Layout & Icons -->
 						<section id="sec-layout" class="{GROUP} scroll-mt-3">
@@ -1540,16 +1575,18 @@
 										desc: 'Choose which surfaces float with rounded corners, margins, and translucent blur.',
 										below: floatingPanelsConfig
 									})}
-									{@render row({
-										title: 'Top titlebar icons',
-										desc: 'Choose which action icons appear on the top bar.',
-										below: titlebarIconsConfig
-									})}
-									{@render row({
-										title: 'Bottom player bar icons',
-										desc: 'Choose which controls appear on the bottom player bar.',
-										below: playerbarIconsConfig
-									})}
+									{#if prefs.customizationMode === 'extreme'}
+										{@render row({
+											title: 'Top titlebar icons',
+											desc: 'Choose which action icons appear on the top bar.',
+											below: titlebarIconsConfig
+										})}
+										{@render row({
+											title: 'Bottom player bar icons',
+											desc: 'Choose which controls appear on the bottom player bar.',
+											below: playerbarIconsConfig
+										})}
+									{/if}
 								</div>
 							{/if}
 						</section>
@@ -1588,6 +1625,37 @@
 									control: filterExplicitSwitch,
 									tall: true
 								})}
+							</div>
+						</section>
+						<section class={GROUP}>
+							<h3 class={LABEL}>Blocked Artists</h3>
+							<div class={CARD}>
+								{#if blockedArtists.length === 0}
+									<p class="px-3 py-3 text-xs text-muted-foreground">
+										No blocked artists. You can block artists from any song's ⋯ menu or directly on their artist page.
+									</p>
+								{:else}
+									<div class="space-y-1.5 p-2">
+										{#each blockedArtists as bArtist (bArtist.name + (bArtist.id ?? ''))}
+											<div class="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+												<div class="min-w-0 pr-2">
+													<p class="truncate text-xs font-semibold text-foreground">{bArtist.name}</p>
+													{#if bArtist.id}
+														<p class="truncate font-mono text-[10px] text-muted-foreground">{bArtist.id}</p>
+													{/if}
+												</div>
+												<Button
+													variant="outline"
+													size="sm"
+													class="h-7 cursor-pointer text-xs text-destructive hover:bg-destructive/10"
+													onclick={() => unblockArtist(bArtist.id || bArtist.name)}
+												>
+													Unblock
+												</Button>
+											</div>
+										{/each}
+									</div>
+								{/if}
 							</div>
 						</section>
 						<section class={GROUP}>

@@ -17,6 +17,7 @@ import { clearCached } from './pagecache';
 import * as pl from './personal';
 import type { Personal } from './personal';
 import { appearance } from './theme.svelte';
+import { thumb } from './thumb';
 
 export const playback = $state({
 	now: null as NowPlaying | null,
@@ -81,6 +82,7 @@ function getInitialFloatingMode(): FloatingSidebarMode {
 const initialMode = getInitialFloatingMode();
 
 export const prefs = $state({
+	customizationMode: (browser ? (localStorage.getItem('customization_mode') as 'basic' | 'extreme') : null) || 'basic',
 	musicVideos: false,
 	filterExplicit: false,
 	animatedArtwork: true,
@@ -185,6 +187,79 @@ export function setVisibleIcon(bar: 'titlebar' | 'playerbar', icon: string, visi
 export function setAnimatedArtwork(enabled: boolean) {
 	prefs.animatedArtwork = enabled;
 	api.setSetting('animated_artwork', enabled ? 'true' : 'false').catch(() => {});
+}
+
+export function setCustomizationMode(mode: 'basic' | 'extreme') {
+	prefs.customizationMode = mode;
+	if (browser) localStorage.setItem('customization_mode', mode);
+}
+
+export interface BlockedArtist {
+	id?: string;
+	name: string;
+	blockedAt: number;
+}
+
+function loadBlockedArtists(): BlockedArtist[] {
+	if (!browser) return [];
+	try {
+		const raw = localStorage.getItem('blocked_artists');
+		return raw ? JSON.parse(raw) : [];
+	} catch {
+		return [];
+	}
+}
+
+export const blockedArtists = $state<BlockedArtist[]>(loadBlockedArtists());
+
+export function isArtistBlocked(id?: string | null, name?: string | null): boolean {
+	if (!id && !name) return false;
+	const normName = name?.trim().toLowerCase();
+	return blockedArtists.some((b) => {
+		if (id && b.id && b.id === id) return true;
+		if (normName && b.name.trim().toLowerCase() === normName) return true;
+		if (normName && normName.split(',').map((s) => s.trim()).includes(b.name.trim().toLowerCase())) return true;
+		return false;
+	});
+}
+
+export function blockArtist(name: string, id?: string | null) {
+	if (!name && !id) return;
+	const cleanName = name.trim();
+	if (isArtistBlocked(id, cleanName)) {
+		toast.info(`${cleanName} is already blocked`);
+		return;
+	}
+	blockedArtists.push({ id: id ?? undefined, name: cleanName, blockedAt: Date.now() });
+	if (browser) localStorage.setItem('blocked_artists', JSON.stringify(blockedArtists));
+	toast.success(`Blocked artist ${cleanName}`);
+
+	if (playback.now && isArtistBlocked(playback.now.artistId, playback.now.artists)) {
+		api.nextTrack().catch(() => {});
+	}
+}
+
+export function unblockArtist(idOrName: string) {
+	const idx = blockedArtists.findIndex(
+		(b) => (b.id && b.id === idOrName) || b.name.toLowerCase() === idOrName.toLowerCase()
+	);
+	if (idx !== -1) {
+		const removed = blockedArtists.splice(idx, 1)[0];
+		if (browser) localStorage.setItem('blocked_artists', JSON.stringify(blockedArtists));
+		toast.info(`Unblocked artist ${removed.name}`);
+	}
+}
+
+export function preloadQueueThumbnails(queue: QueueState) {
+	if (!browser || !queue?.items) return;
+	const cur = queue.currentIndex ?? 0;
+	const upcoming = queue.items.slice(cur + 1, cur + 4);
+	for (const item of upcoming) {
+		if (item.thumbnail) {
+			const img = new Image();
+			img.src = thumb(item.thumbnail, 544) ?? '';
+		}
+	}
 }
 
 /** videoId → the in-flight or settled loopback URL for its music video (null when it has none).
@@ -1224,6 +1299,12 @@ export function initApp(mini = false): () => void {
 				api.nextTrack().catch(() => {});
 				return;
 			}
+			if (isArtistBlocked(n.artistId, n.artists)) {
+				toast(`Skipped track by blocked artist: ${n.artists}`);
+				api.nextTrack().catch(() => {});
+				return;
+			}
+			preloadQueueThumbnails(playback.queue);
 			// Feeds Shortcuts recency and the community shelf's artist seed. Every play lands here,
 			// gapless advances included, so it's the one hook that sees them all.
 			pl.touchPick(personal, n.videoId);
@@ -1242,7 +1323,10 @@ export function initApp(mini = false): () => void {
 			capOverrides(ratings);
 			if (playback.now?.videoId === videoId) playback.rating = rating;
 		}),
-		api.onQueueChanged((q) => (playback.queue = q)),
+		api.onQueueChanged((q) => {
+			playback.queue = q;
+			preloadQueueThumbnails(q);
+		}),
 		// The items did not change, so keep the array we already hold and patch the rest. Splice
 		// the playing row back in: `start_current` backfills its duration and artists after the
 		// stream resolves, and that repair rides on this event rather than a whole new queue.
@@ -1258,6 +1342,7 @@ export function initApp(mini = false): () => void {
 				repeat: q.repeat,
 				sourceName: q.sourceName
 			};
+			preloadQueueThumbnails(playback.queue);
 		}),
 		api.onPosition((p) => {
 			playback.position = p;

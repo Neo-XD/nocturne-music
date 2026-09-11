@@ -23,13 +23,15 @@
 		Share08Icon,
 		PreferenceVerticalIcon,
 		BookmarkAdd02Icon,
-		BookmarkMinus02Icon
+		BookmarkMinus02Icon,
+		Cancel01Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
 	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 	import {
 		addPick,
+		blockArtist,
 		enqueue,
 		isItemSavedInLibrary,
 		openShare,
@@ -205,6 +207,14 @@
 				onclick={(e) => run(e, () => goto(`/artist/${encodeURIComponent(song.artist_id!)}`))}
 			>
 				<HugeiconsIcon icon={UserListIcon} class="h-4 w-4" /> Go to artist
+			</button>
+		{/if}
+		{#if song.artists && !isLocal}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+				onclick={(e) => run(e, () => blockArtist(song.artists, song.artist_id))}
+			>
+				<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" /> Block artist ({song.artists})
 			</button>
 		{/if}
 		<!-- Local files carry no album_id (local.rs). Checked here too: a queue restored from before

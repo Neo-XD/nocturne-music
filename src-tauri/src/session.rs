@@ -45,7 +45,7 @@ const LOGIN_UA: Option<&str> = None;
 /// Google sign-in with `continue` back to YTM, so a successful login redirects to music.youtube.com
 /// (our completion signal).
 const LOGIN_URL: &str =
-    "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://music.youtube.com/";
+    "https://accounts.google.com/AccountChooser?service=youtube&continue=https://music.youtube.com/";
 
 /// Open the login webview. Returns immediately; sign-in completes asynchronously (the UI learns via
 /// the `auth-changed` event, or `login-error` on failure).

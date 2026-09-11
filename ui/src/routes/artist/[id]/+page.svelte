@@ -12,7 +12,8 @@
 		Share08Icon,
 		BookmarkAdd02Icon,
 		BookmarkCheck02Icon,
-		ArrowRight01Icon
+		ArrowRight01Icon,
+		Cancel01Icon
 	} from '@hugeicons/core-free-icons';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
 	import TrackRow from '$lib/components/TrackRow.svelte';
@@ -32,7 +33,10 @@
 		playFrom,
 		startRadio,
 		toast,
-		toggleSaved
+		toggleSaved,
+		blockArtist,
+		unblockArtist,
+		isArtistBlocked
 	} from '$lib/player.svelte';
 	import { getCached, putCached } from '$lib/pagecache';
 	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
@@ -258,6 +262,25 @@
 						{savedHere ? 'In library' : 'Save to library'}
 					</button>
 				{/if}
+				{#if isArtistBlocked(id, artist?.name)}
+					<button
+						class="flex cursor-pointer items-center gap-2 rounded-full border border-destructive/60 bg-destructive/10 px-4 py-2.5 text-sm font-semibold text-destructive transition hover:bg-destructive/20"
+						onclick={() => unblockArtist(id || (artist?.name ?? ''))}
+						title="Unblock artist"
+					>
+						<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
+						Blocked
+					</button>
+				{:else}
+					<button
+						class="flex cursor-pointer items-center gap-2 rounded-full border border-border px-4 py-2.5 text-sm font-semibold text-muted-foreground transition hover:border-destructive/60 hover:text-destructive hover:bg-destructive/10"
+						onclick={() => blockArtist(artist?.name ?? '', id)}
+						title="Block this artist from playing"
+					>
+						<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
+						Block
+					</button>
+				{/if}
 				<button
 					class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border text-muted-foreground transition hover:bg-accent/10 hover:text-foreground"
 					onclick={openMenu}
@@ -349,5 +372,26 @@
 		>
 			<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
 		</button>
+		{#if isArtistBlocked(id, artist?.name)}
+			<button
+				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+				onclick={() => {
+					menuOpen = false;
+					unblockArtist(id || (artist?.name ?? ''));
+				}}
+			>
+				<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" /> Unblock artist
+			</button>
+		{:else}
+			<button
+				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+				onclick={() => {
+					menuOpen = false;
+					blockArtist(artist?.name ?? '', id);
+				}}
+			>
+				<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" /> Block artist
+			</button>
+		{/if}
 	</div>
 {/if}

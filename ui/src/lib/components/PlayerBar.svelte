@@ -285,11 +285,15 @@
 					onclick={() => api.toggleShuffle()}
 					aria-label="Shuffle"
 					aria-pressed={shuffleOn}
+					class="relative"
 				>
 					<HugeiconsIcon
 						icon={ShuffleIcon}
 						class="h-4 w-4 {shuffleOn ? 'text-primary' : 'text-muted-foreground'}"
 					/>
+					{#if shuffleOn}
+						<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
+					{/if}
 				</Button>
 			{/if}
 			<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous">
@@ -321,6 +325,7 @@
 					onclick={cycleRepeat}
 					aria-label="Repeat: {repeat}"
 					aria-pressed={repeat !== 'off'}
+					class="relative"
 				>
 					<!-- icon swap via altIcon/showAlt — `icon` is frozen at mount (see play/pause above) -->
 					<HugeiconsIcon
@@ -329,6 +334,9 @@
 						showAlt={repeat === 'one'}
 						class="h-4 w-4 {repeat !== 'off' ? 'text-primary' : 'text-muted-foreground'}"
 					/>
+					{#if repeat !== 'off'}
+						<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
+					{/if}
 				</Button>
 			{/if}
 		</div>

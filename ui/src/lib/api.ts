@@ -421,6 +421,21 @@ export const getAccountIdentities = () =>
 	invoke<AccountIdentity[]>('get_account_identities');
 export const switchAccount = (selectionKey: string) =>
 	invoke<Account>('switch_account', { selectionKey });
+export interface SavedAccount {
+	id: string;
+	name?: string;
+	handle?: string;
+	email?: string;
+	thumbnail?: string;
+	channelId?: string;
+	dataSyncId?: string;
+	isActive: boolean;
+}
+export const getSavedAccounts = () => invoke<SavedAccount[]>('get_saved_accounts');
+export const switchSavedAccount = (accountId: string) =>
+	invoke<Account>('switch_saved_account', { accountId });
+export const removeSavedAccount = (accountId: string) =>
+	invoke<void>('remove_saved_account', { accountId });
 export const signOut = () => invoke<void>('sign_out');
 /** Open the in-app Google sign-in webview (context/15 Path A). Result arrives via onAuthChanged. */
 export const loginWebview = () => invoke<void>('login_webview');

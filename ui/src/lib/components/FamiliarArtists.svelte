@@ -101,6 +101,10 @@
 
 	const open = (a: ArtistPage) => goto(`/artist/${encodeURIComponent(a.channelId)}`);
 
+	function playCountFor(a: ArtistPage): number {
+		return personal.artists[a.channelId]?.count ?? (a.name ? personal.artists[a.name]?.count : 0) ?? 0;
+	}
+
 	async function toggleSub(a: ArtistPage) {
 		if (subBusy) return;
 		const next = !subs[a.channelId];
@@ -136,6 +140,7 @@
 					{/each}
 				{:else}
 					{#each listed as a (a.channelId)}
+						{@const plays = playCountFor(a)}
 						<div
 							class="group/row flex cursor-pointer items-center gap-3 rounded-lg p-1.5 text-left transition-colors hover:bg-accent/10"
 							role="button"
@@ -170,8 +175,14 @@
 							</div>
 							<div class="min-w-0 flex-1">
 								<div class="truncate text-sm font-medium">{a.name ?? 'Artist'}</div>
-								<div class="truncate text-xs text-muted-foreground">
-									{a.subscribers ?? 'Artist'}
+								<div class="truncate text-xs text-muted-foreground flex items-center gap-1.5">
+									{#if a.subscribers}
+										<span>{a.subscribers}</span>
+										<span>•</span>
+									{/if}
+									<span class="font-medium text-primary/90">
+										{plays} {plays === 1 ? 'play' : 'plays'}
+									</span>
 								</div>
 							</div>
 							<button
