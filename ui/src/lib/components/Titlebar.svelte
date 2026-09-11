@@ -29,6 +29,7 @@
 	import logo from '$lib/assets/icon.png';
 	import * as api from '$lib/api';
 	import { np, prefs, openMiniPlayer, toast, ui } from '$lib/player.svelte';
+	import { theme } from '$lib/theme.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 
@@ -149,7 +150,9 @@
 	data-tauri-drag-region
 	class="app-titlebar z-40 flex h-10.5 shrink-0 select-none items-center justify-between transition-all duration-200 {prefs.floatingTopBar
 		? 'app-floating-panel mx-2 mt-2 rounded-2xl border border-border/70 bg-card/75 backdrop-blur-xl px-2 shadow-none'
-		: 'relative border-b border-border/60 bg-background px-1 shadow-none'}"
+		: theme.id === 'glassy'
+			? 'relative border-b border-border/60 bg-card/65 backdrop-blur-xl px-1 shadow-none'
+			: 'relative border-b border-border/60 bg-background px-1 shadow-none'}"
 >
 	<div class="flex h-full items-center shrink-0">
 		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->

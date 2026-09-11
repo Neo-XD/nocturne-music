@@ -552,6 +552,16 @@ export interface ConnectedClient {
 	connected_at: number;
 }
 
+export interface PairedDevice {
+	id: string;
+	name: string;
+	original_name: string;
+	session_token: string;
+	is_favorite: boolean;
+	paired_at: number;
+	last_seen: number;
+}
+
 export interface RemoteSyncInfo {
 	is_running: boolean;
 	pairing_pin: string;
@@ -559,10 +569,19 @@ export interface RemoteSyncInfo {
 	local_ip: string;
 	device_name: string;
 	connected_clients: ConnectedClient[];
+	paired_devices: PairedDevice[];
 }
 
 export const getRemoteSyncStatus = () => invoke<RemoteSyncInfo>('get_remote_sync_status');
 export const regenerateRemoteSyncPin = () => invoke<string>('regenerate_remote_sync_pin');
+export const getRemoteSyncPairedDevices = () =>
+	invoke<PairedDevice[]>('get_remote_sync_paired_devices');
+export const renameRemoteSyncDevice = (id: string, name: string) =>
+	invoke<void>('rename_remote_sync_device', { id, name });
+export const setRemoteSyncDeviceFavorite = (id: string, isFavorite: boolean) =>
+	invoke<void>('set_remote_sync_device_favorite', { id, isFavorite });
+export const removeRemoteSyncDevice = (id: string) =>
+	invoke<void>('remove_remote_sync_device', { id });
 
 // --- events (context/11). Each returns an unlisten fn; call it on component teardown. --------
 export const onNowPlaying = (cb: (n: NowPlaying) => void): Promise<UnlistenFn> =>

@@ -32,6 +32,17 @@ pub struct ConnectedClient {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairedDevice {
+    pub id: String,
+    pub name: String,
+    pub original_name: String,
+    pub session_token: String,
+    pub is_favorite: bool,
+    pub paired_at: u64,
+    pub last_seen: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteSyncInfo {
     pub is_running: bool,
     pub pairing_pin: String,
@@ -39,6 +50,7 @@ pub struct RemoteSyncInfo {
     pub local_ip: String,
     pub device_name: String,
     pub connected_clients: Vec<ConnectedClient>,
+    pub paired_devices: Vec<PairedDevice>,
 }
 
 pub struct RemoteSyncController {
@@ -47,6 +59,7 @@ pub struct RemoteSyncController {
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
     shutdown_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
+    paired_devices: Arc<RwLock<Vec<PairedDevice>>>,
     current_port: Arc<RwLock<u16>>,
     pairing_pin: Arc<RwLock<String>>,
     pairing_gate: Arc<PairingGate>,
@@ -61,6 +74,7 @@ impl RemoteSyncController {
             state_ref: Arc::new(RwLock::new(None)),
             shutdown_tx: Arc::new(Mutex::new(None)),
             connected_clients: Arc::new(RwLock::new(Vec::new())),
+            paired_devices: Arc::new(RwLock::new(Vec::new())),
             current_port: Arc::new(RwLock::new(8080)),
             pairing_pin: Arc::new(RwLock::new(String::new())),
             pairing_gate: PairingGate::new(),
@@ -68,6 +82,11 @@ impl RemoteSyncController {
     }
 
     pub async fn set_app_state(&self, app_state: Arc<AppState>) {
+        if let Some(json) = app_state.db.get_setting("remote_sync_paired_devices") {
+            if let Ok(devices) = serde_json::from_str::<Vec<PairedDevice>>(&json) {
+                *self.paired_devices.write().await = devices;
+            }
+        }
         let mut w = self.state_ref.write().await;
         *w = Some(app_state);
     }
@@ -79,6 +98,7 @@ impl RemoteSyncController {
     pub async fn get_info(&self) -> RemoteSyncInfo {
         let port = *self.current_port.read().await;
         let clients = self.connected_clients.read().await.clone();
+        let paired = self.paired_devices.read().await.clone();
         let local_ip = get_local_ip();
         let device_name = get_device_name();
 
@@ -89,6 +109,59 @@ impl RemoteSyncController {
             local_ip,
             device_name,
             connected_clients: clients,
+            paired_devices: paired,
+        }
+    }
+
+    pub async fn get_paired_devices(&self) -> Vec<PairedDevice> {
+        self.paired_devices.read().await.clone()
+    }
+
+    pub async fn rename_device(&self, id: &str, new_name: &str) -> Result<(), String> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return Err("Device name cannot be empty".into());
+        }
+        {
+            let mut devices = self.paired_devices.write().await;
+            if let Some(d) = devices.iter_mut().find(|d| d.id == id) {
+                d.name = trimmed.to_string();
+            } else {
+                return Err("Device not found".into());
+            }
+        }
+        self.persist_paired_devices().await;
+        Ok(())
+    }
+
+    pub async fn set_device_favorite(&self, id: &str, is_favorite: bool) -> Result<(), String> {
+        {
+            let mut devices = self.paired_devices.write().await;
+            if let Some(d) = devices.iter_mut().find(|d| d.id == id) {
+                d.is_favorite = is_favorite;
+            } else {
+                return Err("Device not found".into());
+            }
+        }
+        self.persist_paired_devices().await;
+        Ok(())
+    }
+
+    pub async fn remove_device(&self, id: &str) -> Result<(), String> {
+        {
+            let mut devices = self.paired_devices.write().await;
+            devices.retain(|d| d.id != id);
+        }
+        self.persist_paired_devices().await;
+        Ok(())
+    }
+
+    async fn persist_paired_devices(&self) {
+        if let Some(app_state) = self.state_ref.read().await.as_ref() {
+            let devices = self.paired_devices.read().await;
+            if let Ok(json) = serde_json::to_string(&*devices) {
+                app_state.db.set_setting("remote_sync_paired_devices", &json);
+            }
         }
     }
 
@@ -113,6 +186,7 @@ impl RemoteSyncController {
         let broadcast_tx = self.broadcast_tx.clone();
         let state_ref = self.state_ref.clone();
         let connected_clients = self.connected_clients.clone();
+        let paired_devices = self.paired_devices.clone();
         let pairing_pin = self.pairing_pin.clone();
         let pairing_gate = self.pairing_gate.clone();
 
@@ -136,10 +210,11 @@ impl RemoteSyncController {
                                 let b_rx = broadcast_tx.subscribe();
                                 let st_ref = state_ref.clone();
                                 let clients_ref = connected_clients.clone();
+                                let paired_ref = paired_devices.clone();
                                 let pin_ref = pairing_pin.clone();
                                 let gate_ref = pairing_gate.clone();
                                 tokio::spawn(async move {
-                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref, pin_ref, gate_ref).await;
+                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref, paired_ref, pin_ref, gate_ref).await;
                                 });
                             }
                             Err(e) => {
@@ -251,6 +326,7 @@ async fn handle_connection(
     mut b_rx: broadcast::Receiver<String>,
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
+    paired_devices: Arc<RwLock<Vec<PairedDevice>>>,
     pairing_pin: Arc<RwLock<String>>,
     pairing_gate: Arc<PairingGate>,
 ) {
@@ -294,6 +370,11 @@ async fn handle_connection(
     let nonce = format!("{:032x}", rand::random::<u128>());
     let session_token = format!("{:032x}", rand::random::<u128>());
 
+    let valid_tokens: std::collections::HashSet<String> = {
+        let devices = paired_devices.read().await;
+        devices.iter().map(|d| d.session_token.clone()).collect()
+    };
+
     let authed = {
         let mut tx = (&mut ws_sender).with(|text: String| {
             std::future::ready(Ok::<_, tokio_tungstenite::tungstenite::Error>(Message::Text(
@@ -309,6 +390,7 @@ async fn handle_connection(
                     _ => None,
                 }
             });
+        let is_trusted = move |tok: &str| valid_tokens.contains(tok);
         // Bounded so an unauthenticated peer cannot hold a socket open indefinitely.
         tokio::time::timeout(
             std::time::Duration::from_secs(30),
@@ -319,15 +401,16 @@ async fn handle_connection(
                 &get_device_name(),
                 || async { pairing_pin.read().await.clone() },
                 &session_token,
+                is_trusted,
             ),
         )
         .await
     };
 
-    let client_name = match authed {
-        Ok(HandshakeOutcome::Authenticated { client_device_name }) => {
+    let (client_name_raw, used_token) = match authed {
+        Ok(HandshakeOutcome::Authenticated { client_device_name, session_token: tok }) => {
             ticket.succeeded();
-            client_device_name
+            (client_device_name, tok)
         }
         Ok(HandshakeOutcome::WrongPin) => {
             ticket.wrong_pin();
@@ -341,7 +424,47 @@ async fn handle_connection(
         }
     };
 
-    client_info.name = client_name;
+    let assigned_name = {
+        let mut devices = paired_devices.write().await;
+        let matched = devices.iter_mut().find(|d| {
+            if let Some(ref tok) = used_token {
+                d.session_token == *tok
+            } else {
+                d.original_name == client_name_raw
+            }
+        });
+
+        if let Some(d) = matched {
+            d.last_seen = now_secs;
+            if let Some(ref tok) = used_token {
+                d.session_token = tok.clone();
+            }
+            d.name.clone()
+        } else {
+            let tok = used_token.unwrap_or_else(|| session_token.clone());
+            let new_device = PairedDevice {
+                id: format!("{:016x}", rand::random::<u64>()),
+                name: client_name_raw.clone(),
+                original_name: client_name_raw.clone(),
+                session_token: tok,
+                is_favorite: false,
+                paired_at: now_secs,
+                last_seen: now_secs,
+            };
+            let name = new_device.name.clone();
+            devices.push(new_device);
+            name
+        }
+    };
+
+    if let Some(app_state) = state_ref.read().await.as_ref() {
+        let devices = paired_devices.read().await;
+        if let Ok(json) = serde_json::to_string(&*devices) {
+            app_state.db.set_setting("remote_sync_paired_devices", &json);
+        }
+    }
+
+    client_info.name = assigned_name;
     {
         let mut clients = connected_clients.write().await;
         clients.push(client_info.clone());

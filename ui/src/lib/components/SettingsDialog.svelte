@@ -24,7 +24,11 @@
 		ComputerIcon,
 		SmartPhone01Icon,
 		CheckmarkCircle02Icon,
-		Wifi01Icon
+		Wifi01Icon,
+		FavouriteIcon,
+		Edit02Icon,
+		Delete02Icon,
+		Tick02Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -473,13 +477,25 @@
 			name: 'Kugou',
 			description: 'High-coverage LRC lyrics archive matched by exact audio duration.',
 			badge: 'LRC'
+		},
+		{
+			id: 'youlyplus',
+			name: 'YouLyPlus',
+			description: 'High-accuracy synchronized lyrics with word-level annotations and community sync.',
+			badge: 'Enhanced'
+		},
+		{
+			id: 'paxsenix',
+			name: 'Paxsenix',
+			description: 'Aggregated synchronized and romanized lyrics provider covering broad streaming catalogues.',
+			badge: 'Universal'
 		}
 	];
 
 	let lyricsProviders = $state<LyricsProviderInfo[]>([]);
 
 	function initLyricsProviders(saved?: string) {
-		const defaultIds = ['betterlyrics', 'lrclib', 'ytm', 'qq', 'kugou'];
+		const defaultIds = ['betterlyrics', 'lrclib', 'ytm', 'qq', 'kugou', 'youlyplus', 'paxsenix'];
 		let enabledIds: string[] = defaultIds;
 		let savedOrder: string[] = [];
 		if (saved && saved.trim()) {
@@ -746,6 +762,48 @@
 			console.error('Failed to regenerate pairing PIN', e);
 		}
 		await fetchSyncStatus();
+	}
+
+	let editingDeviceId = $state<string | null>(null);
+	let editingDeviceName = $state('');
+
+	function startRename(device: api.PairedDevice) {
+		editingDeviceId = device.id;
+		editingDeviceName = device.name;
+	}
+
+	async function saveRename(id: string) {
+		const trimmed = editingDeviceName.trim();
+		if (!trimmed) return;
+		try {
+			await api.renameRemoteSyncDevice(id, trimmed);
+			toast.success('Device renamed');
+			await fetchSyncStatus();
+		} catch (e) {
+			toast.error(String(e));
+		} finally {
+			editingDeviceId = null;
+		}
+	}
+
+	async function toggleFavorite(device: api.PairedDevice) {
+		try {
+			await api.setRemoteSyncDeviceFavorite(device.id, !device.is_favorite);
+			toast.success(!device.is_favorite ? 'Device added to trusted favorites (bypasses PIN)' : 'Device removed from favorites');
+			await fetchSyncStatus();
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	async function removeDevice(id: string) {
+		try {
+			await api.removeRemoteSyncDevice(id);
+			toast.success('Device unpaired');
+			await fetchSyncStatus();
+		} catch (e) {
+			toast.error(String(e));
+		}
 	}
 
 	let autoRankClients = $state(true);
@@ -2482,6 +2540,95 @@
 							<span class="text-muted-foreground">({client.ip})</span>
 						</div>
 						<span class="text-[10px] font-semibold text-emerald-500">Connected</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		{#if syncInfo && syncInfo.paired_devices && syncInfo.paired_devices.length > 0}
+			<div class="space-y-1.5 pt-2">
+				<div class="flex items-center justify-between">
+					<span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Paired & Trusted Devices</span>
+					<span class="text-[10px] text-muted-foreground">Favorites bypass PIN auto-trust</span>
+				</div>
+				{#each syncInfo.paired_devices as device (device.id)}
+					<div class="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 dark:bg-muted/15 px-3 py-2 text-xs transition-colors hover:border-border">
+						<div class="flex items-center gap-2 min-w-0 flex-1 mr-2">
+							<button
+								type="button"
+								class="cursor-pointer transition-transform hover:scale-110 shrink-0"
+								onclick={() => toggleFavorite(device)}
+								title={device.is_favorite ? "Trusted Favorite (Click to unstar)" : "Star as Trusted Favorite (Bypasses PIN)"}
+							>
+								<HugeiconsIcon
+									icon={FavouriteIcon}
+									class="h-3.5 w-3.5 {device.is_favorite ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground/60 hover:text-foreground'}"
+								/>
+							</button>
+
+							{#if editingDeviceId === device.id}
+								<form
+									class="flex items-center gap-1.5 flex-1 min-w-0"
+									onsubmit={(e) => { e.preventDefault(); saveRename(device.id); }}
+								>
+									<input
+										type="text"
+										bind:value={editingDeviceName}
+										class="h-6 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+										placeholder="Device name"
+										autofocus
+									/>
+									<button
+										type="submit"
+										class="cursor-pointer text-emerald-500 hover:text-emerald-400 p-1"
+										title="Save"
+									>
+										<HugeiconsIcon icon={Tick02Icon} class="h-3.5 w-3.5" />
+									</button>
+									<button
+										type="button"
+										class="cursor-pointer text-muted-foreground hover:text-foreground p-1"
+										onclick={() => { editingDeviceId = null; }}
+										title="Cancel"
+									>
+										<HugeiconsIcon icon={Cancel01Icon} class="h-3.5 w-3.5" />
+									</button>
+								</form>
+							{:else}
+								<div class="flex flex-col min-w-0">
+									<div class="flex items-center gap-1.5">
+										<span class="font-medium text-foreground truncate">{device.name}</span>
+										{#if device.is_favorite}
+											<span class="rounded bg-amber-500/15 px-1.5 py-0.2 text-[9px] font-semibold text-amber-500">Favorite</span>
+										{/if}
+									</div>
+									{#if device.name !== device.original_name}
+										<span class="text-[10px] text-muted-foreground truncate">{device.original_name}</span>
+									{/if}
+								</div>
+							{/if}
+						</div>
+
+						<div class="flex items-center gap-1.5 shrink-0">
+							{#if editingDeviceId !== device.id}
+								<button
+									type="button"
+									class="cursor-pointer text-muted-foreground hover:text-foreground p-1 transition-colors"
+									onclick={() => startRename(device)}
+									title="Rename device"
+								>
+									<HugeiconsIcon icon={Edit02Icon} class="h-3.5 w-3.5" />
+								</button>
+								<button
+									type="button"
+									class="cursor-pointer text-muted-foreground hover:text-destructive p-1 transition-colors"
+									onclick={() => removeDevice(device.id)}
+									title="Unpair device"
+								>
+									<HugeiconsIcon icon={Delete02Icon} class="h-3.5 w-3.5" />
+								</button>
+							{/if}
+						</div>
 					</div>
 				{/each}
 			</div>

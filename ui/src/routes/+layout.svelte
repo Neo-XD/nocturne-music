@@ -204,7 +204,7 @@
 						<AnimatedArtwork
 							src={thumb(playback.now.thumbnail, 720)}
 							class="absolute inset-0 h-full w-full scale-125 object-cover transition-all duration-700"
-							style="opacity: {appearance.glassyLightness}; filter: blur({appearance.glassyBlur}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
+							style="opacity: {appearance.glassyLightness}; filter: blur({Math.min(appearance.glassyBlur, 18)}px) saturate({Math.round(appearance.glassySaturation * 100)}%);"
 							intensity={appearance.glassyWarp}
 							speed={appearance.glassySpeed}
 						/>
@@ -221,7 +221,7 @@
 						class="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-secondary/30"
 					></div>
 				{/if}
-				<div class="absolute inset-0 bg-background/50 dark:bg-black/45 backdrop-blur-2xl"></div>
+				<div class="absolute inset-0 bg-background/45 dark:bg-black/40 {prefs.animatedArtwork ? 'backdrop-blur-sm' : 'backdrop-blur-2xl'}"></div>
 			</div>
 		{/if}
 

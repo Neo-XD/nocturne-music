@@ -436,6 +436,59 @@ pub async fn get_remote_sync_status(
     }
 }
 
+#[tauri::command]
+pub async fn get_remote_sync_paired_devices(
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::remotesync::PairedDevice>, String> {
+    use tauri::Manager;
+    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+        Ok(rs.get_paired_devices().await)
+    } else {
+        Err("Remote sync controller unavailable".into())
+    }
+}
+
+#[tauri::command]
+pub async fn rename_remote_sync_device(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    use tauri::Manager;
+    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+        rs.rename_device(&id, &name).await
+    } else {
+        Err("Remote sync controller unavailable".into())
+    }
+}
+
+#[tauri::command]
+pub async fn set_remote_sync_device_favorite(
+    app: tauri::AppHandle,
+    id: String,
+    is_favorite: bool,
+) -> Result<(), String> {
+    use tauri::Manager;
+    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+        rs.set_device_favorite(&id, is_favorite).await
+    } else {
+        Err("Remote sync controller unavailable".into())
+    }
+}
+
+#[tauri::command]
+pub async fn remove_remote_sync_device(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<(), String> {
+    use tauri::Manager;
+    if let Some(rs) = app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>() {
+        rs.remove_device(&id).await
+    } else {
+        Err("Remote sync controller unavailable".into())
+    }
+}
+
 /// The streamable client keys the orchestrator tries, for the "disabled clients" setting. Names
 /// come from the innertube crate so the UI stays free of YouTube-shaped identity strings.
 #[tauri::command]

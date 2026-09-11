@@ -95,13 +95,13 @@
 				snoise(uv * 2.8 + 4.0 * q + vec2(t * 0.35 + 8.3, t * 0.4 + 2.8))
 			);
 
-			// Fluid offset with boundary clamp
-			vec2 warpedUv = uv + r * (0.045 * u_intensity);
+			// Fluid offset with boundary clamp - enhanced displacement for visible organic liquid movement
+			vec2 warpedUv = uv + r * (0.12 * max(u_intensity, 0.25));
 			warpedUv = clamp(warpedUv, 0.002, 0.998);
 
 			// Chromatic dispersion for liquid depth
-			vec2 rOffset = warpedUv + vec2(0.0035 * r.x * u_intensity, 0.0);
-			vec2 bOffset = warpedUv - vec2(0.0035 * r.y * u_intensity, 0.0);
+			vec2 rOffset = warpedUv + vec2(0.008 * r.x * max(u_intensity, 0.25), 0.0);
+			vec2 bOffset = warpedUv - vec2(0.008 * r.y * max(u_intensity, 0.25), 0.0);
 
 			vec4 curR = texture2D(u_image, clamp(rOffset, 0.002, 0.998));
 			vec4 curG = texture2D(u_image, warpedUv);
@@ -198,7 +198,10 @@
 		img.onload = () => {
 			if (!gl || !program || currentSrc !== newSrc) return;
 			const newTex = loadTexture(gl, img);
-			if (!newTex) return;
+			if (!newTex) {
+				webglFailed = true;
+				return;
+			}
 
 			if (!currentTexture) {
 				currentTexture = newTex;
@@ -207,6 +210,33 @@
 				nextTexture = newTex;
 				textureMix = 0.0;
 			}
+		};
+		img.onerror = () => {
+			// CORS fallback for hosts disallowing anonymous crossOrigin
+			const fallbackImg = new Image();
+			fallbackImg.onload = () => {
+				if (!gl || !program || currentSrc !== newSrc) return;
+				try {
+					const newTex = loadTexture(gl, fallbackImg);
+					if (!newTex) {
+						webglFailed = true;
+						return;
+					}
+					if (!currentTexture) {
+						currentTexture = newTex;
+						textureMix = 1.0;
+					} else {
+						nextTexture = newTex;
+						textureMix = 0.0;
+					}
+				} catch {
+					webglFailed = true;
+				}
+			};
+			fallbackImg.onerror = () => {
+				webglFailed = true;
+			};
+			fallbackImg.src = newSrc;
 		};
 		img.src = newSrc;
 	}

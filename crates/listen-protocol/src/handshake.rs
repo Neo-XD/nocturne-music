@@ -13,7 +13,13 @@ use crate::{RoomState, Track};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncWireMessage {
     AuthChallenge { nonce: String, host_device_name: String },
-    AuthResponse { client_device_name: String, pin_hash: Option<String> },
+    AuthResponse {
+        client_device_name: String,
+        #[serde(default)]
+        pin_hash: Option<String>,
+        #[serde(default)]
+        session_token: Option<String>,
+    },
     AuthResult { success: bool, session_token: Option<String>, message: Option<String> },
     SyncState { state: RoomState },
     PlaybackAction { action: RemotePlaybackAction },
@@ -39,7 +45,7 @@ pub struct RemotePlaybackAction {
 /// How one handshake ended. `WrongPin` is the only outcome that may cost the peer a guess.
 #[derive(Debug, PartialEq, Eq)]
 pub enum HandshakeOutcome {
-    Authenticated { client_device_name: String },
+    Authenticated { client_device_name: String, session_token: Option<String> },
     WrongPin,
     Aborted,
 }
@@ -48,19 +54,21 @@ pub enum HandshakeOutcome {
 ///
 /// `current_pin` is `FnOnce` on purpose: the attempt limiter is only per-attempt because one
 /// admitted handshake evaluates one PIN, and a second evaluation here would fail to compile.
-pub async fn run_handshake<S, R, F, Fut>(
+pub async fn run_handshake<S, R, F, Fut, T>(
     receiver: &mut R,
     sender: &mut S,
     nonce: &str,
     host_device_name: &str,
     current_pin: F,
     session_token: &str,
+    is_trusted_token: T,
 ) -> HandshakeOutcome
 where
     S: Sink<String> + Unpin,
     R: Stream<Item = Option<String>> + Unpin,
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = String>,
+    T: Fn(&str) -> bool,
 {
     let challenge = SyncWireMessage::AuthChallenge {
         nonce: nonce.to_string(),
@@ -80,27 +88,44 @@ where
         // is why a Ping or a playback_action from an unauthenticated peer neither authenticates nor
         // costs it a guess.
         let Some(text) = frame else { continue };
-        let Ok(SyncWireMessage::AuthResponse { client_device_name, pin_hash }) =
-            serde_json::from_str::<SyncWireMessage>(&text)
+        let Ok(SyncWireMessage::AuthResponse {
+            client_device_name,
+            pin_hash,
+            session_token: client_token,
+        }) = serde_json::from_str::<SyncWireMessage>(&text)
         else {
             continue;
         };
 
-        // Read here rather than at connect time, so a PIN regenerated mid-handshake is the one
-        // this attempt is judged against, exactly as the inline version did.
-        let pin = current_pin().await;
-        let ok = !pin.is_empty()
-            && pin_hash.is_some_and(|h| constant_time_eq(&h, &expected_pin_hash(nonce, &pin)));
+        let token_authed = client_token
+            .as_deref()
+            .map(|tok| !tok.is_empty() && is_trusted_token(tok))
+            .unwrap_or(false);
+
+        let (ok, result_token) = if token_authed {
+            (true, client_token)
+        } else {
+            // Read here rather than at connect time, so a PIN regenerated mid-handshake is the one
+            // this attempt is judged against, exactly as the inline version did.
+            let pin = current_pin().await;
+            let pin_ok = !pin.is_empty()
+                && pin_hash.as_deref().is_some_and(|h| constant_time_eq(h, &expected_pin_hash(nonce, &pin)));
+            (pin_ok, pin_ok.then(|| session_token.to_string()))
+        };
+
         let reply = SyncWireMessage::AuthResult {
             success: ok,
-            session_token: ok.then(|| session_token.to_string()),
+            session_token: result_token.clone(),
             message: (!ok).then(|| "Incorrect pairing PIN".to_string()),
         };
         if let Ok(json) = serde_json::to_string(&reply) {
             let _ = sender.send(json).await;
         }
         return if ok {
-            HandshakeOutcome::Authenticated { client_device_name }
+            HandshakeOutcome::Authenticated {
+                client_device_name,
+                session_token: result_token,
+            }
         } else {
             HandshakeOutcome::WrongPin
         };
@@ -134,6 +159,15 @@ mod tests {
         text(&SyncWireMessage::AuthResponse {
             client_device_name: name.to_string(),
             pin_hash: pin_hash.map(str::to_string),
+            session_token: None,
+        })
+    }
+
+    fn auth_response_with_token(name: &str, session_token: Option<&str>) -> Option<String> {
+        text(&SyncWireMessage::AuthResponse {
+            client_device_name: name.to_string(),
+            pin_hash: None,
+            session_token: session_token.map(str::to_string),
         })
     }
 
@@ -174,6 +208,7 @@ mod tests {
                 PIN.to_string()
             },
             "token",
+            |_| false,
         )
         .await;
 
@@ -192,11 +227,14 @@ mod tests {
         let mut rx =
             stream::iter(vec![auth_response("phone", Some(&expected_pin_hash(NONCE, PIN)))]);
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok")
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok", |_| false)
                 .await;
         assert_eq!(
             outcome,
-            HandshakeOutcome::Authenticated { client_device_name: "phone".to_string() }
+            HandshakeOutcome::Authenticated {
+                client_device_name: "phone".to_string(),
+                session_token: Some("tok".to_string()),
+            }
         );
         let last = sent.lock().unwrap().last().unwrap().clone();
         let v: serde_json::Value = serde_json::from_str(&last).unwrap();
@@ -210,7 +248,7 @@ mod tests {
         let mut rx =
             stream::iter(vec![auth_response("phone", Some(&expected_pin_hash(NONCE, "000000")))]);
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok")
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok", |_| false)
                 .await;
         assert_eq!(outcome, HandshakeOutcome::WrongPin);
         let last = sent.lock().unwrap().last().unwrap().clone();
@@ -224,7 +262,7 @@ mod tests {
         let (_sent, mut tx) = recorder();
         let mut rx = stream::iter(vec![auth_response("phone", None)]);
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok")
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok", |_| false)
                 .await;
         assert_eq!(outcome, HandshakeOutcome::WrongPin);
     }
@@ -237,7 +275,7 @@ mod tests {
         let mut rx =
             stream::iter(vec![auth_response("phone", Some(&expected_pin_hash(NONCE, "")))]);
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { String::new() }, "tok").await;
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { String::new() }, "tok", |_| false).await;
         assert_eq!(outcome, HandshakeOutcome::WrongPin);
     }
 
@@ -258,7 +296,7 @@ mod tests {
             text(&SyncWireMessage::Ping),
         ]);
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok")
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok", |_| false)
                 .await;
         assert_eq!(outcome, HandshakeOutcome::Aborted, "actions must not authenticate anyone");
         assert_eq!(
@@ -275,7 +313,7 @@ mod tests {
         let mut rx = stream::pending::<Option<String>>();
         let elapsed = tokio::time::timeout(
             std::time::Duration::from_millis(50),
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok"),
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok", |_| false),
         )
         .await;
         assert!(elapsed.is_err(), "a peer that never answers must be cut off by the timeout");
@@ -294,11 +332,14 @@ mod tests {
             auth_response("phone", Some(&expected_pin_hash(NONCE, PIN))),
         ]);
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok")
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok", |_| false)
                 .await;
         assert_eq!(
             outcome,
-            HandshakeOutcome::Authenticated { client_device_name: "phone".to_string() },
+            HandshakeOutcome::Authenticated {
+                client_device_name: "phone".to_string(),
+                session_token: Some("tok".to_string()),
+            },
             "malformed frames must neither authenticate nor consume the one evaluation"
         );
         assert_eq!(kinds(&sent), vec!["auth_challenge", "auth_result"]);
@@ -309,7 +350,7 @@ mod tests {
         let (_sent, mut tx) = recorder();
         let mut rx = stream::iter(vec![Some("<html>".to_string()), None]);
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok")
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok", |_| false)
                 .await;
         assert_eq!(outcome, HandshakeOutcome::Aborted);
     }
@@ -319,7 +360,7 @@ mod tests {
         let (sent, mut tx) = recorder();
         let mut rx = stream::iter(Vec::<Option<String>>::new());
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "the-host", || async { PIN.to_string() }, "tok")
+            run_handshake(&mut rx, &mut tx, NONCE, "the-host", || async { PIN.to_string() }, "tok", |_| false)
                 .await;
         assert_eq!(outcome, HandshakeOutcome::Aborted);
         let first = sent.lock().unwrap().first().unwrap().clone();
@@ -342,12 +383,78 @@ mod tests {
         let mut rx =
             stream::iter(vec![auth_response("phone", Some(&expected_pin_hash(other_nonce, PIN)))]);
         let outcome =
-            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok")
+            run_handshake(&mut rx, &mut tx, NONCE, "host", || async { PIN.to_string() }, "tok", |_| false)
                 .await;
         assert_eq!(
             outcome,
             HandshakeOutcome::WrongPin,
             "a proof for another connection's nonce must not authenticate"
         );
+    }
+
+    #[tokio::test]
+    async fn a_trusted_token_authenticates_without_evaluating_pin() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counted = reads.clone();
+        let (sent, mut tx) = recorder();
+        let mut rx = stream::iter(vec![auth_response_with_token("phone", Some("valid_token_123"))]);
+        let outcome = run_handshake(
+            &mut rx,
+            &mut tx,
+            NONCE,
+            "host",
+            || async move {
+                counted.fetch_add(1, Ordering::SeqCst);
+                PIN.to_string()
+            },
+            "new_tok",
+            |tok| tok == "valid_token_123",
+        )
+        .await;
+
+        assert_eq!(
+            outcome,
+            HandshakeOutcome::Authenticated {
+                client_device_name: "phone".to_string(),
+                session_token: Some("valid_token_123".to_string()),
+            }
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 0, "PIN must NOT be evaluated when token is trusted");
+        let last = sent.lock().unwrap().last().unwrap().clone();
+        let v: serde_json::Value = serde_json::from_str(&last).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["session_token"], "valid_token_123");
+    }
+
+    #[tokio::test]
+    async fn an_untrusted_token_falls_back_to_pin() {
+        let (sent, mut tx) = recorder();
+        let mut rx = stream::iter(vec![text(&SyncWireMessage::AuthResponse {
+            client_device_name: "phone".to_string(),
+            pin_hash: Some(expected_pin_hash(NONCE, PIN)),
+            session_token: Some("expired_token".to_string()),
+        })]);
+        let outcome = run_handshake(
+            &mut rx,
+            &mut tx,
+            NONCE,
+            "host",
+            || async { PIN.to_string() },
+            "new_tok",
+            |_| false,
+        )
+        .await;
+
+        assert_eq!(
+            outcome,
+            HandshakeOutcome::Authenticated {
+                client_device_name: "phone".to_string(),
+                session_token: Some("new_tok".to_string()),
+            }
+        );
+        let last = sent.lock().unwrap().last().unwrap().clone();
+        let v: serde_json::Value = serde_json::from_str(&last).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["session_token"], "new_tok");
     }
 }
