@@ -102,6 +102,7 @@ export const prefs = $state({
 			lastfm: browser ? localStorage.getItem('icon_tb_lastfm') !== 'false' : true,
 			miniPlayer: browser ? localStorage.getItem('icon_tb_miniPlayer') !== 'false' : true,
 			fullscreen: browser ? localStorage.getItem('icon_tb_fullscreen') !== 'false' : true,
+			mode: browser ? localStorage.getItem('icon_tb_mode') !== 'false' : true,
 			settings: browser ? localStorage.getItem('icon_tb_settings') !== 'false' : true,
 		},
 		playerbar: {

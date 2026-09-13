@@ -85,27 +85,22 @@
 		volTimer = setTimeout(() => (volFlash = false), 1000);
 	}
 
-	// Left offsets mirror Sidebar's w-16 / lg:w-60 and floating margin.
+	// Left padding mirrors Sidebar's w-16 / lg:w-60 and floating margin so background extends to left-0.
 	const isSidebarCollapsed = $derived(
 		(ui.sidebarCollapsed || (np.open && !np.fullscreenOpen)) && !ui.sidebarForceExpanded
 	);
-	const sidebarOffset = $derived(
+	const sidebarPadding = $derived(
 		prefs.floatingSidebarLeft
-			? (isSidebarCollapsed ? 'left-20' : 'left-20 lg:left-64')
-			: (isSidebarCollapsed ? 'left-16' : 'left-16 lg:left-60')
+			? (isSidebarCollapsed ? 'pl-20' : 'pl-20 lg:pl-64')
+			: (isSidebarCollapsed ? 'pl-16' : 'pl-16 lg:pl-60')
 	);
 </script>
 
-<!-- Covers the page but not the sidebar (you navigate away to minimise) and not the player bar,
-     which stays in charge of transport and paints above this on the way in and out.
-     z-20 matches the highest a page uses for its own chrome (home's sticky mood chips) and wins the
-     tie on DOM order, since <main> is static and its z-indexes land in the same stacking context.
-     The player bar and the queue/lyrics panels come later/higher, so they still paint above.
-     ponytail: left offsets mirror Sidebar's w-16/lg:w-60 (and its manual collapse) — keep in sync
-     if those change. -->
+<!-- Covers the full window including behind the top bar, bottom player bar, and floating left sidebar,
+     while content is offset via padding so the artwork, controls, and queue stay clear of chrome. -->
 <div
 	transition:fly={{ y: '100%', duration: 320, easing: cubicOut }}
-	class="absolute inset-y-0 right-0 z-20 flex justify-center overflow-hidden bg-background px-4 py-4 sm:px-6 sm:py-6 lg:px-10 {sidebarOffset} {inset}"
+	class="fixed inset-0 z-20 flex justify-center overflow-hidden bg-background px-4 pt-14 pb-24 sm:px-6 sm:pt-16 sm:pb-28 lg:px-10 {sidebarPadding} {inset}"
 >
 	<!-- The artwork itself, blurred to a wash, is the background: same trick as HomeHero, and it
 	     needs no colour extraction (which a remote image would taint the canvas for anyway). The

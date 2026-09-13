@@ -733,7 +733,7 @@
 				{#if headerImage}
 					<div
 						class="pointer-events-none absolute inset-0 overflow-hidden"
-						style="mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 20%, rgba(0,0,0,0.45) 45%, rgba(0,0,0,0.12) 65%, transparent 80%); -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 20%, rgba(0,0,0,0.45) 45%, rgba(0,0,0,0.12) 65%, transparent 80%);"
+						style="mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 25%, rgba(0,0,0,0.35) 55%, transparent 95%); -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 25%, rgba(0,0,0,0.35) 55%, transparent 95%);"
 					>
 						<img
 							src={headerImage}
@@ -742,8 +742,9 @@
 						/>
 					</div>
 				{/if}
-				<!-- Soft subtle lateral gradient for title legibility -->
-				<div class="pointer-events-none absolute inset-0 bg-gradient-to-r from-background/75 via-background/25 to-transparent"></div>
+				<!-- Smooth bottom and lateral fade into background to eliminate sharp edges -->
+				<div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent"></div>
+				<div class="pointer-events-none absolute inset-0 bg-gradient-to-r from-background/80 via-background/30 to-transparent"></div>
 				{#if isOnRepeat}
 					<div
 						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"

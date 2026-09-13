@@ -15,6 +15,7 @@ export type ShortcutAction =
 	| 'volumeDown'
 	| 'fullscreen'
 	| 'nowPlaying'
+	| 'settings'
 	| 'shortcutsList';
 
 export interface ShortcutDefinition {
@@ -104,6 +105,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 		defaultKey: 'Ctrl+E'
 	},
 	{
+		id: 'settings',
+		label: 'Open settings',
+		description: 'Open application preferences and settings',
+		group: 'General',
+		defaultKey: 'Ctrl+,'
+	},
+	{
 		id: 'shortcutsList',
 		label: 'Keyboard shortcuts list',
 		description: 'Show the keyboard shortcuts dialog',
@@ -124,6 +132,7 @@ export const DEFAULT_KEYBINDINGS: Record<ShortcutAction, string> = {
 	volumeDown: 'Ctrl+<',
 	fullscreen: 'F11',
 	nowPlaying: 'Ctrl+E',
+	settings: 'Ctrl+,',
 	shortcutsList: 'Ctrl+H'
 };
 
@@ -330,6 +339,11 @@ export function initShortcuts() {
 		}
 
 		// 5. General navigation
+		if (matchesCombo(e, keybindings.settings) || ((e.ctrlKey || e.metaKey) && e.key === ',')) {
+			ui.settingsOpen = !ui.settingsOpen;
+			e.preventDefault();
+			return;
+		}
 		if (matchesCombo(e, keybindings.nowPlaying)) {
 			if (!playback.now) return;
 			np.open = !np.open;

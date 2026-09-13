@@ -20,8 +20,13 @@
 		Loading03Icon,
 		HotspotOfflineIcon,
 		UserGroup02Icon,
-		Link04Icon
+		Link04Icon,
+		Home01Icon,
+		Sun01Icon,
+		Moon02Icon
 	} from '@hugeicons/core-free-icons';
+	import { page } from '$app/state';
+	import { toggleMode } from 'mode-watcher';
 	import LastFmIcon from './LastFmIcon.svelte';
 	import DiscordIcon from './DiscordIcon.svelte';
 	import AccountMenu from './AccountMenu.svelte';
@@ -150,11 +155,9 @@
 	data-tauri-drag-region
 	class="app-titlebar z-40 flex h-10.5 shrink-0 select-none items-center justify-between transition-all duration-200 {prefs.floatingTopBar
 		? 'app-floating-panel mx-2 mt-2 rounded-2xl border border-border/70 bg-card/75 backdrop-blur-xl px-2 shadow-none'
-		: theme.id === 'glassy'
-			? 'relative border-b border-border/60 bg-card/65 backdrop-blur-xl px-1 shadow-none'
-			: 'relative border-b border-border/60 bg-background px-1 shadow-none'}"
+		: 'relative border-b border-border/60 bg-card/75 backdrop-blur-xl px-1 shadow-none'}"
 >
-	<div class="flex h-full items-center shrink-0">
+	<div data-tauri-drag-region class="flex h-full items-center shrink-0">
 		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->
 		<img src={logo} alt="" class="pointer-events-none ml-2 mr-1 h-4 w-4" />
 		<!-- Bigger and heavier than the icons on the right: these are navigation, and at their
@@ -178,25 +181,31 @@
 			>
 				<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
 			</button>
+			<a
+				href="/"
+				class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground {page.url.pathname === '/' ? 'text-primary' : ''}"
+				title="Home"
+				aria-label="Home"
+			>
+				<HugeiconsIcon icon={Home01Icon} strokeWidth={2.2} class="h-4 w-4" />
+			</a>
 		{/if}
 	</div>
 
 	<!-- Centered sticky search bar -->
 	{#if prefs.visibleIcons.titlebar.search}
-		<div class="flex flex-1 justify-center mx-2 min-w-0">
+		<div data-tauri-drag-region class="flex flex-1 justify-center mx-2 min-w-0">
 			<div class="w-48 sm:w-56 hover:w-full hover:max-w-md focus-within:w-full focus-within:max-w-md has-[input:not(:placeholder-shown)]:w-full has-[input:not(:placeholder-shown)]:max-w-md transition-[width] duration-300 ease-out">
 				<TopSearchBar />
 			</div>
 		</div>
 	{:else}
-		<div class="flex-1"></div>
+		<div data-tauri-drag-region class="flex-1"></div>
 	{/if}
 
-	<div class="flex h-full items-center shrink-0">
-		<!-- Account first, then the integrations, then the window controls. The drag region lives on
-		     <header> only, so these children are ordinary buttons — don't add the attribute here. -->
+	<div data-tauri-drag-region class="flex h-full items-center shrink-0">
 		<AccountMenu />
-		<div class="mx-1.5 h-4 w-px bg-border"></div>
+		<div data-tauri-drag-region class="mx-1.5 h-4 w-px bg-border"></div>
 
 		<!-- Paste a YouTube Music link and go to it: the only way into a playlist that is shared by
 		     link and never appears in search or the library (#63). -->
@@ -316,7 +325,20 @@
 			</button>
 		{/if}
 
-		<div class="mx-1.5 h-4 w-px bg-border"></div>
+		<!-- Theme mode toggle -->
+		{#if prefs.visibleIcons.titlebar.mode !== false}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground cursor-pointer"
+				onclick={toggleMode}
+				title="Toggle theme mode"
+				aria-label="Toggle theme mode"
+			>
+				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
+				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
+			</button>
+		{/if}
+
+		<div data-tauri-drag-region class="mx-1.5 h-4 w-px bg-border"></div>
 
 		<button
 			class="flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"

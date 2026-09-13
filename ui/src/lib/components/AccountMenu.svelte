@@ -8,12 +8,13 @@
 		ArrowDown01Icon,
 		Add01Icon,
 		Tick02Icon,
-		Delete02Icon
+		Delete02Icon,
+		Settings01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import type { SavedAccount } from '$lib/api';
-	import { auth, openChannelPicker, toast } from '$lib/player.svelte';
+	import { auth, openChannelPicker, toast, ui } from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 
@@ -229,5 +230,20 @@
 			</p>
 			<Button class="mt-3 w-full" onclick={signInGoogle}>Sign in with Google</Button>
 		{/if}
+
+		<div class="my-2 h-px bg-border/60"></div>
+		<Button
+			variant="ghost"
+			size="sm"
+			class="w-full justify-start gap-2 text-foreground/80 hover:text-foreground cursor-pointer"
+			onclick={() => {
+				menuOpen = false;
+				ui.settingsOpen = true;
+			}}
+		>
+			<HugeiconsIcon icon={Settings01Icon} class="h-4 w-4" />
+			<span>Settings</span>
+			<span class="ml-auto text-[10px] text-muted-foreground">Ctrl+,</span>
+		</Button>
 	</div>
 {/if}

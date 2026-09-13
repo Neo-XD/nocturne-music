@@ -3,12 +3,8 @@
 	import { scale } from 'svelte/transition';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
-		Home01Icon,
 		Search01Icon,
 		LibraryIcon,
-		Settings01Icon,
-		Sun01Icon,
-		Moon02Icon,
 		Add01Icon,
 		PinIcon,
 		MusicNote01Icon,
@@ -22,7 +18,6 @@
 		ArrowRight01Icon,
 		ComputerIcon
 	} from '@hugeicons/core-free-icons';
-	import { toggleMode } from 'mode-watcher';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -52,7 +47,6 @@
 	import { PLAYLIST_DND_MIME, setDragPlaylist, setDragItem } from '$lib/dnd';
 
 	const nav = [
-		{ href: '/', label: 'Home', icon: Home01Icon },
 		{ href: '/library', label: 'Library', icon: LibraryIcon }
 	];
 	const isActive = (href: string) =>
@@ -175,35 +169,22 @@
 >
 	<div class="flex items-center justify-center px-2 py-2 {wide('lg:justify-between')}">
 		<span class="hidden font-heading text-lg font-bold tracking-tight {wide('lg:block')}">Nocturne</span>
-		<!-- Column when collapsed: the two buttons don't fit side by side in the 64px rail. -->
-		<div class="flex items-center gap-1 {collapsed ? 'flex-col' : ''}">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				class="hidden hover:text-primary lg:inline-flex"
-				onclick={toggleSidebar}
-				aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-			>
-				<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
-				<HugeiconsIcon
-					icon={SquareArrowLeft01Icon}
-					altIcon={SquareArrowRight01Icon}
-					showAlt={collapsed}
-					strokeWidth={2}
-					class="h-4 w-4"
-				/>
-			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				class="hover:text-primary"
-				onclick={toggleMode}
-				aria-label="Toggle theme"
-			>
-				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
-				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
-			</Button>
-		</div>
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			class="hidden hover:text-primary lg:inline-flex"
+			onclick={toggleSidebar}
+			aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+		>
+			<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
+			<HugeiconsIcon
+				icon={SquareArrowLeft01Icon}
+				altIcon={SquareArrowRight01Icon}
+				showAlt={collapsed}
+				strokeWidth={2}
+				class="h-4 w-4"
+			/>
+		</Button>
 	</div>
 
 	<nav class="mt-2 flex flex-col gap-1">
@@ -230,19 +211,6 @@
 				<span class="hidden {wide('lg:inline')}">{n.label}</span>
 			</a>
 		{/each}
-		<button
-			onclick={() => (ui.settingsOpen = true)}
-			title="Settings"
-			class="group flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground {wide(
-				'lg:justify-start'
-			)}"
-		>
-			<HugeiconsIcon
-				icon={Settings01Icon}
-				class="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
-			/>
-			<span class="hidden {wide('lg:inline')}">Settings</span>
-		</button>
 	</nav>
 
 	<!-- Playlists & Folders. On the collapsed rail, shows playlist icons. On expanded, shows full names & folders. -->

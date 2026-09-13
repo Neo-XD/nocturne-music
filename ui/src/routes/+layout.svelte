@@ -277,7 +277,7 @@
 			{/if}
 		</div>
 		{#if playback.now}
-			<div class="relative z-20" transition:fly={{ y: 64, duration: 200, easing: cubicOut }}>
+			<div class="relative z-30" transition:fly={{ y: 64, duration: 200, easing: cubicOut }}>
 				<PlayerBar
 					onToggleQueue={() => toggleRightSidebar('queue')}
 					queueOpen={tabbed ? np.tab === 'queue' : queueOpen}

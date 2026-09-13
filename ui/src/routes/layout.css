@@ -783,13 +783,21 @@ aside:not(.info-sidebar) {
 	background-color: color-mix(in oklab, var(--background) calc(var(--dialog-opacity, 0.78) * 100%), transparent) !important;
 }
 
-/* Docked top bar in glassy theme has translucent blur */
+/* Docked top bar in glassy theme has translucent blur matching floating bar */
 .theme-glassy .app-titlebar:not(.app-floating-panel) {
-	background-color: color-mix(in oklab, var(--background) calc(var(--sidebar-opacity, 0.45) * 100%), transparent) !important;
-	backdrop-filter: blur(28px) saturate(190%) !important;
-	-webkit-backdrop-filter: blur(28px) saturate(190%) !important;
+	background-color: color-mix(in oklab, var(--card) 45%, transparent) !important;
+	backdrop-filter: blur(36px) saturate(220%) !important;
+	-webkit-backdrop-filter: blur(36px) saturate(220%) !important;
 	box-shadow: none !important;
-	border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent) !important;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+.dark.theme-glassy .app-titlebar:not(.app-floating-panel) {
+	background-color: color-mix(in oklab, var(--card) 35%, transparent) !important;
+	backdrop-filter: blur(36px) saturate(220%) !important;
+	-webkit-backdrop-filter: blur(36px) saturate(220%) !important;
+	box-shadow: none !important;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.10) !important;
 }
 
 /* Floating top bar should not cast an outer drop shadow on the sidebars below it */

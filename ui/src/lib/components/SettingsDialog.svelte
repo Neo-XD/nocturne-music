@@ -2700,6 +2700,24 @@
 				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
 			/>
 		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Theme mode</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.mode}
+				onchange={(e) => setVisibleIcon('titlebar', 'mode', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
+		<label class="flex items-center justify-between gap-2 p-2 rounded-lg bg-card/60 dark:bg-card/40 border border-border/40 cursor-pointer hover:bg-card/80 transition-colors">
+			<span class="font-medium text-foreground/90">Settings</span>
+			<input
+				type="checkbox"
+				checked={prefs.visibleIcons.titlebar.settings}
+				onchange={(e) => setVisibleIcon('titlebar', 'settings', e.currentTarget.checked)}
+				class="h-4 w-4 rounded border-border/80 accent-primary cursor-pointer transition-colors"
+			/>
+		</label>
 	</div>
 {/snippet}
 {#snippet playerbarIconsConfig()}
