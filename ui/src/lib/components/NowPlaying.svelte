@@ -85,14 +85,14 @@
 		volTimer = setTimeout(() => (volFlash = false), 1000);
 	}
 
-	// Left padding mirrors Sidebar's w-16 / lg:w-60 and floating margin so background extends to left-0.
+	// Left padding mirrors Sidebar's width (dynamic ui.sidebarWidth) and floating margin so background extends to left-0.
 	const isSidebarCollapsed = $derived(
 		(ui.sidebarCollapsed || (np.open && !np.fullscreenOpen)) && !ui.sidebarForceExpanded
 	);
-	const sidebarPadding = $derived(
-		prefs.floatingSidebarLeft
-			? (isSidebarCollapsed ? 'pl-20' : 'pl-20 lg:pl-64')
-			: (isSidebarCollapsed ? 'pl-16' : 'pl-16 lg:pl-60')
+	const leftPadding = $derived(
+		isSidebarCollapsed
+			? (prefs.floatingSidebarLeft ? 80 : 64)
+			: (ui.sidebarWidth + (prefs.floatingSidebarLeft ? 16 : 0))
 	);
 </script>
 
@@ -100,7 +100,8 @@
      while content is offset via padding so the artwork, controls, and queue stay clear of chrome. -->
 <div
 	transition:fly={{ y: '100%', duration: 320, easing: cubicOut }}
-	class="fixed inset-0 z-20 flex justify-center overflow-hidden bg-background px-4 pt-14 pb-24 sm:px-6 sm:pt-16 sm:pb-28 lg:px-10 {sidebarPadding} {inset}"
+	style="padding-left: {leftPadding}px;"
+	class="fixed inset-0 z-20 flex justify-center overflow-hidden bg-background px-4 pt-14 pb-24 sm:px-6 sm:pt-16 sm:pb-28 lg:px-10 {inset}"
 >
 	<!-- The artwork itself, blurred to a wash, is the background: same trick as HomeHero, and it
 	     needs no colour extraction (which a remote image would taint the canvas for anyway). The

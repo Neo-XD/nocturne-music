@@ -46,6 +46,7 @@
 		setFloatingSidebarLeft,
 		setFloatingSidebarRight,
 		setFloatingPlayerBar,
+		setHomeInSidebar,
 		setVisibleIcon,
 		setCustomizationMode,
 		blockedArtists,
@@ -1720,6 +1721,12 @@
 							{#if !collapsedCategories['sec-layout']}
 								<div class={CARD}>
 									{@render row({
+										title: 'Home button in sidebar',
+										desc: 'Move the Home navigation button from the top bar into the left sidebar.',
+										control: homeInSidebarSwitch,
+										tall: true
+									})}
+									{@render row({
 										title: 'Floating panels',
 										desc: 'Choose which surfaces float with rounded corners, margins, and translucent blur.',
 										below: floatingPanelsConfig
@@ -2573,6 +2580,9 @@
 {/snippet}
 {#snippet eqSwitch()}
 	<Switch checked={eqEnabled} onCheckedChange={(val) => toggleEqualizer(val)} />
+{/snippet}
+{#snippet homeInSidebarSwitch()}
+	<Switch checked={prefs.homeInSidebar} onCheckedChange={setHomeInSidebar} />
 {/snippet}
 {#snippet floatingPanelsConfig()}
 	<div class="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3 backdrop-blur-md text-xs">

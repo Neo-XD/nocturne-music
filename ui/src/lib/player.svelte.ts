@@ -92,6 +92,7 @@ export const prefs = $state({
 	floatingSidebar: initialMode !== 'none',
 	floatingTopBar: browser ? localStorage.getItem('floating_topbar') !== 'false' : true,
 	floatingPlayerBar: browser ? localStorage.getItem('floating_playerbar') !== 'false' : true,
+	homeInSidebar: browser ? localStorage.getItem('home_in_sidebar') === 'true' : false,
 	visibleIcons: {
 		titlebar: {
 			navigation: browser ? localStorage.getItem('icon_tb_navigation') !== 'false' : true,
@@ -173,6 +174,11 @@ export function setFloatingSidebar(enabled: boolean) {
 export function setFloatingTopBar(enabled: boolean) {
 	prefs.floatingTopBar = enabled;
 	if (browser) localStorage.setItem('floating_topbar', enabled ? 'true' : 'false');
+}
+
+export function setHomeInSidebar(enabled: boolean) {
+	prefs.homeInSidebar = enabled;
+	if (browser) localStorage.setItem('home_in_sidebar', enabled ? 'true' : 'false');
 }
 
 export function setVisibleIcon(bar: 'titlebar' | 'playerbar', icon: string, visible: boolean) {
@@ -1205,8 +1211,15 @@ export const ui = $state({
 	// breakpoint). Here rather than in Sidebar because the now-playing view and the fullscreen
 	// lyrics panel are overlays that offset themselves by the sidebar's width.
 	sidebarCollapsed: browser && localStorage.getItem('sidebar_collapsed') === '1',
-	sidebarForceExpanded: false
+	sidebarForceExpanded: false,
+	sidebarWidth: browser ? Math.min(420, Math.max(180, parseInt(localStorage.getItem('sidebar_width') || '240', 10) || 240)) : 240
 });
+
+export function setSidebarWidth(width: number) {
+	const clamped = Math.min(420, Math.max(180, Math.round(width)));
+	ui.sidebarWidth = clamped;
+	if (browser) localStorage.setItem('sidebar_width', clamped.toString());
+}
 
 export function openChannelPicker(required = false) {
 	ui.channelPickerRequired = required;

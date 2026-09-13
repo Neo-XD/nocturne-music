@@ -616,16 +616,34 @@
 
 #top-search-suggest,
 #search-suggest {
-	background-color: color-mix(in oklab, var(--popover) 82%, transparent) !important;
-	backdrop-filter: blur(28px) saturate(190%) !important;
-	-webkit-backdrop-filter: blur(28px) saturate(190%) !important;
+	background-color: color-mix(in oklab, var(--popover) 55%, transparent) !important;
+	backdrop-filter: blur(36px) saturate(220%) !important;
+	-webkit-backdrop-filter: blur(36px) saturate(220%) !important;
 }
 
 .dark #top-search-suggest,
 .dark #search-suggest {
-	background-color: color-mix(in oklab, var(--popover) 75%, transparent) !important;
-	backdrop-filter: blur(28px) saturate(190%) !important;
-	-webkit-backdrop-filter: blur(28px) saturate(190%) !important;
+	background-color: color-mix(in oklab, var(--popover) 45%, transparent) !important;
+	backdrop-filter: blur(36px) saturate(220%) !important;
+	-webkit-backdrop-filter: blur(36px) saturate(220%) !important;
+}
+
+.theme-glassy #top-search-suggest,
+.theme-glassy #search-suggest {
+	background-color: color-mix(in oklab, var(--card) 45%, transparent) !important;
+	backdrop-filter: blur(36px) saturate(220%) !important;
+	-webkit-backdrop-filter: blur(36px) saturate(220%) !important;
+	border: 1px solid rgba(255, 255, 255, 0.22) !important;
+	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.35), 0 16px 40px 0 rgba(0, 0, 0, 0.25) !important;
+}
+
+.dark.theme-glassy #top-search-suggest,
+.dark.theme-glassy #search-suggest {
+	background-color: color-mix(in oklab, var(--card) 38%, transparent) !important;
+	backdrop-filter: blur(36px) saturate(220%) !important;
+	-webkit-backdrop-filter: blur(36px) saturate(220%) !important;
+	border: 1px solid rgba(255, 255, 255, 0.14) !important;
+	box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.18), 0 16px 40px 0 rgba(0, 0, 0, 0.5) !important;
 }
 
 /* --- Native Theme (Adaptive to Desktop Environment: WinUI3 Fluent, KDE Breeze Qt, GNOME Adwaita GTK, macOS Cupertino) --- */

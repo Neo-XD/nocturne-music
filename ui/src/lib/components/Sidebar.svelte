@@ -15,8 +15,12 @@
 		FolderAddIcon,
 		ArrowDown01Icon,
 		ArrowRight01Icon,
-		ComputerIcon
+		ComputerIcon,
+		Sun01Icon,
+		Moon02Icon,
+		Home01Icon
 	} from '@hugeicons/core-free-icons';
+	import { toggleMode } from 'mode-watcher';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -40,6 +44,7 @@
 		toggleFolderCollapsed,
 		movePlaylistToFolder,
 		toggleSidebar,
+		setSidebarWidth,
 		toast
 	} from '$lib/player.svelte';
 	import { mergeSaved, orderLibrary, type PlaylistFolder } from '$lib/personal';
@@ -151,37 +156,113 @@
 	const isNowPlaying = $derived(np.open && !np.fullscreenOpen);
 	const collapsed = $derived(isSmallScreen || ((ui.sidebarCollapsed || isNowPlaying) && !ui.sidebarForceExpanded));
 	const wide = (cls: string) => (collapsed ? '' : cls);
+
+	function startResize(e: MouseEvent) {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startWidth = ui.sidebarWidth;
+
+		function onMouseMove(ev: MouseEvent) {
+			const delta = ev.clientX - startX;
+			const newWidth = Math.max(180, Math.min(420, startWidth + delta));
+			setSidebarWidth(newWidth);
+		}
+
+		function onMouseUp() {
+			window.removeEventListener('mousemove', onMouseMove);
+			window.removeEventListener('mouseup', onMouseUp);
+		}
+
+		window.addEventListener('mousemove', onMouseMove);
+		window.addEventListener('mouseup', onMouseUp);
+	}
 </script>
 
 <svelte:window bind:innerWidth />
 
 <aside
-	style={prefs.floatingSidebarLeft ? 'height: calc(100% - 1rem);' : 'height: 100%;'}
-	class="relative z-30 flex w-16 shrink-0 flex-col bg-sidebar p-3 text-sidebar-foreground transition-[border-radius,margin,width] duration-200 {prefs.floatingSidebarLeft
+	style="{prefs.floatingSidebarLeft ? 'height: calc(100% - 1rem);' : 'height: 100%;'} width: {collapsed ? '4rem' : `${ui.sidebarWidth}px`};"
+	class="relative z-30 flex shrink-0 flex-col bg-sidebar p-3 text-sidebar-foreground transition-[border-radius,margin] duration-200 {prefs.floatingSidebarLeft
 		? 'app-floating-panel m-2 rounded-2xl border border-border/70 shadow-xl backdrop-blur-xl bg-sidebar/80'
-		: 'border-r border-border/70 rounded-none m-0 shadow-none'} {wide(
-		'lg:w-60'
-	)}"
+		: 'border-r border-border/70 rounded-none m-0 shadow-none'}"
 >
-	<div class="flex items-center justify-center px-2 py-2 {wide('lg:justify-between')}">
-		<span class="hidden font-heading text-lg font-bold tracking-tight {wide('lg:block')}">Nocturne</span>
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			class="hidden hover:text-primary lg:inline-flex"
-			onclick={toggleSidebar}
-			aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-		>
-			<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
-			<HugeiconsIcon
-				icon={SquareArrowLeft01Icon}
-				altIcon={SquareArrowRight01Icon}
-				showAlt={collapsed}
-				strokeWidth={2}
-				class="h-4 w-4"
-			/>
-		</Button>
+	{#if !collapsed}
+		<!-- Resize handle on the right edge -->
+		<div
+			role="separator"
+			tabindex="0"
+			aria-orientation="vertical"
+			aria-label="Resize sidebar"
+			class="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize z-40 hover:bg-primary/25 active:bg-primary/40 transition-colors select-none"
+			onmousedown={startResize}
+		></div>
+	{/if}
+
+	<div class="flex items-center justify-between px-1 py-1">
+		{#if !collapsed}
+			<span class="font-heading text-lg font-bold tracking-tight pl-1">Nocturne</span>
+		{/if}
+		<div class="flex items-center gap-1 {collapsed ? 'w-full justify-center' : ''}">
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				class="hover:text-primary cursor-pointer text-muted-foreground"
+				onclick={toggleMode}
+				aria-label="Toggle theme mode"
+				title="Toggle theme mode"
+			>
+				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
+				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
+			</Button>
+			{#if !isSmallScreen}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					class="hover:text-primary cursor-pointer text-muted-foreground"
+					onclick={toggleSidebar}
+					aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+					title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+				>
+					<!-- altIcon/showAlt, not a ternary: `icon` is read once at mount. -->
+					<HugeiconsIcon
+						icon={SquareArrowLeft01Icon}
+						altIcon={SquareArrowRight01Icon}
+						showAlt={collapsed}
+						strokeWidth={2}
+						class="h-4 w-4"
+					/>
+				</Button>
+			{/if}
+		</div>
 	</div>
+
+	{#if prefs.homeInSidebar}
+		<div class="mt-1 mb-1 shrink-0">
+			<a
+				href="/"
+				title="Home"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {collapsed
+					? 'justify-center'
+					: 'justify-start'} {isActive('/')
+					? 'bg-primary/10 text-primary'
+					: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+			>
+				{#if isActive('/')}
+					<span
+						transition:scale={{ duration: 200, start: 0.4 }}
+						class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary"
+					></span>
+				{/if}
+				<HugeiconsIcon
+					icon={Home01Icon}
+					class="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+				/>
+				{#if !collapsed}
+					<span class="truncate">Home</span>
+				{/if}
+			</a>
+		</div>
+	{/if}
 
 	<!-- Playlists & Folders. On the collapsed rail, shows playlist icons. On expanded, shows full names & folders. -->
 	{#if auth.account?.signedIn || playlists.length || rootFolders.length}

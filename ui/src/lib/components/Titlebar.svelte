@@ -22,11 +22,9 @@
 		UserGroup02Icon,
 		Link04Icon,
 		Home01Icon,
-		Sun01Icon,
-		Moon02Icon
+		Settings01Icon
 	} from '@hugeicons/core-free-icons';
 	import { page } from '$app/state';
-	import { toggleMode } from 'mode-watcher';
 	import LastFmIcon from './LastFmIcon.svelte';
 	import DiscordIcon from './DiscordIcon.svelte';
 	import AccountMenu from './AccountMenu.svelte';
@@ -181,6 +179,7 @@
 			>
 				<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
 			</button>
+		{#if !prefs.homeInSidebar}
 			<a
 				href="/"
 				class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground {page.url.pathname === '/' ? 'text-primary' : ''}"
@@ -189,6 +188,7 @@
 			>
 				<HugeiconsIcon icon={Home01Icon} strokeWidth={2.2} class="h-4 w-4" />
 			</a>
+		{/if}
 		{/if}
 	</div>
 
@@ -205,6 +205,14 @@
 
 	<div data-tauri-drag-region class="flex h-full items-center shrink-0">
 		<AccountMenu />
+		<button
+			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground cursor-pointer {ui.settingsOpen ? 'text-primary' : ''}"
+			onclick={() => (ui.settingsOpen = !ui.settingsOpen)}
+			title="Settings (Ctrl+;)"
+			aria-label="Settings"
+		>
+			<HugeiconsIcon icon={Settings01Icon} class="h-4 w-4" />
+		</button>
 		<div data-tauri-drag-region class="mx-1.5 h-4 w-px bg-border"></div>
 
 		<!-- Paste a YouTube Music link and go to it: the only way into a playlist that is shared by
@@ -322,19 +330,6 @@
 				aria-label="Fullscreen player"
 			>
 				<HugeiconsIcon icon={FullScreenIcon} class="h-4 w-4" />
-			</button>
-		{/if}
-
-		<!-- Theme mode toggle -->
-		{#if prefs.visibleIcons.titlebar.mode !== false}
-			<button
-				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground cursor-pointer"
-				onclick={toggleMode}
-				title="Toggle theme mode"
-				aria-label="Toggle theme mode"
-			>
-				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
-				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
 			</button>
 		{/if}
 
