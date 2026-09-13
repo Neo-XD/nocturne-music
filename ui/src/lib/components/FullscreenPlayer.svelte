@@ -15,6 +15,7 @@
 		Add01Icon,
 		Mic01Icon,
 		MicOff01Icon,
+		Queue01Icon,
 		VolumeHighIcon,
 		VolumeMute02Icon
 	} from '@hugeicons/core-free-icons';
@@ -39,8 +40,10 @@
 	import AnimatedArtwork from './AnimatedArtwork.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import LyricsView from './LyricsView.svelte';
+	import QueueList from './QueueList.svelte';
 
-	let userShowLyrics = $state(true);
+	let activeTab = $state<'lyrics' | 'queue'>('lyrics');
+	let userShowPanel = $state(true);
 	let volDragging = $state(false);
 
 	function durationSecs(d?: string): number | undefined {
@@ -61,7 +64,7 @@
 	};
 
 	// Effective visibility: user preference
-	const showLyrics = $derived(userShowLyrics);
+	const showPanel = $derived(userShowPanel);
 
 	// --- Transport Controls ---
 	let seekDrag = $state<number | null>(null);
@@ -111,7 +114,20 @@
 			nudgeVolume(-5);
 		} else if (e.key.toLowerCase() === 'l') {
 			e.preventDefault();
-			userShowLyrics = !userShowLyrics;
+			if (userShowPanel && activeTab === 'lyrics') {
+				userShowPanel = false;
+			} else {
+				activeTab = 'lyrics';
+				userShowPanel = true;
+			}
+		} else if (e.key.toLowerCase() === 'q') {
+			e.preventDefault();
+			if (userShowPanel && activeTab === 'queue') {
+				userShowPanel = false;
+			} else {
+				activeTab = 'queue';
+				userShowPanel = true;
+			}
 		}
 	}
 
@@ -125,19 +141,19 @@
 
 </script>
 
-<svelte:window onkeydown={onKey} onpointerup={() => (volDragging = false)} />
+<svelte:window onkeydown={onKey} />
 
 <!-- Fullscreen Root Container: Covers whole screen at z-[90] -->
 <div
-	transition:fade={{ duration: 250 }}
-	class="theater fixed inset-0 z-[90] flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground select-none"
+	class="fixed inset-0 z-[90] flex flex-col select-none overflow-hidden bg-background text-foreground animate-in fade-in-0 duration-300"
+	tabindex="-1"
 >
-	<!-- Blurred Background Album Art Wash (Fluid GPU Shaders or Static Art Wash) -->
+	<!-- Dynamic Background: Shaders OR Static Cover Wash -->
 	{#if coverSrc}
 		{#if prefs.animatedArtwork}
 			<AnimatedArtwork
 				src={coverSrc}
-				class="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover"
+				class="pointer-events-none absolute inset-0 h-full w-full object-cover"
 				style="opacity: {appearance.fullscreenLightness}; filter: blur({appearance.fullscreenBlur}px) saturate({Math.round(appearance.fullscreenSaturation * 100)}%);"
 				intensity={appearance.fullscreenWarp}
 				speed={appearance.fullscreenSpeed}
@@ -146,7 +162,7 @@
 			<img
 				src={coverSrc}
 				alt=""
-				class="pointer-events-none absolute inset-0 h-full w-full art-wash scale-125 object-cover"
+				class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover"
 				style="opacity: {appearance.fullscreenLightness}; filter: blur({appearance.fullscreenBlur}px) saturate({Math.round(appearance.fullscreenSaturation * 100)}%);"
 			/>
 		{/if}
@@ -169,19 +185,47 @@
 			</div>
 		</div>
 
-		<!-- Top Right Action Cluster (Lyrics Toggle + Exit) -->
-		<div class="flex items-center gap-2.5 shrink-0">
-			<Button
-				variant="outline"
-				size="sm"
-				onclick={() => (userShowLyrics = !userShowLyrics)}
-				aria-label={userShowLyrics ? 'Hide lyrics (L)' : 'Show lyrics (L)'}
-				class="gap-1.5 rounded-full border-white/20 dark:border-white/10 bg-white/10 dark:bg-black/25 px-3.5 py-1.5 text-xs font-medium text-foreground backdrop-blur-xl transition-all duration-200 hover:bg-white/20 dark:hover:bg-black/40 hover:scale-[1.02] cursor-pointer shadow-lg"
-			>
-				<HugeiconsIcon icon={showLyrics ? Mic01Icon : MicOff01Icon} class="h-3.5 w-3.5 {showLyrics ? 'text-primary' : 'text-muted-foreground'}" />
-				<span>{showLyrics ? 'Hide lyrics' : 'Show lyrics'}</span>
-				<kbd class="ml-0.5 rounded bg-white/15 dark:bg-white/10 px-1 py-0.5 text-[10px] text-foreground/80 border border-white/10">L</kbd>
-			</Button>
+		<!-- Top Right Action Cluster (Lyrics / Queue Switcher + Exit) -->
+		<div class="flex items-center gap-3 shrink-0">
+			<!-- Translucent glass switcher between Lyrics and Queue -->
+			<div class="flex items-center rounded-full border border-white/20 dark:border-white/10 bg-white/10 dark:bg-black/25 p-0.5 backdrop-blur-xl shadow-lg">
+				<button
+					type="button"
+					onclick={() => {
+						if (activeTab === 'lyrics' && userShowPanel) {
+							userShowPanel = false;
+						} else {
+							activeTab = 'lyrics';
+							userShowPanel = true;
+						}
+					}}
+					aria-label="Toggle Lyrics (L)"
+					class="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer {userShowPanel && activeTab === 'lyrics'
+						? 'bg-white/25 dark:bg-white/15 text-foreground shadow-xs font-semibold'
+						: 'text-foreground/70 hover:text-foreground hover:bg-white/10'}"
+				>
+					<HugeiconsIcon icon={Mic01Icon} class="h-3.5 w-3.5 {userShowPanel && activeTab === 'lyrics' ? 'text-primary' : ''}" />
+					<span>Lyrics</span>
+				</button>
+				<button
+					type="button"
+					onclick={() => {
+						if (activeTab === 'queue' && userShowPanel) {
+							userShowPanel = false;
+						} else {
+							activeTab = 'queue';
+							userShowPanel = true;
+						}
+					}}
+					aria-label="Toggle Queue (Q)"
+					class="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer {userShowPanel && activeTab === 'queue'
+						? 'bg-white/25 dark:bg-white/15 text-foreground shadow-xs font-semibold'
+						: 'text-foreground/70 hover:text-foreground hover:bg-white/10'}"
+				>
+					<HugeiconsIcon icon={Queue01Icon} class="h-3.5 w-3.5 {userShowPanel && activeTab === 'queue' ? 'text-primary' : ''}" />
+					<span>Queue</span>
+				</button>
+			</div>
 
 			<Button
 				variant="outline"
@@ -199,8 +243,8 @@
 
 	<!-- Main Content Area -->
 	<div class="relative z-10 flex min-h-0 flex-1 w-full overflow-hidden">
-		{#if showLyrics}
-			<!-- Two-Column View (Cover & Controls Left, Lyrics Right) -->
+		{#if userShowPanel}
+			<!-- Two-Column View (Cover & Controls Left, Lyrics or Queue Right) -->
 			<main class="mx-auto grid h-full w-full max-w-[100rem] min-h-0 grid-rows-[minmax(0,1fr)] gap-10 px-8 pb-8 sm:px-12 xl:gap-20 xl:px-16 lg:grid-cols-[minmax(20rem,0.85fr)_minmax(0,1.15fr)] items-center">
 				<!-- Left Section: Cover & Playback Transport -->
 				<section
@@ -394,10 +438,16 @@
 					</div>
 				</section>
 
-				<!-- Right Section: Upstream-style Lyrics Sidebar -->
-				<section class="relative flex min-h-0 flex-1 h-[72vh] flex-col overflow-hidden rounded-2xl border border-border/40 bg-card/30 backdrop-blur-xl shadow-2xl [mask-image:linear-gradient(to_bottom,transparent_0%,black_6%,black_94%,transparent_100%)]">
-					<LyricsView expanded={true} />
-				</section>
+				<!-- Right Section: Clean transparent Lyrics or Translucent blurred Queue -->
+				{#if activeTab === 'lyrics'}
+					<section class="relative flex min-h-0 flex-1 h-[72vh] flex-col overflow-hidden [mask-image:linear-gradient(to_bottom,transparent_0%,black_6%,black_94%,transparent_100%)]">
+						<LyricsView expanded={true} />
+					</section>
+				{:else}
+					<section class="relative flex min-h-0 flex-1 h-[72vh] flex-col overflow-hidden rounded-2xl border border-white/15 bg-card/40 dark:bg-black/35 backdrop-blur-2xl shadow-2xl p-3">
+						<QueueList />
+					</section>
+				{/if}
 			</main>
 		{:else}
 			<!-- Centered Single-Column View (When lyrics are hidden or for instrumental tracks) -->

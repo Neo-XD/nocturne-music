@@ -184,7 +184,7 @@
 	<!-- Centered sticky search bar -->
 	{#if prefs.visibleIcons.titlebar.search}
 		<div class="flex flex-1 justify-center mx-2 min-w-0">
-			<div class="w-48 sm:w-56 focus-within:w-full focus-within:max-w-md has-[input:not(:placeholder-shown)]:w-full has-[input:not(:placeholder-shown)]:max-w-md hover:w-60 transition-[width] duration-300 ease-out">
+			<div class="w-48 sm:w-56 hover:w-full hover:max-w-md focus-within:w-full focus-within:max-w-md has-[input:not(:placeholder-shown)]:w-full has-[input:not(:placeholder-shown)]:max-w-md transition-[width] duration-300 ease-out">
 				<TopSearchBar />
 			</div>
 		</div>

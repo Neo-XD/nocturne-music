@@ -16,7 +16,13 @@
 	import TrackMenu from './TrackMenu.svelte';
 	import { formatKey, keybindings, registerSearchInput } from '$lib/shortcuts.svelte';
 	import { thumb } from '$lib/thumb';
+	import { toBody } from '$lib/menu';
 	import { onMount } from 'svelte';
+
+	function attachPopup(node: HTMLElement) {
+		updatePopupPosition();
+		return toBody(node);
+	}
 
 	let query = $state('');
 	let open = $state(false);
@@ -26,6 +32,31 @@
 	let loadedFor = '';
 	let debounce: ReturnType<typeof setTimeout> | undefined;
 	let inputEl: HTMLInputElement | undefined = $state();
+	let containerEl: HTMLElement | undefined = $state();
+	let popupEl: HTMLElement | undefined = $state();
+	let popupStyle = $state('');
+
+	function updatePopupPosition() {
+		if (!inputEl) return;
+		const rect = inputEl.getBoundingClientRect();
+		popupStyle = `top: ${Math.round(rect.bottom + 6)}px; left: ${Math.round(rect.left)}px; width: ${Math.round(rect.width)}px;`;
+	}
+
+	$effect(() => {
+		if (open) {
+			updatePopupPosition();
+			let frameId: number;
+			const startTime = performance.now();
+			const tick = () => {
+				updatePopupPosition();
+				if (performance.now() - startTime < 350) {
+					frameId = requestAnimationFrame(tick);
+				}
+			};
+			frameId = requestAnimationFrame(tick);
+			return () => cancelAnimationFrame(frameId);
+		}
+	});
 
 	$effect(() => {
 		registerSearchInput(inputEl);
@@ -127,9 +158,27 @@
 	}
 
 	onMount(() => {
+		const handleScrollOrResize = () => {
+			if (open) updatePopupPosition();
+		};
+		window.addEventListener('resize', handleScrollOrResize);
+		window.addEventListener('scroll', handleScrollOrResize, true);
+
+		const handlePointerDown = (e: PointerEvent) => {
+			if (!open) return;
+			const target = e.target as Node | null;
+			if (containerEl?.contains(target) || popupEl?.contains(target)) return;
+			close();
+		};
+		window.addEventListener('pointerdown', handlePointerDown);
+
 		function onGlobalSlash(e: KeyboardEvent) {
 			const target = e.target as HTMLElement | null;
-			const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+			const isInput =
+				target &&
+				(target.tagName === 'INPUT' ||
+					target.tagName === 'TEXTAREA' ||
+					target.isContentEditable);
 			if (e.key === '/' && !isInput) {
 				e.preventDefault();
 				inputEl?.focus();
@@ -137,15 +186,18 @@
 			}
 		}
 		window.addEventListener('keydown', onGlobalSlash);
-		return () => window.removeEventListener('keydown', onGlobalSlash);
+		return () => {
+			window.removeEventListener('resize', handleScrollOrResize);
+			window.removeEventListener('scroll', handleScrollOrResize, true);
+			window.removeEventListener('pointerdown', handlePointerDown);
+			window.removeEventListener('keydown', onGlobalSlash);
+		};
 	});
 </script>
 
 <div
-	class="relative w-full max-w-sm sm:max-w-md mx-auto"
-	onfocusout={(e) => {
-		if (!e.currentTarget.contains(e.relatedTarget as Node | null)) close();
-	}}
+	bind:this={containerEl}
+	class="relative w-full max-w-md mx-auto"
 >
 	<form
 		class="relative flex items-center"
@@ -196,11 +248,13 @@
 
 	{#if open}
 		<div
+			{@attach attachPopup}
+			bind:this={popupEl}
 			id="top-search-suggest"
 			role="listbox"
 			aria-label="Search preview"
-			class="absolute top-full left-0 right-0 z-50 mt-1.5 max-h-[75vh] overflow-y-auto rounded-xl border border-border/80 bg-popover/80 dark:bg-popover/75 text-popover-foreground shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150"
-			style="background-color: color-mix(in oklab, var(--popover) 80%, transparent); backdrop-filter: blur(28px) saturate(190%); -webkit-backdrop-filter: blur(28px) saturate(190%);"
+			class="fixed z-[100] max-h-[75vh] overflow-y-auto rounded-xl border border-border/80 bg-popover/80 dark:bg-popover/75 text-popover-foreground shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150"
+			style="{popupStyle} background-color: color-mix(in oklab, var(--popover) 80%, transparent); backdrop-filter: blur(28px) saturate(190%); -webkit-backdrop-filter: blur(28px) saturate(190%);"
 		>
 			{#if loading && !items.length}
 				{#each Array(4) as _, i (i)}
