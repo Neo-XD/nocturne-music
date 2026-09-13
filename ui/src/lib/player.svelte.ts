@@ -79,10 +79,70 @@ function getInitialFloatingMode(): FloatingSidebarMode {
 	return 'both';
 }
 
+export type LyricsAnimationStyle =
+	| 'wave'
+	| 'apple'
+	| 'karaoke'
+	| 'glow'
+	| 'slide'
+	| 'fade'
+	| 'og'
+	| 'none';
+
+export interface LyricsAnimationOption {
+	id: LyricsAnimationStyle;
+	label: string;
+	description: string;
+}
+
+export const LYRICS_ANIMATION_OPTIONS: LyricsAnimationOption[] = [
+	{
+		id: 'wave',
+		label: 'Fluid Wave',
+		description: 'Nocturne signature: distance blur, soft linger, scale lift, and feathered wave sweep'
+	},
+	{
+		id: 'apple',
+		label: 'Apple Music',
+		description: 'Smooth cubic word fill, warm white illumination, and subtle letter pop'
+	},
+	{
+		id: 'karaoke',
+		label: 'Karaoke',
+		description: 'High-contrast wipe in theme accent with sharp leading edge and no blur'
+	},
+	{
+		id: 'glow',
+		label: 'Luminous Glow',
+		description: 'Pulsating text glow aura blooming across active syllables and phrases'
+	},
+	{
+		id: 'slide',
+		label: 'Kinetic Slide',
+		description: 'Dynamic horizontal slide wipe with kinetic line translation'
+	},
+	{
+		id: 'fade',
+		label: 'Smooth Fade',
+		description: 'Gentle cubic alpha crossfade between words with pure calm typography'
+	},
+	{
+		id: 'og',
+		label: 'OG Nocturne',
+		description: 'Original classic Nocturne desktop: clean line highlight, subtle scale, no blur'
+	},
+	{
+		id: 'none',
+		label: 'Static / Off',
+		description: 'Instant binary highlight without blur, motion, or scaling effects'
+	}
+];
+
 const initialMode = getInitialFloatingMode();
 
 export const prefs = $state({
 	customizationMode: (browser ? (localStorage.getItem('customization_mode') as 'basic' | 'extreme') : null) || 'basic',
+	lyricsAnimationStyle: (browser ? (localStorage.getItem('lyrics_animation_style') as LyricsAnimationStyle) : null) || 'wave',
 	musicVideos: false,
 	filterExplicit: false,
 	animatedArtwork: true,
@@ -152,6 +212,11 @@ export function setFloatingSidebarRight(enabled: boolean) {
 export function setFloatingPlayerBar(enabled: boolean) {
 	prefs.floatingPlayerBar = enabled;
 	if (browser) localStorage.setItem('floating_playerbar', enabled ? 'true' : 'false');
+}
+
+export function setLyricsAnimationStyle(style: LyricsAnimationStyle) {
+	prefs.lyricsAnimationStyle = style;
+	if (browser) localStorage.setItem('lyrics_animation_style', style);
 }
 
 export function setFloatingSidebarMode(mode: FloatingSidebarMode) {

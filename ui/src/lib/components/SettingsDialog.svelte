@@ -49,6 +49,9 @@
 		setHomeInSidebar,
 		setVisibleIcon,
 		setCustomizationMode,
+		setLyricsAnimationStyle,
+		LYRICS_ANIMATION_OPTIONS,
+		type LyricsAnimationStyle,
 		blockedArtists,
 		unblockArtist
 	} from '$lib/player.svelte';
@@ -2073,6 +2076,55 @@
 							</div>
 						</section>
 					{:else if tab === 'lyrics'}
+						<section class={GROUP}>
+							<div class="flex items-center justify-between px-1 mb-2">
+								<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+									Lyrics Animation Style
+								</h3>
+								<span class="text-[11px] text-muted-foreground">
+									{LYRICS_ANIMATION_OPTIONS.find((o) => o.id === (prefs.lyricsAnimationStyle || 'wave'))?.label}
+								</span>
+							</div>
+							<div class="{CARD} divide-y divide-border/40">
+								<div class="p-3 bg-muted/20 text-xs text-muted-foreground">
+									Choose your preferred lyrics visual physics, line transitions, and word sweep animation. Select <strong>OG Nocturne</strong> to return to the original classic desktop animation.
+								</div>
+								<div class="p-2 space-y-1">
+									{#each LYRICS_ANIMATION_OPTIONS as opt (opt.id)}
+										{@const selected = opt.id === (prefs.lyricsAnimationStyle || 'wave')}
+										<button
+											type="button"
+											onclick={() => setLyricsAnimationStyle(opt.id)}
+											class="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left transition-colors cursor-pointer {selected
+												? 'bg-primary/15 ring-1 ring-primary/40'
+												: 'hover:bg-muted/40'}"
+										>
+											<div class="min-w-0 flex-1">
+												<div class="flex items-center gap-2">
+													<span class="text-xs font-bold text-foreground">{opt.label}</span>
+													{#if opt.id === 'og'}
+														<span class="rounded bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+															Classic
+														</span>
+													{:else if opt.id === 'wave'}
+														<span class="rounded bg-primary/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+															Default
+														</span>
+													{/if}
+												</div>
+												<p class="text-[11px] text-muted-foreground mt-0.5">{opt.description}</p>
+											</div>
+											<div class="flex items-center justify-center h-5 w-5 shrink-0 rounded-full border {selected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/30'}">
+												{#if selected}
+													<div class="h-2 w-2 rounded-full bg-current"></div>
+												{/if}
+											</div>
+										</button>
+									{/each}
+								</div>
+							</div>
+						</section>
+
 						<section class={GROUP}>
 							<div class="flex items-center justify-between px-1 mb-2">
 								<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
