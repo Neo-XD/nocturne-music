@@ -731,20 +731,23 @@
 		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
 			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden p-6 pt-8">
 				{#if headerImage}
-					<div
-						class="pointer-events-none absolute inset-0 overflow-hidden"
-						style="mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 25%, rgba(0,0,0,0.35) 55%, transparent 95%); -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 25%, rgba(0,0,0,0.35) 55%, transparent 95%);"
-					>
+					<div class="pointer-events-none absolute inset-0 overflow-hidden">
 						<img
 							src={headerImage}
 							alt=""
-							class="h-full w-full scale-125 object-cover object-center opacity-70 blur-3xl transition-opacity duration-700"
+							class="h-full w-full scale-105 object-cover object-center opacity-45 dark:opacity-35 blur-xs transition-opacity duration-700"
 						/>
+						<!-- Multi-directional gradient overlays to smoothly feather all edges into app background -->
+						<div class="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-background via-background/85 to-transparent"></div>
+						<div class="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background/90 via-background/40 to-transparent"></div>
+						<div class="absolute inset-y-0 left-0 w-80 bg-gradient-to-r from-background via-background/60 to-transparent"></div>
+						<div class="absolute inset-y-0 right-0 w-44 bg-gradient-to-l from-background via-background/50 to-transparent"></div>
+						<div
+							class="absolute inset-0"
+							style="background: radial-gradient(ellipse at 70% 30%, transparent 35%, var(--background) 90%);"
+						></div>
 					</div>
 				{/if}
-				<!-- Smooth bottom and lateral fade into background to eliminate sharp edges -->
-				<div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent"></div>
-				<div class="pointer-events-none absolute inset-0 bg-gradient-to-r from-background/80 via-background/30 to-transparent"></div>
 				{#if isOnRepeat}
 					<div
 						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"

@@ -109,7 +109,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 		label: 'Open settings',
 		description: 'Open application preferences and settings',
 		group: 'General',
-		defaultKey: 'Ctrl+,'
+		defaultKey: 'Ctrl+;'
 	},
 	{
 		id: 'shortcutsList',
@@ -132,7 +132,7 @@ export const DEFAULT_KEYBINDINGS: Record<ShortcutAction, string> = {
 	volumeDown: 'Ctrl+<',
 	fullscreen: 'F11',
 	nowPlaying: 'Ctrl+E',
-	settings: 'Ctrl+,',
+	settings: 'Ctrl+;',
 	shortcutsList: 'Ctrl+H'
 };
 
@@ -257,6 +257,9 @@ function matchesCombo(e: KeyboardEvent, combo: string): boolean {
 	if (keyPart === '<' || keyPart === ',') {
 		return e.key === '<' || e.key === ',';
 	}
+	if (keyPart === ';') {
+		return e.key === ';';
+	}
 	return e.key.toLowerCase() === keyPart.toLowerCase();
 }
 
@@ -339,7 +342,7 @@ export function initShortcuts() {
 		}
 
 		// 5. General navigation
-		if (matchesCombo(e, keybindings.settings) || ((e.ctrlKey || e.metaKey) && e.key === ',')) {
+		if (matchesCombo(e, keybindings.settings) || ((e.ctrlKey || e.metaKey) && e.key === ';')) {
 			ui.settingsOpen = !ui.settingsOpen;
 			e.preventDefault();
 			return;

@@ -3,7 +3,6 @@
 	import { scale } from 'svelte/transition';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
-		Search01Icon,
 		LibraryIcon,
 		Add01Icon,
 		PinIcon,
@@ -46,9 +45,6 @@
 	import { mergeSaved, orderLibrary, type PlaylistFolder } from '$lib/personal';
 	import { PLAYLIST_DND_MIME, setDragPlaylist, setDragItem } from '$lib/dnd';
 
-	const nav = [
-		{ href: '/library', label: 'Library', icon: LibraryIcon }
-	];
 	const isActive = (href: string) =>
 		href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
 
@@ -187,35 +183,9 @@
 		</Button>
 	</div>
 
-	<nav class="mt-2 flex flex-col gap-1">
-		{#each nav as n (n.href)}
-			<a
-				href={n.href}
-				title={n.label}
-				class="group relative flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors {wide(
-					'lg:justify-start'
-				)} {isActive(n.href)
-					? 'bg-primary/10 text-primary'
-					: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
-			>
-				{#if isActive(n.href)}
-					<span
-						transition:scale={{ duration: 200, start: 0.4 }}
-						class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary"
-					></span>
-				{/if}
-				<HugeiconsIcon
-					icon={n.icon}
-					class="h-5 w-5 shrink-0 transition-transform duration-200 group-hover:scale-110"
-				/>
-				<span class="hidden {wide('lg:inline')}">{n.label}</span>
-			</a>
-		{/each}
-	</nav>
-
 	<!-- Playlists & Folders. On the collapsed rail, shows playlist icons. On expanded, shows full names & folders. -->
 	{#if auth.account?.signedIn || playlists.length || rootFolders.length}
-		<div class="mt-3 flex min-h-0 flex-1 flex-col border-t border-border/60 pt-3">
+		<div class="mt-2 flex min-h-0 flex-1 flex-col pt-1">
 			{#if collapsed}
 				<!-- Collapsed Icon Rail View -->
 				{#if auth.account?.signedIn}
@@ -424,6 +394,31 @@
 			</Dialog.Content>
 		</Dialog.Root>
 	{/if}
+
+	<!-- See full library button at bottom of sidebar -->
+	<div class="mt-auto pt-2 border-t border-border/60 shrink-0">
+		<a
+			href="/library"
+			title="See full library"
+			class="group relative flex items-center justify-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {wide(
+				'lg:justify-start'
+			)} {isActive('/library')
+				? 'bg-primary/10 text-primary'
+				: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+		>
+			{#if isActive('/library')}
+				<span
+					transition:scale={{ duration: 200, start: 0.4 }}
+					class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary"
+				></span>
+			{/if}
+			<HugeiconsIcon
+				icon={LibraryIcon}
+				class="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+			/>
+			<span class="hidden {wide('lg:inline')} truncate">See full library</span>
+		</a>
+	</div>
 </aside>
 
 {#snippet playlistRow(pl: BrowseItem, inFolder: boolean = false)}

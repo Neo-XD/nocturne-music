@@ -243,7 +243,7 @@
 		>
 			<HugeiconsIcon icon={Settings01Icon} class="h-4 w-4" />
 			<span>Settings</span>
-			<span class="ml-auto text-[10px] text-muted-foreground">Ctrl+,</span>
+			<span class="ml-auto text-[10px] text-muted-foreground">Ctrl+;</span>
 		</Button>
 	</div>
 {/if}
