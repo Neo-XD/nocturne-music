@@ -212,7 +212,8 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     let mut fetched_betterlyrics: Option<Option<Lyrics>> = None;
     let mut fetched_youlyplus: Option<Option<Lyrics>> = None;
     let mut fetched_paxsenix: Option<Option<Lyrics>> = None;
-    let mut fetched_customs: std::collections::HashMap<String, Option<Lyrics>> = std::collections::HashMap::new();
+    let mut fetched_customs: std::collections::HashMap<String, Option<Lyrics>> =
+        std::collections::HashMap::new();
 
     // =========================================================================
     // Phase 1: Try ALL word-by-word sources first (in provider priority order)
@@ -255,7 +256,9 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
             }
             other => {
                 let customs = get_custom_providers(&state.db);
-                if let Some(c) = customs.iter().find(|c| c.id == other || c.name.to_lowercase() == other) {
+                if let Some(c) =
+                    customs.iter().find(|c| c.id == other || c.name.to_lowercase() == other)
+                {
                     if c.enabled {
                         let hit = if let Some(cached) = fetched_customs.get(&c.id) {
                             cached.clone()
@@ -278,7 +281,9 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     // Check any remaining custom providers for word timings
     let customs = get_custom_providers(&state.db);
     for c in &customs {
-        if c.enabled && !providers.iter().any(|p| p == &c.id || p.to_lowercase() == c.name.to_lowercase()) {
+        if c.enabled
+            && !providers.iter().any(|p| p == &c.id || p.to_lowercase() == c.name.to_lowercase())
+        {
             let hit = if let Some(cached) = fetched_customs.get(&c.id) {
                 cached.clone()
             } else {
@@ -388,7 +393,9 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
             }
             other => {
                 let customs = get_custom_providers(&state.db);
-                if let Some(c) = customs.iter().find(|c| c.id == other || c.name.to_lowercase() == other) {
+                if let Some(c) =
+                    customs.iter().find(|c| c.id == other || c.name.to_lowercase() == other)
+                {
                     if c.enabled {
                         let hit = if let Some(cached) = fetched_customs.get(&c.id) {
                             cached.clone()
@@ -410,7 +417,9 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
 
     // Check remaining custom providers for line sync
     for c in &customs {
-        if c.enabled && !providers.iter().any(|p| p == &c.id || p.to_lowercase() == c.name.to_lowercase()) {
+        if c.enabled
+            && !providers.iter().any(|p| p == &c.id || p.to_lowercase() == c.name.to_lowercase())
+        {
             let hit = if let Some(cached) = fetched_customs.get(&c.id) {
                 cached.clone()
             } else {

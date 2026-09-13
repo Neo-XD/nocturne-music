@@ -522,17 +522,27 @@ fn perceptual_to_mpv(percent: i64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{af_chain, perceptual_to_mpv, quoted};
+    use super::{af_chain, perceptual_to_mpv, quoted, AudioFilters};
 
     #[test]
     fn gain_and_pitch_share_one_chain() {
         // The bug this exists for: either setter clobbering the other's filter.
-        assert_eq!(af_chain(None, 0), "");
-        assert_eq!(af_chain(Some(-3.5), 0), "lavfi=[volume=-3.5dB]");
-        assert_eq!(af_chain(None, 12), "rubberband=pitch-scale=2");
-        assert_eq!(af_chain(Some(-6.0), -12), "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5");
+        let default_af = AudioFilters::default();
+        assert_eq!(af_chain(&default_af), "");
+
+        let gain_af = AudioFilters { gain_db: Some(-3.5), ..Default::default() };
+        assert_eq!(af_chain(&gain_af), "lavfi=[volume=-3.50dB]");
+
+        let pitch_af = AudioFilters { semitones: 12, ..Default::default() };
+        assert_eq!(af_chain(&pitch_af), "rubberband=pitch-scale=2");
+
+        let combined_af =
+            AudioFilters { gain_db: Some(-6.0), semitones: -12, ..Default::default() };
+        assert_eq!(af_chain(&combined_af), "lavfi=[volume=-6.00dB],rubberband=pitch-scale=0.5");
+
         // One semitone up is the twelfth root of two.
-        assert!(af_chain(None, 1).ends_with("1.0594630943592953"));
+        let semi_af = AudioFilters { semitones: 1, ..Default::default() };
+        assert!(af_chain(&semi_af).ends_with("1.0594630943592953"));
     }
 
     /// Everything above is string-building; this drives a real libmpv and reads `af` back out of
@@ -556,19 +566,35 @@ mod tests {
 
         // 1. Loudness normalization, then a pitch round trip. The gain has to survive both steps.
         p.set_gain(Some(-7.7)).unwrap();
-        assert!(af().contains("volume=-7.7dB"), "gain missing: {}", af());
+        assert!(
+            af().contains("volume=-7.70dB") || af().contains("volume=-7.7dB"),
+            "gain missing: {}",
+            af()
+        );
         p.set_pitch(2).unwrap();
-        assert!(af().contains("volume=-7.7dB"), "pitch dropped the gain: {}", af());
+        assert!(
+            af().contains("volume=-7.70dB") || af().contains("volume=-7.7dB"),
+            "pitch dropped the gain: {}",
+            af()
+        );
         assert!(af().contains("rubberband"), "pitch missing: {}", af());
         p.set_pitch(0).unwrap();
-        assert!(af().contains("volume=-7.7dB"), "reset dropped the gain: {}", af());
+        assert!(
+            af().contains("volume=-7.70dB") || af().contains("volume=-7.7dB"),
+            "reset dropped the gain: {}",
+            af()
+        );
         assert!(!af().contains("rubberband"), "pitch 0 left a filter behind: {}", af());
 
         // 2. Gapless advance: the orchestrator retunes the gain for the next track (state.rs, the
         // `lookahead_gain` take). A pitch the user set must not fall out of the chain when it does.
         p.set_pitch(-5).unwrap();
         p.set_gain(Some(-2.5)).unwrap();
-        assert!(af().contains("volume=-2.5dB"), "retune missed: {}", af());
+        assert!(
+            af().contains("volume=-2.50dB") || af().contains("volume=-2.5dB"),
+            "retune missed: {}",
+            af()
+        );
         assert!(af().contains("rubberband"), "retune dropped the pitch: {}", af());
         p.set_pitch(0).unwrap();
 
@@ -583,12 +609,19 @@ mod tests {
         assert_eq!(err.to_string(), "Pitch shifting isn't available in this build");
         // mpv never applied the bad chain, and the rollback re-applied the good one either way.
         assert_eq!(af(), before, "a rejected pitch changed the live chain");
-        assert!(af().contains("volume=-2.5dB"), "normalization lost: {}", af());
+        assert!(
+            af().contains("volume=-2.50dB") || af().contains("volume=-2.5dB"),
+            "normalization lost: {}",
+            af()
+        );
         // And the rolled-back state is clean: the next per-track retune is gain-only, not a
         // permanently poisoned chain that fails from here on.
         p.set_gain(Some(-4.0)).unwrap();
         let after = af(); // mpv hands the chain back in its own escaped form, hence `contains`
-        assert!(after.contains("volume=-4dB"), "retune after a rejection failed: {after}");
+        assert!(
+            after.contains("volume=-4.00dB") || after.contains("volume=-4dB"),
+            "retune after a rejection failed: {after}"
+        );
         assert!(!after.contains("rubberband"), "stored pitch survived the rollback: {after}");
     }
 
