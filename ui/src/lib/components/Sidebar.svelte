@@ -16,11 +16,8 @@
 		ArrowDown01Icon,
 		ArrowRight01Icon,
 		ComputerIcon,
-		Sun01Icon,
-		Moon02Icon,
 		Home01Icon
 	} from '@hugeicons/core-free-icons';
-	import { toggleMode } from 'mode-watcher';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -202,19 +199,8 @@
 		{#if !collapsed}
 			<span class="font-heading text-lg font-bold tracking-tight pl-1">Nocturne</span>
 		{/if}
-		<div class="flex items-center gap-1 {collapsed ? 'w-full justify-center' : ''}">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				class="hover:text-primary cursor-pointer text-muted-foreground"
-				onclick={toggleMode}
-				aria-label="Toggle theme mode"
-				title="Toggle theme mode"
-			>
-				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
-				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
-			</Button>
-			{#if !isSmallScreen}
+		{#if !isSmallScreen}
+			<div class="flex items-center gap-1 {collapsed ? 'w-full justify-center' : ''}">
 				<Button
 					variant="ghost"
 					size="icon-sm"
@@ -232,8 +218,8 @@
 						class="h-4 w-4"
 					/>
 				</Button>
-			{/if}
-		</div>
+			</div>
+		{/if}
 	</div>
 
 	{#if prefs.homeInSidebar}

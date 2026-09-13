@@ -22,9 +22,12 @@
 		UserGroup02Icon,
 		Link04Icon,
 		Home01Icon,
-		Settings01Icon
+		Settings01Icon,
+		Sun01Icon,
+		Moon02Icon
 	} from '@hugeicons/core-free-icons';
 	import { page } from '$app/state';
+	import { toggleMode } from 'mode-watcher';
 	import LastFmIcon from './LastFmIcon.svelte';
 	import DiscordIcon from './DiscordIcon.svelte';
 	import AccountMenu from './AccountMenu.svelte';
@@ -330,6 +333,19 @@
 				aria-label="Fullscreen player"
 			>
 				<HugeiconsIcon icon={FullScreenIcon} class="h-4 w-4" />
+			</button>
+		{/if}
+
+		<!-- Theme mode toggle -->
+		{#if prefs.visibleIcons.titlebar.mode !== false}
+			<button
+				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground cursor-pointer"
+				onclick={toggleMode}
+				title="Toggle theme mode"
+				aria-label="Toggle theme mode"
+			>
+				<HugeiconsIcon icon={Sun01Icon} strokeWidth={2} class="h-4 w-4 dark:hidden" />
+				<HugeiconsIcon icon={Moon02Icon} strokeWidth={2} class="hidden h-4 w-4 dark:block" />
 			</button>
 		{/if}
 
