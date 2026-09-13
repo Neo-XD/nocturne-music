@@ -42,10 +42,12 @@
     } from "$lib/player.svelte";
     import { getCached, putCached } from "$lib/pagecache";
     import { thumb } from "$lib/thumb";
+    import { getAlbumMotionArtwork } from "$lib/canvas";
     import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from "$lib/menu";
 
     let album = $state<AlbumPage | null>(null);
     let artistHero = $state<string | null>(null);
+    let motionArtworkUrl = $state<string | null>(null);
     let loading = $state(true);
     let error = $state<string | null>(null);
     let expanded = $state(false);
@@ -72,10 +74,14 @@
         const key = `album:${aid}`;
         const hit = getCached<AlbumPage>(key);
         artistHero = null;
+        motionArtworkUrl = null;
         if (hit) {
             album = hit;
             loadHero(aid, hit);
             loading = false;
+            getAlbumMotionArtwork(hit.title, hit.artist).then((u) => {
+                if (aid === id) motionArtworkUrl = u;
+            });
         } else {
             loading = true;
             album = null;
@@ -89,6 +95,9 @@
             album = fresh;
             putCached(key, fresh);
             loadHero(aid, fresh);
+            getAlbumMotionArtwork(fresh.title, fresh.artist).then((u) => {
+                if (aid === id) motionArtworkUrl = u;
+            });
         } catch (e) {
             if (aid !== id) return;
             if (!hit) error = String(e);
@@ -263,7 +272,16 @@
 {:else if album}
     <!-- Header with the artist image as a hero backdrop -->
     <div class="content-in relative overflow-hidden">
-        {#if artistHero}
+        {#if motionArtworkUrl}
+            <video
+                src={motionArtworkUrl}
+                autoplay
+                loop
+                muted
+                playsinline
+                class="absolute inset-0 h-full w-full object-cover object-center opacity-65 dark:opacity-50 blur-xs"
+            ></video>
+        {:else if artistHero}
             <img
                 src={artistHero}
                 alt=""
@@ -290,7 +308,18 @@
             <div class="flex items-end gap-5">
                 <!-- Inline width/height so the size holds even against a stale dev-server CSS that -->
                 <!-- hasn't regenerated a newly-used spacing utility (would fall back to intrinsic size). -->
-                {#if album.thumbnail}
+                {#if motionArtworkUrl}
+                    <div style="width:7rem;height:7rem" class="shrink-0 overflow-hidden rounded-xl shadow-2xl">
+                        <video
+                            src={motionArtworkUrl}
+                            autoplay
+                            loop
+                            muted
+                            playsinline
+                            class="h-full w-full object-cover"
+                        ></video>
+                    </div>
+                {:else if album.thumbnail}
                     <img
                         src={thumb(album.thumbnail, 400)}
                         alt=""

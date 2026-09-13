@@ -141,6 +141,26 @@
 		return i;
 	});
 
+	// Sentence linger: keep previous active line highlighted for 180ms for softer handoff (matches mobile)
+	let prevActiveIndex = $state(-1);
+	let lingeredActiveIndex = $state(-1);
+	let lingerTimer: ReturnType<typeof setTimeout> | undefined;
+
+	$effect(() => {
+		const cur = activeIndex;
+		if (cur !== prevActiveIndex) {
+			const old = prevActiveIndex;
+			prevActiveIndex = cur;
+			if (old >= 0) {
+				lingeredActiveIndex = old;
+				clearTimeout(lingerTimer);
+				lingerTimer = setTimeout(() => {
+					lingeredActiveIndex = -1;
+				}, 180);
+			}
+		}
+	});
+
 	// Auto-scroll pauses while the user is scrolling (wheel/touch/scrollbar), resumes after 3s.
 	// Tracked via input events, not `scroll`, so our own smooth scrolls don't trip it.
 	let userScrollUntil = 0;
@@ -245,34 +265,42 @@
 		<div class="py-[35vh] {expanded ? 'mx-auto max-w-3xl' : ''}">
 			{#each lyrics.lines as line, i (i)}
 				{@const isActive = i === activeIndex}
+				{@const isLingered = i === lingeredActiveIndex}
+				{@const isHighlight = isActive || isLingered}
 				{@const isPast = i < activeIndex}
+				{@const dist = activeIndex >= 0 ? Math.abs(i - activeIndex) : 99}
 				<button
 					data-line={i}
 					onclick={() => seekTo(line)}
 					style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
-					class="group/lyric-line block w-full origin-left cursor-pointer text-left font-bold leading-snug transition-all duration-300 ease-out hover:text-foreground
+					class="group/lyric-line block w-full origin-left cursor-pointer text-left leading-snug transition-[transform,opacity,filter] duration-300 ease-out hover:text-foreground
 						{expanded ? 'py-3.5 text-3xl sm:text-4xl' : compact ? 'py-1 text-sm' : 'py-2.5 text-xl'}
-						{isActive
-						? 'scale-[1.03] text-foreground opacity-100'
-						: isPast
-							? 'text-muted-foreground/45 opacity-60 blur-[0.3px] hover:blur-none hover:opacity-90'
-							: 'text-muted-foreground/75 opacity-75 blur-[0.2px] hover:blur-none hover:opacity-100'}"
+						{isHighlight
+							? 'scale-[1.045] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_18px_rgba(var(--color-primary-rgb,99,102,241),0.35)]'
+							: dist === 1
+								? 'scale-100 translate-y-0 font-bold text-muted-foreground/80 opacity-75 blur-0 hover:blur-none hover:opacity-100'
+								: dist === 2
+									? 'scale-100 translate-y-0 font-bold text-muted-foreground/60 opacity-50 blur-[0.6px] hover:blur-none hover:opacity-90'
+									: dist === 3
+										? 'scale-100 translate-y-0 font-semibold text-muted-foreground/45 opacity-30 blur-[1.4px] hover:blur-none hover:opacity-80'
+										: 'scale-100 translate-y-0 font-medium text-muted-foreground/35 opacity-20 blur-[2.4px] hover:blur-none hover:opacity-75'}"
 				>
 					{#if line.words && line.words.length > 0}
-						<!-- Word-by-Word Karaoke Sweep Animation (Glassy Turbo luminous syllable sweep) -->
+						<!-- Word-by-Word Karaoke Sweep Animation (Ocean Wave with trailing feather) -->
 						<span class="inline-flex flex-wrap items-baseline">
 							{#each line.words as word, wIdx (wIdx)}
 								{@const isWordEnd = word.text.endsWith(' ')}
 								{@const cleanText = word.text.trimEnd()}
-								{#if isActive}
+								{#if isHighlight}
 									{@const progress = getWordProgress(word, posMs)}
-									{@const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)}
+									{@const pct = Math.min(100, Math.max(0, Math.round(progress * 100)))}
+									{@const tail = Math.min(100, pct + 14)}
 									{@const isCurrentWord = progress > 0 && progress < 1}
 									<span
 										class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord
-											? 'scale-[1.04]'
+											? 'scale-[1.05] drop-shadow-[0_0_12px_rgba(255,255,255,0.45)]'
 											: ''}"
-										style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
+										style="background-image: linear-gradient(90deg, var(--foreground) 0%, var(--foreground) {pct}%, color-mix(in srgb, var(--foreground) 75%, var(--primary, #6366f1)) {Math.min(100, pct + 4)}%, var(--muted-foreground) {tail}%, var(--muted-foreground) 100%)"
 									>
 										{cleanText}
 									</span>
@@ -284,12 +312,14 @@
 							{/each}
 						</span>
 					{:else}
-						<span class="{isActive ? 'bg-gradient-to-r from-foreground via-foreground to-primary/80 bg-clip-text' : ''}">{line.text || '♪'}</span>
+						<span class="{isHighlight ? 'bg-gradient-to-r from-foreground via-foreground to-primary/85 bg-clip-text text-transparent drop-shadow-[0_0_16px_rgba(var(--color-primary-rgb,99,102,241),0.4)]' : ''}">
+							{line.text || '♪'}
+						</span>
 					{/if}
 
 					<!-- Translation line rendering -->
 					{#if line.translation}
-						<p class="mt-1 text-sm font-normal italic tracking-wide opacity-80 transition-opacity">
+						<p class="mt-1 text-sm font-normal italic tracking-wide transition-opacity {isHighlight ? 'text-foreground/80 opacity-90' : 'text-muted-foreground/50 opacity-60'}">
 							{line.translation}
 						</p>
 					{/if}

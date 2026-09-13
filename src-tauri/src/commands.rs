@@ -1501,6 +1501,20 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v082_note = ReleaseNote {
+        version: "0.8.2".to_string(),
+        date: "2026-09-13".to_string(),
+        body: r#"### Nocturne Music v0.8.2
+
+- **Motion Album Art for Playlists & Albums**: Looping dynamic motion video artwork for playlists and albums ported from mobile, integrating Nocturne Canvas and Apple Music motion artwork with multi-directional smooth gradient masking and fast-path LRU caching.
+- **Mobile Lyric Animations & Wave Sweep**: Ported lyric animation fidelity from mobile including 180ms sentence lingering on line transition, distance-based progressive blur, curved inactive line alpha falloff, active line scale and Y-lift physics, and syllable/word wave sweep with trailing feather gradient.
+- **Window Dragging & Top Bar Redesign**: Restored full window drag regions across the top title bar. Relocated Home button next to navigation arrows (with option to keep in sidebar) and moved Quick Settings adjacent to Account Switcher.
+- **Settings Shortcut**: Added `Ctrl+;` global keyboard shortcut to instantly open and toggle Settings dialog from anywhere in the app.
+- **Fullscreen Now Playing Edge-to-Edge Wash**: Now playing background wash expands fully under top bar, bottom bar, and left sidebar. Lyrics and queue switches feature acrylic translucency with backdrop blur, and lyric background obstruction removed for clean typography over art.
+- **Resizable Left Sidebar Rail**: Drag-to-resize left sidebar rail (200px to 420px) with persistent width saving and repositioned "See full library" navigation at the bottom.
+- **Translucent Frosted Search Bar**: Smooth full-width expansion on search bar hover/focus and frosted glass backdrop blur on search suggestions and typeahead dropdowns."#.to_string(),
+    };
+
     let v081_note = ReleaseNote {
         version: "0.8.1".to_string(),
         date: "2026-09-11".to_string(),
@@ -1685,14 +1699,15 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note,
-        v064_note, v063_note, v062_note, v061_note, v06_note,
+        v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note,
+        v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "0.8.2".to_string(),
             "0.8.1".to_string(),
             "0.8".to_string(),
             "0.8.0".to_string(),

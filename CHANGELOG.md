@@ -2,6 +2,27 @@
 
 All notable changes to Nocturne Desktop are documented in this file.
 
+## [v0.8.2] - 2026-09-13
+
+### ✨ New Features
+- **Motion Album Art for Playlists & Albums**: Seamless looping motion video artwork ported from mobile (`nocturne-mobile`). Integrates Nocturne Canvas manifest API and Apple Music motion artwork API (`editorialVideo` HLS/mp4 streams) to display looping video both inside playlist/album cover art tiles and across the atmospheric backdrop wash with multi-directional smooth gradient masking and fast-path LRU caching.
+- **Mobile Lyric Animations & Wave Sweep**: Brought complete lyric animation fidelity from mobile (`ViviMusicLyrics.kt`) to desktop. Includes 180ms sentence linger upon line transition for smooth handoff, distance-based progressive blur and curved inactive alpha falloff (`dist=1: 0.75, blur 0; dist=2: 0.50, blur 0.6px; dist=3: 0.30, blur 1.4px; dist>=4: 0.20, blur 2.4px`), active line scale (`1.045`) and subtle Y-lift physics (`-0.125rem`), luminous ambient drop-shadow aura glow, and syllable/word wave sweep with trailing feather gradient.
+- **Resizable Left Sidebar Rail**: Draggable resize handle on the left navigation sidebar rail allowing users to customize sidebar width between 200px and 420px with persistent `localStorage` saving.
+- **Settings Global Keyboard Shortcut**: Added `Ctrl+;` shortcut to open and toggle the Settings modal from anywhere in the application.
+
+### 🎨 Improvements & Polish
+- **Top Bar Redesign & Window Dragging**: Restored native window dragging across title bar non-interactive space. Relocated Home button directly to the right of navigation arrows with an appearance setting to toggle it back to the sidebar, moved Quick Settings adjacent to the Account Switcher, and matched docked top bar's blur and frosted translucent styling with the floating top bar aesthetic.
+- **Translucent Fullscreen Now Playing Experience**: Expanded immersive now playing background wash completely behind the left sidebar, under the top bar, and under the bottom player bar. Replaced queue and lyrics switcher with translucent acrylic buttons featuring `backdrop-blur-xl`, and removed the opaque background behind lyrics for unobstructed visual harmony with cover art and motion video.
+- **Playlist & Album Header Gradient Translucency**: Replaced hard vignette borders on playlist and album header art with smooth multi-directional radial and linear mask gradients, blending naturally into the app background.
+- **Sidebar Library Navigation**: Relocated library navigation to the bottom of the sidebar with explicit "See full library" styling.
+- **Top Bar Theme Swapper**: Kept quick theme switcher conveniently accessible in the top bar.
+
+### 🐛 Bug Fixes
+- **Search Bar Expansion**: Fixed top search bar hover and focus expansion behavior so it expands smoothly to full width without stuttering or stopping halfway.
+- **Search Popups Translucency & Backdrop Blur**: Restored frosted glass backdrop blur (`backdrop-blur-2xl`) and translucent acrylic styling on search suggestion popups (`SearchSuggest` and `TopSearchBar`).
+
+---
+
 ## [v0.8.1] - 2026-09-11
 
 ### ✨ New Features

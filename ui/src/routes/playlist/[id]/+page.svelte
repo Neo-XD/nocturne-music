@@ -33,6 +33,7 @@
 	import type { BrowseItem, PlaylistPage, SongItem } from '$lib/api';
 	import { getCached, putCached, invalidateCached } from '$lib/pagecache';
 	import { thumb } from '$lib/thumb';
+	import { getPlaylistMotionArtwork } from '$lib/canvas';
 	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
 	import { rowWindow } from '$lib/rows';
 	import { rowScroller } from '$lib/rows.svelte';
@@ -81,6 +82,7 @@
 	// A song cover is only the fallback: a playlist's own artwork is always the hero backdrop when
 	// it has one. It also keeps auto-generated playlists from ending up with an empty header.
 	let fallbackImage = $state<string | null>(null);
+	let motionArtworkUrl = $state<string | null>(null);
 	// ⋯ options menu, positioned `fixed` at the button so it isn't clipped (matches TrackRow).
 	let menuOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
@@ -359,11 +361,15 @@
 		// A page that failed on the last playlist would otherwise keep this one's retry state
 		// showing, and block the filter's own walk (`loadAll` bails while it's set).
 		moreError = false;
+		motionArtworkUrl = null;
 		if (hit) {
 			pl = hit;
 			if (!saved) sort = hit.sortMenu?.selected ?? 'default';
 			fallbackImage = pickCover(hit.items);
 			loading = false;
+			getPlaylistMotionArtwork(hit.title, hit.subtitle, hit.items[0]).then((u) => {
+				if (pid === id) motionArtworkUrl = u;
+			});
 		} else {
 			loading = true;
 			pl = null;
@@ -382,6 +388,9 @@
 			if (!saved) sort = fresh.sortMenu?.selected ?? 'default';
 			fallbackImage = pickCover(fresh.items);
 			putCached(key, fresh);
+			getPlaylistMotionArtwork(fresh.title, fresh.subtitle, fresh.items[0]).then((u) => {
+				if (pid === id) motionArtworkUrl = u;
+			});
 		} catch (e) {
 			if (pid !== id) return;
 			if (!hit) error = String(e);
@@ -730,7 +739,24 @@
 		     album page. -->
 		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
 			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden p-6 pt-8">
-				{#if headerImage}
+				{#if motionArtworkUrl}
+					<div
+						class="pointer-events-none absolute inset-0 overflow-hidden"
+						style="mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 35%, rgba(0,0,0,0.5) 65%, transparent 100%), linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.9) 25%, rgba(0,0,0,0.95) 60%, rgba(0,0,0,0.7) 85%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 35%, rgba(0,0,0,0.5) 65%, transparent 100%), linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.9) 25%, rgba(0,0,0,0.95) 60%, rgba(0,0,0,0.7) 85%, transparent 100%); -webkit-mask-composite: source-in; mask-composite: intersect;"
+					>
+						<video
+							src={motionArtworkUrl}
+							autoplay
+							loop
+							muted
+							playsinline
+							class="h-full w-full scale-105 object-cover object-center opacity-65 dark:opacity-55 blur-xs transition-opacity duration-700"
+						></video>
+					</div>
+					<!-- Soft, subtle translucent easing to page background at bottom and left -->
+					<div class="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background to-transparent"></div>
+					<div class="pointer-events-none absolute inset-y-0 left-0 w-64 bg-gradient-to-r from-background/70 to-transparent"></div>
+				{:else if headerImage}
 					<div
 						class="pointer-events-none absolute inset-0 overflow-hidden"
 						style="mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 35%, rgba(0,0,0,0.5) 65%, transparent 100%), linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.9) 25%, rgba(0,0,0,0.95) 60%, rgba(0,0,0,0.7) 85%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 35%, rgba(0,0,0,0.5) 65%, transparent 100%), linear-gradient(to right, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.9) 25%, rgba(0,0,0,0.95) 60%, rgba(0,0,0,0.7) 85%, transparent 100%); -webkit-mask-composite: source-in; mask-composite: intersect;"
@@ -750,6 +776,17 @@
 						class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-lg"
 					>
 						<HugeiconsIcon icon={ListRestartIcon} class="h-20 w-20" />
+					</div>
+				{:else if motionArtworkUrl}
+					<div class="relative h-40 w-40 overflow-hidden rounded-xl shadow-lg group">
+						<video
+							src={motionArtworkUrl}
+							autoplay
+							loop
+							muted
+							playsinline
+							class="h-full w-full object-cover"
+						></video>
 					</div>
 				{:else if art}
 					<img src={art} alt="" class="relative h-40 w-40 rounded-xl object-cover shadow-lg" />
