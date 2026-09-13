@@ -262,13 +262,26 @@
 			hasScrolled = false;
 			userScrollUntil = 0;
 		}
+		if (!scroller) return;
 		if (i < 0) {
-			if (!hasScrolled && scroller) {
-				scroller.scrollTo({ top: 0, behavior: 'instant' });
+			if (!hasScrolled) {
+				// Lyrics loaded but no active cue yet (lead-in silence) — scroll to first line
+				// so the user can read ahead rather than staring at a blank top.
+				const firstLine = lyrics?.lines?.length ? scroller.querySelector('[data-line="0"]') : null;
+				if (firstLine) {
+					const lineRect = firstLine.getBoundingClientRect();
+					const boxRect = scroller.getBoundingClientRect();
+					scroller.scrollTo({
+						top: scroller.scrollTop + (lineRect.top - boxRect.top) - (boxRect.height - lineRect.height) / 2,
+						behavior: 'instant'
+					});
+				} else {
+					scroller.scrollTo({ top: 0, behavior: 'instant' });
+				}
 			}
 			return;
 		}
-		if (!scroller || Date.now() < userScrollUntil) return;
+		if (Date.now() < userScrollUntil) return;
 		if (i === 0) {
 			scroller.scrollTo({
 				top: 0,
