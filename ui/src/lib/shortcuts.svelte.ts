@@ -140,12 +140,7 @@ export function registerSearchInput(el: HTMLInputElement | undefined) {
 }
 
 export function focusSearchInput() {
-	if (searchInputEl && document.contains(searchInputEl)) {
-		searchInputEl.focus();
-		searchInputEl.select();
-	} else {
-		ui.paletteOpen = !ui.paletteOpen;
-	}
+	ui.paletteOpen = !ui.paletteOpen;
 }
 
 /** Check whether user is currently typing in an input element */

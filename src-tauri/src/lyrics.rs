@@ -200,25 +200,137 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     let providers = resolve_providers(&state.db);
     let mut lr: Option<Result<Option<LrclibTrack>, reqwest::Error>> = None;
 
+    fn has_word_timings(l: &Lyrics) -> bool {
+        l.lines.iter().any(|line| line.words.as_ref().map_or(false, |w| !w.is_empty()))
+    }
+
+    fn is_line_synced(l: &Lyrics) -> bool {
+        l.synced || l.instrumental || l.lines.iter().any(|line| line.time_ms.is_some())
+    }
+
+    // Cache of already-fetched candidate responses so no provider is hit twice.
+    let mut fetched_betterlyrics: Option<Option<Lyrics>> = None;
+    let mut fetched_youlyplus: Option<Option<Lyrics>> = None;
+    let mut fetched_paxsenix: Option<Option<Lyrics>> = None;
+    let mut fetched_customs: std::collections::HashMap<String, Option<Lyrics>> = std::collections::HashMap::new();
+
+    // =========================================================================
+    // Phase 1: Try ALL word-by-word sources first (in provider priority order)
+    // =========================================================================
     for provider in &providers {
         match provider.as_str() {
             "betterlyrics" | "boidu" => {
                 if state.db.get_setting("lyrics_boidu").as_deref() != Some("false")
                     && state.db.get_setting("lyrics_betterlyrics").as_deref() != Some("false")
                 {
-                    if let Ok(Some(l)) = betterlyrics_get(req).await {
-                        return (Some(l), req.duration.is_some());
+                    if fetched_betterlyrics.is_none() {
+                        fetched_betterlyrics = Some(betterlyrics_get(req).await.ok().flatten());
+                    }
+                    if let Some(Some(l)) = &fetched_betterlyrics {
+                        if has_word_timings(l) {
+                            return (Some(l.clone()), req.duration.is_some());
+                        }
                     }
                 }
             }
             "youlyplus" | "lyricsplus" => {
-                if let Ok(Some(l)) = youlyplus_get(req).await {
-                    return (Some(l), req.duration.is_some());
+                if fetched_youlyplus.is_none() {
+                    fetched_youlyplus = Some(youlyplus_get(req).await.ok().flatten());
+                }
+                if let Some(Some(l)) = &fetched_youlyplus {
+                    if has_word_timings(l) {
+                        return (Some(l.clone()), req.duration.is_some());
+                    }
                 }
             }
             "paxsenix" => {
-                if let Ok(Some(l)) = paxsenix_get(req).await {
+                if fetched_paxsenix.is_none() {
+                    fetched_paxsenix = Some(paxsenix_get(req).await.ok().flatten());
+                }
+                if let Some(Some(l)) = &fetched_paxsenix {
+                    if has_word_timings(l) {
+                        return (Some(l.clone()), req.duration.is_some());
+                    }
+                }
+            }
+            other => {
+                let customs = get_custom_providers(&state.db);
+                if let Some(c) = customs.iter().find(|c| c.id == other || c.name.to_lowercase() == other) {
+                    if c.enabled {
+                        let hit = if let Some(cached) = fetched_customs.get(&c.id) {
+                            cached.clone()
+                        } else {
+                            let res = custom_provider_get(c, req).await.ok().flatten();
+                            fetched_customs.insert(c.id.clone(), res.clone());
+                            res
+                        };
+                        if let Some(l) = hit {
+                            if has_word_timings(&l) {
+                                return (Some(l), req.duration.is_some());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check any remaining custom providers for word timings
+    let customs = get_custom_providers(&state.db);
+    for c in &customs {
+        if c.enabled && !providers.iter().any(|p| p == &c.id || p.to_lowercase() == c.name.to_lowercase()) {
+            let hit = if let Some(cached) = fetched_customs.get(&c.id) {
+                cached.clone()
+            } else {
+                let res = custom_provider_get(c, req).await.ok().flatten();
+                fetched_customs.insert(c.id.clone(), res.clone());
+                res
+            };
+            if let Some(l) = hit {
+                if has_word_timings(&l) {
                     return (Some(l), req.duration.is_some());
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Phase 2: If no word timings found, try ALL line-by-line synced sources
+    // =========================================================================
+    for provider in &providers {
+        match provider.as_str() {
+            "betterlyrics" | "boidu" => {
+                if state.db.get_setting("lyrics_boidu").as_deref() != Some("false")
+                    && state.db.get_setting("lyrics_betterlyrics").as_deref() != Some("false")
+                {
+                    if fetched_betterlyrics.is_none() {
+                        fetched_betterlyrics = Some(betterlyrics_get(req).await.ok().flatten());
+                    }
+                    if let Some(Some(l)) = &fetched_betterlyrics {
+                        if is_line_synced(l) {
+                            return (Some(l.clone()), req.duration.is_some());
+                        }
+                    }
+                }
+            }
+            "youlyplus" | "lyricsplus" => {
+                if fetched_youlyplus.is_none() {
+                    fetched_youlyplus = Some(youlyplus_get(req).await.ok().flatten());
+                }
+                if let Some(Some(l)) = &fetched_youlyplus {
+                    if is_line_synced(l) {
+                        return (Some(l.clone()), req.duration.is_some());
+                    }
+                }
+            }
+            "paxsenix" => {
+                if fetched_paxsenix.is_none() {
+                    fetched_paxsenix = Some(paxsenix_get(req).await.ok().flatten());
+                }
+                if let Some(Some(l)) = &fetched_paxsenix {
+                    if is_line_synced(l) {
+                        return (Some(l.clone()), req.duration.is_some());
+                    }
                 }
             }
             "lrclib" => {
@@ -262,22 +374,33 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
             }
             "qq" | "qqmusic" => {
                 if let Ok(Some(l)) = qqmusic_get(req).await {
-                    return (Some(l), req.duration.is_some());
+                    if is_line_synced(&l) {
+                        return (Some(l), req.duration.is_some());
+                    }
                 }
             }
             "kugou" => {
                 if let Ok(Some(l)) = kugou_get(req).await {
-                    return (Some(l), req.duration.is_some());
+                    if is_line_synced(&l) {
+                        return (Some(l), req.duration.is_some());
+                    }
                 }
             }
             other => {
                 let customs = get_custom_providers(&state.db);
-                if let Some(c) =
-                    customs.iter().find(|c| c.id == other || c.name.to_lowercase() == other)
-                {
+                if let Some(c) = customs.iter().find(|c| c.id == other || c.name.to_lowercase() == other) {
                     if c.enabled {
-                        if let Ok(Some(l)) = custom_provider_get(c, req).await {
-                            return (Some(l), req.duration.is_some());
+                        let hit = if let Some(cached) = fetched_customs.get(&c.id) {
+                            cached.clone()
+                        } else {
+                            let res = custom_provider_get(c, req).await.ok().flatten();
+                            fetched_customs.insert(c.id.clone(), res.clone());
+                            res
+                        };
+                        if let Some(l) = hit {
+                            if is_line_synced(&l) {
+                                return (Some(l), req.duration.is_some());
+                            }
                         }
                     }
                 }
@@ -285,18 +408,25 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         }
     }
 
-    let customs = get_custom_providers(&state.db);
+    // Check remaining custom providers for line sync
     for c in &customs {
-        if c.enabled
-            && !providers.iter().any(|p| p == &c.id || p.to_lowercase() == c.name.to_lowercase())
-        {
-            if let Ok(Some(l)) = custom_provider_get(c, req).await {
-                return (Some(l), req.duration.is_some());
+        if c.enabled && !providers.iter().any(|p| p == &c.id || p.to_lowercase() == c.name.to_lowercase()) {
+            let hit = if let Some(cached) = fetched_customs.get(&c.id) {
+                cached.clone()
+            } else {
+                let res = custom_provider_get(c, req).await.ok().flatten();
+                fetched_customs.insert(c.id.clone(), res.clone());
+                res
+            };
+            if let Some(l) = hit {
+                if is_line_synced(&l) {
+                    return (Some(l), req.duration.is_some());
+                }
             }
         }
     }
 
-    // --- Fallbacks (fuzzy search & plain text) ---
+    // Fuzzy search for synced lyrics on LRCLIB
     let allows_lrclib = providers.iter().any(|p| p == "lrclib");
     let allows_ytm = providers.iter().any(|p| p == "ytm" || p == "youtube" || p == "youtubemusic");
 
@@ -312,7 +442,59 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         searched = Some(s);
     }
 
-    // Plain from LRCLIB exact match
+    // =========================================================================
+    // Phase 3: If no synced lyrics anywhere, try ALL unsynced (plain) sources
+    // =========================================================================
+    // 1. Any unsynced hit from earlier fetched word/line providers in priority order
+    for provider in &providers {
+        match provider.as_str() {
+            "betterlyrics" | "boidu" => {
+                if let Some(Some(l)) = fetched_betterlyrics.take() {
+                    return (Some(l), req.duration.is_some());
+                }
+            }
+            "youlyplus" | "lyricsplus" => {
+                if let Some(Some(l)) = fetched_youlyplus.take() {
+                    return (Some(l), req.duration.is_some());
+                }
+            }
+            "paxsenix" => {
+                if let Some(Some(l)) = fetched_paxsenix.take() {
+                    return (Some(l), req.duration.is_some());
+                }
+            }
+            "lrclib" => {
+                if let Some(Ok(Some(hit))) = &lr {
+                    if let Some(l) = plain_from_text(hit.plain_lyrics.as_deref(), "LRCLIB") {
+                        return (Some(l), req.duration.is_some());
+                    }
+                }
+            }
+            "ytm" | "youtube" | "youtubemusic" => {
+                if let Some(bid) = &browse_id {
+                    if let Some(client) = state.clients.get(innertube::METADATA_CLIENT) {
+                        match state.it.lyrics_plain(client, bid).await {
+                            Ok(Some(p)) => {
+                                let source = p.footer.unwrap_or_else(|| "YouTube Music".into());
+                                if let Some(l) = plain_from_text(Some(&p.text), &source) {
+                                    return (Some(l), true);
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(e) => tracing::debug!(error = %e, "lyrics: plain browse failed"),
+                        }
+                    }
+                }
+            }
+            other => {
+                if let Some(Some(l)) = fetched_customs.remove(other) {
+                    return (Some(l), req.duration.is_some());
+                }
+            }
+        }
+    }
+
+    // Plain from LRCLIB exact match (if not returned yet)
     if allows_lrclib {
         if let Some(Ok(Some(hit))) = &lr {
             if let Some(l) = plain_from_text(hit.plain_lyrics.as_deref(), "LRCLIB") {
@@ -321,7 +503,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         }
     }
 
-    // Plain from YouTube Music (WEB_REMIX)
+    // Plain from YouTube Music (WEB_REMIX) (if not returned yet)
     if allows_ytm {
         if let Some(bid) = &browse_id {
             if let Some(client) = state.clients.get(innertube::METADATA_CLIENT) {
@@ -1768,7 +1950,10 @@ mod tests {
     fn resolve_providers_handles_custom_priority_and_fallbacks() {
         let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         // Default when unset
-        assert_eq!(resolve_providers(&db), vec!["betterlyrics", "lrclib", "ytm", "qq", "kugou"]);
+        assert_eq!(
+            resolve_providers(&db),
+            vec!["betterlyrics", "youlyplus", "paxsenix", "lrclib", "ytm", "qq", "kugou"]
+        );
 
         // Comma separated list
         db.set_setting("lyrics_providers", "lrclib, betterlyrics, kugou");

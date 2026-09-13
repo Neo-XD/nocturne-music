@@ -187,6 +187,24 @@
 		hasScrolled = true;
 	});
 
+	// Autoscroll for unsynced (plain) lyrics based on playback progress
+	const durationNum = $derived(playback.duration || durationSecs(playback.now?.duration) || 0);
+	const unsyncedProgress = $derived(
+		durationNum > 6 ? Math.min(Math.max((playback.position - 2) / (durationNum - 4), 0), 1) : 0
+	);
+
+	$effect(() => {
+		if (lyrics?.synced || !lyrics || !scroller || loading || Date.now() < userScrollUntil) return;
+		const progress = unsyncedProgress;
+		const maxScroll = scroller.scrollHeight - scroller.clientHeight;
+		if (maxScroll > 0) {
+			scroller.scrollTo({
+				top: progress * maxScroll,
+				behavior: 'smooth'
+			});
+		}
+	});
+
 	function seekTo(line: api.LyricLine) {
 		if (line.time_ms === undefined) return;
 		const secs = line.time_ms / 1000;
@@ -281,18 +299,18 @@
 	{:else if lyrics}
 		<div
 			style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
-			class="space-y-2 leading-relaxed text-foreground/90 {expanded
-				? 'mx-auto max-w-3xl text-xl'
+			class="py-10 space-y-3 leading-relaxed text-foreground/90 {expanded
+				? 'mx-auto max-w-3xl text-2xl py-20 space-y-5 font-bold'
 				: compact
 					? 'text-xs'
-					: 'text-[15px]'}"
+					: 'text-[16px] font-semibold'}"
 		>
 			{#each lyrics.lines as line, i (i)}
 				{#if line.text}
-					<div>
+					<div class="transition-opacity hover:opacity-100 opacity-80">
 						<p>{line.text}</p>
 						{#if line.translation}
-							<p class="text-xs italic text-muted-foreground">{line.translation}</p>
+							<p class="text-xs italic text-muted-foreground mt-1">{line.translation}</p>
 						{/if}
 					</div>
 				{:else}

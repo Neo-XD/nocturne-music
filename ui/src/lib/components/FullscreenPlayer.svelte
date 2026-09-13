@@ -38,13 +38,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import AnimatedArtwork from './AnimatedArtwork.svelte';
 	import { appearance } from '$lib/theme.svelte';
-	import LyricsSyncDock from './LyricsSyncDock.svelte';
+	import LyricsView from './LyricsView.svelte';
 
-	// --- Lyrics Loading & Sync ---
-	let lyrics = $state<api.Lyrics | null>(null);
-	let loadingLyrics = $state(true);
-	let scroller: HTMLElement | undefined = $state();
-	let requestedId = '';
 	let userShowLyrics = $state(true);
 	let volDragging = $state(false);
 
@@ -65,107 +60,8 @@
 		return `${h ? `${h}:` : ''}${mm}:${s.toString().padStart(2, '0')}`;
 	};
 
-	$effect(() => {
-		const now = playback.now;
-		if (!now) {
-			requestedId = '';
-			lyrics = null;
-			loadingLyrics = false;
-			return;
-		}
-		if (now.videoId === requestedId) return;
-		const id = (requestedId = now.videoId);
-		loadingLyrics = true;
-		lyrics = null;
-		const album = playback.queue.items[playback.queue.currentIndex]?.album;
-		api.getLyrics({
-			videoId: id,
-			title: now.title,
-			artists: now.artists,
-			album: album ?? undefined,
-			duration: durationSecs(now.duration)
-		})
-			.then((l) => {
-				if (requestedId !== id) return;
-				lyrics = l;
-				loadingLyrics = false;
-				hasScrolled = false;
-			})
-			.catch(() => {
-				if (requestedId !== id) return;
-				loadingLyrics = false;
-			});
-	});
-
 	// Effective visibility: user preference
 	const showLyrics = $derived(userShowLyrics);
-
-	// High-precision clock for 60fps karaoke word sweep
-	let interpolatedPosSecs = $state(playback.position);
-
-	$effect(() => {
-		const pos = playback.position;
-		if (playback.paused) {
-			interpolatedPosSecs = pos;
-			return;
-		}
-		const base = pos;
-		const baseAt = performance.now();
-		interpolatedPosSecs = pos;
-		let frameId = requestAnimationFrame(function tick() {
-			interpolatedPosSecs = base + (performance.now() - baseAt) / 1000;
-			frameId = requestAnimationFrame(tick);
-		});
-		return () => cancelAnimationFrame(frameId);
-	});
-
-	const posMs = $derived(interpolatedPosSecs * 1000 + lyricsSync.currentOffsetMs);
-
-	const activeIndex = $derived.by(() => {
-		if (!lyrics?.synced) return -1;
-		const currentMs = posMs;
-		let i = -1;
-		for (let j = 0; j < lyrics.lines.length; j++) {
-			const t = lyrics.lines[j].time_ms;
-			if (t === undefined) continue;
-			if (t > currentMs) break;
-			i = j;
-		}
-		return i;
-	});
-
-	let userScrollUntil = 0;
-	let hasScrolled = false;
-
-	function onUserScroll() {
-		userScrollUntil = Date.now() + 3000;
-	}
-
-	$effect(() => {
-		const i = activeIndex;
-		if (i < 0 || !scroller || Date.now() < userScrollUntil) return;
-		scroller.querySelector(`[data-line="${i}"]`)?.scrollIntoView({
-			behavior: hasScrolled ? 'smooth' : 'instant',
-			block: 'center'
-		});
-		hasScrolled = true;
-	});
-
-	function seekTo(line: api.LyricLine) {
-		if (line.time_ms === undefined) return;
-		const secs = line.time_ms / 1000;
-		playback.position = secs;
-		userScrollUntil = 0;
-		api.seek(secs);
-	}
-
-	function getWordProgress(word: api.LyricWord, currentMs: number): number {
-		if (currentMs <= word.start_ms) return 0;
-		if (currentMs >= word.end_ms) return 1;
-		const dur = word.end_ms - word.start_ms;
-		if (dur <= 0) return 1;
-		return (currentMs - word.start_ms) / dur;
-	}
 
 	// --- Transport Controls ---
 	let seekDrag = $state<number | null>(null);
@@ -498,108 +394,9 @@
 					</div>
 				</section>
 
-				<!-- Right Section: Live-Synced Lyrics Stream -->
-				<section class="relative flex min-h-0 flex-1 h-[72vh] flex-col overflow-hidden [mask-image:linear-gradient(to_bottom,transparent_0%,black_10%,black_90%,transparent_100%)]">
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div
-						bind:this={scroller}
-						onwheel={onUserScroll}
-						ontouchmove={onUserScroll}
-						onpointerdown={onUserScroll}
-						class="min-h-0 flex-1 overflow-y-auto px-4 lg:px-10 py-10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-					>
-						{#if loadingLyrics}
-							<div class="space-y-6 py-20">
-								{#each { length: 7 } as _, i (i)}
-									<div
-										class="h-8 animate-pulse rounded-lg bg-foreground/10"
-										style="width:{50 + ((i * 23) % 45)}%"
-									></div>
-								{/each}
-							</div>
-						{:else if lyrics && lyrics.synced}
-							<div class="py-[30vh] space-y-5">
-								{#each lyrics.lines as line, i (i)}
-									{@const isActive = i === activeIndex}
-									{@const isPast = i < activeIndex}
-									<button
-										data-line={i}
-										onclick={() => seekTo(line)}
-										style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
-										class="group/lyric-line block w-full origin-left cursor-pointer text-left font-extrabold leading-snug transition-all duration-300 ease-out hover:text-foreground
-											text-2xl sm:text-3xl lg:text-4xl
-											{isActive
-											? 'text-foreground opacity-100 scale-[1.03]'
-											: isPast
-												? 'text-muted-foreground/35 opacity-50 blur-[0.3px] hover:blur-none hover:opacity-85'
-												: 'text-muted-foreground/75 opacity-75 blur-[0.2px] hover:blur-none hover:opacity-100'}"
-									>
-										{#if line.words && line.words.length > 0}
-											<span class="inline-flex flex-wrap items-baseline">
-												{#each line.words as word, wIdx (wIdx)}
-													{@const isWordEnd = word.text.endsWith(' ')}
-													{@const cleanText = word.text.trimEnd()}
-													{#if isActive}
-														{@const progress = getWordProgress(word, posMs)}
-														{@const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100)}
-														{@const isCurrentWord = progress > 0 && progress < 1}
-														<span
-															class="inline-block bg-clip-text text-transparent [-webkit-text-fill-color:transparent] transition-transform duration-100 ease-out {isWordEnd ? 'mr-[0.26em]' : ''} {isCurrentWord ? 'scale-[1.04]' : ''}"
-															style="background-image: linear-gradient(90deg, var(--foreground) {pct}%, var(--muted-foreground) {pct}%)"
-														>
-															{cleanText}
-														</span>
-													{:else}
-														<span class="inline-block {isWordEnd ? 'mr-[0.26em]' : ''} {isPast ? 'text-muted-foreground/35' : 'text-muted-foreground/75'}">
-															{cleanText}
-														</span>
-													{/if}
-												{/each}
-											</span>
-										{:else}
-											<span class="{isActive ? 'bg-gradient-to-r from-foreground via-foreground to-primary/80 bg-clip-text' : ''}">{line.text || '♪'}</span>
-										{/if}
-
-										{#if line.translation}
-											<p class="mt-2 text-base font-normal italic tracking-wide opacity-75">
-												{line.translation}
-											</p>
-										{/if}
-									</button>
-								{/each}
-							</div>
-						{:else if lyrics}
-							<!-- Plain text unsynced lyrics -->
-							<div
-								style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
-								class="py-16 space-y-4 text-xl sm:text-2xl lg:text-3xl font-semibold text-foreground/80 leading-relaxed"
-							>
-								{#each lyrics.lines as line, i (i)}
-									{#if line.text}
-										<div>
-											<p>{line.text}</p>
-											{#if line.translation}
-												<p class="text-sm font-normal italic text-muted-foreground">{line.translation}</p>
-											{/if}
-										</div>
-									{:else}
-										<div class="h-6"></div>
-									{/if}
-								{/each}
-							</div>
-						{:else}
-							<div class="flex h-full min-h-[40vh] flex-col items-center justify-center py-20 text-center">
-								<p class="text-xl font-semibold text-muted-foreground/80">No lyrics found for this track</p>
-							</div>
-						{/if}
-					</div>
-
-					<!-- BetterLyrics Sync Dock in bottom corner of Fullscreen Lyrics -->
-					{#if lyrics && !loadingLyrics}
-						<div class="absolute bottom-4 right-6 z-20 pointer-events-auto">
-							<LyricsSyncDock />
-						</div>
-					{/if}
+				<!-- Right Section: Upstream-style Lyrics Sidebar -->
+				<section class="relative flex min-h-0 flex-1 h-[72vh] flex-col overflow-hidden rounded-2xl border border-border/40 bg-card/30 backdrop-blur-xl shadow-2xl [mask-image:linear-gradient(to_bottom,transparent_0%,black_6%,black_94%,transparent_100%)]">
+					<LyricsView expanded={true} />
 				</section>
 			</main>
 		{:else}

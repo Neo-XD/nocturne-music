@@ -28,12 +28,12 @@
 ></button>
 
 <aside
-	style={!expanded ? (prefs.floatingSidebarRight ? 'height: calc(100% - 1rem);' : 'height: 100%;') : ''}
+	style={!expanded ? (prefs.floatingSidebarRight ? 'width: calc(100% - 1rem); height: calc(100% - 1rem);' : 'width: 100%; height: 100%;') : ''}
 	class={expanded
 		? 'fixed inset-0 z-50 flex h-full flex-col border-l border-border/70 bg-card/85 dark:bg-card/80 backdrop-blur-2xl shadow-2xl'
-		: `relative flex w-full max-w-[85vw] shrink-0 flex-col transition-[border-radius,margin] duration-200 ${prefs.floatingSidebarRight
+		: `relative flex max-w-[85vw] shrink-0 flex-col transition-[border-radius,margin] duration-200 ${prefs.floatingSidebarRight
 			? 'app-floating-panel m-2 rounded-2xl border border-border/70 bg-card/90 shadow-2xl backdrop-blur-xl'
-			: 'border-l border-border/70 bg-card/85 dark:bg-card/80 backdrop-blur-2xl shadow-2xl rounded-none m-0'}`}
+			: 'w-full border-l border-border/70 bg-card/85 dark:bg-card/80 backdrop-blur-2xl shadow-2xl rounded-none m-0'}`}
 >
 	<div class="flex items-center justify-between border-b px-4 py-3">
 		<h2 class="font-heading text-sm font-semibold">Lyrics</h2>

@@ -197,7 +197,7 @@
 			: 'rounded-lg'}"
 	>
 		<!-- Glassy Theme: Solid Base Underlayer + Warped/Blurred Animated Album Art Background -->
-		{#if theme.id === 'glassy' || appearance.artworkBackground}
+		{#if theme.id === 'glassy'}
 			<div class="pointer-events-none absolute inset-0 z-0 overflow-hidden select-none bg-background">
 				{#if !appearance.reduceMotion && appearance.glassyWarp > 0}
 					<AnimatedArtwork

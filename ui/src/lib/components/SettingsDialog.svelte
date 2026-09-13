@@ -1103,13 +1103,16 @@
 
 	const APPEARANCE_SECTIONS = [
 		{ id: 'sec-theme', label: 'Theme & Accent' },
-		{ id: 'sec-translucency', label: 'Translucency' },
+		{ id: 'sec-translucency', label: 'Translucency', extremeOnly: true },
 		{ id: 'sec-typography', label: 'Typography' },
 		{ id: 'sec-player', label: 'Player & Visuals' },
-		{ id: 'sec-glassy', label: 'Glassy Theme' },
-		{ id: 'sec-fullscreen', label: 'Fullscreen Player' },
+		{ id: 'sec-glassy', label: 'Glassy Theme', extremeOnly: true },
+		{ id: 'sec-fullscreen', label: 'Fullscreen Player', extremeOnly: true },
 		{ id: 'sec-layout', label: 'Layout & Icons' }
 	];
+	const visibleAppearanceSections = $derived(
+		APPEARANCE_SECTIONS.filter((s) => !s.extremeOnly || prefs.customizationMode === 'extreme')
+	);
 	let activeAppearanceSection = $state('sec-theme');
 	let collapsedCategories = $state<Record<string, boolean>>({});
 
@@ -1120,7 +1123,7 @@
 	}
 
 	function toggleAllCategories(collapse: boolean) {
-		for (const s of APPEARANCE_SECTIONS) {
+		for (const s of visibleAppearanceSections) {
 			collapsedCategories[s.id] = collapse;
 		}
 	}
@@ -1224,7 +1227,7 @@
 						if (tab !== 'themes') return;
 						const target = e.currentTarget;
 						const containerRect = target.getBoundingClientRect();
-						for (const s of APPEARANCE_SECTIONS) {
+						for (const s of visibleAppearanceSections) {
 							const el = document.getElementById(s.id);
 							if (el) {
 								const rect = el.getBoundingClientRect();
@@ -2433,7 +2436,7 @@
 				<!-- Quick Section Dots Navigation (Sticky & pinned on the right of Appearance tab) -->
 				{#if tab === 'themes'}
 					<nav class="absolute right-3.5 top-24 z-30 hidden sm:flex flex-col items-center gap-2 rounded-full border border-white/15 dark:border-white/10 bg-card/50 dark:bg-black/50 py-2.5 px-1.5 shadow-lg backdrop-blur-2xl" aria-label="Appearance section dots">
-						{#each APPEARANCE_SECTIONS as sec}
+						{#each visibleAppearanceSections as sec}
 							<button
 								type="button"
 								onclick={() => scrollToAppearanceSection(sec.id)}

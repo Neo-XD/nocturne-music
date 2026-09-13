@@ -90,8 +90,8 @@ export const prefs = $state({
 	floatingSidebarLeft: initialMode === 'both' || initialMode === 'left',
 	floatingSidebarRight: initialMode === 'both' || initialMode === 'right',
 	floatingSidebar: initialMode !== 'none',
-	floatingTopBar: browser ? localStorage.getItem('floating_topbar') === 'true' : false,
-	floatingPlayerBar: browser ? localStorage.getItem('floating_playerbar') === 'true' : false,
+	floatingTopBar: browser ? localStorage.getItem('floating_topbar') !== 'false' : true,
+	floatingPlayerBar: browser ? localStorage.getItem('floating_playerbar') !== 'false' : true,
 	visibleIcons: {
 		titlebar: {
 			navigation: browser ? localStorage.getItem('icon_tb_navigation') !== 'false' : true,

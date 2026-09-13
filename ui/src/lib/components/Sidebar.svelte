@@ -156,10 +156,14 @@
 	// breakpoint, so the button is hidden there and `wide()` has nothing to drop. Every expanded
 	// style is an `lg:` class, so collapsing is just not emitting them. The flag lives in `ui`
 	// because the overlays that offset by the sidebar's width read it too.
+	let innerWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1200);
+	const isSmallScreen = $derived(innerWidth < 1024);
 	const isNowPlaying = $derived(np.open && !np.fullscreenOpen);
-	const collapsed = $derived((ui.sidebarCollapsed || isNowPlaying) && !ui.sidebarForceExpanded);
+	const collapsed = $derived(isSmallScreen || ((ui.sidebarCollapsed || isNowPlaying) && !ui.sidebarForceExpanded));
 	const wide = (cls: string) => (collapsed ? '' : cls);
 </script>
+
+<svelte:window bind:innerWidth />
 
 <aside
 	style={prefs.floatingSidebarLeft ? 'height: calc(100% - 1rem);' : 'height: 100%;'}

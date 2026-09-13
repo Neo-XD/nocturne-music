@@ -31,7 +31,7 @@
 	import { np, prefs, openMiniPlayer, toast, ui } from '$lib/player.svelte';
 	import { theme } from '$lib/theme.svelte';
 	import { lt } from '$lib/lt.svelte';
-	import { anchorMenu, fitMenu, NO_ANCHOR } from '$lib/menu';
+	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 
 	function getWin() {
 		if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
@@ -183,8 +183,10 @@
 
 	<!-- Centered sticky search bar -->
 	{#if prefs.visibleIcons.titlebar.search}
-		<div class="flex-1 max-w-sm md:max-w-md mx-2">
-			<TopSearchBar />
+		<div class="flex flex-1 justify-center mx-2 min-w-0">
+			<div class="w-48 sm:w-56 focus-within:w-full focus-within:max-w-md has-[input:not(:placeholder-shown)]:w-full has-[input:not(:placeholder-shown)]:max-w-md hover:w-60 transition-[width] duration-300 ease-out">
+				<TopSearchBar />
+			</div>
 		</div>
 	{:else}
 		<div class="flex-1"></div>
@@ -345,10 +347,12 @@
 		class="fixed inset-0 z-40 cursor-default"
 		onclick={() => (menuOpen = false)}
 		aria-label="Close menu"
+		{@attach toBody}
 	></button>
 	<div
 		class="fixed z-50 min-w-52 animate-in rounded-lg border border-border/80 bg-popover/85 p-1 text-popover-foreground shadow-2xl backdrop-blur-2xl duration-150 fade-in-0 zoom-in-95"
 		style={anchor.style}
+		{@attach toBody}
 		{@attach fitMenu(anchor)}
 	>
 		<div class="flex items-center gap-2.5 px-2 py-2">

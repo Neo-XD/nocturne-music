@@ -84,26 +84,27 @@
 
 		void main() {
 			vec2 uv = v_uv;
-			float t = u_time * u_speed * 0.7;
+			float t = u_time * u_speed * 0.05;
 
-			// Dual-octave domain warping (Kawarp style)
-			vec2 q = vec2(
-				snoise(uv * 1.8 + vec2(t * 0.35, t * 0.25)),
-				snoise(uv * 1.8 + vec2(t * 0.25 + 4.3, t * 0.35 + 2.1))
-			);
+			vec2 center = uv - 0.5;
+			float centerWeight = 1.0 - smoothstep(0.0, 0.7, length(center));
 
-			vec2 r = vec2(
-				snoise(uv * 2.4 + 3.6 * q + vec2(t * 0.4 + 1.7, t * 0.45 + 9.2)),
-				snoise(uv * 2.4 + 3.6 * q + vec2(t * 0.35 + 8.3, t * 0.4 + 2.8))
-			);
+			// Large-scale movement (slow, big blobs)
+			float n1 = snoise(uv * 0.35 + vec2(t, t * 0.7));
+			float n2 = snoise(uv * 0.35 + vec2(-t * 0.8, t * 0.5) + vec2(50.0, 50.0));
 
-			// Fluid offset with boundary clamp - enhanced displacement for visible organic liquid movement
-			vec2 warpedUv = uv + r * (0.34 * max(u_intensity, 0.40));
+			// Medium-scale detail (adds organic movement)
+			float n3 = snoise(uv * 0.9 + vec2(t * 1.2, -t) + vec2(100.0, 0.0));
+			float n4 = snoise(uv * 0.9 + vec2(-t, t * 1.1) + vec2(0.0, 100.0));
+
+			// Combine two octaves (Kawarp algorithm)
+			vec2 warp = vec2(
+				n1 * 0.65 + n3 * 0.35,
+				n2 * 0.65 + n4 * 0.35
+			) * centerWeight;
+
+			vec2 warpedUv = uv + warp * (u_intensity * 0.18);
 			warpedUv = clamp(warpedUv, 0.002, 0.998);
-
-			// Chromatic dispersion for liquid depth
-			vec2 rOffset = clamp(warpedUv + vec2(0.020 * r.x * max(u_intensity, 0.35), 0.008 * r.y), 0.002, 0.998);
-			vec2 bOffset = clamp(warpedUv - vec2(0.020 * r.y * max(u_intensity, 0.35), 0.008 * r.x), 0.002, 0.998);
 
 			vec4 color;
 
@@ -114,36 +115,26 @@
 				vec3 c3 = vec3(0.18, 0.78, 0.72); // luminous emerald/teal
 				vec3 c4 = vec3(0.10, 0.12, 0.22); // deep midnight space
 
-				float n1 = snoise(warpedUv * 1.8 + vec2(t * 0.25, -t * 0.20)) * 0.5 + 0.5;
-				float n2 = snoise(warpedUv * 2.6 - vec2(-t * 0.20, t * 0.24)) * 0.5 + 0.5;
-				float n3 = snoise(warpedUv * 3.4 + vec2(t * 0.18, t * 0.14)) * 0.5 + 0.5;
+				float m1 = snoise(warpedUv * 0.4 + vec2(t * 0.4, -t * 0.3)) * 0.5 + 0.5;
+				float m2 = snoise(warpedUv * 0.7 - vec2(-t * 0.3, t * 0.4)) * 0.5 + 0.5;
+				float m3 = snoise(warpedUv * 1.0 + vec2(t * 0.3, t * 0.2)) * 0.5 + 0.5;
 
-				vec3 grad = mix(c1, c2, n1);
-				grad = mix(grad, c3, n2 * 0.75);
-				grad = mix(grad, c4, (1.0 - n3) * 0.45);
+				vec3 grad = mix(c1, c2, m1);
+				grad = mix(grad, c3, m2 * 0.75);
+				grad = mix(grad, c4, (1.0 - m3) * 0.45);
 
 				color = vec4(grad, 1.0);
 			} else {
-				vec4 curR = texture2D(u_image, rOffset);
-				vec4 curG = texture2D(u_image, warpedUv);
-				vec4 curB = texture2D(u_image, bOffset);
-				vec4 curColor = vec4(curR.r, curG.g, curB.b, curG.a);
-
+				vec4 curColor = texture2D(u_image, warpedUv);
 				color = curColor;
 
 				if (u_mix < 1.0) {
-					vec4 nxtR = texture2D(u_next_image, rOffset);
-					vec4 nxtG = texture2D(u_next_image, warpedUv);
-					vec4 nxtB = texture2D(u_next_image, bOffset);
-					vec4 nextColor = vec4(nxtR.r, nxtG.g, nxtB.b, nxtG.a);
+					vec4 nextColor = texture2D(u_next_image, warpedUv);
 					color = mix(curColor, nextColor, u_mix);
 				}
 			}
 
-			// Subtle liquid caustic highlights for organic flow
-			float caustic = pow(clamp(dot(r, q) * 0.5 + 0.5, 0.0, 1.0), 3.0) * 0.15 * max(u_intensity, 0.2);
-			float pulse = sin(t * 0.7) * 0.03 + 1.0;
-			gl_FragColor = vec4((color.rgb + vec3(caustic)) * pulse, color.a);
+			gl_FragColor = color;
 		}
 	`;
 

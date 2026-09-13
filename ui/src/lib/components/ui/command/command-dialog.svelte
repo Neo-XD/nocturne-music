@@ -33,7 +33,7 @@
 		<Dialog.Description>{description}</Dialog.Description>
 	</Dialog.Header>
 	<Dialog.Content
-		class={cn("rounded-4xl! p-0 mt-[33vh] mb-auto overflow-hidden p-0", className)}
+		class={cn("rounded-2xl! p-0 mt-[16vh] mb-auto overflow-hidden shadow-2xl backdrop-blur-2xl bg-popover/90 border border-border/80 data-open:slide-in-from-top-12 data-closed:slide-out-to-top-8 duration-200 ease-out", className)}
 		{showCloseButton}
 		{portalProps}
 	>

@@ -80,9 +80,9 @@
 	--sidebar-accent-foreground: oklch(0.145 0 var(--hue));
 	--sidebar-border: oklch(0 0 0 / 10%);
 	--sidebar-ring: oklch(0.145 0 var(--hue));
-	--font-sans: 'IBM Plex Sans Variable', sans-serif;
-	--font-heading: 'IBM Plex Sans Variable', sans-serif;
-	--font-lyrics: 'IBM Plex Sans Variable', sans-serif;
+	--font-sans: 'Outfit Variable', sans-serif;
+	--font-heading: 'Outfit Variable', sans-serif;
+	--font-lyrics: 'Outfit Variable', sans-serif;
 	--font-serif: ui-serif, Georgia, serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	/* Tailwind's stock shadow scale. Restated here because @theme inline maps the shadow
@@ -575,7 +575,7 @@
 .theme-glassy .bg-popover,
 .theme-glassy aside,
 .theme-glassy footer,
-.theme-glassy .app-titlebar.app-floating-panel,
+.theme-glassy .app-titlebar,
 .theme-glassy .info-sidebar,
 .theme-glassy .media-card {
 	backdrop-filter: blur(28px) saturate(200%);
@@ -783,13 +783,13 @@ aside:not(.info-sidebar) {
 	background-color: color-mix(in oklab, var(--background) calc(var(--dialog-opacity, 0.78) * 100%), transparent) !important;
 }
 
-/* Docked top bar must NOT have blur, translucency, or drop shadow */
+/* Docked top bar in glassy theme has translucent blur */
 .theme-glassy .app-titlebar:not(.app-floating-panel) {
-	background-color: var(--background) !important;
-	backdrop-filter: none !important;
-	-webkit-backdrop-filter: none !important;
+	background-color: color-mix(in oklab, var(--background) calc(var(--sidebar-opacity, 0.45) * 100%), transparent) !important;
+	backdrop-filter: blur(28px) saturate(190%) !important;
+	-webkit-backdrop-filter: blur(28px) saturate(190%) !important;
 	box-shadow: none !important;
-	border-bottom: 1px solid var(--border) !important;
+	border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent) !important;
 }
 
 /* Floating top bar should not cast an outer drop shadow on the sidebars below it */

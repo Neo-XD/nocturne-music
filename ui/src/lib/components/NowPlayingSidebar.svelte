@@ -344,7 +344,7 @@
 ></button>
 
 <aside
-	style="width: 100%; {prefs.floatingSidebarRight ? 'height: calc(100% - 1rem);' : 'height: 100%;'}"
+	style={prefs.floatingSidebarRight ? 'width: calc(100% - 1rem); height: calc(100% - 1rem);' : 'width: 100%; height: 100%;'}
 	class="info-sidebar relative flex max-w-[90vw] shrink-0 flex-col select-none overflow-hidden transition-[border-radius,margin] duration-200 {prefs.floatingSidebarRight
 		? 'app-floating-panel m-2 rounded-2xl border border-border/70 bg-card/90 shadow-2xl backdrop-blur-xl'
 		: 'h-full border-l border-border/70 bg-card/90 shadow-2xl backdrop-blur-2xl rounded-none m-0'}"

@@ -40,10 +40,10 @@ export const THEMES: Theme[] = [
 
 /** Font stacks bundled with the app (imported in layout.css). "System" needs no download. */
 export const FONTS: { label: string; value: string }[] = [
-	{ label: 'Oxanium', value: "'Oxanium Variable', sans-serif" },
-	{ label: 'IBM Plex Sans', value: "'IBM Plex Sans Variable', sans-serif" },
-	{ label: 'Montserrat', value: "'Montserrat Variable', sans-serif" },
 	{ label: 'Outfit', value: "'Outfit Variable', sans-serif" },
+	{ label: 'IBM Plex Sans', value: "'IBM Plex Sans Variable', sans-serif" },
+	{ label: 'Oxanium', value: "'Oxanium Variable', sans-serif" },
+	{ label: 'Montserrat', value: "'Montserrat Variable', sans-serif" },
 	{ label: 'DM Sans', value: "'DM Sans Variable', sans-serif" },
 	{ label: 'System', value: 'ui-sans-serif, system-ui, sans-serif' }
 ];

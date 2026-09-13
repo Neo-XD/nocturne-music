@@ -72,10 +72,10 @@
 </script>
 
 <aside
-	style={prefs.floatingSidebarRight ? 'height: calc(100% - 1rem);' : 'height: 100%;'}
-	class="info-sidebar relative flex w-full max-w-[90vw] shrink-0 flex-col transition-[border-radius,margin] duration-200 {prefs.floatingSidebarRight
+	style={prefs.floatingSidebarRight ? 'width: calc(100% - 1rem); height: calc(100% - 1rem);' : 'width: 100%; height: 100%;'}
+	class="info-sidebar relative flex max-w-[90vw] shrink-0 flex-col transition-[border-radius,margin] duration-200 {prefs.floatingSidebarRight
 		? 'app-floating-panel m-2 rounded-2xl border border-border/70 bg-card/90 shadow-2xl backdrop-blur-xl'
-		: 'border-l border-border/70 bg-background/80 dark:bg-background/75 backdrop-blur-2xl shadow-2xl rounded-none m-0'}"
+		: 'w-full border-l border-border/70 bg-background/80 dark:bg-background/75 backdrop-blur-2xl shadow-2xl rounded-none m-0'}"
 >
 	<!-- Header -->
 	<div class="flex items-center justify-between border-b border-border/60 bg-background/35 dark:bg-background/20 backdrop-blur-md px-4 py-3.5">
