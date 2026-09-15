@@ -55,11 +55,11 @@ browser runtime, no backend server, no ads in the audio and **Extremely Customiz
 
 | Platform | File | Notes | Testing Status |
 |---|---|---|---|
-| Linux | `.AppImage` | Self-updating, libmpv bundled. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) | Tested and working |
+| Linux | `.AppImage` | Self-updating, libmpv bundled. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) | Not Working |
 | Linux (Ubuntu/Debian) | `.deb` | No self-update. Needs Ubuntu 24.04+ / Debian 13+; apt pulls libmpv and webkit2gtk in for you | Tested and working |
 | Linux (Fedora/RHEL) | `.rpm` | Needs `mpv-libs` installed (`sudo dnf install mpv-libs`). Updates through dnf, not in-app | Tested and working |
 | Windows | `-setup.exe` | Self-updating NSIS installer | Tested and working as expected |
-| macOS | none yet | Build from source, see [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md) | untested for nocturne |
+| macOS | `.dmg` `.app` | Availible On Releases. `.dmg` is not self updating | untested for nocturne |
 
 ---
 
@@ -77,7 +77,7 @@ Nocturne resolves audio streams through high-speed official YouTube clients with
 
 ## Performance & Linux Stability
 
-- **Heavily RAM Optimised**: Extremely well optimised so that the Client Interface does't occupy >80MB of your RAM.
+- **Heavily RAM Optimised**:Client interface eats less ram than most Youtube Music Clients availible right now.
 - **Native GPU Acceleration**: Hardware acceleration uses native auto-detection (NVIDIA explicit sync + DMABUF renderer rules on Linux, Direct3D/WebView2 native GPU on Windows, Metal/WebKit on macOS) without manual flag overhead.
 
 ---
@@ -85,7 +85,7 @@ Nocturne resolves audio streams through high-speed official YouTube clients with
 
 Both live in the title bar, next to the window controls.
 
-- **Last.fm** — connect directly in **Settings > General > Last.fm** by typing your API Key & Shared Secret (or from the title bar icon), approve Nocturne in the browser tab that opens, and you're connected for good. Tracks scrobble at the halfway point (or four minutes, whichever comes first). Click again to see the account or disconnect.
+- **Last.fm** — click the Last.fm icon on the topbar to enable scrobbling. If you haven't linked before, you will be shown the login page to start scrobbling. Tracks scrobble at the halfway point (or four minutes, whichever comes first). Click again to see the account or disconnect.
 - **Discord** — click the Discord mark to toggle Rich Presence. Green dot means
   it's live. The card shows the track, artist, album art, and a progress bar, and
   it disappears when you pause.
@@ -106,6 +106,8 @@ Without that file everything else still builds and runs; credentials can simply 
 Open the panel with the microphone button in the player bar, next to the queue
 button. It takes the same side of the window as the queue, so opening one closes
 the other.
+
+Lyrics are also availible on the Now Playing Sidebar, Fullscreen Player, and the Fullscreen Now Playing view.
 
 Lyrics come from [BetterLyrics](https://boidu.dev) first, then
 [LRCLIB](https://lrclib.net), then YouTube Music's own timed lyrics, 
@@ -168,6 +170,11 @@ Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLAT
   contacts YouTube itself.
 
 ---
+
+## Current Status
+ - Nocturne from `v0.8.x` to `v0.9.x` will have mostly new features to **refine the UI and UX**.
+ - Nocturne from `v0.9.x` to `v1.x.x` will be more focused on **getting critical bugs and small QOL things out of the way** for a clean v1 release.
+ - Nocturne from `v1.x.x` and after will be focused on **smaller refinements** with a slower release cycle.
 
 ## Note for Contributors
 
