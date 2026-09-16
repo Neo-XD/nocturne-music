@@ -1858,23 +1858,49 @@ fn extract_code_from_query(req: &str) -> Option<String> {
     None
 }
 
+fn generate_pkce_pair() -> (String, String) {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+
+    let mut bytes = [0u8; 48];
+    for b in &mut bytes {
+        *b = rand::random::<u8>();
+    }
+    let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+
+    let mut hasher = Sha256::new();
+    hasher.update(verifier.as_bytes());
+    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hasher.finalize());
+
+    (verifier, challenge)
+}
+
 async fn exchange_spotify_code(
     client_id: &str,
-    client_secret: &str,
+    client_secret: Option<&str>,
     code: &str,
     redirect_uri: &str,
+    code_verifier: Option<&str>,
 ) -> Result<(String, String, u64), String> {
     let client = crate::http::client();
-    let params =
-        [("grant_type", "authorization_code"), ("code", code), ("redirect_uri", redirect_uri)];
+    let mut params = vec![
+        ("grant_type", "authorization_code".to_string()),
+        ("code", code.to_string()),
+        ("redirect_uri", redirect_uri.to_string()),
+        ("client_id", client_id.to_string()),
+    ];
+    if let Some(verifier) = code_verifier.filter(|v| !v.trim().is_empty()) {
+        params.push(("code_verifier", verifier.trim().to_string()));
+    }
 
-    let res = client
-        .post("https://accounts.spotify.com/api/token")
-        .basic_auth(client_id, Some(client_secret))
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| format!("Network error exchanging Spotify code: {e}"))?;
+    let mut req = client.post("https://accounts.spotify.com/api/token").form(&params);
+
+    if let Some(secret) = client_secret.filter(|s| !s.trim().is_empty()) {
+        req = req.basic_auth(client_id, Some(secret.trim()));
+    }
+
+    let res =
+        req.send().await.map_err(|e| format!("Network error exchanging Spotify code: {e}"))?;
 
     if !res.status().is_success() {
         let err_body = res.text().await.unwrap_or_default();
@@ -1965,28 +1991,32 @@ pub async fn spotify_start_dev_auth(
     app: tauri::AppHandle,
     state: St<'_>,
     client_id: String,
-    client_secret: String,
+    client_secret: Option<String>,
 ) -> Result<String, String> {
     let clean_id = client_id.trim().to_string();
-    let clean_secret = client_secret.trim().to_string();
-    if clean_id.is_empty() || clean_secret.is_empty() {
-        return Err("Client ID and Client Secret cannot be empty".to_string());
+    let clean_secret = client_secret.as_deref().unwrap_or("").trim().to_string();
+    if clean_id.is_empty() {
+        return Err("Client ID cannot be empty".to_string());
     }
 
+    let (code_verifier, code_challenge) = generate_pkce_pair();
     let redirect_uri = "http://127.0.0.1:8888/callback";
     let scopes = "user-read-private user-read-email playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private";
     let auth_url = format!(
-        "https://accounts.spotify.com/authorize?client_id={}&response_type=code&redirect_uri={}&scope={}&show_dialog=true",
+        "https://accounts.spotify.com/authorize?client_id={}&response_type=code&redirect_uri={}&code_challenge_method=S256&code_challenge={}&scope={}&show_dialog=true",
         urlencoding::encode(&clean_id),
         urlencoding::encode(redirect_uri),
+        urlencoding::encode(&code_challenge),
         urlencoding::encode(scopes)
     );
 
     let _ = state.db.set_setting("spotify_pending_client_id", &clean_id);
     let _ = state.db.set_setting("spotify_pending_client_secret", &clean_secret);
+    let _ = state.db.set_setting("spotify_pending_code_verifier", &code_verifier);
 
     let cid = clean_id.clone();
     let csec = clean_secret.clone();
+    let cver = code_verifier.clone();
     let app_clone = app.clone();
     let state_clone = state.inner().clone();
 
@@ -2015,7 +2045,7 @@ pub async fn spotify_start_dev_auth(
                 let _ = stream.flush().await;
 
                 if let Ok((access_token, refresh_token, expires_in)) =
-                    exchange_spotify_code(&cid, &csec, &code, redirect_uri).await
+                    exchange_spotify_code(&cid, Some(&csec), &code, redirect_uri, Some(&cver)).await
                 {
                     if let Ok(status) = fetch_and_save_spotify_profile(
                         &state_clone,
@@ -2052,17 +2082,25 @@ pub async fn spotify_complete_dev_auth(
     app: tauri::AppHandle,
     state: St<'_>,
     client_id: String,
-    client_secret: String,
+    client_secret: Option<String>,
     code_or_url: String,
 ) -> Result<SpotifyAccountStatus, String> {
-    let clean_id = client_id.trim().to_string();
-    let clean_secret = client_secret.trim().to_string();
-    let input = code_or_url.trim();
-
-    if clean_id.is_empty() || clean_secret.is_empty() {
-        return Err("Client ID and Client Secret cannot be empty".to_string());
+    let mut clean_id = client_id.trim().to_string();
+    if clean_id.is_empty() {
+        clean_id = state.db.get_setting("spotify_pending_client_id").unwrap_or_default();
+    }
+    if clean_id.is_empty() {
+        return Err("Client ID cannot be empty".to_string());
     }
 
+    let mut clean_secret = client_secret.as_deref().unwrap_or("").trim().to_string();
+    if clean_secret.is_empty() {
+        clean_secret = state.db.get_setting("spotify_pending_client_secret").unwrap_or_default();
+    }
+
+    let pending_verifier = state.db.get_setting("spotify_pending_code_verifier");
+
+    let input = code_or_url.trim();
     let code = if input.contains("code=") {
         input.split("code=").nth(1).and_then(|c| c.split('&').next()).unwrap_or(input)
     } else {
@@ -2070,8 +2108,14 @@ pub async fn spotify_complete_dev_auth(
     };
 
     let redirect_uri = "http://127.0.0.1:8888/callback";
-    let (access_token, refresh_token, expires_in) =
-        exchange_spotify_code(&clean_id, &clean_secret, code, redirect_uri).await?;
+    let (access_token, refresh_token, expires_in) = exchange_spotify_code(
+        &clean_id,
+        Some(&clean_secret),
+        code,
+        redirect_uri,
+        pending_verifier.as_deref(),
+    )
+    .await?;
 
     let status = fetch_and_save_spotify_profile(
         &state,
@@ -2104,7 +2148,10 @@ pub async fn spotify_link(state: St<'_>, sp_dc: String) -> Result<SpotifyAccount
         .map_err(|e| format!("Failed to connect to Spotify: {e}"))?;
 
     if !token_res.status().is_success() {
-        return Err("Invalid sp_dc cookie or Spotify token request failed".to_string());
+        return Err(
+            "Spotify has blocked legacy cookie access (HTTP 403 Forbidden). Please use the Spotify Developer API tab with your Client ID to link your account."
+                .to_string(),
+        );
     }
 
     let token_json: serde_json::Value = token_res
@@ -2212,6 +2259,9 @@ pub async fn spotify_unlink(state: St<'_>) -> Result<(), String> {
     let _ = state.db.set_setting("spotify_display_name", "");
     let _ = state.db.set_setting("spotify_avatar", "");
     let _ = state.db.set_setting("spotify_product", "");
+    let _ = state.db.set_setting("spotify_pending_client_id", "");
+    let _ = state.db.set_setting("spotify_pending_client_secret", "");
+    let _ = state.db.set_setting("spotify_pending_code_verifier", "");
     Ok(())
 }
 
@@ -2248,7 +2298,7 @@ async fn get_spotify_token(state: &AppState) -> Result<String, String> {
         let client_secret = state.db.get_setting("spotify_client_secret").unwrap_or_default();
         let refresh_token = state.db.get_setting("spotify_refresh_token").unwrap_or_default();
 
-        if refresh_token.is_empty() || client_id.is_empty() || client_secret.is_empty() {
+        if refresh_token.is_empty() || client_id.is_empty() {
             return Err(
                 "Spotify Developer credentials missing or expired. Please re-link in profile."
                     .to_string(),
@@ -2256,15 +2306,20 @@ async fn get_spotify_token(state: &AppState) -> Result<String, String> {
         }
 
         let client = crate::http::client();
-        let params = [("grant_type", "refresh_token"), ("refresh_token", refresh_token.as_str())];
+        let params = [
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token.as_str()),
+            ("client_id", client_id.as_str()),
+        ];
 
-        let res = client
-            .post("https://accounts.spotify.com/api/token")
-            .basic_auth(&client_id, Some(&client_secret))
-            .form(&params)
-            .send()
-            .await
-            .map_err(|e| format!("Network error refreshing Spotify token: {e}"))?;
+        let mut req = client.post("https://accounts.spotify.com/api/token").form(&params);
+
+        if !client_secret.trim().is_empty() {
+            req = req.basic_auth(&client_id, Some(&client_secret));
+        }
+
+        let res =
+            req.send().await.map_err(|e| format!("Network error refreshing Spotify token: {e}"))?;
 
         if !res.status().is_success() {
             let err_txt = res.text().await.unwrap_or_default();

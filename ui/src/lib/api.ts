@@ -916,13 +916,18 @@ export interface SpotifyAccountStatus {
 	auth_type?: string | null;
 }
 
-export const spotifyStartDevAuth = (clientId: string, clientSecret: string) =>
-	invoke<string>('spotify_start_dev_auth', { clientId, clientSecret });
+export const spotifyStartDevAuth = (clientId: string, clientSecret?: string) =>
+	invoke<string>('spotify_start_dev_auth', { clientId, clientSecret: clientSecret || null });
 export const spotifyCompleteDevAuth = (
 	clientId: string,
-	clientSecret: string,
+	clientSecret: string | undefined,
 	codeOrUrl: string
-) => invoke<SpotifyAccountStatus>('spotify_complete_dev_auth', { clientId, clientSecret, codeOrUrl });
+) =>
+	invoke<SpotifyAccountStatus>('spotify_complete_dev_auth', {
+		clientId,
+		clientSecret: clientSecret || null,
+		codeOrUrl
+	});
 export const spotifyLink = (spDc: string) =>
 	invoke<SpotifyAccountStatus>('spotify_link', { spDc });
 export const spotifyStatus = () => invoke<SpotifyAccountStatus>('spotify_status');

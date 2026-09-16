@@ -24,6 +24,7 @@
 	// Developer API State
 	let clientId = $state('');
 	let clientSecret = $state('');
+	let showSecretSection = $state(false);
 	let showSecret = $state(false);
 	let startingAuth = $state(false);
 	let waitingForAuth = $state(false);
@@ -42,6 +43,9 @@
 		if (browser) {
 			clientId = localStorage.getItem('nocturne:spotify_client_id') || '';
 			clientSecret = localStorage.getItem('nocturne:spotify_client_secret') || '';
+			if (clientSecret) {
+				showSecretSection = true;
+			}
 		}
 
 		void api.onSpotifyLinked((status) => {
@@ -67,19 +71,23 @@
 		e.preventDefault();
 		const cid = clientId.trim();
 		const csec = clientSecret.trim();
-		if (!cid || !csec) {
-			toast.error('Please enter both Client ID and Client Secret');
+		if (!cid) {
+			toast.error('Please enter your Spotify Client ID');
 			return;
 		}
 
 		if (browser) {
 			localStorage.setItem('nocturne:spotify_client_id', cid);
-			localStorage.setItem('nocturne:spotify_client_secret', csec);
+			if (csec) {
+				localStorage.setItem('nocturne:spotify_client_secret', csec);
+			} else {
+				localStorage.removeItem('nocturne:spotify_client_secret');
+			}
 		}
 
 		startingAuth = true;
 		try {
-			const url = await api.spotifyStartDevAuth(cid, csec);
+			const url = await api.spotifyStartDevAuth(cid, csec || undefined);
 			authUrl = url;
 			waitingForAuth = true;
 			toast.info('Opened Spotify in browser. Click Agree to link!');
@@ -94,8 +102,8 @@
 		const cid = clientId.trim();
 		const csec = clientSecret.trim();
 		const input = manualCodeOrUrl.trim();
-		if (!cid || !csec) {
-			toast.error('Please enter both Client ID and Client Secret');
+		if (!cid) {
+			toast.error('Please enter your Spotify Client ID');
 			return;
 		}
 		if (!input) {
@@ -105,7 +113,7 @@
 
 		submittingManual = true;
 		try {
-			const res = await api.spotifyCompleteDevAuth(cid, csec, input);
+			const res = await api.spotifyCompleteDevAuth(cid, csec || undefined, input);
 			await refreshSpotify();
 			toast.success(
 				res.display_name
@@ -175,7 +183,7 @@
 					waitingForAuth = false;
 				}}
 			>
-				Spotify Developer API <span class="text-[10px] text-emerald-400 font-normal ml-1">Standard</span>
+				Spotify Developer API <span class="text-[10px] text-emerald-400 font-normal ml-1">Standard (Single Key)</span>
 			</button>
 			<button
 				type="button"
@@ -187,7 +195,7 @@
 					waitingForAuth = false;
 				}}
 			>
-				Cookie (sp_dc) <span class="text-[10px] text-muted-foreground font-normal ml-1">Legacy</span>
+				Cookie (sp_dc) <span class="text-[10px] text-amber-400 font-normal ml-1">Discontinued</span>
 			</button>
 		</div>
 
@@ -210,7 +218,7 @@
 					<div class="rounded-lg border border-border/50 bg-muted/30 p-3 text-[11px] text-muted-foreground space-y-1.5">
 						<div class="flex items-center gap-1.5 font-semibold text-foreground text-xs">
 							<HugeiconsIcon icon={InformationCircleIcon} class="h-4 w-4 text-emerald-400" />
-							<span>How to create your Spotify Developer App:</span>
+							<span>How to get your free Spotify Client ID:</span>
 						</div>
 						<ol class="list-decimal pl-4 space-y-1.5 leading-relaxed">
 							<li>
@@ -228,43 +236,58 @@
 							<li>
 								Under <strong>Which API/SDKs are you planning to use?</strong>: check <strong>Web API</strong> (and optionally <strong>Web Playback SDK</strong>). Leave iOS and Android unchecked.
 							</li>
-							<li>Agree to Spotify Developer Terms of Service and click <strong>Save</strong>.</li>
-							<li>In your new app's <strong>Settings</strong>, copy your <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields below.</li>
+							<li>Agree to Spotify Developer Terms and click <strong>Save</strong>.</li>
+							<li>In your app settings, copy your <strong>Client ID</strong> (the only key provided for desktop apps) and paste it below.</li>
 						</ol>
 					</div>
 
 					<div class="space-y-1.5">
-						<label for="dev-client-id" class="text-xs font-semibold text-foreground">Client ID</label>
+						<div class="flex items-center justify-between">
+							<label for="dev-client-id" class="text-xs font-semibold text-foreground">Spotify Client ID</label>
+							<span class="text-[10px] text-emerald-400">Single key required</span>
+						</div>
 						<Input
 							id="dev-client-id"
 							type="text"
 							bind:value={clientId}
-							placeholder="e.g. 7c32..."
+							placeholder="Paste your Spotify App Client ID (e.g. 7c32...)"
 							class="font-mono text-xs"
 							required
 						/>
 					</div>
 
-					<div class="space-y-1.5">
-						<div class="flex items-center justify-between">
-							<label for="dev-client-secret" class="text-xs font-semibold text-foreground">Client Secret</label>
-							<button
-								type="button"
-								class="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
-								onclick={() => (showSecret = !showSecret)}
-							>
-								<HugeiconsIcon icon={showSecret ? ViewOffIcon : ViewIcon} class="h-3 w-3" />
-								<span>{showSecret ? 'Hide' : 'Show'}</span>
-							</button>
-						</div>
-						<Input
-							id="dev-client-secret"
-							type={showSecret ? 'text' : 'password'}
-							bind:value={clientSecret}
-							placeholder="e.g. 9b10..."
-							class="font-mono text-xs"
-							required
-						/>
+					<!-- Optional Client Secret for Legacy Confidential Apps -->
+					<div class="pt-0.5">
+						<button
+							type="button"
+							class="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer transition-colors"
+							onclick={() => (showSecretSection = !showSecretSection)}
+						>
+							<span>{showSecretSection ? '− Hide optional Client Secret' : '+ Advanced: Have a confidential app with a Client Secret? (Optional)'}</span>
+						</button>
+
+						{#if showSecretSection}
+							<div class="space-y-1.5 mt-2 pt-2 border-t border-border/40">
+								<div class="flex items-center justify-between">
+									<label for="dev-client-secret" class="text-xs font-semibold text-muted-foreground">Client Secret (Optional)</label>
+									<button
+										type="button"
+										class="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
+										onclick={() => (showSecret = !showSecret)}
+									>
+										<HugeiconsIcon icon={showSecret ? ViewOffIcon : ViewIcon} class="h-3 w-3" />
+										<span>{showSecret ? 'Hide' : 'Show'}</span>
+									</button>
+								</div>
+								<Input
+									id="dev-client-secret"
+									type={showSecret ? 'text' : 'password'}
+									bind:value={clientSecret}
+									placeholder="Leave empty unless you created a confidential app"
+									class="font-mono text-xs"
+								/>
+							</div>
+						{/if}
 					</div>
 
 					<div class="flex items-center justify-between pt-1">
@@ -273,7 +296,7 @@
 						</Button>
 						<Button
 							type="submit"
-							disabled={startingAuth || !clientId.trim() || !clientSecret.trim()}
+							disabled={startingAuth || !clientId.trim()}
 							class="gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium cursor-pointer"
 						>
 							{#if startingAuth}
@@ -373,42 +396,53 @@
 			{/if}
 		{:else}
 			<!-- COOKIE (SP_DC) FLOW -->
-			<form class="space-y-3" onsubmit={submitCookie}>
-				<div class="space-y-1.5">
-					<label for="sp-dc-input" class="text-xs font-semibold text-foreground">Spotify sp_dc Cookie</label>
-					<Input
-						id="sp-dc-input"
-						type="password"
-						bind:value={spDc}
-						placeholder="Paste your sp_dc cookie value..."
-						class="font-mono text-xs"
-					/>
-				</div>
-
-				<div class="rounded-lg border border-border/50 bg-muted/40 p-2.5 text-[11px] text-muted-foreground flex items-start gap-2">
-					<HugeiconsIcon icon={InformationCircleIcon} class="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-					<div>
-						<strong>How to obtain:</strong> Open <button
-							type="button"
-							class="text-primary underline hover:text-primary/80 cursor-pointer p-0 bg-transparent border-none text-[11px]"
-							onclick={() => api.openExternal('https://open.spotify.com')}
-						>open.spotify.com</button> in your browser, press <kbd class="px-1 py-0.2 bg-muted rounded font-mono text-[10px]">F12</kbd> (DevTools), navigate to <strong>Application / Storage → Cookies</strong>, and copy the value of <code>sp_dc</code>.
+			<div class="space-y-4 py-1">
+				<div class="rounded-xl border border-destructive/40 bg-destructive/10 p-3.5 text-xs text-red-200 flex items-start gap-2.5">
+					<HugeiconsIcon icon={Alert02Icon} class="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+					<div class="space-y-1.5">
+						<p class="font-semibold text-red-300">Cookie Auth Discontinued by Spotify</p>
+						<p class="text-[11px] text-red-200/90 leading-relaxed">
+							Spotify has permanently blocked third-party web token endpoints (<code class="font-mono text-red-300">HTTP 403 URL Blocked</code>). Legacy <code class="font-mono text-red-300">sp_dc</code> cookie scraping is no longer supported by Spotify servers.
+						</p>
+						<p class="text-[11px] text-red-200/80 leading-relaxed">
+							Please use the <strong>Spotify Developer API</strong> tab instead. It only requires a free <strong>Client ID</strong> (no secret needed) and connects seamlessly via Spotify's modern PKCE authorization.
+						</p>
+						<div class="pt-1">
+							<Button
+								type="button"
+								size="sm"
+								class="bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer text-xs h-7 px-3 font-medium"
+								onclick={() => {
+									activeTab = 'dev';
+									waitingForAuth = false;
+								}}
+							>
+								Switch to Spotify Developer API (Recommended)
+							</Button>
+						</div>
 					</div>
 				</div>
 
-				<div class="flex justify-end gap-2 pt-1">
-					<Button type="button" variant="outline" onclick={() => (open = false)} disabled={connectingCookie}>
-						Cancel
-					</Button>
-					<Button
-						type="submit"
-						disabled={connectingCookie || !spDc.trim()}
-						class="gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-					>
-						{connectingCookie ? 'Connecting…' : 'Link Spotify'}
-					</Button>
-				</div>
-			</form>
+				<form class="space-y-3 opacity-60 pointer-events-none" onsubmit={submitCookie}>
+					<div class="space-y-1.5">
+						<label for="sp-dc-input" class="text-xs font-semibold text-foreground">Legacy sp_dc Cookie</label>
+						<Input
+							id="sp-dc-input"
+							type="password"
+							bind:value={spDc}
+							disabled
+							placeholder="Legacy cookie login is discontinued..."
+							class="font-mono text-xs"
+						/>
+					</div>
+
+					<div class="flex justify-end gap-2 pt-1">
+						<Button type="button" variant="outline" onclick={() => (open = false)}>
+							Close
+						</Button>
+					</div>
+				</form>
+			</div>
 		{/if}
 	</Dialog.Content>
 </Dialog.Root>

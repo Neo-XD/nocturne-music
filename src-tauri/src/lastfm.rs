@@ -406,13 +406,23 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
     let cmd = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "windows")]
     let cmd = {
-        let res = std::process::Command::new("rundll32")
-            .arg("url.dll,FileProtocolHandler")
-            .arg(url)
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let safe_url = url.replace('\'', "''");
+        let res = std::process::Command::new("powershell")
+            .creation_flags(CREATE_NO_WINDOW)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!("Start-Process '{safe_url}'"),
+            ])
             .spawn();
         if res.is_err() {
-            use std::os::windows::process::CommandExt;
-            std::process::Command::new("cmd").raw_arg(format!("/C start \"\" \"{url}\"")).spawn()
+            std::process::Command::new("rundll32")
+                .arg("url.dll,FileProtocolHandler")
+                .arg(url)
+                .spawn()
         } else {
             res
         }
