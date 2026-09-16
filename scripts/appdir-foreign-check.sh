@@ -47,17 +47,21 @@ if command -v apt-get >/dev/null; then
     libegl-mesa0 libgl1-mesa-dri libglx-mesa0 libgles2 libgl1 libegl1 \
     libharfbuzz0b libharfbuzz-icu0 libkrb5-3 libgssapi-krb5-2 libpango-1.0-0 \
     libasound2t64 libfribidi0 libusb-1.0-0 libcom-err2 libgpg-error0 libexpat1 \
-    libfontconfig1 fonts-dejavu-core ca-certificates gvfs
+    libfontconfig1 fonts-dejavu-core ca-certificates gvfs \
+    libva2 libva-drm2 libva-x11-2 libva-wayland2 \
+    libwayland-client0 libwayland-cursor0 libwayland-server0 libwayland-egl1
 elif command -v pacman >/dev/null; then
   pacman -Sy --noconfirm --quiet \
     xorg-server-xvfb xorg-xauth dbus python \
     mesa libglvnd harfbuzz harfbuzz-icu krb5 pango alsa-lib fribidi libusb \
-    expat fontconfig ttf-dejavu ca-certificates gvfs
+    expat fontconfig ttf-dejavu ca-certificates gvfs \
+    libva wayland
 elif command -v dnf >/dev/null; then
   dnf install -y -q \
     xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon dbus-x11 python3 \
     mesa-libEGL mesa-libGL mesa-libGLES libglvnd harfbuzz krb5-libs pango alsa-lib \
-    fribidi libusb1 expat fontconfig dejavu-sans-fonts ca-certificates gvfs
+    fribidi libusb1 expat fontconfig dejavu-sans-fonts ca-certificates gvfs \
+    libva libwayland-client libwayland-cursor libwayland-server libwayland-egl
 else
   echo "   unknown package manager"; exit 1
 fi
