@@ -49,6 +49,7 @@
 		openDownloadPage,
 		checkForUpdatesQuiet
 	} from '$lib/updater.svelte';
+	import { openExternal } from '$lib/api';
 
 	let { children } = $props();
 	const tabbed = $derived(np.open && appearance.tabbedPlayer);
@@ -169,6 +170,23 @@
 			teardownShortcuts();
 		};
 	});
+
+	function handleGlobalClick(e: MouseEvent) {
+		const target = (e.target as HTMLElement)?.closest?.('a');
+		if (!target) return;
+		const href = target.getAttribute('href');
+		if (
+			href &&
+			(href.startsWith('http://') || href.startsWith('https://')) &&
+			(target.target === '_blank' ||
+				target.getAttribute('rel')?.includes('external') ||
+				target.getAttribute('rel')?.includes('noreferrer') ||
+				!href.startsWith(window.location.origin))
+		) {
+			e.preventDefault();
+			openExternal(href).catch((err) => console.error('Failed to open external URL:', err));
+		}
+	}
 </script>
 
 <!-- oncontextmenu: the app's own menus handle their right-click and stop the event, so anything
@@ -178,6 +196,7 @@
 	ondragover={blockForeignDrag}
 	ondrop={blockForeignDrag}
 	oncontextmenu={suppressNative}
+	onclick={handleGlobalClick}
 />
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>

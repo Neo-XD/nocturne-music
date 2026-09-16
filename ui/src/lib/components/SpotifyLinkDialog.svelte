@@ -212,11 +212,24 @@
 							<HugeiconsIcon icon={InformationCircleIcon} class="h-4 w-4 text-emerald-400" />
 							<span>How to create your Spotify Developer App:</span>
 						</div>
-						<ol class="list-decimal pl-4 space-y-1 leading-relaxed">
-							<li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer" class="text-primary hover:underline inline-flex items-center gap-0.5">Spotify Developer Dashboard <HugeiconsIcon icon={LinkSquare01Icon} class="h-2.5 w-2.5 inline" /></a> and log in.</li>
-							<li>Click <strong>Create app</strong> (name it <code>Nocturne</code>).</li>
-							<li>In App Settings, set Redirect URI to: <code class="px-1 py-0.2 bg-muted rounded font-mono text-[10px] text-emerald-400 select-all">http://127.0.0.1:8888/callback</code></li>
-							<li>Under APIs, select <strong>Web API</strong>. Save the app and copy your credentials below.</li>
+						<ol class="list-decimal pl-4 space-y-1.5 leading-relaxed">
+							<li>
+								Open the <button
+									type="button"
+									class="text-primary hover:underline inline-flex items-center gap-0.5 font-medium cursor-pointer p-0 bg-transparent border-none text-[11px]"
+									onclick={() => api.openExternal('https://developer.spotify.com/dashboard')}
+								>
+									<span>Spotify Developer Dashboard</span>
+									<HugeiconsIcon icon={LinkSquare01Icon} class="h-2.5 w-2.5 inline" />
+								</button> and log in.
+							</li>
+							<li>Click <strong>Create app</strong> (name: <code>Nocturne</code>, description: <code>Desktop player</code>).</li>
+							<li>In <strong>Redirect URIs</strong>, enter <code class="px-1 py-0.2 bg-muted rounded font-mono text-[10px] text-emerald-400 select-all">http://127.0.0.1:8888/callback</code> and click <strong>Add</strong>.</li>
+							<li>
+								Under <strong>Which API/SDKs are you planning to use?</strong>: check <strong>Web API</strong> (and optionally <strong>Web Playback SDK</strong>). Leave iOS and Android unchecked.
+							</li>
+							<li>Agree to Spotify Developer Terms of Service and click <strong>Save</strong>.</li>
+							<li>In your new app's <strong>Settings</strong>, copy your <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields below.</li>
 						</ol>
 					</div>
 
@@ -375,7 +388,11 @@
 				<div class="rounded-lg border border-border/50 bg-muted/40 p-2.5 text-[11px] text-muted-foreground flex items-start gap-2">
 					<HugeiconsIcon icon={InformationCircleIcon} class="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
 					<div>
-						<strong>How to obtain:</strong> Open <a href="https://open.spotify.com" target="_blank" rel="noreferrer" class="text-primary underline">open.spotify.com</a> in your browser, press <kbd class="px-1 py-0.2 bg-muted rounded font-mono text-[10px]">F12</kbd> (DevTools), navigate to <strong>Application / Storage → Cookies</strong>, and copy the value of <code>sp_dc</code>.
+						<strong>How to obtain:</strong> Open <button
+							type="button"
+							class="text-primary underline hover:text-primary/80 cursor-pointer p-0 bg-transparent border-none text-[11px]"
+							onclick={() => api.openExternal('https://open.spotify.com')}
+						>open.spotify.com</button> in your browser, press <kbd class="px-1 py-0.2 bg-muted rounded font-mono text-[10px]">F12</kbd> (DevTools), navigate to <strong>Application / Storage → Cookies</strong>, and copy the value of <code>sp_dc</code>.
 					</div>
 				</div>
 

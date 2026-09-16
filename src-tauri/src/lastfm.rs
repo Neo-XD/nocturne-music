@@ -406,8 +406,16 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
     let cmd = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "windows")]
     let cmd = {
-        use std::os::windows::process::CommandExt;
-        std::process::Command::new("cmd").raw_arg(format!("/C start \"\" \"{url}\"")).spawn()
+        let res = std::process::Command::new("rundll32")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(url)
+            .spawn();
+        if res.is_err() {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("cmd").raw_arg(format!("/C start \"\" \"{url}\"")).spawn()
+        } else {
+            res
+        }
     };
     cmd.map(|_| ()).map_err(|e| format!("Couldn't open the browser: {e}"))
 }
