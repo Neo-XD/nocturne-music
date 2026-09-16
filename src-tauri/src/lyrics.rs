@@ -1203,11 +1203,12 @@ pub async fn custom_provider_get(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LyricCandidate {
     pub id: String,
-    pub provider: String,
+    pub source: String,
     pub title: String,
     pub artist: String,
     pub album: Option<String>,
-    pub duration_seconds: Option<f64>,
+    /// Track duration in seconds.
+    pub duration: Option<f64>,
     pub synced: bool,
     pub has_words: bool,
     pub lyrics: Lyrics,
@@ -1234,11 +1235,11 @@ pub async fn search_all_lyrics(
         let has_words = l.lines.iter().any(|line| line.words.is_some());
         candidates.push(LyricCandidate {
             id: format!("betterlyrics-{}", candidates.len()),
-            provider: "Better Lyrics".into(),
+            source: "Better Lyrics".into(),
             title: title.clone(),
             artist: artist.clone(),
             album: None,
-            duration_seconds: duration,
+            duration,
             synced: l.synced,
             has_words,
             lyrics: l,
@@ -1250,11 +1251,11 @@ pub async fn search_all_lyrics(
         let has_words = l.lines.iter().any(|line| line.words.is_some());
         candidates.push(LyricCandidate {
             id: format!("youlyplus-{}", candidates.len()),
-            provider: "YouLyPlus".into(),
+            source: "YouLyPlus".into(),
             title: title.clone(),
             artist: artist.clone(),
             album: None,
-            duration_seconds: duration,
+            duration,
             synced: l.synced,
             has_words,
             lyrics: l,
@@ -1266,11 +1267,11 @@ pub async fn search_all_lyrics(
         let has_words = l.lines.iter().any(|line| line.words.is_some());
         candidates.push(LyricCandidate {
             id: format!("paxsenix-{}", candidates.len()),
-            provider: "Paxsenix".into(),
+            source: "Paxsenix".into(),
             title: title.clone(),
             artist: artist.clone(),
             album: None,
-            duration_seconds: duration,
+            duration,
             synced: l.synced,
             has_words,
             lyrics: l,
@@ -1282,11 +1283,11 @@ pub async fn search_all_lyrics(
         if let Some(l) = lrclib_to_lyrics(&hit) {
             candidates.push(LyricCandidate {
                 id: format!("lrclib-{}", hit.id.unwrap_or(0)),
-                provider: "LRCLIB".into(),
+                source: "LRCLIB".into(),
                 title: hit.track_name.unwrap_or_else(|| title.clone()),
                 artist: hit.artist_name.unwrap_or_else(|| artist.clone()),
                 album: hit.album_name,
-                duration_seconds: hit.duration,
+                duration: hit.duration,
                 synced: l.synced,
                 has_words: false,
                 lyrics: l,
@@ -1297,14 +1298,14 @@ pub async fn search_all_lyrics(
     // 3. LRCLIB search (up to 5 results)
     if let Ok(Some(hit)) = lrclib_search(&req).await {
         if let Some(l) = lrclib_to_lyrics(&hit) {
-            if !candidates.iter().any(|c| c.provider == "LRCLIB") {
+            if !candidates.iter().any(|c| c.source == "LRCLIB") {
                 candidates.push(LyricCandidate {
                     id: format!("lrclib-search-{}", hit.id.unwrap_or(0)),
-                    provider: "LRCLIB (Search)".into(),
+                    source: "LRCLIB (Search)".into(),
                     title: hit.track_name.unwrap_or_else(|| title.clone()),
                     artist: hit.artist_name.unwrap_or_else(|| artist.clone()),
                     album: hit.album_name,
-                    duration_seconds: hit.duration,
+                    duration: hit.duration,
                     synced: l.synced,
                     has_words: false,
                     lyrics: l,
@@ -1318,11 +1319,11 @@ pub async fn search_all_lyrics(
         let has_words = l.lines.iter().any(|line| line.words.is_some());
         candidates.push(LyricCandidate {
             id: format!("qq-{}", candidates.len()),
-            provider: "QQ Music".into(),
+            source: "QQ Music".into(),
             title: title.clone(),
             artist: artist.clone(),
             album: None,
-            duration_seconds: duration,
+            duration,
             synced: l.synced,
             has_words,
             lyrics: l,
@@ -1334,11 +1335,11 @@ pub async fn search_all_lyrics(
         let has_words = l.lines.iter().any(|line| line.words.is_some());
         candidates.push(LyricCandidate {
             id: format!("kugou-{}", candidates.len()),
-            provider: "Kugou".into(),
+            source: "Kugou".into(),
             title: title.clone(),
             artist: artist.clone(),
             album: None,
-            duration_seconds: duration,
+            duration,
             synced: l.synced,
             has_words,
             lyrics: l,
@@ -1352,11 +1353,11 @@ pub async fn search_all_lyrics(
                 let has_words = l.lines.iter().any(|line| line.words.is_some());
                 candidates.push(LyricCandidate {
                     id: format!("custom-{}-{}", c.id, candidates.len()),
-                    provider: c.name,
+                    source: c.name,
                     title: title.clone(),
                     artist: artist.clone(),
                     album: None,
-                    duration_seconds: duration,
+                    duration,
                     synced: l.synced,
                     has_words,
                     lyrics: l,
@@ -1888,6 +1889,32 @@ fn strip_xml_tags(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lyric_candidate_serialization_matches_ui_contract() {
+        let candidate = LyricCandidate {
+            id: "test-candidate".into(),
+            source: "Test Provider".into(),
+            title: "Test Title".into(),
+            artist: "Test Artist".into(),
+            album: Some("Test Album".into()),
+            duration: Some(123.5),
+            synced: true,
+            has_words: false,
+            lyrics: Lyrics {
+                source: "Test Provider".into(),
+                synced: true,
+                instrumental: false,
+                lines: vec![LyricLine::simple(Some(1000), "Test line".into())],
+            },
+        };
+
+        let value = serde_json::to_value(candidate).unwrap();
+        assert_eq!(value.get("source").and_then(|v| v.as_str()), Some("Test Provider"));
+        assert_eq!(value.get("duration").and_then(|v| v.as_f64()), Some(123.5));
+        assert!(value.get("provider").is_none());
+        assert!(value.get("duration_seconds").is_none());
+    }
 
     #[test]
     fn parses_basic_lrc() {

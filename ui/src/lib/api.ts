@@ -840,11 +840,13 @@ export const saveCustomLyricProviders = (providers: CustomLyricProvider[]) =>
 	invoke<void>('save_custom_lyric_providers', { providers });
 
 export interface LyricCandidate {
+	id: string;
 	source: string;
 	title: string;
 	artist: string;
-	album?: string;
-	duration?: number;
+	album: string | null;
+	/** Track duration in seconds. */
+	duration: number | null;
 	synced: boolean;
 	has_words: boolean;
 	lyrics: Lyrics;
