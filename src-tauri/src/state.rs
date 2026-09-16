@@ -1909,7 +1909,11 @@ impl AppState {
     /// Everything the `now-playing` event carries. Shared with [`Self::playback_snapshot`] so a
     /// window that asks for the current track can't be told a different shape than one that
     /// listened for it.
-    fn now_playing_json(item: &SongItem, stream_client: &str, audio_quality: Option<&str>) -> serde_json::Value {
+    fn now_playing_json(
+        item: &SongItem,
+        stream_client: &str,
+        audio_quality: Option<&str>,
+    ) -> serde_json::Value {
         serde_json::json!({
             "videoId": item.video_id,
             "title": item.title,
@@ -1935,7 +1939,12 @@ impl AppState {
     pub async fn playback_snapshot(&self) -> serde_json::Value {
         let (duration, item, queue_items, current_quality) = {
             let q = self.queue.lock().await;
-            (q.duration, q.items.get(q.current).cloned(), q.items.clone(), q.current_audio_quality.clone())
+            (
+                q.duration,
+                q.items.get(q.current).cloned(),
+                q.items.clone(),
+                q.current_audio_quality.clone(),
+            )
         };
         serde_json::json!({
             "now": item.as_ref().map(|i| Self::now_playing_json(i, "current", current_quality.as_deref())),
@@ -2027,7 +2036,9 @@ impl AppState {
     }
 
     fn emit_now_playing(&self, item: &SongItem, stream_client: &str, audio_quality: Option<&str>) {
-        let _ = self.app.emit("now-playing", Self::now_playing_json(item, stream_client, audio_quality));
+        let _ = self
+            .app
+            .emit("now-playing", Self::now_playing_json(item, stream_client, audio_quality));
         let _ = self.app.emit("playback-state", "playing");
         // Push the same metadata to the OS media widget (context/16) and Discord.
         if let Some(m) = &self.media {

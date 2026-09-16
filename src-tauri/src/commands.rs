@@ -1711,8 +1711,8 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v083_note, v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note,
-        v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
+        v083_note, v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note,
+        v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
@@ -1906,13 +1906,7 @@ pub async fn spotify_link(state: St<'_>, sp_dc: String) -> Result<SpotifyAccount
         let _ = state.db.set_setting("spotify_product", pr);
     }
 
-    Ok(SpotifyAccountStatus {
-        linked: true,
-        username,
-        display_name,
-        product,
-        avatar_url,
-    })
+    Ok(SpotifyAccountStatus { linked: true, username, display_name, product, avatar_url })
 }
 
 #[tauri::command]
@@ -2006,10 +2000,8 @@ pub async fn spotify_get_playlists(state: St<'_>) -> Result<Vec<SpotifyPlaylistS
         return Err(format!("Spotify API returned status {}", res.status()));
     }
 
-    let json: serde_json::Value = res
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Spotify playlists: {e}"))?;
+    let json: serde_json::Value =
+        res.json().await.map_err(|e| format!("Failed to parse Spotify playlists: {e}"))?;
 
     let mut playlists = Vec::new();
     if let Some(items) = json["items"].as_array() {
@@ -2027,10 +2019,7 @@ pub async fn spotify_get_playlists(state: St<'_>) -> Result<Vec<SpotifyPlaylistS
                 .and_then(|arr| arr.first())
                 .and_then(|img| img["url"].as_str())
                 .map(|u| u.to_string());
-            let url = item["external_urls"]["spotify"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
+            let url = item["external_urls"]["spotify"].as_str().unwrap_or_default().to_string();
 
             playlists.push(SpotifyPlaylistSummary {
                 id,
@@ -2067,13 +2056,13 @@ pub async fn spotify_transfer_to_ytm(
         return Err(format!("Spotify returned error {}", pl_res.status()));
     }
 
-    let pl_json: serde_json::Value = pl_res
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse playlist JSON: {e}"))?;
+    let pl_json: serde_json::Value =
+        pl_res.json().await.map_err(|e| format!("Failed to parse playlist JSON: {e}"))?;
 
     let title = pl_json["name"].as_str().unwrap_or("Imported Spotify Playlist");
-    let desc = pl_json["description"].as_str().unwrap_or("Transferred from Spotify to Nocturne / YouTube Music");
+    let desc = pl_json["description"]
+        .as_str()
+        .unwrap_or("Transferred from Spotify to Nocturne / YouTube Music");
 
     let ytm_client = require_login(&state)?;
     let new_ytm_playlist_id = state
@@ -2100,7 +2089,10 @@ pub async fn spotify_transfer_to_ytm(
             let search_query = format!("{name} {artist}");
             if let Ok(results) = state.it.search_songs(ytm_client, &search_query).await {
                 if let Some(first) = results.items.first() {
-                    let _ = state.it.playlist_add(ytm_client, &new_ytm_playlist_id, &first.video_id).await;
+                    let _ = state
+                        .it
+                        .playlist_add(ytm_client, &new_ytm_playlist_id, &first.video_id)
+                        .await;
                     state.db.add_playlist_track(&new_ytm_playlist_id, &first.video_id);
                     added_count += 1;
                 }
@@ -2109,7 +2101,10 @@ pub async fn spotify_transfer_to_ytm(
     }
 
     let _ = app.emit("library-changed", ());
-    Ok(format!("Successfully created \"{} (Spotify)\" with {} tracks transferred!", title, added_count))
+    Ok(format!(
+        "Successfully created \"{} (Spotify)\" with {} tracks transferred!",
+        title, added_count
+    ))
 }
 
 #[tauri::command]
@@ -2137,10 +2132,8 @@ pub async fn ytm_transfer_to_spotify(
         .await
         .map_err(|e| format!("Failed to get Spotify profile: {e}"))?;
 
-    let me_json: serde_json::Value = me_res
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse profile: {e}"))?;
+    let me_json: serde_json::Value =
+        me_res.json().await.map_err(|e| format!("Failed to parse profile: {e}"))?;
 
     let user_id = me_json["id"].as_str().ok_or("Could not read Spotify user ID")?;
 
@@ -2183,7 +2176,11 @@ pub async fn ytm_transfer_to_spotify(
 
         if let Ok(s_res) = search_res {
             if let Ok(s_json) = s_res.json::<serde_json::Value>().await {
-                if let Some(uri) = s_json["tracks"]["items"].as_array().and_then(|a| a.first()).and_then(|t| t["uri"].as_str()) {
+                if let Some(uri) = s_json["tracks"]["items"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|t| t["uri"].as_str())
+                {
                     uris.push(uri.to_string());
                 }
             }
@@ -2216,7 +2213,10 @@ pub async fn ytm_transfer_to_spotify(
 
 #[tauri::command]
 pub async fn spotify_get_sync_mode(state: St<'_>) -> Result<String, String> {
-    let mode = state.db.get_setting("spotify_playlist_sync_mode").unwrap_or_else(|| "seperate".to_string());
+    let mode = state
+        .db
+        .get_setting("spotify_playlist_sync_mode")
+        .unwrap_or_else(|| "seperate".to_string());
     if mode.is_empty() {
         Ok("seperate".to_string())
     } else {
@@ -2225,7 +2225,11 @@ pub async fn spotify_get_sync_mode(state: St<'_>) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn spotify_set_sync_mode(app: tauri::AppHandle, state: St<'_>, mode: String) -> Result<(), String> {
+pub async fn spotify_set_sync_mode(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    mode: String,
+) -> Result<(), String> {
     let valid_mode = match mode.as_str() {
         "sync" => "sync",
         "transfer" => "transfer",
@@ -2235,7 +2239,6 @@ pub async fn spotify_set_sync_mode(app: tauri::AppHandle, state: St<'_>, mode: S
     let _ = app.emit("spotify-sync-mode-changed", valid_mode);
     Ok(())
 }
-
 
 // --- Song downloader ------------------------------------------------------------------------
 
