@@ -592,6 +592,14 @@ pub fn run() {
             commands::get_audio_devices,
             commands::set_audio_device,
             commands::get_desktop_environment,
+            commands::spotify_link,
+            commands::spotify_status,
+            commands::spotify_unlink,
+            commands::spotify_get_playlists,
+            commands::spotify_transfer_to_ytm,
+            commands::ytm_transfer_to_spotify,
+            commands::spotify_get_sync_mode,
+            commands::spotify_set_sync_mode,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is

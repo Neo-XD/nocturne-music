@@ -46,6 +46,7 @@
 		setFloatingSidebarLeft,
 		setFloatingSidebarRight,
 		setFloatingPlayerBar,
+		setShowAudioQuality,
 		setHomeInSidebar,
 		setVisibleIcon,
 		setCustomizationMode,
@@ -222,12 +223,52 @@
 	let lastfmUser = $state<string | null>(null);
 	let lastfmConnecting = $state(false);
 
+	let spotifyStatus = $state<api.SpotifyAccountStatus>({ linked: false });
+	let spotifyConnecting = $state(false);
+	let spotifySpDcInput = $state('');
+	let showSpotifyInput = $state(false);
+
 	async function loadLastfm() {
 		try {
 			const s = await api.lastfmStatus();
 			lastfmConnected = s.connected;
 			lastfmUser = s.username ?? null;
 		} catch {}
+	}
+
+	async function loadSpotify() {
+		try {
+			spotifyStatus = await api.spotifyStatus();
+		} catch {}
+	}
+
+	async function linkSpotify() {
+		if (!spotifySpDcInput.trim()) {
+			toast.error('Please enter your sp_dc cookie');
+			return;
+		}
+		spotifyConnecting = true;
+		try {
+			const res = await api.spotifyLink(spotifySpDcInput.trim());
+			spotifyStatus = res;
+			spotifySpDcInput = '';
+			showSpotifyInput = false;
+			toast.success(res.display_name ? `Linked Spotify as ${res.display_name}` : 'Spotify account linked');
+		} catch (e) {
+			toast.error(String(e));
+		} finally {
+			spotifyConnecting = false;
+		}
+	}
+
+	async function unlinkSpotify() {
+		try {
+			await api.spotifyUnlink();
+			spotifyStatus = { linked: false };
+			toast.success('Spotify account unlinked');
+		} catch (e) {
+			toast.error(String(e));
+		}
 	}
 
 	async function connectLastfm() {
@@ -255,6 +296,7 @@
 	onMount(() => {
 		// Without this syncInfo stays null and the pairing PIN row cannot show the server's PIN.
 		void fetchSyncStatus();
+		void loadSpotify();
 		const sub = api.onLastfmState((s) => {
 			lastfmConnecting = false;
 			lastfmConnected = s.connected;
@@ -302,7 +344,8 @@
 				api.getSettings(),
 				api.getStreamClients(),
 				api.getClientLatencies().catch(() => []),
-				loadLastfm()
+				loadLastfm(),
+				loadSpotify()
 			]);
 			settings = s;
 			let clientOrder = c;
@@ -1279,6 +1322,14 @@
 										: 'Connect your Last.fm account to scrobble songs and update now playing.',
 									control: lastfmButton
 								})}
+								{@render row({
+									title: 'Spotify account linking',
+									desc: spotifyStatus.linked
+										? `Connected as ${spotifyStatus.display_name || spotifyStatus.username || 'Spotify User'}${spotifyStatus.product ? ` (${spotifyStatus.product})` : ''}.`
+										: 'Link your Spotify account via sp_dc cookie to sync your profile and library.',
+									control: spotifyButton,
+									below: showSpotifyInput ? spotifyInputSnippet : undefined
+								})}
 							</div>
 						</section>
 						<section class={GROUP}>
@@ -1766,6 +1817,11 @@
 									badgeVariant: 'info',
 									desc: 'Preferred stream quality when resolving a track. Lower qualities use less data and CPU.',
 									control: qualityPicker
+								})}
+								{@render row({
+									title: 'Audio quality indicator',
+									desc: 'Show an audio codec and bitrate badge below the artist name in the bottom player bar.',
+									control: showAudioQualitySwitch
 								})}
 								{@render row({
 									title: 'Autoplay',
@@ -2885,6 +2941,36 @@
 		</Button>
 	{/if}
 {/snippet}
+{#snippet spotifyButton()}
+	{#if spotifyStatus.linked}
+		<Button size="sm" variant="outline" onclick={unlinkSpotify}>Disconnect</Button>
+	{:else}
+		<Button size="sm" onclick={() => (showSpotifyInput = !showSpotifyInput)}>
+			{showSpotifyInput ? 'Cancel' : 'Link Spotify'}
+		</Button>
+	{/if}
+{/snippet}
+{#snippet spotifyInputSnippet()}
+	<div class="mt-2.5 space-y-2.5 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3.5 backdrop-blur-md">
+		<div class="space-y-1">
+			<span class="text-xs font-semibold text-foreground">Direct Cookie Authentication (sp_dc)</span>
+			<p class="text-[11px] text-muted-foreground">
+				Link your Spotify account directly using your <code>sp_dc</code> cookie without requiring third-party API credentials (psst method).
+			</p>
+		</div>
+		<div class="flex items-center gap-2">
+			<Input
+				bind:value={spotifySpDcInput}
+				placeholder="Paste sp_dc cookie value..."
+				type="password"
+				class="h-8 text-xs font-mono"
+			/>
+			<Button size="sm" onclick={linkSpotify} disabled={spotifyConnecting || !spotifySpDcInput.trim()}>
+				{spotifyConnecting ? 'Connecting…' : 'Save & Link'}
+			</Button>
+		</div>
+	</div>
+{/snippet}
 {#snippet remoteSyncSwitch()}<Switch checked={remoteSyncOn} onCheckedChange={setRemoteSync} />{/snippet}
 {#snippet remoteSyncConfig()}
 	<div class="mt-2.5 space-y-3 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3.5 backdrop-blur-md">
@@ -3076,6 +3162,7 @@
 {#snippet traySwitch()}<Switch checked={trayOn} onCheckedChange={setTray} />{/snippet}
 {#snippet autostartSwitch()}<Switch checked={autostartOn} onCheckedChange={setAutostart} />{/snippet}
 {#snippet autoplaySwitch()}<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />{/snippet}
+{#snippet showAudioQualitySwitch()}<Switch checked={prefs.showAudioQuality} onCheckedChange={setShowAudioQuality} />{/snippet}
 {#snippet dupSwitch()}<Switch
 		checked={preventDuplicatesOn}
 		onCheckedChange={setPreventDuplicates}

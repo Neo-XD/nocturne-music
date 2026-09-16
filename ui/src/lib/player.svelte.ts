@@ -152,6 +152,7 @@ export const prefs = $state({
 	floatingSidebar: initialMode !== 'none',
 	floatingTopBar: browser ? localStorage.getItem('floating_topbar') !== 'false' : true,
 	floatingPlayerBar: browser ? localStorage.getItem('floating_playerbar') !== 'false' : true,
+	showAudioQuality: browser ? localStorage.getItem('show_audio_quality') !== 'false' : true,
 	homeInSidebar: browser ? localStorage.getItem('home_in_sidebar') === 'true' : false,
 	visibleIcons: {
 		titlebar: {
@@ -213,6 +214,63 @@ export function setFloatingPlayerBar(enabled: boolean) {
 	prefs.floatingPlayerBar = enabled;
 	if (browser) localStorage.setItem('floating_playerbar', enabled ? 'true' : 'false');
 }
+
+export function setShowAudioQuality(enabled: boolean) {
+	prefs.showAudioQuality = enabled;
+	if (browser) localStorage.setItem('show_audio_quality', enabled ? 'true' : 'false');
+}
+
+// --- Spotify Store & Sync Mode -------------------------------------------------------------
+export const spotify = $state<{
+	status: api.SpotifyAccountStatus;
+	syncMode: api.SpotifyPlaylistSyncMode;
+	playlists: api.SpotifyPlaylistSummary[];
+	loadingPlaylists: boolean;
+}>({
+	status: { linked: false },
+	syncMode: 'seperate',
+	playlists: [],
+	loadingPlaylists: false
+});
+
+export async function refreshSpotify() {
+	try {
+		const [st, mode] = await Promise.all([
+			api.spotifyStatus(),
+			api.spotifyGetSyncMode().catch(() => 'seperate' as const)
+		]);
+		spotify.status = st;
+		spotify.syncMode = mode;
+		if (st.linked) {
+			void loadSpotifyPlaylists();
+		} else {
+			spotify.playlists = [];
+		}
+	} catch {}
+}
+
+export async function setSpotifySyncMode(mode: api.SpotifyPlaylistSyncMode) {
+	try {
+		spotify.syncMode = mode;
+		await api.spotifySetSyncMode(mode);
+		toast.success(`Playlist mode set to ${mode}`);
+	} catch (e) {
+		toast.error(String(e));
+	}
+}
+
+export async function loadSpotifyPlaylists() {
+	if (!spotify.status.linked) return;
+	spotify.loadingPlaylists = true;
+	try {
+		spotify.playlists = await api.spotifyGetPlaylists();
+	} catch (e) {
+		console.warn('Failed to load Spotify playlists:', e);
+	} finally {
+		spotify.loadingPlaylists = false;
+	}
+}
+
 
 export function setLyricsAnimationStyle(style: LyricsAnimationStyle) {
 	prefs.lyricsAnimationStyle = style;
@@ -1516,5 +1574,6 @@ export function initApp(mini = false): () => void {
 	scanLocal();
 	// Seed the Listen Together state (server URL, any active room after a UI reload).
 	api.ltGetState().then(applyLtState).catch(() => {});
+	void refreshSpotify();
 	return teardown;
 }

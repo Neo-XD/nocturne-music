@@ -90,6 +90,8 @@ export interface NowPlaying {
 	thumbnail?: string;
 	duration?: string;
 	streamClient: string;
+	/** Human-readable audio quality string, e.g. "OPUS 160 kbps" or "FLAC Lossless". */
+	audioQuality?: string;
 	/** The user's rating of the track (null if unknown). */
 	rating?: Rating | null;
 	/** YouTube's `musicVideoType` says this is a video upload, not the generated audio track.
@@ -903,3 +905,41 @@ export interface AudioDeviceInfo {
 export const getAudioDevices = () => invoke<AudioDeviceInfo>('get_audio_devices');
 export const setAudioDevice = (device: string) => invoke<void>('set_audio_device', { device });
 export const getDesktopEnvironment = () => invoke<string>('get_desktop_environment');
+
+// --- Spotify Account Linking (psst-style) ----------------------------------------------------
+export interface SpotifyAccountStatus {
+	linked: boolean;
+	username?: string | null;
+	display_name?: string | null;
+	product?: string | null;
+	avatar_url?: string | null;
+}
+
+export const spotifyLink = (spDc: string) =>
+	invoke<SpotifyAccountStatus>('spotify_link', { spDc });
+export const spotifyStatus = () => invoke<SpotifyAccountStatus>('spotify_status');
+export const spotifyUnlink = () => invoke<void>('spotify_unlink');
+
+export interface SpotifyPlaylistSummary {
+	id: string;
+	title: string;
+	subtitle?: string | null;
+	thumbnail?: string | null;
+	track_count?: number | null;
+	url: string;
+}
+
+export type SpotifyPlaylistSyncMode = 'seperate' | 'sync' | 'transfer';
+
+export const spotifyGetPlaylists = () =>
+	invoke<SpotifyPlaylistSummary[]>('spotify_get_playlists');
+export const spotifyTransferToYtm = (spotifyPlaylistId: string) =>
+	invoke<string>('spotify_transfer_to_ytm', { spotifyPlaylistId });
+export const ytmTransferToSpotify = (ytmPlaylistId: string) =>
+	invoke<string>('ytm_transfer_to_spotify', { ytmPlaylistId });
+export const spotifyGetSyncMode = () =>
+	invoke<SpotifyPlaylistSyncMode>('spotify_get_sync_mode');
+export const spotifySetSyncMode = (mode: SpotifyPlaylistSyncMode) =>
+	invoke<void>('spotify_set_sync_mode', { mode });
+
+

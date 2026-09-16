@@ -14,14 +14,26 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import type { SavedAccount } from '$lib/api';
-	import { auth, openChannelPicker, toast, ui } from '$lib/player.svelte';
+	import {
+		auth,
+		openChannelPicker,
+		toast,
+		ui,
+		spotify,
+		refreshSpotify,
+		setSpotifySyncMode
+	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
+	import SpotifyLinkDialog from './SpotifyLinkDialog.svelte';
+	import SpotifyTransferDialog from './SpotifyTransferDialog.svelte';
 
 	let menuOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
 	let savedAccounts = $state<SavedAccount[]>([]);
 	let loadingAccounts = $state(false);
+	let spotifyModalOpen = $state(false);
+	let transferModalOpen = $state(false);
 
 	async function loadAccounts() {
 		try {
@@ -34,12 +46,23 @@
 		}
 	}
 
+	async function unlinkSpotify() {
+		try {
+			await api.spotifyUnlink();
+			await refreshSpotify();
+			toast.success('Spotify account unlinked');
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
 	// Right-anchored under the trigger, like the Last.fm menu next to it.
 	function openMenu(e: MouseEvent) {
 		anchor = anchorMenu(e, { align: 'right' });
 		menuOpen = !menuOpen;
 		if (menuOpen) {
 			loadAccounts();
+			refreshSpotify();
 		}
 	}
 
@@ -232,6 +255,115 @@
 		{/if}
 
 		<div class="my-2 h-px bg-border/60"></div>
+
+		<!-- Spotify Account Section -->
+		<div class="mb-2">
+			<div class="mb-1.5 flex items-center justify-between">
+				<span class="text-[11px] font-semibold uppercase tracking-wider text-emerald-500">Spotify Account</span>
+				{#if spotify.status.linked}
+					<span class="rounded bg-emerald-500/15 px-1.5 py-0.2 text-[9px] font-semibold text-emerald-400">
+						{spotify.status.product ? spotify.status.product.toUpperCase() : 'LINKED'}
+					</span>
+				{/if}
+			</div>
+
+			{#if spotify.status.linked}
+				<div class="rounded-lg border border-border/60 bg-muted/40 p-2.5 text-left mb-2">
+					<div class="flex items-center gap-2.5">
+						{#if spotify.status.avatar_url}
+							<img
+								src={spotify.status.avatar_url}
+								alt=""
+								class="size-8 shrink-0 rounded-full object-cover ring-1 ring-emerald-500/50"
+							/>
+						{:else}
+							<div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+								<svg class="size-4" viewBox="0 0 24 24" fill="currentColor">
+									<path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10 5.524 0 10-4.476 10-10 0-5.523-4.476-10-10-10zm4.586 14.424a.627.627 0 0 1-.86.208c-2.355-1.439-5.32-1.765-8.812-.966a.625.625 0 0 1-.277-1.22c3.824-.874 7.099-.508 9.74 1.107.292.179.387.568.209.871zm1.226-2.723a.784.784 0 0 1-1.077.26c-2.695-1.656-6.804-2.136-9.992-1.168a.785.785 0 1 1-.462-1.501c3.642-1.106 8.188-.574 11.27 1.321a.784.784 0 0 1 .261 1.088zm.105-2.833c-3.232-1.919-8.566-2.096-11.657-1.157a.94.94 0 1 1-.552-1.8c3.553-1.078 9.444-.87 13.14 1.323a.94.94 0 0 1-.931 1.634z"/>
+								</svg>
+							</div>
+						{/if}
+						<div class="min-w-0 flex-1">
+							<div class="truncate text-xs font-semibold">{spotify.status.display_name || spotify.status.username || 'Spotify User'}</div>
+							<p class="truncate text-[10px] text-muted-foreground">Linked via sp_dc</p>
+						</div>
+					</div>
+
+					<!-- Playlist Mode Selector: Separate (Default), In Sync, Transfer -->
+					<div class="mt-2.5 border-t border-border/40 pt-2">
+						<div class="flex items-center justify-between mb-1">
+							<span class="text-[10px] font-medium text-muted-foreground">Playlist Mode:</span>
+							<span class="text-[10px] font-bold text-foreground capitalize">{spotify.syncMode}</span>
+						</div>
+						<div class="grid grid-cols-3 gap-1 rounded-md bg-muted/60 p-0.5">
+							<button
+								type="button"
+								class="rounded py-1 text-[10px] font-semibold transition cursor-pointer {spotify.syncMode === 'seperate' ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+								onclick={() => setSpotifySyncMode('seperate')}
+								title="Keep YTM and Spotify playlists in separate tabs"
+							>
+								Separate
+							</button>
+							<button
+								type="button"
+								class="rounded py-1 text-[10px] font-semibold transition cursor-pointer {spotify.syncMode === 'sync' ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+								onclick={() => setSpotifySyncMode('sync')}
+								title="Keep playlists synchronized between services"
+							>
+								In Sync
+							</button>
+							<button
+								type="button"
+								class="rounded py-1 text-[10px] font-semibold transition cursor-pointer {spotify.syncMode === 'transfer' ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+								onclick={() => setSpotifySyncMode('transfer')}
+								title="Transfer playlists between YTM and Spotify"
+							>
+								Transfer
+							</button>
+						</div>
+
+						{#if spotify.syncMode === 'transfer'}
+							<button
+								type="button"
+								class="mt-1.5 flex w-full items-center justify-center gap-1 rounded bg-muted/80 hover:bg-muted py-1 text-[10px] font-medium text-foreground transition cursor-pointer"
+								onclick={() => {
+									menuOpen = false;
+									transferModalOpen = true;
+								}}
+							>
+								Transfer Playlists…
+							</button>
+						{/if}
+					</div>
+
+					<Button
+						variant="ghost"
+						size="sm"
+						class="mt-2 h-7 w-full text-xs text-destructive hover:bg-destructive/10 hover:text-destructive cursor-pointer"
+						onclick={unlinkSpotify}
+					>
+						Unlink Spotify
+					</Button>
+				</div>
+			{:else}
+				<Button
+					variant="outline"
+					size="sm"
+					class="w-full gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 cursor-pointer"
+					onclick={() => {
+						menuOpen = false;
+						spotifyModalOpen = true;
+					}}
+				>
+					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+						<path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10 5.524 0 10-4.476 10-10 0-5.523-4.476-10-10-10zm4.586 14.424a.627.627 0 0 1-.86.208c-2.355-1.439-5.32-1.765-8.812-.966a.625.625 0 0 1-.277-1.22c3.824-.874 7.099-.508 9.74 1.107.292.179.387.568.209.871zm1.226-2.723a.784.784 0 0 1-1.077.26c-2.695-1.656-6.804-2.136-9.992-1.168a.785.785 0 1 1-.462-1.501c3.642-1.106 8.188-.574 11.27 1.321a.784.784 0 0 1 .261 1.088zm.105-2.833c-3.232-1.919-8.566-2.096-11.657-1.157a.94.94 0 1 1-.552-1.8c3.553-1.078 9.444-.87 13.14 1.323a.94.94 0 0 1-.931 1.634z"/>
+					</svg>
+					<span>Link Spotify Account</span>
+				</Button>
+			{/if}
+		</div>
+
+		<div class="my-2 h-px bg-border/60"></div>
 		<Button
 			variant="ghost"
 			size="sm"
@@ -247,3 +379,6 @@
 		</Button>
 	</div>
 {/if}
+
+<SpotifyLinkDialog bind:open={spotifyModalOpen} />
+<SpotifyTransferDialog bind:open={transferModalOpen} />

@@ -215,6 +215,16 @@
 					class="block max-w-full text-xs text-muted-foreground"
 				/>
 			</div>
+			{#if prefs.showAudioQuality && playback.now?.audioQuality}
+				<div class="flex items-center gap-1 mt-0.5" in:fade={{ duration: 150 }}>
+					<span
+						class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] tracking-tight font-medium bg-muted/60 text-muted-foreground/90 border border-border/40 select-none"
+						title="Playback Audio Quality"
+					>
+						{playback.now.audioQuality}
+					</span>
+				</div>
+			{/if}
 		</div>
 		{#if playback.now}
 			<div class="flex items-center">

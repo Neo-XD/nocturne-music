@@ -46,6 +46,8 @@ pub struct PlaybackData {
     pub is_video: Option<bool>,
     /// Which client produced the stream (diagnostics). context/06.
     pub stream_client: String,
+    /// Human-readable audio quality label (e.g. "OPUS 160 kbps", "AAC 256 kbps", "FLAC Lossless").
+    pub audio_quality: Option<String>,
 }
 
 /// The watch-history ping for one play: `playbackTracking.videostatsPlaybackUrl.baseUrl` plus the
@@ -607,6 +609,7 @@ impl Orchestrator {
                 // rustypipe answers without a `musicVideoType`, so the queue row's flag stands.
                 is_video: None,
                 stream_client: "rustypipe".to_owned(),
+                audio_quality: Some(format_quality_label(&c.mime, c.bitrate as i64)),
             }),
             Err(e) => {
                 tracing::error!(video_id, error = %e, "rustypipe fallback failed");
@@ -725,7 +728,29 @@ impl Orchestrator {
             thumbnail: main_resp.as_ref().and_then(best_thumbnail),
             is_video: vd.and_then(|v| v.is_music_video()),
             stream_client: client.to_owned(),
+            audio_quality: Some(format_quality_label(&format.mime_type, format.bitrate)),
         }
+    }
+}
+
+/// Generate a user-friendly quality badge (e.g. "OPUS 160 kbps", "AAC 256 kbps").
+pub fn format_quality_label(mime: &str, bitrate: i64) -> String {
+    let codec = if mime.contains("opus") {
+        "OPUS"
+    } else if mime.contains("mp4a") || mime.contains("aac") {
+        "AAC"
+    } else if mime.contains("flac") {
+        "FLAC"
+    } else if mime.contains("mp3") {
+        "MP3"
+    } else {
+        "AUDIO"
+    };
+    if bitrate > 0 {
+        let kbps = (bitrate as f64 / 1000.0).round() as i64;
+        format!("{codec} {kbps} kbps")
+    } else {
+        codec.to_string()
     }
 }
 

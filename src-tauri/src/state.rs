@@ -308,6 +308,8 @@ struct QueueState {
     /// The client that served the primed lookahead track — promoted to `current_client` on a
     /// gapless advance so the failure feedback still knows the client.
     lookahead_client: Option<String>,
+    current_audio_quality: Option<String>,
+    lookahead_audio_quality: Option<String>,
     /// Loudness gain (dB) for the primed lookahead. mpv's `af` is global, so this can't ride along
     /// with the appended entry — it's applied when the gapless advance is observed.
     lookahead_gain: Option<Option<f64>>,
@@ -1012,6 +1014,14 @@ impl AppState {
                 // to the queue row's flag, which is exactly the thing that can't be trusted.
                 is_video: c.is_video,
                 stream_client: "cache".to_owned(),
+                audio_quality: match c.itag {
+                    251 => Some("OPUS 160 kbps".into()),
+                    250 => Some("OPUS 70 kbps".into()),
+                    249 => Some("OPUS 50 kbps".into()),
+                    140 => Some("AAC 128 kbps".into()),
+                    141 => Some("AAC 256 kbps".into()),
+                    _ => None,
+                },
             });
         }
         let custom_priority = self.stream_client_priority();
@@ -1564,6 +1574,7 @@ impl AppState {
             // lets a single-item repeat-all queue re-prime itself instead of "already primed".)
             q.lookahead_loaded = None;
             q.current_client = q.lookahead_client.take();
+            q.current_audio_quality = q.lookahead_audio_quality.take();
             // New track is now playing → fresh history state (mirrors start_current).
             q.playback_ping = q.lookahead_playback_ping.take();
             q.cpn = innertube::generate_cpn();
@@ -1571,7 +1582,8 @@ impl AppState {
             q.duration = 0.0;
         }
         if let Some(item) = self.current_item().await {
-            self.emit_now_playing(&item, "gapless");
+            let quality = self.queue.lock().await.current_audio_quality.clone();
+            self.emit_now_playing(&item, "gapless", quality.as_deref());
             // Same as `start_current`: an autoplay-appended track carries no rating of its own.
             self.refresh_rating(&item.video_id, gen);
         }
@@ -1743,6 +1755,7 @@ impl AppState {
         {
             let mut q = self.queue.lock().await;
             q.current_client = Some(data.stream_client.clone());
+            q.current_audio_quality = data.audio_quality.clone();
             // Fresh play → fresh history state (context/01 §registerPlayback).
             q.playback_ping = data.playback_ping.clone();
             q.cpn = innertube::generate_cpn();
@@ -1762,7 +1775,7 @@ impl AppState {
                 }
             }
         }
-        self.emit_now_playing(&item, &data.stream_client);
+        self.emit_now_playing(&item, &data.stream_client, data.audio_quality.as_deref());
         // The rating just emitted is whatever the row was parsed with, which for a search result
         // or a radio track is nothing at all (issue #93). Ask.
         self.refresh_rating(&item.video_id, gen);
@@ -1875,6 +1888,7 @@ impl AppState {
         }
         q.lookahead_loaded = Some(next_idx);
         q.lookahead_client = Some(data.stream_client.clone());
+        q.lookahead_audio_quality = data.audio_quality.clone();
         q.lookahead_gain = Some(loudness_gain(data.loudness_db));
         q.lookahead_playback_ping = data.playback_ping.clone();
         // Same backfill as start_current: a gapless advance emits this item straight from the
@@ -1895,7 +1909,7 @@ impl AppState {
     /// Everything the `now-playing` event carries. Shared with [`Self::playback_snapshot`] so a
     /// window that asks for the current track can't be told a different shape than one that
     /// listened for it.
-    fn now_playing_json(item: &SongItem, stream_client: &str) -> serde_json::Value {
+    fn now_playing_json(item: &SongItem, stream_client: &str, audio_quality: Option<&str>) -> serde_json::Value {
         serde_json::json!({
             "videoId": item.video_id,
             "title": item.title,
@@ -1906,6 +1920,7 @@ impl AppState {
             "thumbnail": item.thumbnail,
             "duration": item.duration,
             "streamClient": stream_client,
+            "audioQuality": audio_quality,
             "rating": item.rating,
             // YouTube's own `musicVideoType` says this track is a video upload, not the generated
             // audio track, which is what the player view's music-video mode gates on (plan 031).
@@ -1918,12 +1933,12 @@ impl AppState {
     /// player (a second webview, created long after the track started) and the main window on a
     /// cold start both have to ask once instead of guessing.
     pub async fn playback_snapshot(&self) -> serde_json::Value {
-        let (duration, item, queue_items) = {
+        let (duration, item, queue_items, current_quality) = {
             let q = self.queue.lock().await;
-            (q.duration, q.items.get(q.current).cloned(), q.items.clone())
+            (q.duration, q.items.get(q.current).cloned(), q.items.clone(), q.current_audio_quality.clone())
         };
         serde_json::json!({
-            "now": item.as_ref().map(|i| Self::now_playing_json(i, "current")),
+            "now": item.as_ref().map(|i| Self::now_playing_json(i, "current", current_quality.as_deref())),
             "paused": !self.is_playing.load(Ordering::Relaxed),
             "position": self.current_position(),
             "duration": duration,
@@ -2011,8 +2026,8 @@ impl AppState {
         });
     }
 
-    fn emit_now_playing(&self, item: &SongItem, stream_client: &str) {
-        let _ = self.app.emit("now-playing", Self::now_playing_json(item, stream_client));
+    fn emit_now_playing(&self, item: &SongItem, stream_client: &str, audio_quality: Option<&str>) {
+        let _ = self.app.emit("now-playing", Self::now_playing_json(item, stream_client, audio_quality));
         let _ = self.app.emit("playback-state", "playing");
         // Push the same metadata to the OS media widget (context/16) and Discord.
         if let Some(m) = &self.media {
@@ -2037,7 +2052,7 @@ impl AppState {
         self.last_media_push.store(0, Ordering::Relaxed);
 
         let snapshot = serde_json::json!({
-            "now": Self::now_playing_json(item, stream_client),
+            "now": Self::now_playing_json(item, stream_client, audio_quality),
             "paused": false,
             "position": 0.0,
             "duration": 0.0,
@@ -2499,7 +2514,8 @@ impl AppState {
             // announced before this would briefly look like it was playing (and put a presence card
             // up for a song nobody started).
             self.media_set_playing(false);
-            self.emit_now_playing(&item, "restored");
+            let q_quality = self.queue.lock().await.current_audio_quality.clone();
+            self.emit_now_playing(&item, "restored", q_quality.as_deref());
             // The stored rating is as old as the database: a like made on another device since
             // has never been seen here (issue #93).
             self.refresh_rating(&item.video_id, self.generation.load(Ordering::SeqCst));
@@ -2667,7 +2683,8 @@ impl AppState {
         }
         let _ = if playing { self.player.play() } else { self.player.pause() };
         if let Some(item) = self.current_item().await {
-            self.emit_now_playing(&item, "listen-together");
+            let q_quality = self.queue.lock().await.current_audio_quality.clone();
+            self.emit_now_playing(&item, "listen-together", q_quality.as_deref());
         }
         if !playing {
             let _ = self.app.emit("playback-state", "paused");

@@ -19,7 +19,6 @@
 		FavouriteIcon,
 		MusicNote01Icon,
 		MaximizeScreenIcon,
-		Mic01Icon,
 		VolumeHighIcon,
 		VolumeMute02Icon
 	} from '@hugeicons/core-free-icons';
@@ -329,16 +328,6 @@
 				{#if repeat !== 'off'}
 					<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-primary pointer-events-none"></span>
 				{/if}
-			</button>
-			<button
-				class="{panelBtn} absolute right-0 {tab === 'lyrics'
-					? 'text-primary'
-					: 'text-muted-foreground'}"
-				onclick={() => (tab = tab === 'lyrics' ? 'queue' : 'lyrics')}
-				aria-label={tab === 'lyrics' ? 'Show queue' : 'Show lyrics'}
-				aria-pressed={tab === 'lyrics'}
-			>
-				<HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" />
 			</button>
 		</div>
 	</div>

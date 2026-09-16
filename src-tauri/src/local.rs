@@ -614,10 +614,18 @@ pub fn playback_data(video_id: &str, path: &str) -> Result<crate::orchestrator::
         title: None,
         artists: None,
         duration: None,
+        thumbnail: None,
         // A file on disk has no `musicVideoType`, and video mode skips local ids anyway.
         is_video: None,
-        thumbnail: None,
         stream_client: "local".to_owned(),
+        audio_quality: Path::new(path).extension().and_then(|e| e.to_str()).map(|ext| {
+            let upper = ext.to_uppercase();
+            if upper == "FLAC" || upper == "WAV" || upper == "ALAC" || upper == "AIFF" {
+                format!("{upper} Lossless")
+            } else {
+                upper
+            }
+        }),
     })
 }
 

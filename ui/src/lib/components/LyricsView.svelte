@@ -499,10 +499,11 @@
 		ontouchmove={onUserScroll}
 		onpointerdown={onUserScroll}
 		class="lyrics-scroller min-h-0 flex-1 overflow-y-auto {compact
-			? 'px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+			? 'px-3 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
 			: expanded
 				? 'px-10 py-6'
-				: 'px-5 py-6'}"
+				: 'px-5 py-4'}"
+		style="mask-image: linear-gradient(to bottom, transparent 0%, black 6%, black 94%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 6%, black 94%, transparent 100%);"
 	>
 		{#if loading}
 			<div class="space-y-3">
@@ -511,8 +512,8 @@
 				{/each}
 			</div>
 		{:else if lyrics && lyrics.synced}
-			<!-- Padding lets the first/last lines center-scroll. -->
-			<div class="py-[35vh] {expanded ? 'mx-auto max-w-3xl' : ''}">
+			<!-- BetterLyrics-style dynamic vertical spacing: tight padding on sidebar/compact, expansive on fullscreen -->
+			<div class="{compact ? 'py-4' : expanded ? 'py-[25vh] mx-auto max-w-3xl' : 'py-8'}">
 				{#each lyrics.lines as line, i (i)}
 					{@const timing = lineTimings[i]}
 					{@const isActive = activeIndices.includes(i)}
@@ -583,11 +584,11 @@
 		{:else if lyrics}
 			<div
 				style="font-family: var(--font-lyrics, var(--font-heading, inherit));"
-				class="py-10 space-y-3 leading-relaxed text-foreground/90 {expanded
-					? 'mx-auto max-w-3xl text-2xl py-20 space-y-5 font-bold'
+				class="space-y-3 leading-relaxed text-foreground/90 {expanded
+					? 'mx-auto max-w-3xl text-2xl py-12 space-y-5 font-bold'
 					: compact
-						? 'text-xs'
-						: 'text-[16px] font-semibold'}"
+						? 'text-xs py-2'
+						: 'text-[16px] py-4 font-semibold'}"
 			>
 				{#each lyrics.lines as line, i (i)}
 					{#if line.text}

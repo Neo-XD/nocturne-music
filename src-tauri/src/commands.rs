@@ -1501,6 +1501,18 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v083_note = ReleaseNote {
+        version: "0.8.3".to_string(),
+        date: "2026-09-15".to_string(),
+        body: r#"### Nocturne Music v0.8.3
+
+- **Spotify Account Linking (psst-style Direct Authentication)**: Direct Spotify account linking support using persistent `sp_dc` cookie auth. Link and view your Spotify profile, sync library, and connect your Spotify streaming identity without extra developer apps.
+- **Audio Quality Indicator**: Added configurable audio quality indicator badge below artist info in the bottom PlayerBar with customizable toggle in Settings.
+- **Clean Cross-Platform Handoff (Nocturne Sync)**: Seamless Spotify-Connect-style audio handoffs between Desktop and Mobile with instant timestamp and track state transfer.
+- **Listen Together Decoupling**: Fully decoupled Listen Together shared sessions and Nocturne Sync audio routing, allowing concurrent shared room listening and custom audio output target control.
+- **Refined MiniPlayer**: Streamlined miniplayer layout keeping dedicated shuffle and essential playback controls."#.to_string(),
+    };
+
     let v082_note = ReleaseNote {
         version: "0.8.2".to_string(),
         date: "2026-09-13".to_string(),
@@ -1699,7 +1711,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note,
+        v083_note, v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note,
         v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
 
@@ -1707,6 +1719,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "0.8.3".to_string(),
             "0.8.2".to_string(),
             "0.8.1".to_string(),
             "0.8".to_string(),
@@ -1818,6 +1831,411 @@ pub async fn lastfm_disconnect(state: St<'_>) -> Result<(), String> {
 pub async fn lastfm_status(state: St<'_>) -> Result<serde_json::Value, String> {
     Ok(crate::lastfm::status(&state))
 }
+
+// --- Spotify account linking (psst-style) ----------------------------------------------------
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SpotifyAccountStatus {
+    pub linked: bool,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub product: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[tauri::command]
+pub async fn spotify_link(state: St<'_>, sp_dc: String) -> Result<SpotifyAccountStatus, String> {
+    let clean_sp_dc = sp_dc.trim().to_string();
+    if clean_sp_dc.is_empty() {
+        return Err("sp_dc cookie cannot be empty".to_string());
+    }
+
+    let client = crate::http::client();
+    let token_res = client
+        .get("https://open.spotify.com/get_access_token?reason=transport&productType=web_player")
+        .header("Cookie", format!("sp_dc={clean_sp_dc}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to Spotify: {e}"))?;
+
+    if !token_res.status().is_success() {
+        return Err("Invalid sp_dc cookie or Spotify token request failed".to_string());
+    }
+
+    let token_json: serde_json::Value = token_res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Spotify token response: {e}"))?;
+
+    let access_token = token_json["accessToken"]
+        .as_str()
+        .or_else(|| token_json["token"].as_str())
+        .ok_or_else(|| "Could not extract access token from Spotify response".to_string())?;
+
+    let me_res = client
+        .get("https://api.spotify.com/v1/me")
+        .header("Authorization", format!("Bearer {access_token}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Spotify profile: {e}"))?;
+
+    let (username, display_name, product, avatar_url) = if me_res.status().is_success() {
+        let me_json: serde_json::Value = me_res.json().await.unwrap_or_default();
+        let user_id = me_json["id"].as_str().map(|s| s.to_string());
+        let name = me_json["display_name"].as_str().map(|s| s.to_string());
+        let prod = me_json["product"].as_str().map(|s| s.to_string());
+        let avatar = me_json["images"]
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|img| img["url"].as_str())
+            .map(|s| s.to_string());
+        (user_id, name, prod, avatar)
+    } else {
+        (Some("Spotify User".to_string()), Some("Spotify User".to_string()), None, None)
+    };
+
+    let _ = state.db.set_setting("spotify_sp_dc", &clean_sp_dc);
+    let _ = state.db.set_setting("spotify_user", &username.clone().unwrap_or_default());
+    let _ = state.db.set_setting("spotify_display_name", &display_name.clone().unwrap_or_default());
+    if let Some(ref av) = avatar_url {
+        let _ = state.db.set_setting("spotify_avatar", av);
+    }
+    if let Some(ref pr) = product {
+        let _ = state.db.set_setting("spotify_product", pr);
+    }
+
+    Ok(SpotifyAccountStatus {
+        linked: true,
+        username,
+        display_name,
+        product,
+        avatar_url,
+    })
+}
+
+#[tauri::command]
+pub async fn spotify_status(state: St<'_>) -> Result<SpotifyAccountStatus, String> {
+    let sp_dc = state.db.get_setting("spotify_sp_dc");
+    if let Some(cookie) = sp_dc {
+        if !cookie.trim().is_empty() {
+            return Ok(SpotifyAccountStatus {
+                linked: true,
+                username: state.db.get_setting("spotify_user"),
+                display_name: state.db.get_setting("spotify_display_name"),
+                product: state.db.get_setting("spotify_product"),
+                avatar_url: state.db.get_setting("spotify_avatar"),
+            });
+        }
+    }
+    Ok(SpotifyAccountStatus {
+        linked: false,
+        username: None,
+        display_name: None,
+        product: None,
+        avatar_url: None,
+    })
+}
+
+#[tauri::command]
+pub async fn spotify_unlink(state: St<'_>) -> Result<(), String> {
+    let _ = state.db.set_setting("spotify_sp_dc", "");
+    let _ = state.db.set_setting("spotify_user", "");
+    let _ = state.db.set_setting("spotify_display_name", "");
+    let _ = state.db.set_setting("spotify_avatar", "");
+    let _ = state.db.set_setting("spotify_product", "");
+    Ok(())
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SpotifyPlaylistSummary {
+    pub id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub thumbnail: Option<String>,
+    pub track_count: Option<u32>,
+    pub url: String,
+}
+
+async fn get_spotify_token(state: &AppState) -> Result<String, String> {
+    let cookie = state.db.get_setting("spotify_sp_dc").unwrap_or_default();
+    let clean = cookie.trim();
+    if clean.is_empty() {
+        return Err("Spotify account is not linked. Please link via sp_dc cookie.".to_string());
+    }
+    let client = crate::http::client();
+    let token_res = client
+        .get("https://open.spotify.com/get_access_token?reason=transport&productType=web_player")
+        .header("Cookie", format!("sp_dc={clean}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Spotify token network error: {e}"))?;
+
+    if !token_res.status().is_success() {
+        return Err("Spotify token request rejected. Your sp_dc cookie may be expired.".to_string());
+    }
+
+    let token_json: serde_json::Value = token_res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Spotify token response: {e}"))?;
+
+    let access_token = token_json["accessToken"]
+        .as_str()
+        .or_else(|| token_json["token"].as_str())
+        .ok_or_else(|| "Could not extract access token from Spotify response".to_string())?;
+
+    Ok(access_token.to_string())
+}
+
+#[tauri::command]
+pub async fn spotify_get_playlists(state: St<'_>) -> Result<Vec<SpotifyPlaylistSummary>, String> {
+    let token = get_spotify_token(&state).await?;
+    let client = crate::http::client();
+    let res = client
+        .get("https://api.spotify.com/v1/me/playlists?limit=50")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Spotify playlists: {e}"))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Spotify API returned status {}", res.status()));
+    }
+
+    let json: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Spotify playlists: {e}"))?;
+
+    let mut playlists = Vec::new();
+    if let Some(items) = json["items"].as_array() {
+        for item in items {
+            let id = match item["id"].as_str() {
+                Some(id) if !id.is_empty() => id.to_string(),
+                _ => continue,
+            };
+            let title = item["name"].as_str().unwrap_or("Untitled Playlist").to_string();
+            let track_count = item["tracks"]["total"].as_u64().map(|c| c as u32);
+            let owner = item["owner"]["display_name"].as_str().unwrap_or("Spotify");
+            let subtitle = Some(format!("{} tracks • {}", track_count.unwrap_or(0), owner));
+            let thumbnail = item["images"]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|img| img["url"].as_str())
+                .map(|u| u.to_string());
+            let url = item["external_urls"]["spotify"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+
+            playlists.push(SpotifyPlaylistSummary {
+                id,
+                title,
+                subtitle,
+                thumbnail,
+                track_count,
+                url,
+            });
+        }
+    }
+
+    Ok(playlists)
+}
+
+#[tauri::command]
+pub async fn spotify_transfer_to_ytm(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    spotify_playlist_id: String,
+) -> Result<String, String> {
+    let token = get_spotify_token(&state).await?;
+    let client = crate::http::client();
+
+    let pl_res = client
+        .get(format!("https://api.spotify.com/v1/playlists/{spotify_playlist_id}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Spotify playlist details: {e}"))?;
+
+    if !pl_res.status().is_success() {
+        return Err(format!("Spotify returned error {}", pl_res.status()));
+    }
+
+    let pl_json: serde_json::Value = pl_res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse playlist JSON: {e}"))?;
+
+    let title = pl_json["name"].as_str().unwrap_or("Imported Spotify Playlist");
+    let desc = pl_json["description"].as_str().unwrap_or("Transferred from Spotify to Nocturne / YouTube Music");
+
+    let ytm_client = require_login(&state)?;
+    let new_ytm_playlist_id = state
+        .it
+        .create_playlist(ytm_client, &format!("{} (Spotify)", title), Some(desc), Some("PRIVATE"))
+        .await
+        .map_err(|e| format!("Failed to create playlist on YouTube Music: {e}"))?;
+
+    let mut added_count = 0;
+    if let Some(items) = pl_json["tracks"]["items"].as_array() {
+        for track_item in items {
+            let track = &track_item["track"];
+            let name = track["name"].as_str().unwrap_or_default();
+            let artist = track["artists"]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|a| a["name"].as_str())
+                .unwrap_or_default();
+
+            if name.is_empty() {
+                continue;
+            }
+
+            let search_query = format!("{name} {artist}");
+            if let Ok(results) = state.it.search_songs(ytm_client, &search_query).await {
+                if let Some(first) = results.items.first() {
+                    let _ = state.it.playlist_add(ytm_client, &new_ytm_playlist_id, &first.video_id).await;
+                    state.db.add_playlist_track(&new_ytm_playlist_id, &first.video_id);
+                    added_count += 1;
+                }
+            }
+        }
+    }
+
+    let _ = app.emit("library-changed", ());
+    Ok(format!("Successfully created \"{} (Spotify)\" with {} tracks transferred!", title, added_count))
+}
+
+#[tauri::command]
+pub async fn ytm_transfer_to_spotify(
+    state: St<'_>,
+    ytm_playlist_id: String,
+) -> Result<String, String> {
+    let token = get_spotify_token(&state).await?;
+    let http_client = crate::http::client();
+    let ytm_client = metadata_client(&state)?;
+
+    let page = state
+        .it
+        .playlist(ytm_client, &ytm_playlist_id, None)
+        .await
+        .map_err(|e| format!("Failed to fetch YouTube Music playlist: {e}"))?;
+
+    let title = page.title.as_deref().unwrap_or("Playlist");
+
+    let me_res = http_client
+        .get("https://api.spotify.com/v1/me")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get Spotify profile: {e}"))?;
+
+    let me_json: serde_json::Value = me_res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse profile: {e}"))?;
+
+    let user_id = me_json["id"].as_str().ok_or("Could not read Spotify user ID")?;
+
+    let create_body = serde_json::json!({
+        "name": format!("{} (YTM)", title),
+        "description": "Transferred from YouTube Music to Spotify via Nocturne",
+        "public": false
+    });
+
+    let create_res = http_client
+        .post(format!("https://api.spotify.com/v1/users/{user_id}/playlists"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/json")
+        .json(&create_body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create playlist on Spotify: {e}"))?;
+
+    if !create_res.status().is_success() {
+        return Err(format!("Spotify create playlist failed with status {}", create_res.status()));
+    }
+
+    let created_json: serde_json::Value = create_res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse created Spotify playlist: {e}"))?;
+
+    let spotify_pl_id = created_json["id"].as_str().ok_or("Missing created playlist id")?;
+
+    let mut uris = Vec::new();
+    for track in &page.items {
+        let query = format!("{} {}", track.title, track.artists);
+
+        let search_res = http_client
+            .get("https://api.spotify.com/v1/search")
+            .query(&[("q", query.as_str()), ("type", "track"), ("limit", "1")])
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await;
+
+        if let Ok(s_res) = search_res {
+            if let Ok(s_json) = s_res.json::<serde_json::Value>().await {
+                if let Some(uri) = s_json["tracks"]["items"].as_array().and_then(|a| a.first()).and_then(|t| t["uri"].as_str()) {
+                    uris.push(uri.to_string());
+                }
+            }
+        }
+
+        if uris.len() >= 100 {
+            let add_body = serde_json::json!({ "uris": uris });
+            let _ = http_client
+                .post(format!("https://api.spotify.com/v1/playlists/{spotify_pl_id}/tracks"))
+                .header("Authorization", format!("Bearer {token}"))
+                .json(&add_body)
+                .send()
+                .await;
+            uris.clear();
+        }
+    }
+
+    if !uris.is_empty() {
+        let add_body = serde_json::json!({ "uris": uris });
+        let _ = http_client
+            .post(format!("https://api.spotify.com/v1/playlists/{spotify_pl_id}/tracks"))
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&add_body)
+            .send()
+            .await;
+    }
+
+    Ok(format!("Successfully transferred \"{}\" to Spotify!", title))
+}
+
+#[tauri::command]
+pub async fn spotify_get_sync_mode(state: St<'_>) -> Result<String, String> {
+    let mode = state.db.get_setting("spotify_playlist_sync_mode").unwrap_or_else(|| "seperate".to_string());
+    if mode.is_empty() {
+        Ok("seperate".to_string())
+    } else {
+        Ok(mode)
+    }
+}
+
+#[tauri::command]
+pub async fn spotify_set_sync_mode(app: tauri::AppHandle, state: St<'_>, mode: String) -> Result<(), String> {
+    let valid_mode = match mode.as_str() {
+        "sync" => "sync",
+        "transfer" => "transfer",
+        _ => "seperate",
+    };
+    let _ = state.db.set_setting("spotify_playlist_sync_mode", valid_mode);
+    let _ = app.emit("spotify-sync-mode-changed", valid_mode);
+    Ok(())
+}
+
 
 // --- Song downloader ------------------------------------------------------------------------
 
