@@ -592,6 +592,8 @@ pub fn run() {
             commands::get_audio_devices,
             commands::set_audio_device,
             commands::get_desktop_environment,
+            commands::spotify_start_dev_auth,
+            commands::spotify_complete_dev_auth,
             commands::spotify_link,
             commands::spotify_status,
             commands::spotify_unlink,

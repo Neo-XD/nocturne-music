@@ -913,12 +913,22 @@ export interface SpotifyAccountStatus {
 	display_name?: string | null;
 	product?: string | null;
 	avatar_url?: string | null;
+	auth_type?: string | null;
 }
 
+export const spotifyStartDevAuth = (clientId: string, clientSecret: string) =>
+	invoke<string>('spotify_start_dev_auth', { clientId, clientSecret });
+export const spotifyCompleteDevAuth = (
+	clientId: string,
+	clientSecret: string,
+	codeOrUrl: string
+) => invoke<SpotifyAccountStatus>('spotify_complete_dev_auth', { clientId, clientSecret, codeOrUrl });
 export const spotifyLink = (spDc: string) =>
 	invoke<SpotifyAccountStatus>('spotify_link', { spDc });
 export const spotifyStatus = () => invoke<SpotifyAccountStatus>('spotify_status');
 export const spotifyUnlink = () => invoke<void>('spotify_unlink');
+export const onSpotifyLinked = (cb: (status: SpotifyAccountStatus) => void) =>
+	listen<SpotifyAccountStatus>('spotify-linked', (e) => cb(e.payload));
 
 export interface SpotifyPlaylistSummary {
 	id: string;

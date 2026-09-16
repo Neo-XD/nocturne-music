@@ -1832,7 +1832,7 @@ pub async fn lastfm_status(state: St<'_>) -> Result<serde_json::Value, String> {
     Ok(crate::lastfm::status(&state))
 }
 
-// --- Spotify account linking (psst-style) ----------------------------------------------------
+// --- Spotify account linking (Developer API & psst-style) -----------------------------------
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SpotifyAccountStatus {
@@ -1841,6 +1841,250 @@ pub struct SpotifyAccountStatus {
     pub display_name: Option<String>,
     pub product: Option<String>,
     pub avatar_url: Option<String>,
+    pub auth_type: Option<String>,
+}
+
+fn extract_code_from_query(req: &str) -> Option<String> {
+    let line = req.lines().next()?;
+    let path = line.split_whitespace().nth(1)?;
+    let query = path.split_once('?')?;
+    for pair in query.1.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == "code" {
+                return Some(urlencoding::decode(v).unwrap_or_else(|_| v.into()).to_string());
+            }
+        }
+    }
+    None
+}
+
+async fn exchange_spotify_code(
+    client_id: &str,
+    client_secret: &str,
+    code: &str,
+    redirect_uri: &str,
+) -> Result<(String, String, u64), String> {
+    let client = crate::http::client();
+    let params =
+        [("grant_type", "authorization_code"), ("code", code), ("redirect_uri", redirect_uri)];
+
+    let res = client
+        .post("https://accounts.spotify.com/api/token")
+        .basic_auth(client_id, Some(client_secret))
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("Network error exchanging Spotify code: {e}"))?;
+
+    if !res.status().is_success() {
+        let err_body = res.text().await.unwrap_or_default();
+        return Err(format!("Spotify token exchange failed: {err_body}"));
+    }
+
+    let json: serde_json::Value =
+        res.json().await.map_err(|e| format!("Failed to parse token response: {e}"))?;
+
+    let access_token = json["access_token"]
+        .as_str()
+        .ok_or_else(|| "Missing access_token in Spotify response".to_string())?
+        .to_string();
+
+    let refresh_token = json["refresh_token"]
+        .as_str()
+        .ok_or_else(|| "Missing refresh_token in Spotify response".to_string())?
+        .to_string();
+
+    let expires_in = json["expires_in"].as_u64().unwrap_or(3600);
+
+    Ok((access_token, refresh_token, expires_in))
+}
+
+async fn fetch_and_save_spotify_profile(
+    state: &AppState,
+    access_token: &str,
+    refresh_token: &str,
+    expires_in: u64,
+    client_id: &str,
+    client_secret: &str,
+) -> Result<SpotifyAccountStatus, String> {
+    let client = crate::http::client();
+    let me_res = client
+        .get("https://api.spotify.com/v1/me")
+        .header("Authorization", format!("Bearer {access_token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Spotify profile: {e}"))?;
+
+    let (username, display_name, product, avatar_url) = if me_res.status().is_success() {
+        let me_json: serde_json::Value = me_res.json().await.unwrap_or_default();
+        let user_id = me_json["id"].as_str().map(|s| s.to_string());
+        let name = me_json["display_name"].as_str().map(|s| s.to_string());
+        let prod = me_json["product"].as_str().map(|s| s.to_string());
+        let avatar = me_json["images"]
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|img| img["url"].as_str())
+            .map(|s| s.to_string());
+        (user_id, name, prod, avatar)
+    } else {
+        (Some("Spotify User".to_string()), Some("Spotify User".to_string()), None, None)
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let _ = state.db.set_setting("spotify_auth_type", "dev_api");
+    let _ = state.db.set_setting("spotify_client_id", client_id);
+    let _ = state.db.set_setting("spotify_client_secret", client_secret);
+    let _ = state.db.set_setting("spotify_access_token", access_token);
+    let _ = state.db.set_setting("spotify_refresh_token", refresh_token);
+    let _ = state.db.set_setting("spotify_token_expires_at", &(now + expires_in).to_string());
+    let _ = state.db.set_setting("spotify_user", &username.clone().unwrap_or_default());
+    let _ = state.db.set_setting("spotify_display_name", &display_name.clone().unwrap_or_default());
+    if let Some(ref av) = avatar_url {
+        let _ = state.db.set_setting("spotify_avatar", av);
+    }
+    if let Some(ref pr) = product {
+        let _ = state.db.set_setting("spotify_product", pr);
+    }
+
+    Ok(SpotifyAccountStatus {
+        linked: true,
+        username,
+        display_name,
+        product,
+        avatar_url,
+        auth_type: Some("dev_api".to_string()),
+    })
+}
+
+#[tauri::command]
+pub async fn spotify_start_dev_auth(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    client_id: String,
+    client_secret: String,
+) -> Result<String, String> {
+    let clean_id = client_id.trim().to_string();
+    let clean_secret = client_secret.trim().to_string();
+    if clean_id.is_empty() || clean_secret.is_empty() {
+        return Err("Client ID and Client Secret cannot be empty".to_string());
+    }
+
+    let redirect_uri = "http://127.0.0.1:8888/callback";
+    let scopes = "user-read-private user-read-email playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private";
+    let auth_url = format!(
+        "https://accounts.spotify.com/authorize?client_id={}&response_type=code&redirect_uri={}&scope={}&show_dialog=true",
+        urlencoding::encode(&clean_id),
+        urlencoding::encode(redirect_uri),
+        urlencoding::encode(scopes)
+    );
+
+    let _ = state.db.set_setting("spotify_pending_client_id", &clean_id);
+    let _ = state.db.set_setting("spotify_pending_client_secret", &clean_secret);
+
+    let cid = clean_id.clone();
+    let csec = clean_secret.clone();
+    let app_clone = app.clone();
+    let state_clone = state.inner().clone();
+
+    tokio::spawn(async move {
+        let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8888").await else {
+            tracing::warn!("Could not bind to 127.0.0.1:8888 for Spotify OAuth callback");
+            return;
+        };
+
+        if let Ok(Ok((mut stream, _))) =
+            tokio::time::timeout(std::time::Duration::from_secs(300), listener.accept()).await
+        {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+
+            if let Some(code) = extract_code_from_query(&req) {
+                let html = "<!DOCTYPE html><html><body style=\"font-family:system-ui,-apple-system,sans-serif;background:#0d0d11;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\"><div style=\"text-align:center;padding:2.5rem;background:#18181f;border-radius:16px;border:1px solid rgba(255,255,255,0.1);max-width:400px;\"><div style=\"font-size:44px;margin-bottom:12px;\">✨</div><h1 style=\"color:#1ed760;margin:0 0 8px 0;font-size:22px;\">Linked with Nocturne!</h1><p style=\"color:#a1a1aa;margin:0;font-size:14px;line-height:1.5;\">Spotify authorization succeeded. You can safely close this tab and head back to Nocturne.</p></div></body></html>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    html.len(),
+                    html
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+                let _ = stream.flush().await;
+
+                if let Ok((access_token, refresh_token, expires_in)) =
+                    exchange_spotify_code(&cid, &csec, &code, redirect_uri).await
+                {
+                    if let Ok(status) = fetch_and_save_spotify_profile(
+                        &state_clone,
+                        &access_token,
+                        &refresh_token,
+                        expires_in,
+                        &cid,
+                        &csec,
+                    )
+                    .await
+                    {
+                        let _ = app_clone.emit("spotify-linked", status);
+                    }
+                }
+            } else {
+                let html = "<!DOCTYPE html><html><body style=\"background:#0d0d11;color:#fff;padding:2rem;\"><h2>Authorization failed or cancelled</h2></body></html>";
+                let resp = format!(
+                    "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    html.len(),
+                    html
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+                let _ = stream.flush().await;
+            }
+        }
+    });
+
+    let _ = crate::lastfm::open_browser(&auth_url);
+    Ok(auth_url)
+}
+
+#[tauri::command]
+pub async fn spotify_complete_dev_auth(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    client_id: String,
+    client_secret: String,
+    code_or_url: String,
+) -> Result<SpotifyAccountStatus, String> {
+    let clean_id = client_id.trim().to_string();
+    let clean_secret = client_secret.trim().to_string();
+    let input = code_or_url.trim();
+
+    if clean_id.is_empty() || clean_secret.is_empty() {
+        return Err("Client ID and Client Secret cannot be empty".to_string());
+    }
+
+    let code = if input.contains("code=") {
+        input.split("code=").nth(1).and_then(|c| c.split('&').next()).unwrap_or(input)
+    } else {
+        input
+    };
+
+    let redirect_uri = "http://127.0.0.1:8888/callback";
+    let (access_token, refresh_token, expires_in) =
+        exchange_spotify_code(&clean_id, &clean_secret, code, redirect_uri).await?;
+
+    let status = fetch_and_save_spotify_profile(
+        &state,
+        &access_token,
+        &refresh_token,
+        expires_in,
+        &clean_id,
+        &clean_secret,
+    )
+    .await?;
+
+    let _ = app.emit("spotify-linked", status.clone());
+    Ok(status)
 }
 
 #[tauri::command]
@@ -1896,6 +2140,7 @@ pub async fn spotify_link(state: St<'_>, sp_dc: String) -> Result<SpotifyAccount
         (Some("Spotify User".to_string()), Some("Spotify User".to_string()), None, None)
     };
 
+    let _ = state.db.set_setting("spotify_auth_type", "sp_dc");
     let _ = state.db.set_setting("spotify_sp_dc", &clean_sp_dc);
     let _ = state.db.set_setting("spotify_user", &username.clone().unwrap_or_default());
     let _ = state.db.set_setting("spotify_display_name", &display_name.clone().unwrap_or_default());
@@ -1906,34 +2151,62 @@ pub async fn spotify_link(state: St<'_>, sp_dc: String) -> Result<SpotifyAccount
         let _ = state.db.set_setting("spotify_product", pr);
     }
 
-    Ok(SpotifyAccountStatus { linked: true, username, display_name, product, avatar_url })
+    Ok(SpotifyAccountStatus {
+        linked: true,
+        username,
+        display_name,
+        product,
+        avatar_url,
+        auth_type: Some("sp_dc".to_string()),
+    })
 }
 
 #[tauri::command]
 pub async fn spotify_status(state: St<'_>) -> Result<SpotifyAccountStatus, String> {
+    let auth_type = state.db.get_setting("spotify_auth_type");
+    let is_dev_linked = auth_type.as_deref() == Some("dev_api")
+        && state
+            .db
+            .get_setting("spotify_refresh_token")
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
     let sp_dc = state.db.get_setting("spotify_sp_dc");
-    if let Some(cookie) = sp_dc {
-        if !cookie.trim().is_empty() {
-            return Ok(SpotifyAccountStatus {
-                linked: true,
-                username: state.db.get_setting("spotify_user"),
-                display_name: state.db.get_setting("spotify_display_name"),
-                product: state.db.get_setting("spotify_product"),
-                avatar_url: state.db.get_setting("spotify_avatar"),
-            });
-        }
+    let is_sp_dc_linked = sp_dc.map(|s| !s.trim().is_empty()).unwrap_or(false);
+
+    if is_dev_linked || is_sp_dc_linked {
+        return Ok(SpotifyAccountStatus {
+            linked: true,
+            username: state.db.get_setting("spotify_user"),
+            display_name: state.db.get_setting("spotify_display_name"),
+            product: state.db.get_setting("spotify_product"),
+            avatar_url: state.db.get_setting("spotify_avatar"),
+            auth_type: if is_dev_linked {
+                Some("dev_api".to_string())
+            } else {
+                Some("sp_dc".to_string())
+            },
+        });
     }
+
     Ok(SpotifyAccountStatus {
         linked: false,
         username: None,
         display_name: None,
         product: None,
         avatar_url: None,
+        auth_type: None,
     })
 }
 
 #[tauri::command]
 pub async fn spotify_unlink(state: St<'_>) -> Result<(), String> {
+    let _ = state.db.set_setting("spotify_auth_type", "");
+    let _ = state.db.set_setting("spotify_client_id", "");
+    let _ = state.db.set_setting("spotify_client_secret", "");
+    let _ = state.db.set_setting("spotify_access_token", "");
+    let _ = state.db.set_setting("spotify_refresh_token", "");
+    let _ = state.db.set_setting("spotify_token_expires_at", "");
     let _ = state.db.set_setting("spotify_sp_dc", "");
     let _ = state.db.set_setting("spotify_user", "");
     let _ = state.db.set_setting("spotify_display_name", "");
@@ -1953,10 +2226,75 @@ pub struct SpotifyPlaylistSummary {
 }
 
 async fn get_spotify_token(state: &AppState) -> Result<String, String> {
+    let auth_type = state.db.get_setting("spotify_auth_type").unwrap_or_default();
+    if auth_type == "dev_api" {
+        let access_token = state.db.get_setting("spotify_access_token").unwrap_or_default();
+        let expires_at: u64 = state
+            .db
+            .get_setting("spotify_token_expires_at")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        if !access_token.is_empty() && expires_at > now + 60 {
+            return Ok(access_token);
+        }
+
+        let client_id = state.db.get_setting("spotify_client_id").unwrap_or_default();
+        let client_secret = state.db.get_setting("spotify_client_secret").unwrap_or_default();
+        let refresh_token = state.db.get_setting("spotify_refresh_token").unwrap_or_default();
+
+        if refresh_token.is_empty() || client_id.is_empty() || client_secret.is_empty() {
+            return Err(
+                "Spotify Developer credentials missing or expired. Please re-link in profile."
+                    .to_string(),
+            );
+        }
+
+        let client = crate::http::client();
+        let params = [("grant_type", "refresh_token"), ("refresh_token", refresh_token.as_str())];
+
+        let res = client
+            .post("https://accounts.spotify.com/api/token")
+            .basic_auth(&client_id, Some(&client_secret))
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| format!("Network error refreshing Spotify token: {e}"))?;
+
+        if !res.status().is_success() {
+            let err_txt = res.text().await.unwrap_or_default();
+            return Err(format!("Spotify token refresh failed: {err_txt}"));
+        }
+
+        let json: serde_json::Value =
+            res.json().await.map_err(|e| format!("Failed to parse token response: {e}"))?;
+        let new_access = json["access_token"]
+            .as_str()
+            .ok_or("Missing access_token in refresh response")?
+            .to_string();
+        let expires_in = json["expires_in"].as_u64().unwrap_or(3600);
+
+        let _ = state.db.set_setting("spotify_access_token", &new_access);
+        let _ = state.db.set_setting("spotify_token_expires_at", &(now + expires_in).to_string());
+        if let Some(new_refresh) = json["refresh_token"].as_str() {
+            let _ = state.db.set_setting("spotify_refresh_token", new_refresh);
+        }
+
+        return Ok(new_access);
+    }
+
     let cookie = state.db.get_setting("spotify_sp_dc").unwrap_or_default();
     let clean = cookie.trim();
     if clean.is_empty() {
-        return Err("Spotify account is not linked. Please link via sp_dc cookie.".to_string());
+        return Err(
+            "Spotify account is not linked. Please connect via Spotify Developer App or sp_dc."
+                .to_string(),
+        );
     }
     let client = crate::http::client();
     let token_res = client
