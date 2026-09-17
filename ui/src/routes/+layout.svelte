@@ -342,6 +342,7 @@
 			videoId={request.videoId}
 			initialTitle={request.initialTitle}
 			initialArtist={request.initialArtist}
+			album={request.album}
 			duration={request.duration}
 		/>
 	{/if}

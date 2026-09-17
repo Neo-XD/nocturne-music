@@ -47,10 +47,13 @@
 	function openSelector() {
 		const now = playback.now;
 		if (!now) return;
+		const queueItem = playback.queue.items[playback.queue.currentIndex];
+		const album = queueItem?.video_id === now.videoId ? queueItem.album : undefined;
 		openLyricSelector({
 			videoId: now.videoId,
 			initialTitle: now.title,
 			initialArtist: now.artists,
+			album,
 			duration: durationSecs(now.duration)
 		});
 	}

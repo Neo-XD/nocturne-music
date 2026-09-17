@@ -859,6 +859,7 @@ export interface LyricCandidate {
 export const searchLyricsCandidates = (args: {
 	title: string;
 	artist: string;
+	album?: string;
 	duration?: number;
 	videoId?: string;
 }) => invoke<LyricCandidate[]>('search_lyrics_candidates', args);

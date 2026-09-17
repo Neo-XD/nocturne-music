@@ -2,6 +2,7 @@ export interface LyricSelectorRequest {
 	videoId: string;
 	initialTitle: string;
 	initialArtist: string;
+	album?: string;
 	duration?: number;
 }
 

@@ -75,6 +75,21 @@
 	let advancedOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
 
+	/** "3:21" / "1:02:03" → seconds. */
+	function durationSecs(duration?: string): number | undefined {
+		if (!duration) return undefined;
+		const parts = duration.split(':');
+		if (
+			(parts.length !== 2 && parts.length !== 3) ||
+			parts.some((part) => !/^\d+$/.test(part))
+		) {
+			return undefined;
+		}
+		const values = parts.map(Number);
+		if (values.slice(1).some((part) => part >= 60)) return undefined;
+		return values.reduce((total, part) => total * 60 + part, 0);
+	}
+
 	async function startDownload() {
 		try {
 			toast.info(`Downloading "${song.title}"...`);
@@ -288,7 +303,9 @@
 						openLyricSelector({
 							videoId: song.video_id,
 							initialTitle: song.title,
-							initialArtist: song.artists
+							initialArtist: song.artists,
+							album: song.album,
+							duration: durationSecs(song.duration)
 						})
 					)}
 			>

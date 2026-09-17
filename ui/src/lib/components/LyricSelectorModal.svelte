@@ -8,12 +8,14 @@
 		videoId,
 		initialTitle = '',
 		initialArtist = '',
+		album,
 		duration
 	}: {
 		open: boolean;
 		videoId: string;
 		initialTitle?: string;
 		initialArtist?: string;
+		album?: string;
 		duration?: number;
 	} = $props();
 
@@ -69,6 +71,9 @@
 
 	async function search(title: string, artist: string) {
 		const generation = ++searchGeneration;
+		const requestAlbum = album;
+		const requestDuration = duration;
+		const requestVideoId = videoId;
 		candidates = [];
 		selectedCandidate = null;
 		if (!title && !artist) {
@@ -80,8 +85,9 @@
 			const res = await api.searchLyricsCandidates({
 				title,
 				artist,
-				duration,
-				videoId
+				album: requestAlbum,
+				duration: requestDuration,
+				videoId: requestVideoId
 			});
 			if (generation !== searchGeneration) return;
 			candidates = res;
