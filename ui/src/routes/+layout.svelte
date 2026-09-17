@@ -108,6 +108,14 @@
 	const devicesOpen = $derived(activeRightSidebar === 'devices');
 	const npSidebarOpen = $derived(activeRightSidebar === 'np' && !np.open);
 
+	// Tabbed Now Playing owns Queue and Lyrics. Clear the external panel's source of truth so it
+	// cannot render alongside the matching tab or reappear when Now Playing closes.
+	$effect.pre(() => {
+		if (tabbed && (activeRightSidebar === 'queue' || activeRightSidebar === 'lyrics')) {
+			activeRightSidebar = null;
+		}
+	});
+
 	$effect(() => {
 		if (np.sidebarOpen && activeRightSidebar === null && !np.open) {
 			activeRightSidebar = 'np';
