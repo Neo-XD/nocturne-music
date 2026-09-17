@@ -1214,6 +1214,12 @@ pub struct LyricCandidate {
     pub lyrics: Lyrics,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LyricsUpdatedEvent {
+    pub video_id: String,
+    pub lyrics: Lyrics,
+}
+
 pub async fn search_all_lyrics(
     state: &AppState,
     title: String,
@@ -1372,7 +1378,8 @@ pub async fn search_all_lyrics(
 pub fn apply_selected_lyrics(state: &AppState, video_id: String, lyrics: Lyrics) {
     if let Ok(json) = serde_json::to_string(&lyrics) {
         state.db.put_lyrics(&video_id, Some(&json), now_secs());
-        let _ = state.app.emit("lyrics-updated", &lyrics);
+        let payload = LyricsUpdatedEvent { video_id, lyrics };
+        let _ = state.app.emit("lyrics-updated", &payload);
     }
 }
 
@@ -1914,6 +1921,30 @@ mod tests {
         assert_eq!(value.get("duration").and_then(|v| v.as_f64()), Some(123.5));
         assert!(value.get("provider").is_none());
         assert!(value.get("duration_seconds").is_none());
+    }
+
+    #[test]
+    fn lyrics_updated_event_serialization_includes_video_id() {
+        let event = LyricsUpdatedEvent {
+            video_id: "test-video".into(),
+            lyrics: Lyrics {
+                source: "Test Provider".into(),
+                synced: false,
+                instrumental: false,
+                lines: vec![LyricLine::simple(None, "Test line".into())],
+            },
+        };
+
+        let value = serde_json::to_value(event).unwrap();
+        assert_eq!(value.get("video_id").and_then(|v| v.as_str()), Some("test-video"));
+        assert_eq!(
+            value
+                .get("lyrics")
+                .and_then(|lyrics| lyrics.get("source"))
+                .and_then(|source| source.as_str()),
+            Some("Test Provider")
+        );
+        assert!(value.get("videoId").is_none());
     }
 
     #[test]

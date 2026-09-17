@@ -8,15 +8,13 @@
 		videoId,
 		initialTitle = '',
 		initialArtist = '',
-		duration,
-		onApplied
+		duration
 	}: {
 		open: boolean;
 		videoId: string;
 		initialTitle?: string;
 		initialArtist?: string;
 		duration?: number;
-		onApplied?: (lyrics: api.Lyrics) => void;
 	} = $props();
 
 	let titleQuery = $state('');
@@ -108,7 +106,6 @@
 				lyrics: candidate.lyrics
 			});
 			toast.success(`Lyrics applied from ${candidate.source}`);
-			onApplied?.(candidate.lyrics);
 			closeModal();
 		} catch (e) {
 			toast.error(`Failed to apply lyrics: ${e}`);
@@ -128,7 +125,7 @@
 
 {#if open}
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+		class="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
 		onclick={(e) => {
 			if (e.target === e.currentTarget) closeModal();
 		}}
