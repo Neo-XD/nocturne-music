@@ -82,6 +82,7 @@ function getInitialFloatingMode(): FloatingSidebarMode {
 export type LyricsAnimationStyle =
 	| 'wave'
 	| 'apple'
+	| 'apple_v2'
 	| 'karaoke'
 	| 'glow'
 	| 'slide'
@@ -105,6 +106,11 @@ export const LYRICS_ANIMATION_OPTIONS: LyricsAnimationOption[] = [
 		id: 'apple',
 		label: 'Apple Music',
 		description: 'Smooth cubic word fill, warm white illumination, and subtle letter pop'
+	},
+	{
+		id: 'apple_v2',
+		label: 'Apple Music V2 (Letter by Letter)',
+		description: 'Grapheme-level illumination using real word timing or visual-only line estimates'
 	},
 	{
 		id: 'karaoke',

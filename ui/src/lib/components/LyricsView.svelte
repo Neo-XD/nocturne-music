@@ -8,6 +8,10 @@
 	} from '$lib/player.svelte';
 	import LyricsSyncDock from '$lib/components/LyricsSyncDock.svelte';
 	import { openLyricSelector } from '$lib/lyric-selector.svelte';
+	import {
+		appleV2GraphemeProgress,
+		buildAppleV2LineTiming
+	} from '$lib/lyrics-animation';
 
 	// `expanded` only sizes the type and centres the column. The owner of the extra room (the side
 	// panel, or the now-playing view) decides how much there is. Toggling it must not remount this
@@ -119,9 +123,11 @@
 	// mpv's position arrives ~4x a second. Run a local clock forward from each one so the karaoke
 	// sweep moves every frame instead of stepping four times a second.
 	let interpolatedPosSecs = $state(playback.position);
+	const currentAnimStyle = $derived(prefs.lyricsAnimationStyle || 'wave');
 
 	const needsFrameClock = $derived(
-		!!lyrics?.synced && lyrics.lines.some((l) => (l.words?.length ?? 0) > 0)
+		!!lyrics?.synced &&
+		(currentAnimStyle === 'apple_v2' || lyrics.lines.some((l) => (l.words?.length ?? 0) > 0))
 	);
 
 	$effect(() => {
@@ -170,12 +176,21 @@
 		});
 	});
 
+	// Apple V2 timing is presentation-only and depends only on the loaded lyrics. It is derived
+	// once when lyrics/style change; animation frames only read the precomputed grapheme ranges.
+	const appleV2LineTimings = $derived.by(() => {
+		const loadedLyrics = lyrics;
+		if (currentAnimStyle !== 'apple_v2' || !loadedLyrics?.synced) return [];
+		return loadedLyrics.lines.map((_, index) =>
+			buildAppleV2LineTiming(loadedLyrics.lines, index, true)
+		);
+	});
+
 	// Linger duration based on chosen animation style
-	const currentAnimStyle = $derived(prefs.lyricsAnimationStyle || 'wave');
 	const lingerMs = $derived.by(() => {
 		const s = currentAnimStyle;
 		if (s === 'wave') return 180;
-		if (s === 'apple') return 120;
+		if (s === 'apple' || s === 'apple_v2') return 120;
 		if (s === 'glow') return 200;
 		if (s === 'fade') return 180;
 		if (s === 'slide') return 140;
@@ -349,6 +364,12 @@
 		return (currentMs - word.start_ms) / dur;
 	}
 
+	function getAppleV2GraphemeBackground(progress: number): string {
+		const smooth = progress * progress * (3 - 2 * progress);
+		const pct = Math.min(100, Math.max(0, Math.round(smooth * 100)));
+		return `linear-gradient(90deg, #ffffff 0%, #ffffff ${pct}%, rgba(255,255,255,0.34) ${pct}%, rgba(255,255,255,0.34) 100%)`;
+	}
+
 	function getWordRenderInfo(word: api.LyricWord, currentMs: number, style: LyricsAnimationStyle) {
 		const progress = getWordProgress(word, currentMs);
 		const isCurrent = progress > 0 && progress < 1;
@@ -416,7 +437,7 @@
 	function getLineFallbackClass(isHighlight: boolean, style: LyricsAnimationStyle): string {
 		if (!isHighlight) return '';
 		if (style === 'wave') return 'bg-gradient-to-r from-foreground via-foreground to-primary/85 bg-clip-text text-transparent drop-shadow-[0_0_16px_rgba(var(--color-primary-rgb,99,102,241),0.4)]';
-		if (style === 'apple') return 'text-foreground drop-shadow-[0_0_16px_rgba(255,255,255,0.35)]';
+		if (style === 'apple' || style === 'apple_v2') return 'text-foreground drop-shadow-[0_0_16px_rgba(255,255,255,0.35)]';
 		if (style === 'karaoke') return 'text-primary drop-shadow-[0_0_14px_rgba(var(--color-primary-rgb,99,102,241),0.5)]';
 		if (style === 'glow') return 'text-foreground drop-shadow-[0_0_24px_var(--primary)]';
 		if (style === 'slide') return 'translate-x-2 text-foreground drop-shadow-[0_0_12px_rgba(var(--color-primary-rgb,99,102,241),0.3)]';
@@ -428,7 +449,7 @@
 	function getLineClasses(isHighlight: boolean, isPast: boolean, dist: number, style: LyricsAnimationStyle): string {
 		if (isHighlight) {
 			if (style === 'wave') return 'scale-[1.045] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_18px_rgba(var(--color-primary-rgb,99,102,241),0.35)]';
-			if (style === 'apple') return 'scale-[1.035] -translate-y-0.5 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_20px_rgba(255,255,255,0.35)]';
+			if (style === 'apple' || style === 'apple_v2') return 'scale-[1.035] -translate-y-0.5 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_20px_rgba(255,255,255,0.35)]';
 			if (style === 'karaoke') return 'scale-[1.02] translate-y-0 text-primary font-extrabold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(var(--color-primary-rgb,99,102,241),0.5)]';
 			if (style === 'glow') return 'scale-[1.04] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_24px_var(--primary)]';
 			if (style === 'slide') return 'scale-[1.02] translate-x-2 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(var(--color-primary-rgb,99,102,241),0.35)]';
@@ -444,7 +465,7 @@
 				if (dist === 3) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/45 opacity-30 blur-[1.4px] hover:blur-none hover:opacity-80';
 				return 'scale-100 translate-y-0 font-medium text-muted-foreground/35 opacity-20 blur-[2.4px] hover:blur-none hover:opacity-75';
 			}
-			if (style === 'apple') {
+			if (style === 'apple' || style === 'apple_v2') {
 				if (dist === 1) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/75 opacity-70 blur-0 hover:opacity-95';
 				if (dist === 2) return 'scale-100 translate-y-0 font-medium text-muted-foreground/50 opacity-45 blur-[0.4px] hover:blur-none hover:opacity-90';
 				return 'scale-100 translate-y-0 font-normal text-muted-foreground/35 opacity-25 blur-[0.8px] hover:blur-none hover:opacity-80';
@@ -476,7 +497,7 @@
 			if (dist === 3) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/45 opacity-30 blur-[1.4px] hover:blur-none hover:opacity-80';
 			return 'scale-100 translate-y-0 font-medium text-muted-foreground/35 opacity-20 blur-[2.4px] hover:blur-none hover:opacity-75';
 		}
-		if (style === 'apple') {
+		if (style === 'apple' || style === 'apple_v2') {
 			if (dist === 1) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/80 opacity-75 blur-0 hover:opacity-100';
 			if (dist === 2) return 'scale-100 translate-y-0 font-medium text-muted-foreground/55 opacity-50 blur-[0.4px] hover:blur-none hover:opacity-90';
 			return 'scale-100 translate-y-0 font-normal text-muted-foreground/40 opacity-30 blur-[0.8px] hover:blur-none hover:opacity-80';
@@ -529,6 +550,7 @@
 			<div class="{compact ? 'py-4' : expanded ? 'py-[25vh] mx-auto max-w-3xl' : 'py-8'}">
 				{#each lyrics.lines as line, i (i)}
 					{@const timing = lineTimings[i]}
+					{@const appleV2Timing = appleV2LineTimings[i]}
 					{@const isActive = activeIndices.includes(i)}
 					{@const isLingered = lingeredIndices.includes(i)}
 					{@const isHighlight = isActive || isLingered}
@@ -548,7 +570,27 @@
 							{expanded ? 'py-3.5 text-3xl sm:text-4xl' : compact ? 'py-1 text-sm' : 'py-2.5 text-xl'}
 							{getLineClasses(isHighlight, isPast, dist, currentAnimStyle)}"
 					>
-						{#if line.words && line.words.length > 0}
+						{#if currentAnimStyle === 'apple_v2' && appleV2Timing}
+							{#if isHighlight}
+								<span class="whitespace-pre-wrap">
+									{#each appleV2Timing.graphemes as grapheme, glyphIndex (glyphIndex)}
+										{@const progress = appleV2GraphemeProgress(grapheme, posMs)}
+										<span
+											class="bg-clip-text text-transparent [-webkit-text-fill-color:transparent] {progress > 0 && progress < 1
+												? 'drop-shadow-[0_0_9px_rgba(255,255,255,0.55)]'
+												: ''}"
+											style="background-image: {getAppleV2GraphemeBackground(progress)}"
+										>
+											{grapheme.text}
+										</span>
+									{/each}
+								</span>
+							{:else}
+								<span class="whitespace-pre-wrap {isPast ? 'text-muted-foreground/40' : 'text-muted-foreground/70'}">
+									{appleV2Timing.text}
+								</span>
+							{/if}
+						{:else if line.words && line.words.length > 0}
 							<!-- Word-by-Word Animation Sweep with selectable styles -->
 							<span class="inline-flex flex-wrap items-baseline">
 								{#each line.words as word, wIdx (wIdx)}
