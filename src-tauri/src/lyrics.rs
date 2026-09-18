@@ -15,6 +15,7 @@
 
 use std::time::Duration;
 
+use futures_util::{stream::FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
@@ -24,7 +25,7 @@ use crate::state::AppState;
 const MISS_TTL_SECS: i64 = 24 * 3600;
 
 /// Bump when a parser change makes previously serialized positive lyrics unsafe to reuse.
-const LYRICS_CACHE_VERSION: u32 = 1;
+const LYRICS_CACHE_VERSION: u32 = 2;
 
 const LRCLIB_ROOT: &str = "https://lrclib.net/api";
 
@@ -64,6 +65,89 @@ pub struct Lyrics {
     #[serde(default)]
     pub instrumental: bool,
     pub lines: Vec<LyricLine>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct ProviderWordQuality {
+    valid_tokens: usize,
+    timed_lines: usize,
+    multi_token_lines: usize,
+    non_empty_lines: usize,
+    timed_text_chars: usize,
+    lyric_text_chars: usize,
+}
+
+impl ProviderWordQuality {
+    fn is_genuine(self) -> bool {
+        if self.valid_tokens == 0 || self.lyric_text_chars == 0 {
+            return false;
+        }
+
+        let covers_half_the_lines = self.timed_lines * 2 >= self.non_empty_lines;
+        let covers_half_the_text = self.timed_text_chars * 2 >= self.lyric_text_chars;
+        if self.valid_tokens >= 2
+            && self.multi_token_lines > 0
+            && (covers_half_the_lines || covers_half_the_text)
+        {
+            return true;
+        }
+
+        // One-line lyrics can legitimately contain only one usable interval (for example a
+        // two-word eLRC whose final word has no closing boundary). Keep that narrow case only
+        // when the lyric is short, the valid timed text covers at least half of it, and an
+        // unclosed portion remains. Requiring partial coverage prevents a single whole-line
+        // token from masquerading as word-by-word timing.
+        self.non_empty_lines == 1
+            && self.lyric_text_chars <= 32
+            && covers_half_the_text
+            && self.timed_text_chars < self.lyric_text_chars
+    }
+}
+
+fn meaningful_chars(text: &str) -> usize {
+    text.chars().filter(|character| !character.is_whitespace()).count()
+}
+
+fn provider_word_quality(lyrics: &Lyrics) -> ProviderWordQuality {
+    let mut quality = ProviderWordQuality::default();
+
+    for line in &lyrics.lines {
+        let line_text_chars = meaningful_chars(&line.text);
+        let all_word_chars = line
+            .words
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|word| meaningful_chars(&word.text))
+            .sum::<usize>();
+        let lyric_chars = if line_text_chars > 0 { line_text_chars } else { all_word_chars };
+        if lyric_chars > 0 {
+            quality.non_empty_lines += 1;
+            quality.lyric_text_chars += lyric_chars;
+        }
+
+        let mut line_valid_tokens = 0;
+        for word in line.words.as_deref().unwrap_or_default() {
+            let text_chars = meaningful_chars(&word.text);
+            if text_chars > 0 && word.end_ms > word.start_ms {
+                quality.valid_tokens += 1;
+                quality.timed_text_chars += text_chars;
+                line_valid_tokens += 1;
+            }
+        }
+        if line_valid_tokens > 0 {
+            quality.timed_lines += 1;
+        }
+        if line_valid_tokens >= 2 {
+            quality.multi_token_lines += 1;
+        }
+    }
+
+    quality
+}
+
+fn has_genuine_word_timings(lyrics: &Lyrics) -> bool {
+    provider_word_quality(lyrics).is_genuine()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -226,10 +310,6 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     let providers = resolve_providers(&state.db);
     let mut lr: Option<Result<Option<LrclibTrack>, reqwest::Error>> = None;
 
-    fn has_word_timings(l: &Lyrics) -> bool {
-        l.lines.iter().any(|line| line.words.as_ref().map_or(false, |w| !w.is_empty()))
-    }
-
     fn is_line_synced(l: &Lyrics) -> bool {
         l.synced || l.instrumental || l.lines.iter().any(|line| line.time_ms.is_some())
     }
@@ -254,7 +334,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                         fetched_betterlyrics = Some(betterlyrics_get(req).await.ok().flatten());
                     }
                     if let Some(Some(l)) = &fetched_betterlyrics {
-                        if has_word_timings(l) {
+                        if has_genuine_word_timings(l) {
                             return (Some(l.clone()), req.duration.is_some());
                         }
                     }
@@ -265,7 +345,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                     fetched_youlyplus = Some(youlyplus_get(req).await.ok().flatten());
                 }
                 if let Some(Some(l)) = &fetched_youlyplus {
-                    if has_word_timings(l) {
+                    if has_genuine_word_timings(l) {
                         return (Some(l.clone()), req.duration.is_some());
                     }
                 }
@@ -275,7 +355,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                     fetched_paxsenix = Some(paxsenix_get(req).await.ok().flatten());
                 }
                 if let Some(Some(l)) = &fetched_paxsenix {
-                    if has_word_timings(l) {
+                    if has_genuine_word_timings(l) {
                         return (Some(l.clone()), req.duration.is_some());
                     }
                 }
@@ -294,7 +374,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                             res
                         };
                         if let Some(l) = hit {
-                            if has_word_timings(&l) {
+                            if has_genuine_word_timings(&l) {
                                 return (Some(l), req.duration.is_some());
                             }
                         }
@@ -318,7 +398,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 res
             };
             if let Some(l) = hit {
-                if has_word_timings(&l) {
+                if has_genuine_word_timings(&l) {
                     return (Some(l), req.duration.is_some());
                 }
             }
@@ -969,110 +1049,232 @@ async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest
     Ok(None)
 }
 
-/// YouLyPlus KPoe API client (queries multi-server mirrors with syllable-level word timings)
-async fn youlyplus_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
-    const SERVERS: [&str; 6] = [
-        "https://lyricsplus.prjktla.my.id",
-        "https://lyricsplus.atomix.one",
-        "https://lyricsplus.binimum.org",
-        "https://lyricsplus.prjktla.workers.dev",
-        "https://lyricsplus-seven.vercel.app",
-        "https://lyrics-plus-backend.vercel.app",
-    ];
+const YOULYPLUS_SERVERS: [&str; 6] = [
+    "https://lyricsplus.prjktla.my.id",
+    "https://lyricsplus.atomix.one",
+    "https://lyricsplus.binimum.org",
+    "https://lyricsplus.prjktla.workers.dev",
+    "https://lyricsplus-seven.vercel.app",
+    "https://lyrics-plus-backend.vercel.app",
+];
+const YOULYPLUS_WORD_FALLBACK_MS: u64 = 400;
 
-    let clean_title = clean_lyrics_title(&req.title);
-    let clean_artist = clean_lyrics_artist(&req.artists);
-    let title = if clean_title.is_empty() { &req.title } else { &clean_title };
-    let artist = if clean_artist.is_empty() { &req.artists } else { &clean_artist };
-    let dur = req.duration.unwrap_or(0.0).round() as i64;
+#[derive(Clone)]
+struct YoulyPlusQuery {
+    title: String,
+    artist: String,
+    duration: Option<i64>,
+    album: Option<String>,
+    video_id: Option<String>,
+}
 
-    for server in SERVERS {
-        let url = format!("{server}/v2/lyrics/get");
-        let mut q: Vec<(&str, String)> =
-            vec![("title", title.to_string()), ("artist", artist.to_string())];
-        if dur > 0 {
-            q.push(("duration", dur.to_string()));
+impl YoulyPlusQuery {
+    fn params(&self) -> Vec<(&'static str, String)> {
+        let mut params = vec![("title", self.title.clone()), ("artist", self.artist.clone())];
+        if let Some(duration) = self.duration {
+            params.push(("duration", duration.to_string()));
         }
-        if let Some(album) = &req.album {
-            q.push(("album", album.clone()));
+        if let Some(album) = &self.album {
+            params.push(("album", album.clone()));
         }
-        if !req.video_id.is_empty() {
-            q.push(("id", req.video_id.clone()));
+        if let Some(video_id) = &self.video_id {
+            params.push(("id", video_id.clone()));
         }
+        params
+    }
+}
 
-        let resp_opt: Option<serde_json::Value> = match crate::http::client()
-            .get(&url)
-            .query(&q)
-            .header("User-Agent", "Nocturne/0.7.3")
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-        {
-            Ok(r) if r.status().is_success() => r.json().await.ok(),
-            _ => None,
-        };
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LyricsQuality {
+    Plain,
+    LineSynced,
+    WordSynced,
+}
 
-        if let Some(resp) = resp_opt {
-            if let Some(synced) = resp.get("syncedLyrics").and_then(|v| v.as_str()) {
-                if !synced.trim().is_empty() {
-                    if let Some(hit) = from_parsed("YouLyPlus", parse_lrc_or_ttml(synced)) {
-                        return Ok(Some(hit));
-                    }
+fn lyrics_quality(lyrics: &Lyrics) -> LyricsQuality {
+    if has_genuine_word_timings(lyrics) {
+        LyricsQuality::WordSynced
+    } else if lyrics.synced
+        || lyrics.instrumental
+        || lyrics.lines.iter().any(|line| line.time_ms.is_some())
+    {
+        LyricsQuality::LineSynced
+    } else {
+        LyricsQuality::Plain
+    }
+}
+
+fn prefer_richer_lyrics(current: Option<Lyrics>, candidate: Lyrics) -> Option<Lyrics> {
+    match current {
+        Some(current) if lyrics_quality(&current) >= lyrics_quality(&candidate) => Some(current),
+        _ => Some(candidate),
+    }
+}
+
+fn json_millis(value: Option<&serde_json::Value>) -> Option<u64> {
+    let value = value?;
+    if let Some(value) = value.as_u64() {
+        return Some(value);
+    }
+    let value =
+        value.as_f64().or_else(|| value.as_str().and_then(|value| value.parse::<f64>().ok()))?;
+    (value.is_finite() && value >= 0.0 && value <= u64::MAX as f64).then(|| value.round() as u64)
+}
+
+fn parse_youlyplus_structured(response: &serde_json::Value) -> Option<Lyrics> {
+    let items = response.get("lyrics")?.as_array()?;
+    let mut lines = Vec::new();
+
+    for (item_index, item) in items.iter().enumerate() {
+        let declared_time = json_millis(item.get("time"));
+        let line_duration = json_millis(item.get("duration")).filter(|duration| *duration > 0);
+        let next_line_start =
+            items.get(item_index + 1).and_then(|next| json_millis(next.get("time")));
+        let mut syllables = Vec::new();
+        if let Some(items) = item.get("syllabus").and_then(|value| value.as_array()) {
+            for syllable in items {
+                let Some(start_ms) = json_millis(syllable.get("time")) else {
+                    continue;
+                };
+                let text =
+                    syllable.get("text").and_then(|value| value.as_str()).unwrap_or("").to_string();
+                if text.is_empty() {
+                    continue;
                 }
-            }
-            if let Some(lyrics_arr) = resp.get("lyrics").and_then(|v| v.as_array()) {
-                let mut lines = Vec::new();
-                for item in lyrics_arr {
-                    let time_ms = item.get("time").and_then(|v| v.as_u64());
-                    let text = item.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let mut words = Vec::new();
-                    if let Some(syllabus) = item.get("syllabus").and_then(|v| v.as_array()) {
-                        for (i, syl) in syllabus.iter().enumerate() {
-                            let s_time =
-                                syl.get("time").and_then(|v| v.as_u64()).or(time_ms).unwrap_or(0);
-                            let s_text =
-                                syl.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let s_end = syllabus
-                                .get(i + 1)
-                                .and_then(|n| n.get("time").and_then(|v| v.as_u64()))
-                                .unwrap_or(s_time + 400);
-                            if !s_text.is_empty() {
-                                words.push(LyricWord {
-                                    text: s_text,
-                                    start_ms: s_time,
-                                    end_ms: s_end,
-                                });
-                            }
-                        }
-                    }
-                    lines.push(LyricLine {
-                        time_ms,
-                        end_time_ms: None,
-                        text,
-                        words: if !words.is_empty() { Some(words) } else { None },
-                        translation: None,
-                    });
-                }
-                if !lines.is_empty() {
-                    lines.sort_by_key(|l| l.time_ms);
-                    return Ok(Some(Lyrics {
-                        source: "YouLyPlus".into(),
-                        synced: lines.iter().any(|l| l.time_ms.is_some()),
-                        instrumental: false,
-                        lines,
-                    }));
-                }
-            }
-            if let Some(plain) = resp.get("plainLyrics").and_then(|v| v.as_str()) {
-                if !plain.trim().is_empty() {
-                    if let Some(hit) = from_parsed("YouLyPlus", parse_lrc_or_ttml(plain)) {
-                        return Ok(Some(hit));
-                    }
-                }
+                let duration_ms =
+                    json_millis(syllable.get("duration")).filter(|duration| *duration > 0);
+                syllables.push((text, start_ms, duration_ms));
             }
         }
+
+        let time_ms = declared_time.or_else(|| syllables.first().map(|(_, start, _)| *start));
+        let duration_end =
+            time_ms.zip(line_duration).and_then(|(start, duration)| start.checked_add(duration));
+        let end_time_ms = duration_end
+            .or_else(|| time_ms.and_then(|start| next_line_start.filter(|next| *next > start)));
+        let mut words = Vec::new();
+        for (i, (text, start_ms, duration_ms)) in syllables.iter().enumerate() {
+            let duration_end = duration_ms.and_then(|duration| start_ms.checked_add(duration));
+            let next_start = syllables.get(i + 1).map(|(_, start, _)| *start);
+            let end_ms = duration_end
+                .filter(|end| *end > *start_ms)
+                .or_else(|| next_start.filter(|end| *end > *start_ms))
+                .or_else(|| end_time_ms.filter(|end| *end > *start_ms))
+                .unwrap_or_else(|| start_ms.saturating_add(YOULYPLUS_WORD_FALLBACK_MS));
+            words.push(LyricWord { text: text.clone(), start_ms: *start_ms, end_ms });
+        }
+
+        let text = item
+            .get("text")
+            .and_then(|value| value.as_str())
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| syllables.iter().map(|(text, _, _)| text.as_str()).collect());
+        if text.is_empty() && time_ms.is_none() && words.is_empty() {
+            continue;
+        }
+        lines.push(LyricLine {
+            time_ms,
+            end_time_ms,
+            text,
+            words: (!words.is_empty()).then_some(words),
+            translation: None,
+        });
     }
 
+    if lines.is_empty() {
+        return None;
+    }
+    lines.sort_by_key(|line| line.time_ms);
+    let synced = lines.iter().any(|line| line.time_ms.is_some() || line.words.is_some());
+    Some(Lyrics { source: "YouLyPlus".into(), synced, instrumental: false, lines })
+}
+
+fn parse_youlyplus_response(response: &serde_json::Value) -> Option<Lyrics> {
+    let structured = parse_youlyplus_structured(response);
+    if structured.as_ref().is_some_and(|lyrics| lyrics_quality(lyrics) == LyricsQuality::WordSynced)
+    {
+        return structured;
+    }
+
+    let synced = response
+        .get("syncedLyrics")
+        .and_then(|value| value.as_str())
+        .filter(|text| !text.trim().is_empty())
+        .and_then(|text| from_parsed("YouLyPlus", parse_lrc_or_ttml(text)));
+    if synced.is_some() {
+        return synced;
+    }
+    if structured.is_some() {
+        return structured;
+    }
+
+    response
+        .get("plainLyrics")
+        .and_then(|value| value.as_str())
+        .and_then(|text| plain_from_text(Some(text), "YouLyPlus"))
+}
+
+async fn fetch_youlyplus_mirror(server: &'static str, query: &YoulyPlusQuery) -> Option<Lyrics> {
+    let url = format!("{server}/v2/lyrics/get");
+    let response = crate::http::client()
+        .get(&url)
+        .query(&query.params())
+        .header("User-Agent", "Nocturne/0.8.3")
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    parse_youlyplus_response(&response.json().await.ok()?)
+}
+
+async fn fetch_youlyplus_query(query: &YoulyPlusQuery) -> Option<Lyrics> {
+    let mut requests = FuturesUnordered::new();
+    for server in YOULYPLUS_SERVERS {
+        requests.push(fetch_youlyplus_mirror(server, query));
+    }
+
+    let mut best = None;
+    while let Some(result) = requests.next().await {
+        if let Some(lyrics) = result {
+            if lyrics_quality(&lyrics) == LyricsQuality::WordSynced {
+                return Some(lyrics);
+            }
+            best = prefer_richer_lyrics(best, lyrics);
+        }
+    }
+    best
+}
+
+/// YouLyPlus KPoe API client. Mirrors race concurrently and the richest usable response wins.
+async fn youlyplus_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    let duration =
+        req.duration.filter(|duration| *duration > 0.0).map(|duration| duration.round() as i64);
+    let exact = YoulyPlusQuery {
+        title: req.title.clone(),
+        artist: req.artists.clone(),
+        duration,
+        album: req.album.clone(),
+        video_id: (!req.video_id.is_empty()).then(|| req.video_id.clone()),
+    };
+    if let Some(lyrics) = fetch_youlyplus_query(&exact).await {
+        return Ok(Some(lyrics));
+    }
+
+    let cleaned = YoulyPlusQuery {
+        title: clean_lyrics_title(&req.title),
+        artist: clean_lyrics_artist(&req.artists),
+        ..exact.clone()
+    };
+    if (cleaned.title != exact.title || cleaned.artist != exact.artist)
+        && !cleaned.title.is_empty()
+        && !cleaned.artist.is_empty()
+    {
+        return Ok(fetch_youlyplus_query(&cleaned).await);
+    }
     Ok(None)
 }
 
@@ -1265,7 +1467,7 @@ pub async fn search_all_lyrics(
 
     // 1. BetterLyrics
     if let Ok(Some(l)) = betterlyrics_get(&req).await {
-        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        let has_words = has_genuine_word_timings(&l);
         candidates.push(LyricCandidate {
             id: format!("betterlyrics-{}", candidates.len()),
             source: "Better Lyrics".into(),
@@ -1281,7 +1483,7 @@ pub async fn search_all_lyrics(
 
     // 1b. YouLyPlus
     if let Ok(Some(l)) = youlyplus_get(&req).await {
-        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        let has_words = has_genuine_word_timings(&l);
         candidates.push(LyricCandidate {
             id: format!("youlyplus-{}", candidates.len()),
             source: "YouLyPlus".into(),
@@ -1297,7 +1499,7 @@ pub async fn search_all_lyrics(
 
     // 1c. Paxsenix
     if let Ok(Some(l)) = paxsenix_get(&req).await {
-        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        let has_words = has_genuine_word_timings(&l);
         candidates.push(LyricCandidate {
             id: format!("paxsenix-{}", candidates.len()),
             source: "Paxsenix".into(),
@@ -1349,7 +1551,7 @@ pub async fn search_all_lyrics(
 
     // 4. QQ Music
     if let Ok(Some(l)) = qqmusic_get(&req).await {
-        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        let has_words = has_genuine_word_timings(&l);
         candidates.push(LyricCandidate {
             id: format!("qq-{}", candidates.len()),
             source: "QQ Music".into(),
@@ -1365,7 +1567,7 @@ pub async fn search_all_lyrics(
 
     // 5. Kugou
     if let Ok(Some(l)) = kugou_get(&req).await {
-        let has_words = l.lines.iter().any(|line| line.words.is_some());
+        let has_words = has_genuine_word_timings(&l);
         candidates.push(LyricCandidate {
             id: format!("kugou-{}", candidates.len()),
             source: "Kugou".into(),
@@ -1383,7 +1585,7 @@ pub async fn search_all_lyrics(
     for c in get_custom_providers(&state.db) {
         if c.enabled {
             if let Ok(Some(l)) = custom_provider_get(&c, &req).await {
-                let has_words = l.lines.iter().any(|line| line.words.is_some());
+                let has_words = has_genuine_word_timings(&l);
                 candidates.push(LyricCandidate {
                     id: format!("custom-{}-{}", c.id, candidates.len()),
                     source: c.name,
@@ -2089,6 +2291,266 @@ mod tests {
     }
 
     #[test]
+    fn whole_line_token_is_not_genuine_word_sync() {
+        let lyrics = Lyrics {
+            source: "Line Token Provider".into(),
+            synced: true,
+            instrumental: false,
+            lines: vec![LyricLine {
+                time_ms: Some(10_000),
+                end_time_ms: Some(11_000),
+                text: "Hello world".into(),
+                words: Some(vec![LyricWord {
+                    text: "Hello world".into(),
+                    start_ms: 10_000,
+                    end_ms: 11_000,
+                }]),
+                translation: None,
+            }],
+        };
+
+        let quality = provider_word_quality(&lyrics);
+        assert_eq!(quality.valid_tokens, 1);
+        assert_eq!(quality.multi_token_lines, 0);
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn whole_line_tokens_on_multiple_lines_are_not_genuine_word_sync() {
+        let lines = [(10_000, 11_000, "Hello world"), (12_000, 13_000, "Second line")]
+            .into_iter()
+            .map(|(start_ms, end_ms, text)| LyricLine {
+                time_ms: Some(start_ms),
+                end_time_ms: Some(end_ms),
+                text: text.into(),
+                words: Some(vec![LyricWord { text: text.into(), start_ms, end_ms }]),
+                translation: None,
+            })
+            .collect();
+        let lyrics = Lyrics {
+            source: "Line Token Provider".into(),
+            synced: true,
+            instrumental: false,
+            lines,
+        };
+
+        let quality = provider_word_quality(&lyrics);
+        assert_eq!(quality.valid_tokens, 2);
+        assert_eq!(quality.timed_lines, 2);
+        assert_eq!(quality.multi_token_lines, 0);
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn isolated_word_interval_does_not_make_a_full_lyric_word_synced() {
+        let mut lines = (0..8)
+            .map(|index| {
+                LyricLine::simple(Some(index * 2_000), format!("Ordinary line number {index}"))
+            })
+            .collect::<Vec<_>>();
+        lines[3].words =
+            Some(vec![LyricWord { text: "accidental".into(), start_ms: 6_000, end_ms: 6_300 }]);
+        let lyrics = Lyrics {
+            source: "Malformed Provider".into(),
+            synced: true,
+            instrumental: false,
+            lines,
+        };
+
+        let quality = provider_word_quality(&lyrics);
+        assert_eq!(quality.valid_tokens, 1);
+        assert_eq!(quality.timed_lines, 1);
+        assert_eq!(quality.non_empty_lines, 8);
+        assert!(!has_genuine_word_timings(&lyrics));
+        assert_eq!(lyrics_quality(&lyrics), LyricsQuality::LineSynced);
+    }
+
+    #[test]
+    fn two_timed_words_on_one_line_are_genuine_word_sync() {
+        let lyrics = Lyrics {
+            source: "Timed Provider".into(),
+            synced: true,
+            instrumental: false,
+            lines: vec![LyricLine {
+                time_ms: Some(10_000),
+                end_time_ms: Some(11_000),
+                text: "Hello world".into(),
+                words: Some(vec![
+                    LyricWord { text: "Hello ".into(), start_ms: 10_000, end_ms: 10_500 },
+                    LyricWord { text: "world".into(), start_ms: 10_500, end_ms: 11_000 },
+                ]),
+                translation: None,
+            }],
+        };
+
+        let quality = provider_word_quality(&lyrics);
+        assert_eq!(quality.valid_tokens, 2);
+        assert_eq!(quality.timed_lines, 1);
+        assert_eq!(quality.multi_token_lines, 1);
+        assert!(has_genuine_word_timings(&lyrics));
+        assert_eq!(lyrics_quality(&lyrics), LyricsQuality::WordSynced);
+    }
+
+    #[test]
+    fn short_one_line_partial_timing_remains_genuine_word_sync() {
+        let lyrics =
+            from_parsed("eLRC Provider", parse_elrc("[00:10.00]<00:10.00>Hello <00:10.50>world"))
+                .unwrap();
+
+        let quality = provider_word_quality(&lyrics);
+        assert_eq!(quality.valid_tokens, 1);
+        assert_eq!(quality.multi_token_lines, 0);
+        assert!(quality.timed_text_chars < quality.lyric_text_chars);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn canonical_word_quality_drives_ranking_and_candidate_flags() {
+        let cases = [
+            from_parsed("Line Provider", parse_lrc("[00:10.00]Line only")).unwrap(),
+            parse_youlyplus_response(&serde_json::json!({
+                "lyrics": [{
+                    "time": 10000,
+                    "text": "Word timing",
+                    "syllabus": [
+                        { "time": 10000, "duration": 300, "text": "Word " },
+                        { "time": 10300, "duration": 400, "text": "timing" }
+                    ]
+                }]
+            }))
+            .unwrap(),
+        ];
+
+        for lyrics in cases {
+            let canonical = has_genuine_word_timings(&lyrics);
+            let auto_ranks_as_words = lyrics_quality(&lyrics) == LyricsQuality::WordSynced;
+            let candidate_has_words = has_genuine_word_timings(&lyrics);
+            assert_eq!(auto_ranks_as_words, canonical);
+            assert_eq!(candidate_has_words, canonical);
+        }
+    }
+
+    #[test]
+    fn youlyplus_prefers_structured_words_over_synced_lrc_and_preserves_duration() {
+        let response = serde_json::json!({
+            "syncedLyrics": "[00:10.00]Hello world",
+            "lyrics": [{
+                "time": 10000,
+                "duration": 1200,
+                "text": "Hello world",
+                "syllabus": [
+                    { "time": 10000, "duration": 200, "text": "Hello " },
+                    { "time": 10500, "duration": 700, "text": "world" }
+                ]
+            }]
+        });
+
+        let lyrics = parse_youlyplus_response(&response).unwrap();
+        assert_eq!(lyrics_quality(&lyrics), LyricsQuality::WordSynced);
+        let words = lyrics.lines[0].words.as_ref().unwrap();
+        assert_eq!(words.len(), 2);
+        assert_eq!((words[0].start_ms, words[0].end_ms), (10000, 10200));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (10500, 11200));
+    }
+
+    #[test]
+    fn youlyplus_missing_syllable_duration_uses_real_boundaries() {
+        let response = serde_json::json!({
+            "lyrics": [{
+                "time": 12000,
+                "duration": 1000,
+                "text": "I see",
+                "syllabus": [
+                    { "time": 12000, "text": "I " },
+                    { "time": 12300, "text": "see" }
+                ]
+            }]
+        });
+
+        let lyrics = parse_youlyplus_response(&response).unwrap();
+        let words = lyrics.lines[0].words.as_ref().unwrap();
+        assert_eq!((words[0].start_ms, words[0].end_ms), (12000, 12300));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (12300, 13000));
+    }
+
+    #[test]
+    fn youlyplus_line_sync_is_a_valid_fallback() {
+        let lyrics = parse_youlyplus_response(&serde_json::json!({
+            "syncedLyrics": "[00:10.00]Hello\n[00:12.00]world"
+        }))
+        .unwrap();
+        assert_eq!(lyrics_quality(&lyrics), LyricsQuality::LineSynced);
+        assert_eq!(lyrics.lines.len(), 2);
+        assert!(lyrics.lines.iter().all(|line| line.words.is_none()));
+    }
+
+    #[test]
+    fn youlyplus_synced_elrc_keeps_word_timing() {
+        let lyrics = parse_youlyplus_response(&serde_json::json!({
+            "syncedLyrics": "[00:10.00]<00:10.00>Hello <00:10.50>world"
+        }))
+        .unwrap();
+        assert_eq!(lyrics_quality(&lyrics), LyricsQuality::WordSynced);
+        let words = lyrics.lines[0].words.as_ref().unwrap();
+        assert_eq!((words[0].start_ms, words[0].end_ms), (10000, 10500));
+        assert_eq!(words[1].start_ms, 10500);
+    }
+
+    #[test]
+    fn youlyplus_synced_lyrics_rank_above_plain_lyrics() {
+        let lyrics = parse_youlyplus_response(&serde_json::json!({
+            "syncedLyrics": "[00:10.00]Synced line",
+            "plainLyrics": "Plain line"
+        }))
+        .unwrap();
+        assert_eq!(lyrics_quality(&lyrics), LyricsQuality::LineSynced);
+        assert_eq!(lyrics.lines[0].text, "Synced line");
+    }
+
+    #[test]
+    fn youlyplus_quality_orders_words_then_lines_then_plain() {
+        let plain = plain_from_text(Some("Plain line"), "YouLyPlus").unwrap();
+        let line = from_parsed("YouLyPlus", parse_lrc("[00:10.00]Synced line")).unwrap();
+        let words = parse_youlyplus_response(&serde_json::json!({
+            "lyrics": [{
+                "time": 10000,
+                "text": "Word sync",
+                "syllabus": [
+                    { "time": 10000, "duration": 300, "text": "Word " },
+                    { "time": 10300, "duration": 400, "text": "sync" }
+                ]
+            }]
+        }))
+        .unwrap();
+
+        assert!(lyrics_quality(&words) > lyrics_quality(&line));
+        assert!(lyrics_quality(&line) > lyrics_quality(&plain));
+    }
+
+    #[test]
+    fn youlyplus_mirror_ranking_replaces_an_early_line_result_with_words() {
+        let line = parse_youlyplus_response(&serde_json::json!({
+            "syncedLyrics": "[00:10.00]Line only"
+        }))
+        .unwrap();
+        let words = parse_youlyplus_response(&serde_json::json!({
+            "lyrics": [{
+                "time": 10000,
+                "text": "Word sync",
+                "syllabus": [
+                    { "time": 10000, "duration": 300, "text": "Word " },
+                    { "time": 10300, "duration": 400, "text": "sync" }
+                ]
+            }]
+        }))
+        .unwrap();
+
+        let selected = [line, words].into_iter().fold(None, prefer_richer_lyrics).unwrap();
+        assert_eq!(lyrics_quality(&selected), LyricsQuality::WordSynced);
+        assert!(has_genuine_word_timings(&selected));
+    }
+
+    #[test]
     fn resolve_providers_handles_custom_priority_and_fallbacks() {
         let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
         // Default when unset
@@ -2120,7 +2582,7 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_cache_rejects_legacy_entries_and_round_trips_current_version() {
+    fn lyrics_cache_rejects_v1_entries_and_round_trips_v2() {
         let lyrics = Lyrics {
             source: "Test Provider".into(),
             synced: true,
@@ -2131,9 +2593,12 @@ mod tests {
         let legacy = serde_json::to_string(&lyrics).unwrap();
         assert!(deserialize_cached_lyrics(&legacy).is_none());
 
+        let v1 = serde_json::json!({ "version": 1, "lyrics": lyrics.clone() });
+        assert!(deserialize_cached_lyrics(&v1.to_string()).is_none());
+
         let encoded = serialize_cached_lyrics(&lyrics).unwrap();
         let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(value.get("version").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(value.get("version").and_then(|v| v.as_u64()), Some(2));
         let decoded = deserialize_cached_lyrics(&encoded).unwrap();
         assert_eq!(decoded.source, lyrics.source);
         assert_eq!(decoded.lines[0].text, lyrics.lines[0].text);
@@ -2141,6 +2606,19 @@ mod tests {
         let mut future = value;
         future["version"] = serde_json::json!(LYRICS_CACHE_VERSION + 1);
         assert!(deserialize_cached_lyrics(&future.to_string()).is_none());
+    }
+
+    #[test]
+    fn lyrics_cache_versioning_does_not_change_negative_cache_ttl() {
+        let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let fetched_at = 1_000;
+        db.put_lyrics("missing", None, fetched_at);
+
+        assert!(matches!(
+            db.get_lyrics("missing", fetched_at + MISS_TTL_SECS, MISS_TTL_SECS),
+            Some(None)
+        ));
+        assert!(db.get_lyrics("missing", fetched_at + MISS_TTL_SECS + 1, MISS_TTL_SECS).is_none());
     }
 
     #[test]
