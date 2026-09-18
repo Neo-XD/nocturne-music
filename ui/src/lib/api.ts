@@ -851,8 +851,9 @@ export const saveCustomLyricProviders = (providers: CustomLyricProvider[]) =>
 export interface LyricCandidate {
 	id: string;
 	source: string;
-	title: string;
-	artist: string;
+	/** Canonical provider metadata; null when the provider did not supply it. */
+	title: string | null;
+	artist: string | null;
 	album: string | null;
 	/** Track duration in seconds. */
 	duration: number | null;

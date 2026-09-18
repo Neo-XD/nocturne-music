@@ -71,9 +71,13 @@
 
 	async function search(title: string, artist: string) {
 		const generation = ++searchGeneration;
-		const requestAlbum = album;
-		const requestDuration = duration;
-		const requestVideoId = videoId;
+		const matchesCurrentTrack =
+			title === initialTitle.trim() && artist === initialArtist.trim();
+		// Album, duration, and video ID describe the currently playing track. Once the user edits
+		// title or artist they become stale ranking hints and must not bias discovery results.
+		const requestAlbum = matchesCurrentTrack ? album : undefined;
+		const requestDuration = matchesCurrentTrack ? duration : undefined;
+		const requestVideoId = matchesCurrentTrack ? videoId : undefined;
 		candidates = [];
 		selectedCandidate = null;
 		if (!title && !artist) {
@@ -231,14 +235,14 @@
 							>
 								<div class="flex items-center justify-between gap-2">
 									<span class="font-medium text-sm text-foreground truncate">
-										{candidate.title || titleQuery}
+										{candidate.title || (candidate.artist ? 'Title not supplied' : 'Metadata not supplied by provider')}
 									</span>
 									<span class="text-[11px] px-2 py-0.5 rounded-full font-semibold shrink-0 {candidate.source.includes('BetterLyrics') ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-primary/20 text-primary border border-primary/30'}">
 										{candidate.source}
 									</span>
 								</div>
 								<div class="text-xs text-muted-foreground truncate mt-0.5">
-									{candidate.artist || artistQuery}
+									{candidate.artist || (candidate.title ? 'Artist not supplied' : 'Exact lookup result')}
 								</div>
 								<div class="mt-2 flex items-center gap-1.5 flex-wrap text-[10px]">
 									{#if candidate.has_words}
