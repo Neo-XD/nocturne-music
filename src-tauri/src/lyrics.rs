@@ -23,6 +23,9 @@ use crate::state::AppState;
 /// How long a cached "no lyrics found" verdict suppresses refetching.
 const MISS_TTL_SECS: i64 = 24 * 3600;
 
+/// Bump when a parser change makes previously serialized positive lyrics unsafe to reuse.
+const LYRICS_CACHE_VERSION: u32 = 1;
+
 const LRCLIB_ROOT: &str = "https://lrclib.net/api";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +55,7 @@ impl LyricLine {
     }
 }
 
-/// What the UI gets (and what `lyrics_cache` stores as JSON).
+/// What the UI gets (and what the private `lyrics_cache` envelope contains).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lyrics {
     /// Attribution shown in the panel footer ("LRCLIB", "Better Lyrics", "YouTube Music", …).
@@ -61,6 +64,22 @@ pub struct Lyrics {
     #[serde(default)]
     pub instrumental: bool,
     pub lines: Vec<LyricLine>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CachedLyrics {
+    version: u32,
+    lyrics: Lyrics,
+}
+
+fn serialize_cached_lyrics(lyrics: &Lyrics) -> Option<String> {
+    serde_json::to_string(&CachedLyrics { version: LYRICS_CACHE_VERSION, lyrics: lyrics.clone() })
+        .ok()
+}
+
+fn deserialize_cached_lyrics(json: &str) -> Option<Lyrics> {
+    let cached: CachedLyrics = serde_json::from_str(json).ok()?;
+    (cached.version == LYRICS_CACHE_VERSION).then_some(cached.lyrics)
 }
 
 pub struct LyricsRequest {
@@ -135,12 +154,19 @@ pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> 
     let forced = forced_provider();
     if forced.is_none() {
         if let Some(cached) = state.db.get_lyrics(&video_id, now, MISS_TTL_SECS) {
-            return cached.and_then(|json| serde_json::from_str(&json).ok());
+            match cached {
+                None => return None,
+                Some(json) => {
+                    if let Some(lyrics) = deserialize_cached_lyrics(&json) {
+                        return Some(lyrics);
+                    }
+                }
+            }
         }
     }
     let (lyrics, cacheable) = fetch(state, req).await;
     if cacheable && forced.is_none() {
-        let json = lyrics.as_ref().and_then(|l| serde_json::to_string(l).ok());
+        let json = lyrics.as_ref().and_then(serialize_cached_lyrics);
         state.db.put_lyrics(&video_id, json.as_deref(), now);
     }
     lyrics
@@ -1377,7 +1403,7 @@ pub async fn search_all_lyrics(
 }
 
 pub fn apply_selected_lyrics(state: &AppState, video_id: String, lyrics: Lyrics) {
-    if let Ok(json) = serde_json::to_string(&lyrics) {
+    if let Some(json) = serialize_cached_lyrics(&lyrics) {
         state.db.put_lyrics(&video_id, Some(&json), now_secs());
         let payload = LyricsUpdatedEvent { video_id, lyrics };
         let _ = state.app.emit("lyrics-updated", &payload);
@@ -1756,11 +1782,13 @@ fn parse_ttml_aaml(xml: &str) -> Vec<LyricLine> {
 /// Enhanced LRC parser (line timestamps + word inline timestamp tags)
 fn parse_elrc(lrc: &str) -> Vec<LyricLine> {
     let mut base_lines = parse_lrc(lrc);
-    for line in &mut base_lines {
-        if line.text.contains('<') || line.text.contains('(') {
+    for i in 0..base_lines.len() {
+        let next_line_start = base_lines.get(i + 1).and_then(|line| line.time_ms);
+        let line = &mut base_lines[i];
+        if line.text.contains('<') {
             let mut words = Vec::new();
             let mut text_buf = String::new();
-            let mut last_ms = line.time_ms.unwrap_or(0);
+            let mut current_word: Option<(u64, String)> = None;
 
             let mut pos = 0;
             let text_bytes = line.text.as_bytes();
@@ -1769,20 +1797,19 @@ fn parse_elrc(lrc: &str) -> Vec<LyricLine> {
                     if let Some(end_idx) = line.text[pos..].find('>') {
                         let tag = &line.text[pos + 1..pos + end_idx];
                         if let Some(w_ms) = parse_lrc_time(tag) {
+                            // An inline timestamp starts the text after it, so it also supplies the
+                            // deterministic end boundary for the preceding token.
+                            if let Some((start_ms, text)) = current_word.take() {
+                                if !text.is_empty() {
+                                    words.push(LyricWord {
+                                        text,
+                                        start_ms,
+                                        end_ms: w_ms.max(start_ms),
+                                    });
+                                }
+                            }
+                            current_word = Some((w_ms, String::new()));
                             pos += end_idx + 1;
-                            let next_tag_idx = line.text[pos..]
-                                .find('<')
-                                .map(|i| pos + i)
-                                .unwrap_or(line.text.len());
-                            let w_str = &line.text[pos..next_tag_idx];
-                            text_buf.push_str(w_str);
-                            words.push(LyricWord {
-                                text: w_str.to_string(),
-                                start_ms: last_ms,
-                                end_ms: w_ms,
-                            });
-                            last_ms = w_ms;
-                            pos = next_tag_idx;
                             continue;
                         }
                     }
@@ -1793,7 +1820,23 @@ fn parse_elrc(lrc: &str) -> Vec<LyricLine> {
                 // ASCII `<`/`>`, so slicing here is always on a char boundary.
                 let ch = line.text[pos..].chars().next().unwrap_or(' ');
                 text_buf.push(ch);
+                if let Some((_, text)) = &mut current_word {
+                    text.push(ch);
+                }
                 pos += ch.len_utf8();
+            }
+
+            if let Some((start_ms, text)) = current_word {
+                if !text.is_empty() {
+                    // eLRC has no closing tag for the final token. Use only a real boundary the
+                    // parsed line set already supplies; otherwise keep a safe zero-length tail.
+                    let end_ms = line
+                        .end_time_ms
+                        .filter(|end| *end >= start_ms)
+                        .or_else(|| next_line_start.filter(|end| *end >= start_ms))
+                        .unwrap_or(start_ms);
+                    words.push(LyricWord { text, start_ms, end_ms });
+                }
             }
 
             if !words.is_empty() {
@@ -2003,15 +2046,46 @@ mod tests {
 
     #[test]
     fn parses_elrc_inline_word_timestamps() {
-        let lrc = "[00:10.50]<00:10.50>Hello <00:11.20>world";
+        let lrc = "[00:10.00]<00:10.00>Hello <00:10.50>world";
         let lines = parse_elrc(lrc);
         assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0].time_ms, Some(10500));
+        assert_eq!(lines[0].time_ms, Some(10000));
         assert_eq!(lines[0].text, "Hello world");
         let words = lines[0].words.as_ref().unwrap();
         assert_eq!(words.len(), 2);
         assert_eq!(words[0].text, "Hello ");
+        assert_eq!(words[0].start_ms, 10000);
+        assert_eq!(words[0].end_ms, 10500);
         assert_eq!(words[1].text, "world");
+        assert_eq!(words[1].start_ms, 10500);
+        assert!(words[1].end_ms >= words[1].start_ms);
+    }
+
+    #[test]
+    fn elrc_each_token_ends_when_the_next_one_starts() {
+        let lines = parse_elrc("[00:12.00]<00:12.00>I <00:12.30>see <00:12.65>trees");
+        let words = lines[0].words.as_ref().unwrap();
+        assert_eq!(words.len(), 3);
+        assert_eq!((words[0].start_ms, words[0].end_ms), (12000, 12300));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (12300, 12650));
+        assert_eq!(words[2].start_ms, 12650);
+        assert!(words[2].end_ms >= words[2].start_ms);
+    }
+
+    #[test]
+    fn elrc_final_token_uses_the_next_line_as_its_boundary() {
+        let lines = parse_elrc("[00:10.00]<00:10.00>Hello <00:10.50>world\n[00:12.00]Next line");
+        let words = lines[0].words.as_ref().unwrap();
+        assert_eq!(words[1].end_ms, 12000);
+    }
+
+    #[test]
+    fn standard_lrc_remains_line_synced_only() {
+        let lines = parse_elrc("[00:10.00]Hello world");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_ms, Some(10000));
+        assert_eq!(lines[0].text, "Hello world");
+        assert!(lines[0].words.is_none());
     }
 
     #[test]
@@ -2041,7 +2115,32 @@ mod tests {
         let words = lines[0].words.as_ref().unwrap();
         assert_eq!(words.len(), 1);
         assert_eq!(words[0].text, "歌う");
+        assert_eq!(words[0].start_ms, 12500);
         assert_eq!(words[0].end_ms, 12500);
+    }
+
+    #[test]
+    fn lyrics_cache_rejects_legacy_entries_and_round_trips_current_version() {
+        let lyrics = Lyrics {
+            source: "Test Provider".into(),
+            synced: true,
+            instrumental: false,
+            lines: vec![LyricLine::simple(Some(10000), "Hello world".into())],
+        };
+
+        let legacy = serde_json::to_string(&lyrics).unwrap();
+        assert!(deserialize_cached_lyrics(&legacy).is_none());
+
+        let encoded = serialize_cached_lyrics(&lyrics).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(value.get("version").and_then(|v| v.as_u64()), Some(1));
+        let decoded = deserialize_cached_lyrics(&encoded).unwrap();
+        assert_eq!(decoded.source, lyrics.source);
+        assert_eq!(decoded.lines[0].text, lyrics.lines[0].text);
+
+        let mut future = value;
+        future["version"] = serde_json::json!(LYRICS_CACHE_VERSION + 1);
+        assert!(deserialize_cached_lyrics(&future.to_string()).is_none());
     }
 
     #[test]
