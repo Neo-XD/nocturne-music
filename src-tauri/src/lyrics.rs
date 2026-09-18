@@ -28,6 +28,10 @@ const MISS_TTL_SECS: i64 = 24 * 3600;
 const LYRICS_CACHE_VERSION: u32 = 2;
 
 const LRCLIB_ROOT: &str = "https://lrclib.net/api";
+const UNISON_ENDPOINT: &str = "https://unison.betterlyrics.org/lyrics";
+const UNISON_SOURCE: &str = "Unison";
+const UNISON_SEARCH_LIMIT: usize = 10;
+const UNISON_CANDIDATE_LIMIT: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LyricWord {
@@ -166,6 +170,12 @@ fn deserialize_cached_lyrics(json: &str) -> Option<Lyrics> {
     (cached.version == LYRICS_CACHE_VERSION).then_some(cached.lyrics)
 }
 
+/// The official Better Lyrics client marks Unison results as non-cacheable. Mirror that policy for
+/// persistent positive lyrics caching. Negative cache entries retain the normal whole-chain policy.
+fn positive_lyrics_cache_allowed(lyrics: &Lyrics) -> bool {
+    lyrics.source != UNISON_SOURCE
+}
+
 pub struct LyricsRequest {
     pub video_id: String,
     pub title: String,
@@ -186,8 +196,8 @@ fn forced_provider() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-pub const DEFAULT_PROVIDERS: [&str; 7] =
-    ["betterlyrics", "youlyplus", "paxsenix", "lrclib", "ytm", "qq", "kugou"];
+pub const DEFAULT_PROVIDERS: [&str; 8] =
+    ["betterlyrics", "youlyplus", "unison", "paxsenix", "lrclib", "ytm", "qq", "kugou"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomLyricProvider {
@@ -250,8 +260,15 @@ pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> 
     }
     let (lyrics, cacheable) = fetch(state, req).await;
     if cacheable && forced.is_none() {
-        let json = lyrics.as_ref().and_then(serialize_cached_lyrics);
-        state.db.put_lyrics(&video_id, json.as_deref(), now);
+        match lyrics.as_ref() {
+            Some(lyrics) if positive_lyrics_cache_allowed(lyrics) => {
+                if let Some(json) = serialize_cached_lyrics(lyrics) {
+                    state.db.put_lyrics(&video_id, Some(&json), now);
+                }
+            }
+            Some(_) => {}
+            None => state.db.put_lyrics(&video_id, None, now),
+        }
     }
     lyrics
 }
@@ -291,6 +308,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         let hit = match only.as_str() {
             "betterlyrics" | "boidu" => betterlyrics_get(req).await,
             "youlyplus" | "lyricsplus" => youlyplus_get(req).await,
+            "unison" => unison_get(req).await,
             "paxsenix" => paxsenix_get(req).await,
             "qq" => qqmusic_get(req).await,
             "kugou" => kugou_get(req).await,
@@ -317,6 +335,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     // Cache of already-fetched candidate responses so no provider is hit twice.
     let mut fetched_betterlyrics: Option<Option<Lyrics>> = None;
     let mut fetched_youlyplus: Option<Option<Lyrics>> = None;
+    let mut fetched_unison: Option<Option<Lyrics>> = None;
     let mut fetched_paxsenix: Option<Option<Lyrics>> = None;
     let mut fetched_customs: std::collections::HashMap<String, Option<Lyrics>> =
         std::collections::HashMap::new();
@@ -347,6 +366,20 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 if let Some(Some(l)) = &fetched_youlyplus {
                     if has_genuine_word_timings(l) {
                         return (Some(l.clone()), req.duration.is_some());
+                    }
+                }
+            }
+            "unison" => {
+                if fetched_unison.is_none() {
+                    let hit = unison_get(req).await;
+                    if hit.is_ok() {
+                        definitive = true;
+                    }
+                    fetched_unison = Some(hit.ok().flatten());
+                }
+                if let Some(Some(l)) = &fetched_unison {
+                    if has_genuine_word_timings(l) {
+                        return (Some(l.clone()), false);
                     }
                 }
             }
@@ -431,6 +464,20 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 if let Some(Some(l)) = &fetched_youlyplus {
                     if is_line_synced(l) {
                         return (Some(l.clone()), req.duration.is_some());
+                    }
+                }
+            }
+            "unison" => {
+                if fetched_unison.is_none() {
+                    let hit = unison_get(req).await;
+                    if hit.is_ok() {
+                        definitive = true;
+                    }
+                    fetched_unison = Some(hit.ok().flatten());
+                }
+                if let Some(Some(l)) = &fetched_unison {
+                    if is_line_synced(l) {
+                        return (Some(l.clone()), false);
                     }
                 }
             }
@@ -571,6 +618,11 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
             "youlyplus" | "lyricsplus" => {
                 if let Some(Some(l)) = fetched_youlyplus.take() {
                     return (Some(l), req.duration.is_some());
+                }
+            }
+            "unison" => {
+                if let Some(Some(l)) = fetched_unison.take() {
+                    return (Some(l), false);
                 }
             }
             "paxsenix" => {
@@ -952,6 +1004,453 @@ fn clean_lyrics_artist(artist: &str) -> String {
 }
 
 // --- Additional Providers (Better Lyrics & Asian Catalogues) ------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnisonQuery {
+    video_id: Option<String>,
+    song: String,
+    artist: String,
+    duration: Option<i64>,
+    album: Option<String>,
+}
+
+impl UnisonQuery {
+    fn from_request(req: &LyricsRequest) -> Self {
+        Self {
+            video_id: (!req.video_id.is_empty()).then(|| req.video_id.clone()),
+            song: req.title.clone(),
+            artist: req.artists.clone(),
+            duration: req
+                .duration
+                .filter(|duration| *duration > 0.0)
+                .map(|duration| duration.round() as i64),
+            album: req.album.clone().filter(|album| !album.trim().is_empty()),
+        }
+    }
+
+    fn params(&self) -> Vec<(&'static str, String)> {
+        let mut params = Vec::new();
+        if let Some(video_id) = &self.video_id {
+            params.push(("v", video_id.clone()));
+        }
+        params.push(("song", self.song.clone()));
+        params.push(("artist", self.artist.clone()));
+        if let Some(duration) = self.duration {
+            params.push(("duration", duration.to_string()));
+        }
+        if let Some(album) = &self.album {
+            params.push(("album", album.clone()));
+        }
+        params
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UnisonSearchQuery {
+    Metadata { song: String, artist: String, limit: usize },
+    Broad { query: String, limit: usize },
+}
+
+impl UnisonSearchQuery {
+    fn from_request(req: &LyricsRequest) -> Option<Self> {
+        let song = req.title.trim();
+        let artist = req.artists.trim();
+        match (song.is_empty(), artist.is_empty()) {
+            (false, false) => Some(Self::Metadata {
+                song: song.to_owned(),
+                artist: artist.to_owned(),
+                limit: UNISON_SEARCH_LIMIT,
+            }),
+            (false, true) => {
+                Some(Self::Broad { query: song.to_owned(), limit: UNISON_SEARCH_LIMIT })
+            }
+            (true, false) => {
+                Some(Self::Broad { query: artist.to_owned(), limit: UNISON_SEARCH_LIMIT })
+            }
+            (true, true) => None,
+        }
+    }
+
+    fn params(&self) -> Vec<(&'static str, String)> {
+        match self {
+            Self::Metadata { song, artist, limit } => vec![
+                ("song", song.clone()),
+                ("artist", artist.clone()),
+                ("limit", limit.to_string()),
+            ],
+            Self::Broad { query, limit } => {
+                vec![("q", query.clone()), ("limit", limit.to_string())]
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct UnisonResponse {
+    success: bool,
+    data: Option<UnisonData>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnisonData {
+    lyrics: String,
+    format: String,
+    sync_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UnisonSearchResponse {
+    success: bool,
+    #[serde(default)]
+    data: Vec<UnisonSearchItem>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnisonSearchItem {
+    id: i64,
+    song: String,
+    artist: String,
+    #[serde(default)]
+    album: Option<String>,
+    #[serde(default)]
+    duration: Option<f64>,
+    format: String,
+    sync_type: String,
+    #[serde(default)]
+    match_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MetadataRank {
+    tier: u8,
+    score: f64,
+}
+
+#[derive(Debug)]
+struct MetadataFieldMatch {
+    requested: bool,
+    meaningful: bool,
+    exact: bool,
+    contains_all: bool,
+    matched_tokens: usize,
+    token_count: usize,
+    coverage: f64,
+    similarity: f64,
+}
+
+fn normalize_search_text(text: &str) -> String {
+    let mut normalized = String::new();
+    let mut pending_space = false;
+    for character in text.trim().chars().flat_map(char::to_lowercase) {
+        if character.is_alphanumeric() {
+            if pending_space && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            normalized.push(character);
+            pending_space = false;
+        } else {
+            pending_space = true;
+        }
+    }
+    normalized
+}
+
+fn is_common_search_token(token: &str) -> bool {
+    matches!(
+        token,
+        "a" | "an"
+            | "and"
+            | "the"
+            | "of"
+            | "to"
+            | "in"
+            | "on"
+            | "for"
+            | "with"
+            | "feat"
+            | "featuring"
+            | "ft"
+            | "version"
+            | "remix"
+    )
+}
+
+fn bigram_similarity(left: &str, right: &str) -> f64 {
+    let left: Vec<char> = left.chars().filter(|character| !character.is_whitespace()).collect();
+    let right: Vec<char> = right.chars().filter(|character| !character.is_whitespace()).collect();
+    if left == right {
+        return 1.0;
+    }
+    if left.len() < 2 || right.len() < 2 {
+        return 0.0;
+    }
+
+    let mut right_bigrams: Vec<(char, char)> =
+        right.windows(2).map(|pair| (pair[0], pair[1])).collect();
+    let mut matches = 0usize;
+    for pair in left.windows(2).map(|pair| (pair[0], pair[1])) {
+        if let Some(index) = right_bigrams.iter().position(|candidate| *candidate == pair) {
+            matches += 1;
+            right_bigrams.swap_remove(index);
+        }
+    }
+    (2 * matches) as f64 / (left.len() + right.len() - 2) as f64
+}
+
+fn compare_metadata_field(query: &str, candidate: Option<&str>) -> MetadataFieldMatch {
+    let query = normalize_search_text(query);
+    let candidate = normalize_search_text(candidate.unwrap_or_default());
+    if query.is_empty() {
+        return MetadataFieldMatch {
+            requested: false,
+            meaningful: false,
+            exact: true,
+            contains_all: true,
+            matched_tokens: 0,
+            token_count: 0,
+            coverage: 1.0,
+            similarity: 1.0,
+        };
+    }
+
+    let query_tokens: Vec<&str> =
+        query.split_whitespace().filter(|token| !is_common_search_token(token)).collect();
+    let candidate_tokens: Vec<&str> = candidate.split_whitespace().collect();
+    let matched_tokens = query_tokens
+        .iter()
+        .filter(|query_token| {
+            candidate_tokens.iter().any(|candidate_token| {
+                query_token == &candidate_token
+                    || (query_token.chars().count() >= 4
+                        && candidate_token.chars().count() >= 4
+                        && bigram_similarity(query_token, candidate_token) >= 0.65)
+            })
+        })
+        .count();
+    let token_count = query_tokens.len();
+    let coverage = if token_count == 0 { 0.0 } else { matched_tokens as f64 / token_count as f64 };
+
+    MetadataFieldMatch {
+        requested: true,
+        meaningful: token_count > 0,
+        exact: query == candidate,
+        contains_all: token_count > 0 && matched_tokens == token_count,
+        matched_tokens,
+        token_count,
+        coverage,
+        similarity: bigram_similarity(&query, &candidate),
+    }
+}
+
+fn rank_provider_metadata(
+    req: &LyricsRequest,
+    title: Option<&str>,
+    artist: Option<&str>,
+) -> Option<MetadataRank> {
+    let title = compare_metadata_field(&req.title, title);
+    let artist = compare_metadata_field(&req.artists, artist);
+    let fields = [&title, &artist];
+    let requested: Vec<_> = fields.into_iter().filter(|field| field.requested).collect();
+    if requested.is_empty() || requested.iter().all(|field| !field.meaningful) {
+        return None;
+    }
+    if requested.iter().any(|field| !field.meaningful) {
+        return None;
+    }
+
+    let substantial = |field: &&MetadataFieldMatch| {
+        field.matched_tokens >= 2 || (field.token_count == 1 && field.coverage == 1.0)
+    };
+    let tier = if requested.iter().all(|field| field.exact) {
+        4
+    } else if requested.iter().all(|field| field.contains_all && substantial(field)) {
+        3
+    } else if requested.iter().all(|field| field.coverage >= 0.6 && substantial(field)) {
+        2
+    } else if requested.iter().all(|field| field.similarity >= 0.45) {
+        1
+    } else {
+        return None;
+    };
+    let field_count = requested.len() as f64;
+    let score = tier as f64 * 100.0
+        + requested.iter().map(|field| field.coverage).sum::<f64>() * 20.0 / field_count
+        + requested.iter().map(|field| field.similarity).sum::<f64>() * 10.0 / field_count;
+    Some(MetadataRank { tier, score })
+}
+
+fn rank_unison_search_item(req: &LyricsRequest, item: &UnisonSearchItem) -> Option<MetadataRank> {
+    let mut rank = rank_provider_metadata(req, Some(&item.song), Some(&item.artist))?;
+    if let (Some(query_album), Some(candidate_album)) = (&req.album, &item.album) {
+        let album = compare_metadata_field(query_album, Some(candidate_album));
+        rank.score += if album.exact {
+            4.0
+        } else if album.contains_all {
+            2.0
+        } else {
+            0.0
+        };
+    }
+    if let (Some(query_duration), Some(candidate_duration)) = (req.duration, item.duration) {
+        let difference = (query_duration - candidate_duration).abs();
+        rank.score += if difference <= 2.0 {
+            5.0
+        } else if difference <= 5.0 {
+            3.0
+        } else if difference <= 10.0 {
+            1.0
+        } else {
+            0.0
+        };
+    }
+    rank.score += item.match_score.unwrap_or_default().clamp(0.0, 1.0);
+    Some(rank)
+}
+
+fn rank_unison_search_results(
+    req: &LyricsRequest,
+    items: Vec<UnisonSearchItem>,
+) -> Vec<UnisonSearchItem> {
+    let mut ranked: Vec<(MetadataRank, UnisonSearchItem)> = items
+        .into_iter()
+        .filter_map(|item| rank_unison_search_item(req, &item).map(|rank| (rank, item)))
+        .collect();
+    ranked.sort_by(|(left_rank, left), (right_rank, right)| {
+        right_rank
+            .tier
+            .cmp(&left_rank.tier)
+            .then_with(|| right_rank.score.total_cmp(&left_rank.score))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut seen = std::collections::HashSet::new();
+    ranked
+        .into_iter()
+        .filter_map(|(_, item)| {
+            let key = format!(
+                "{}\u{1f}|{}\u{1f}|{}\u{1f}|{}\u{1f}|{}",
+                normalize_search_text(&item.song),
+                normalize_search_text(&item.artist),
+                normalize_search_text(item.album.as_deref().unwrap_or_default()),
+                item.format.to_ascii_lowercase(),
+                item.sync_type.to_ascii_lowercase()
+            );
+            seen.insert(key).then_some(item)
+        })
+        .take(UNISON_CANDIDATE_LIMIT)
+        .collect()
+}
+
+fn unison_response_to_lyrics(response: UnisonResponse) -> Option<Lyrics> {
+    if !response.success {
+        return None;
+    }
+    let data = response.data?;
+    if data.lyrics.trim().is_empty()
+        || !matches!(
+            data.sync_type.to_ascii_lowercase().as_str(),
+            "richsync" | "linesync" | "plain"
+        )
+    {
+        return None;
+    }
+
+    match data.format.to_ascii_lowercase().as_str() {
+        "ttml" | "lrc" => from_parsed(UNISON_SOURCE, parse_lrc_or_ttml(&data.lyrics)),
+        "plain" => plain_from_text(Some(&data.lyrics), UNISON_SOURCE),
+        _ => None,
+    }
+}
+
+/// Unison's public endpoint returns one best result for the exact metadata request. There are no
+/// retries here: the surrounding provider chain supplies the fallback behavior.
+async fn unison_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    let response = crate::http::client()
+        .get(UNISON_ENDPOINT)
+        .query(&UnisonQuery::from_request(req).params())
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let payload: UnisonResponse = response.error_for_status()?.json().await?;
+    Ok(unison_response_to_lyrics(payload))
+}
+
+async fn unison_get_by_id(id: i64) -> Result<Option<Lyrics>, reqwest::Error> {
+    let response = crate::http::client()
+        .get(format!("{UNISON_ENDPOINT}/{id}"))
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let payload: UnisonResponse = response.error_for_status()?.json().await?;
+    Ok(unison_response_to_lyrics(payload))
+}
+
+fn unison_manual_candidate(item: UnisonSearchItem, lyrics: Lyrics) -> LyricCandidate {
+    let has_words = has_genuine_word_timings(&lyrics);
+    LyricCandidate {
+        id: format!("unison-{}", item.id),
+        source: UNISON_SOURCE.into(),
+        title: item.song,
+        artist: item.artist,
+        album: item.album,
+        duration: item.duration,
+        synced: lyrics.synced,
+        has_words,
+        lyrics,
+    }
+}
+
+/// Manual Find Lyrics uses Unison's fuzzy metadata search rather than the automatic video-ID
+/// lookup. Search results contain metadata only, so resolve just the top bounded IDs afterward.
+async fn unison_search_candidates(
+    req: &LyricsRequest,
+) -> Result<Vec<LyricCandidate>, reqwest::Error> {
+    let Some(query) = UnisonSearchQuery::from_request(req) else {
+        return Ok(Vec::new());
+    };
+    let response = crate::http::client()
+        .get(format!("{UNISON_ENDPOINT}/search"))
+        .query(&query.params())
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(Vec::new());
+    }
+    let payload: UnisonSearchResponse = response.error_for_status()?.json().await?;
+    if !payload.success {
+        return Ok(Vec::new());
+    }
+
+    let ranked = rank_unison_search_results(req, payload.data);
+    let mut requests = FuturesUnordered::new();
+    for (index, item) in ranked.into_iter().enumerate() {
+        requests.push(async move {
+            let lyrics = unison_get_by_id(item.id).await;
+            (index, item, lyrics)
+        });
+    }
+
+    let mut candidates = Vec::new();
+    while let Some((index, item, lyrics)) = requests.next().await {
+        if let Some(lyrics) = lyrics? {
+            candidates.push((index, unison_manual_candidate(item, lyrics)));
+        }
+    }
+    candidates.sort_by_key(|(index, _)| *index);
+    Ok(candidates.into_iter().map(|(_, candidate)| candidate).collect())
+}
 
 /// Better Lyrics provider (Better Lyrics API / Boidu) - syllable-by-syllable & word-level sync
 async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
@@ -1448,6 +1947,15 @@ pub struct LyricsUpdatedEvent {
     pub lyrics: Lyrics,
 }
 
+fn manual_search_request(
+    title: String,
+    artist: String,
+    album: Option<String>,
+    duration: Option<f64>,
+) -> LyricsRequest {
+    LyricsRequest { video_id: String::new(), title, artists: artist, album, duration }
+}
+
 pub async fn search_all_lyrics(
     state: &AppState,
     title: String,
@@ -1457,13 +1965,13 @@ pub async fn search_all_lyrics(
     video_id: Option<String>,
 ) -> Vec<LyricCandidate> {
     let mut candidates = Vec::new();
-    let req = LyricsRequest {
-        video_id: video_id.unwrap_or_default(),
-        title: title.clone(),
-        artists: artist.clone(),
-        album,
-        duration,
-    };
+    // The current player's video ID identifies what is already playing, not what the edited
+    // discovery form asks for. Manual providers must resolve their own result IDs.
+    let _current_video_id = video_id;
+    let req = manual_search_request(title.clone(), artist.clone(), album, duration);
+    if req.title.trim().is_empty() && req.artists.trim().is_empty() {
+        return Vec::new();
+    }
 
     // 1. BetterLyrics
     if let Ok(Some(l)) = betterlyrics_get(&req).await {
@@ -1497,7 +2005,12 @@ pub async fn search_all_lyrics(
         });
     }
 
-    // 1c. Paxsenix
+    // 1c. Unison catalogue search returns canonical metadata and resolves only bounded top hits.
+    if let Ok(mut hits) = unison_search_candidates(&req).await {
+        candidates.append(&mut hits);
+    }
+
+    // 1d. Paxsenix
     if let Ok(Some(l)) = paxsenix_get(&req).await {
         let has_words = has_genuine_word_timings(&l);
         candidates.push(LyricCandidate {
@@ -1604,12 +2117,25 @@ pub async fn search_all_lyrics(
     candidates
 }
 
-pub fn apply_selected_lyrics(state: &AppState, video_id: String, lyrics: Lyrics) {
-    if let Some(json) = serialize_cached_lyrics(&lyrics) {
-        state.db.put_lyrics(&video_id, Some(&json), now_secs());
-        let payload = LyricsUpdatedEvent { video_id, lyrics };
-        let _ = state.app.emit("lyrics-updated", &payload);
+fn persist_selected_lyrics(db: &crate::db::Db, video_id: &str, lyrics: &Lyrics) -> bool {
+    if !positive_lyrics_cache_allowed(lyrics) {
+        return false;
     }
+    let Some(json) = serialize_cached_lyrics(lyrics) else {
+        return false;
+    };
+    db.put_lyrics(video_id, Some(&json), now_secs());
+    true
+}
+
+pub fn apply_selected_lyrics(state: &AppState, video_id: String, lyrics: Lyrics) {
+    if positive_lyrics_cache_allowed(&lyrics)
+        && !persist_selected_lyrics(&state.db, &video_id, &lyrics)
+    {
+        return;
+    }
+    let payload = LyricsUpdatedEvent { video_id, lyrics };
+    let _ = state.app.emit("lyrics-updated", &payload);
 }
 
 /// How far a search hit's length may sit from the track we're actually playing. Same tolerance the
@@ -2231,6 +2757,272 @@ mod tests {
         assert_eq!(l.lines[2].text, "");
     }
 
+    fn unison_body(format: &str, sync_type: &str, lyrics: &str) -> String {
+        serde_json::json!({
+            "success": true,
+            "data": {
+                "lyrics": lyrics,
+                "format": format,
+                "syncType": sync_type
+            }
+        })
+        .to_string()
+    }
+
+    fn unison_search_item(id: i64, song: &str, artist: &str) -> UnisonSearchItem {
+        UnisonSearchItem {
+            id,
+            song: song.into(),
+            artist: artist.into(),
+            album: Some("Provider Album".into()),
+            duration: Some(123.0),
+            format: "lrc".into(),
+            sync_type: "linesync".into(),
+            match_score: Some(0.8),
+        }
+    }
+
+    fn unison_manual_request(title: &str, artist: &str) -> LyricsRequest {
+        LyricsRequest {
+            video_id: "automatic-video-id-must-not-be-searched".into(),
+            title: title.into(),
+            artists: artist.into(),
+            album: Some("Provider Album".into()),
+            duration: Some(123.0),
+        }
+    }
+
+    fn decode_unison_response(body: &str) -> Result<Option<Lyrics>, serde_json::Error> {
+        serde_json::from_str(body).map(unison_response_to_lyrics)
+    }
+
+    #[test]
+    fn unison_accepts_ttml_through_the_existing_parser() {
+        let ttml = r#"<tt><body><div><p begin="00:10.000" end="00:11.000"><span begin="00:10.000" end="00:10.500">Hello </span><span begin="00:10.500" end="00:11.000">world</span></p></div></body></tt>"#;
+        let lyrics =
+            decode_unison_response(&unison_body("ttml", "richsync", ttml)).unwrap().unwrap();
+
+        assert_eq!(lyrics.source, UNISON_SOURCE);
+        assert!(lyrics.synced);
+        assert_eq!(lyrics.lines[0].text, "Hello world");
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn unison_lrc_preserves_real_word_and_line_quality() {
+        let rich = decode_unison_response(&unison_body(
+            "lrc",
+            "richsync",
+            "[00:10.00]<00:10.00>Hello <00:10.50>world\n[00:11.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(has_genuine_word_timings(&rich));
+
+        let line = decode_unison_response(&unison_body(
+            "lrc",
+            "linesync",
+            "[00:10.00]Hello world\n[00:11.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(line.synced);
+        assert!(!has_genuine_word_timings(&line));
+    }
+
+    #[test]
+    fn unison_plain_stays_plain() {
+        let lyrics =
+            decode_unison_response(&unison_body("plain", "plain", "Hello world\nSecond line"))
+                .unwrap()
+                .unwrap();
+        assert!(!lyrics.synced);
+        assert!(!has_genuine_word_timings(&lyrics));
+        assert!(lyrics.lines.iter().all(|line| line.time_ms.is_none()));
+    }
+
+    #[test]
+    fn unison_distinguishes_malformed_json_from_valid_no_result() {
+        assert!(decode_unison_response("not json").is_err());
+        assert!(decode_unison_response(r#"{"success":false}"#).unwrap().is_none());
+        assert!(decode_unison_response(r#"{"success":true}"#).unwrap().is_none());
+        assert!(decode_unison_response(&unison_body("lrc", "linesync", "   ")).unwrap().is_none());
+        assert!(decode_unison_response(&unison_body("unknown", "linesync", "lyrics"))
+            .unwrap()
+            .is_none());
+        assert!(decode_unison_response(&unison_body("plain", "unknown", "lyrics"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn unison_query_uses_the_public_metadata_contract() {
+        let query = UnisonQuery::from_request(&LyricsRequest {
+            video_id: "video-id".into(),
+            title: "Song title".into(),
+            artists: "Artist name".into(),
+            album: Some("Album name".into()),
+            duration: Some(123.6),
+        });
+
+        assert_eq!(
+            query.params(),
+            vec![
+                ("v", "video-id".into()),
+                ("song", "Song title".into()),
+                ("artist", "Artist name".into()),
+                ("duration", "124".into()),
+                ("album", "Album name".into()),
+            ]
+        );
+
+        let without_optional = UnisonQuery::from_request(&LyricsRequest {
+            video_id: String::new(),
+            title: "Song".into(),
+            artists: "Artist".into(),
+            album: None,
+            duration: None,
+        });
+        assert_eq!(
+            without_optional.params(),
+            vec![("song", "Song".into()), ("artist", "Artist".into())]
+        );
+    }
+
+    #[test]
+    fn unison_manual_search_query_uses_fuzzy_text_without_video_id() {
+        let req = unison_manual_request("With Glory", "Wuthering Waves");
+        let query = UnisonSearchQuery::from_request(&req).unwrap();
+
+        assert_eq!(
+            query.params(),
+            vec![
+                ("song", "With Glory".into()),
+                ("artist", "Wuthering Waves".into()),
+                ("limit", UNISON_SEARCH_LIMIT.to_string())
+            ]
+        );
+        assert!(query.params().iter().all(|(key, _)| *key != "v"));
+
+        let automatic = UnisonQuery::from_request(&req);
+        assert!(automatic.params().iter().any(|(key, value)| {
+            *key == "v" && value == "automatic-video-id-must-not-be-searched"
+        }));
+
+        let title_only = unison_manual_request("Voyaging", "");
+        assert_eq!(
+            UnisonSearchQuery::from_request(&title_only).unwrap().params(),
+            vec![("q", "Voyaging".into()), ("limit", UNISON_SEARCH_LIMIT.to_string())]
+        );
+        let artist_only = unison_manual_request("", "Wuthering Waves");
+        assert_eq!(
+            UnisonSearchQuery::from_request(&artist_only).unwrap().params(),
+            vec![("q", "Wuthering Waves".into()), ("limit", UNISON_SEARCH_LIMIT.to_string())]
+        );
+    }
+
+    #[test]
+    fn manual_discovery_drops_the_current_video_hint_but_automatic_queries_keep_it() {
+        let manual =
+            manual_search_request("Edited title".into(), "Edited artist".into(), None, None);
+        assert!(manual.video_id.is_empty());
+
+        let automatic =
+            UnisonQuery::from_request(&unison_manual_request("Playing title", "Playing artist"));
+        assert!(automatic.params().iter().any(|(key, value)| {
+            *key == "v" && value == "automatic-video-id-must-not-be-searched"
+        }));
+    }
+
+    #[test]
+    fn unison_manual_ranking_prefers_exact_normalized_metadata() {
+        let req = unison_manual_request("With Glory I Shall Fall", "Wuthering Waves");
+        let exact = unison_search_item(1, "With Glory I Shall Fall", "Wuthering Waves");
+        let richer_artist = unison_search_item(
+            2,
+            "With Glory I Shall Fall",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+
+        let ranked = rank_unison_search_results(&req, vec![richer_artist, exact]);
+        assert_eq!(ranked.iter().map(|item| item.id).collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    #[test]
+    fn unison_manual_ranking_accepts_partial_title_and_richer_artist() {
+        let req = unison_manual_request("With Glory", "Wuthering Waves");
+        let richer = unison_search_item(
+            1,
+            "With Glory I Shall Fall",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+
+        let rank = rank_unison_search_item(&req, &richer).unwrap();
+        assert_eq!(rank.tier, 3);
+        assert_eq!(rank_unison_search_results(&req, vec![richer]).len(), 1);
+    }
+
+    #[test]
+    fn unison_manual_ranking_accepts_voyage_as_a_fuzzy_partial_title() {
+        let req = unison_manual_request("Voyage", "Wuthering Waves");
+        let candidate = unison_search_item(
+            1,
+            "Voyaging Star's Farewell",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+
+        let rank = rank_unison_search_item(&req, &candidate).unwrap();
+        assert_eq!(rank.tier, 3);
+    }
+
+    #[test]
+    fn unison_manual_ranking_is_case_and_punctuation_insensitive() {
+        let req = unison_manual_request("WITH GLORY!", "wuthering-waves");
+        let candidate = unison_search_item(
+            1,
+            "With Glory I Shall Fall",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+
+        assert!(rank_unison_search_item(&req, &candidate).is_some());
+    }
+
+    #[test]
+    fn unison_manual_ranking_rejects_an_unrelated_common_token_match() {
+        let req = unison_manual_request("With Glory", "Wuthering Waves");
+        let unrelated = unison_search_item(1, "With You Tonight", "Ocean Avenue");
+
+        assert!(rank_unison_search_item(&req, &unrelated).is_none());
+        assert!(rank_unison_search_results(&req, vec![unrelated]).is_empty());
+    }
+
+    #[test]
+    fn unison_manual_ranking_deduplicates_identical_results() {
+        let req = unison_manual_request("With Glory", "Wuthering Waves");
+        let first = unison_search_item(1, "With Glory I Shall Fall", "Wuthering Waves");
+        let duplicate = unison_search_item(2, "With Glory I Shall Fall", "Wuthering Waves");
+
+        let ranked = rank_unison_search_results(&req, vec![duplicate, first]);
+        assert_eq!(ranked.iter().map(|item| item.id).collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn unison_manual_candidate_preserves_provider_metadata() {
+        let item = unison_search_item(
+            42,
+            "With Glory I Shall Fall",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+        let lyrics = plain_from_text(Some("Provider lyrics"), UNISON_SOURCE).unwrap();
+        let candidate = unison_manual_candidate(item, lyrics);
+
+        assert_eq!(candidate.id, "unison-42");
+        assert_eq!(candidate.title, "With Glory I Shall Fall");
+        assert_eq!(candidate.artist, "Wuthering Waves, jixwang & VISION SOUND");
+        assert_eq!(candidate.album.as_deref(), Some("Provider Album"));
+        assert_eq!(candidate.duration, Some(123.0));
+    }
+
     #[test]
     fn parses_ttml_aaml_word_timestamps() {
         let xml = r#"<tt><p begin="00:10.500" end="00:14.200"><span begin="00:10.500" end="00:11.200">Hello </span><span begin="00:11.200" end="00:12.100">world </span></p></tt>"#;
@@ -2556,7 +3348,7 @@ mod tests {
         // Default when unset
         assert_eq!(
             resolve_providers(&db),
-            vec!["betterlyrics", "youlyplus", "paxsenix", "lrclib", "ytm", "qq", "kugou"]
+            vec!["betterlyrics", "youlyplus", "unison", "paxsenix", "lrclib", "ytm", "qq", "kugou"]
         );
 
         // Comma separated list
@@ -2606,6 +3398,63 @@ mod tests {
         let mut future = value;
         future["version"] = serde_json::json!(LYRICS_CACHE_VERSION + 1);
         assert!(deserialize_cached_lyrics(&future.to_string()).is_none());
+    }
+
+    #[test]
+    fn unison_positive_cache_policy_does_not_change_other_providers() {
+        let unison = Lyrics {
+            source: UNISON_SOURCE.into(),
+            synced: false,
+            instrumental: false,
+            lines: vec![LyricLine::simple(None, "Unison lyric".into())],
+        };
+        let existing = Lyrics { source: "LRCLIB".into(), ..unison.clone() };
+
+        assert!(!positive_lyrics_cache_allowed(&unison));
+        assert!(positive_lyrics_cache_allowed(&existing));
+    }
+
+    #[test]
+    fn manual_unison_apply_skips_persistence_while_existing_providers_persist() {
+        let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let unison = Lyrics {
+            source: UNISON_SOURCE.into(),
+            synced: false,
+            instrumental: false,
+            lines: vec![LyricLine::simple(None, "Unison lyric".into())],
+        };
+        let existing = Lyrics { source: "LRCLIB".into(), ..unison.clone() };
+
+        assert!(!persist_selected_lyrics(&db, "unison-track", &unison));
+        assert!(db.get_lyrics("unison-track", now_secs(), MISS_TTL_SECS).is_none());
+
+        assert!(persist_selected_lyrics(&db, "existing-track", &existing));
+        let stored = db
+            .get_lyrics("existing-track", now_secs(), MISS_TTL_SECS)
+            .and_then(|entry| entry)
+            .and_then(|json| deserialize_cached_lyrics(&json));
+        assert_eq!(stored.map(|lyrics| lyrics.source), Some("LRCLIB".into()));
+    }
+
+    #[test]
+    fn unison_candidate_word_badge_uses_canonical_timing_quality() {
+        let genuine = decode_unison_response(&unison_body(
+            "lrc",
+            "richsync",
+            "[00:10.00]<00:10.00>Hello <00:10.50>world\n[00:11.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+        let line_only = decode_unison_response(&unison_body(
+            "lrc",
+            "linesync",
+            "[00:10.00]Hello world\n[00:11.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+
+        assert!(has_genuine_word_timings(&genuine));
+        assert!(!has_genuine_word_timings(&line_only));
     }
 
     #[test]
