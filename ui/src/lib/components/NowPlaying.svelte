@@ -269,18 +269,18 @@
 				>
 					<div class="flex items-center gap-2 {big ? 'justify-end' : ''}">
 						<!-- Translucent glass switcher with backdrop blur -->
-						<Tabs.List class="{big ? 'hidden' : 'flex-1'} rounded-full border border-border/50 bg-card/60 dark:bg-card/40 backdrop-blur-xl p-1 shadow-sm">
-							<Tabs.Trigger value="queue" class="gap-2.5 rounded-full data-active:bg-background/80 dark:data-active:bg-card/80 data-active:backdrop-blur-md data-active:shadow-sm">
+						<Tabs.List class="{big ? 'hidden' : 'flex-1'} rounded-[calc(var(--radius,0.45rem)+4px)] border border-border/50 bg-card/60 dark:bg-card/40 backdrop-blur-xl p-1 shadow-sm">
+							<Tabs.Trigger value="queue" class="gap-2.5 rounded-[var(--radius,0.45rem)] data-active:bg-background/80 dark:data-active:bg-card/80 data-active:backdrop-blur-md data-active:shadow-sm">
 								<HugeiconsIcon icon={Queue01Icon} class="h-4 w-4" /> Queue
 							</Tabs.Trigger>
-							<Tabs.Trigger value="lyrics" class="gap-2.5 rounded-full data-active:bg-background/80 dark:data-active:bg-card/80 data-active:backdrop-blur-md data-active:shadow-sm">
+							<Tabs.Trigger value="lyrics" class="gap-2.5 rounded-[var(--radius,0.45rem)] data-active:bg-background/80 dark:data-active:bg-card/80 data-active:backdrop-blur-md data-active:shadow-sm">
 								<HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" /> Lyrics
 							</Tabs.Trigger>
 						</Tabs.List>
 						{#if np.tab === 'lyrics'}
 							<button
 								onclick={() => (big = !big)}
-								class="cursor-pointer rounded-full border border-border/40 bg-card/60 dark:bg-card/40 backdrop-blur-xl p-1.5 text-muted-foreground transition-colors hover:text-foreground shadow-sm"
+								class="cursor-pointer rounded-[var(--radius,0.45rem)] border border-border/40 bg-card/60 dark:bg-card/40 backdrop-blur-xl p-1.5 text-muted-foreground transition-colors hover:text-foreground shadow-sm"
 								aria-label={big ? 'Shrink lyrics' : 'Enlarge lyrics'}
 							>
 								<!-- icon swap via altIcon/showAlt: `icon` is frozen at mount -->
