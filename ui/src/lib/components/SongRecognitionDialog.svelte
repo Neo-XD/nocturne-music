@@ -85,7 +85,7 @@
 
 <Dialog.Root bind:open>
 	<Dialog.Content class="sm:max-w-md border-border/80 bg-popover/95 p-6 backdrop-blur-2xl shadow-2xl rounded-[calc(var(--radius,0.45rem)+8px)]">
-		<div class="flex items-center justify-between pb-3 border-b border-border/40">
+		<div class="flex items-center justify-between pb-3 pr-8 border-b border-border/40">
 			<div class="flex items-center gap-2">
 				<div class="flex size-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
 					<HugeiconsIcon icon={AudioWave01Icon} class="size-4.5" />
@@ -95,13 +95,6 @@
 					<p class="text-[11px] text-muted-foreground">Identify songs playing on your PC (Shazam)</p>
 				</div>
 			</div>
-			<button
-				type="button"
-				class="size-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
-				onclick={() => (open = false)}
-			>
-				<HugeiconsIcon icon={Cancel01Icon} class="size-4" />
-			</button>
 		</div>
 
 		<!-- Listening State -->
