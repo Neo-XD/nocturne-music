@@ -35,6 +35,10 @@ const LYRICS_CACHE_VERSION: u32 = 2;
 const LRCLIB_ROOT: &str = "https://lrclib.net/api";
 const UNISON_ENDPOINT: &str = "https://unison.betterlyrics.org/lyrics";
 const UNISON_SOURCE: &str = "Unison";
+const AMLL_ROOT: &str = "https://api.amll.dev";
+const AMLL_SOURCE: &str = "AMLL TTML DB";
+const AMLL_SEARCH_LIMIT: usize = 10;
+const AMLL_CANDIDATE_LIMIT: usize = 3;
 const UNISON_SEARCH_LIMIT: usize = 10;
 const UNISON_CANDIDATE_LIMIT: usize = 3;
 const MANUAL_PROVIDER_CANDIDATE_LIMIT: usize = 3;
@@ -203,8 +207,8 @@ fn forced_provider() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-pub const DEFAULT_PROVIDERS: [&str; 8] =
-    ["betterlyrics", "youlyplus", "unison", "paxsenix", "lrclib", "ytm", "qq", "kugou"];
+pub const DEFAULT_PROVIDERS: [&str; 9] =
+    ["betterlyrics", "amll", "youlyplus", "unison", "paxsenix", "lrclib", "ytm", "qq", "kugou"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomLyricProvider {
@@ -316,6 +320,15 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
             "betterlyrics" | "boidu" => betterlyrics_get(req).await,
             "youlyplus" | "lyricsplus" => youlyplus_get(req).await,
             "unison" => unison_get(req).await,
+            "amll" => {
+                return match amll_get(req).await {
+                    Ok(hit) => (hit, false),
+                    Err(error) => {
+                        tracing::warn!(%error, "pinned: AMLL failed");
+                        (None, false)
+                    }
+                }
+            }
             "paxsenix" => paxsenix_get(req).await,
             "qq" => qqmusic_get(req).await,
             "kugou" => kugou_get(req).await,
@@ -343,6 +356,8 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     let mut fetched_betterlyrics: Option<Option<Lyrics>> = None;
     let mut fetched_youlyplus: Option<Option<Lyrics>> = None;
     let mut fetched_unison: Option<Option<Lyrics>> = None;
+    let mut fetched_amll: Option<Option<Lyrics>> = None;
+    let mut amll_error = false;
     let mut fetched_paxsenix: Option<Option<Lyrics>> = None;
     let mut fetched_customs: std::collections::HashMap<String, Option<Lyrics>> =
         std::collections::HashMap::new();
@@ -387,6 +402,28 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 if let Some(Some(l)) = &fetched_unison {
                     if has_genuine_word_timings(l) {
                         return (Some(l.clone()), false);
+                    }
+                }
+            }
+            "amll" => {
+                if fetched_amll.is_none() {
+                    match amll_get(req).await {
+                        Ok(hit) => {
+                            if amll_search_params(req, true).is_some() {
+                                definitive = true;
+                            }
+                            fetched_amll = Some(hit);
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "lyrics: AMLL failed");
+                            amll_error = true;
+                            fetched_amll = Some(None);
+                        }
+                    }
+                }
+                if let Some(Some(lyrics)) = &fetched_amll {
+                    if has_genuine_word_timings(lyrics) {
+                        return (Some(lyrics.clone()), true);
                     }
                 }
             }
@@ -485,6 +522,13 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 if let Some(Some(l)) = &fetched_unison {
                     if is_line_synced(l) {
                         return (Some(l.clone()), false);
+                    }
+                }
+            }
+            "amll" => {
+                if let Some(Some(lyrics)) = &fetched_amll {
+                    if is_line_synced(lyrics) {
+                        return (Some(lyrics.clone()), true);
                     }
                 }
             }
@@ -632,6 +676,11 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                     return (Some(l), false);
                 }
             }
+            "amll" => {
+                if let Some(Some(lyrics)) = fetched_amll.take() {
+                    return (Some(lyrics), true);
+                }
+            }
             "paxsenix" => {
                 if let Some(Some(l)) = fetched_paxsenix.take() {
                     return (Some(l), req.duration.is_some());
@@ -704,7 +753,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         }
     }
 
-    (None, definitive)
+    (None, definitive && !amll_error)
 }
 
 // --- LRCLIB (https://lrclib.net/docs) -------------------------------------------------------
@@ -1153,6 +1202,264 @@ struct UnisonSearchItem {
     sync_type: String,
     #[serde(default)]
     match_score: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AmllResponse<T> {
+    status: u16,
+    data: Option<T>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AmllSearchData {
+    items: Vec<AmllSongItem>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AmllSongItem {
+    id: i64,
+    #[serde(default)]
+    music_names: Vec<String>,
+    #[serde(default)]
+    artist_names: Vec<String>,
+    #[serde(default)]
+    album_names: Vec<String>,
+    #[serde(default)]
+    lyrics: Option<String>,
+    format: Option<String>,
+}
+
+fn amll_search_params(req: &LyricsRequest, automatic: bool) -> Option<Vec<(&'static str, String)>> {
+    let title = req.title.trim();
+    let artist = req.artists.trim();
+    if (title.is_empty() && artist.is_empty())
+        || (automatic && (title.is_empty() || artist.is_empty()))
+    {
+        return None;
+    }
+    let mut params = Vec::new();
+    if !title.is_empty() {
+        params.push(("musicName", title.to_owned()));
+    }
+    if !artist.is_empty() {
+        params.push(("artistName", artist.to_owned()));
+    }
+    if automatic {
+        if let Some(album) = req.album.as_deref().map(str::trim).filter(|album| {
+            !album.is_empty()
+                && !matches!(normalize_search_text(album).as_str(), "unknown album" | "single")
+        }) {
+            params.push(("albumName", album.to_owned()));
+        }
+    }
+    params.push(("page", "1".into()));
+    params.push(("pageSize", AMLL_SEARCH_LIMIT.to_string()));
+    Some(params)
+}
+
+fn amll_display_alias(query: &str, aliases: &[String]) -> Option<String> {
+    if query.trim().is_empty() {
+        return aliases.iter().find(|alias| !alias.trim().is_empty()).cloned();
+    }
+    aliases
+        .iter()
+        .filter(|alias| !alias.trim().is_empty())
+        .max_by(|left, right| {
+            let left = compare_metadata_field(query, Some(left));
+            let right = compare_metadata_field(query, Some(right));
+            (left.exact, left.contains_all, left.coverage.to_bits(), left.similarity.to_bits()).cmp(
+                &(
+                    right.exact,
+                    right.contains_all,
+                    right.coverage.to_bits(),
+                    right.similarity.to_bits(),
+                ),
+            )
+        })
+        .cloned()
+}
+
+fn amll_metadata(req: &LyricsRequest, item: &AmllSongItem) -> CandidateMetadata {
+    let artist_aliases: Vec<String> = if item.artist_names.len() > 1 {
+        item.artist_names
+            .iter()
+            .cloned()
+            .chain(std::iter::once(item.artist_names.join(", ")))
+            .collect()
+    } else {
+        item.artist_names.clone()
+    };
+    CandidateMetadata::canonical(
+        amll_display_alias(&req.title, &item.music_names),
+        amll_display_alias(&req.artists, &artist_aliases),
+        item.album_names.iter().find(|album| !album.trim().is_empty()).cloned(),
+        None,
+    )
+}
+
+fn amll_artist_credit_matches(requested: &str, alias: &str) -> bool {
+    let requested = normalize_search_text(requested);
+    if requested.is_empty() {
+        return false;
+    }
+    if requested == normalize_search_text(alias) {
+        return true;
+    }
+
+    // Compare whole credited components, never substrings or fuzzy token overlaps. Comma,
+    // ampersand, and semicolon are credit separators; feat/ft/featuring and spaced x/× are
+    // common collaboration separators. A marker at the start remains part of an artist name.
+    let mut component = Vec::new();
+    for part in alias.split([',', '&', ';', '×']) {
+        for word in part.split_whitespace() {
+            let marker = word.trim_end_matches('.').to_ascii_lowercase();
+            if !component.is_empty() && matches!(marker.as_str(), "feat" | "ft" | "featuring" | "x")
+            {
+                if normalize_search_text(&component.join(" ")) == requested {
+                    return true;
+                }
+                component.clear();
+            } else {
+                component.push(word);
+            }
+        }
+        if normalize_search_text(&component.join(" ")) == requested {
+            return true;
+        }
+        component.clear();
+    }
+    false
+}
+
+fn amll_automatic_matches(req: &LyricsRequest, item: &AmllSongItem) -> bool {
+    let title = normalize_search_text(&req.title);
+    !title.is_empty()
+        && item.music_names.iter().any(|alias| normalize_search_text(alias) == title)
+        && item.artist_names.iter().any(|alias| amll_artist_credit_matches(&req.artists, alias))
+}
+
+fn amll_rank(
+    req: &LyricsRequest,
+    item: &AmllSongItem,
+) -> Option<(MetadataRank, CandidateMetadata)> {
+    let metadata = amll_metadata(req, item);
+    let mut rank = rank_candidate_metadata(req, &metadata)?;
+    if item.format.as_deref().is_some_and(|format| format != "ttml") {
+        return None;
+    }
+    // The shared fuzzy tiers rank manual results; automatic admission is checked separately.
+    if rank.tier == 4 && !req.title.trim().is_empty() && !req.artists.trim().is_empty() {
+        rank.score += 1.0;
+    }
+    Some((rank, metadata))
+}
+
+fn amll_ranked_items(
+    req: &LyricsRequest,
+    items: Vec<AmllSongItem>,
+) -> Vec<(AmllSongItem, CandidateMetadata, MetadataRank)> {
+    let mut ranked: Vec<_> = items
+        .into_iter()
+        .filter_map(|item| amll_rank(req, &item).map(|(rank, metadata)| (item, metadata, rank)))
+        .collect();
+    ranked.sort_by(|left, right| {
+        right
+            .2
+            .tier
+            .cmp(&left.2.tier)
+            .then_with(|| right.2.score.total_cmp(&left.2.score))
+            .then_with(|| left.0.id.cmp(&right.0.id))
+    });
+    ranked
+}
+
+fn amll_lyrics(item: &AmllSongItem) -> anyhow::Result<Lyrics> {
+    anyhow::ensure!(item.format.as_deref() == Some("ttml"), "AMLL returned incompatible format");
+    let xml = item
+        .lyrics
+        .as_deref()
+        .filter(|xml| !xml.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("AMLL get response omitted TTML"))?;
+    from_parsed(AMLL_SOURCE, parse_ttml_aaml(xml))
+        .ok_or_else(|| anyhow::anyhow!("AMLL returned malformed or empty TTML"))
+}
+
+async fn amll_search_at(
+    base: &str,
+    req: &LyricsRequest,
+    automatic: bool,
+) -> anyhow::Result<Vec<AmllSongItem>> {
+    let Some(params) = amll_search_params(req, automatic) else { return Ok(Vec::new()) };
+    let response = crate::http::client()
+        .get(format!("{base}/v1/lyrics/search"))
+        .query(&params)
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(Vec::new());
+    }
+    let response = response.error_for_status()?;
+    let payload: AmllResponse<AmllSearchData> = response.json().await?;
+    anyhow::ensure!(payload.status == 200, "AMLL search returned status {}", payload.status);
+    Ok(payload.data.ok_or_else(|| anyhow::anyhow!("AMLL search omitted data"))?.items)
+}
+
+async fn amll_get_at(base: &str, id: i64) -> anyhow::Result<Option<AmllSongItem>> {
+    let response = crate::http::client()
+        .get(format!("{base}/v1/lyrics/get"))
+        .query(&[("id", id)])
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let response = response.error_for_status()?;
+    let payload: AmllResponse<AmllSongItem> = response.json().await?;
+    anyhow::ensure!(payload.status == 200, "AMLL get returned status {}", payload.status);
+    let item = payload.data.ok_or_else(|| anyhow::anyhow!("AMLL get omitted data"))?;
+    anyhow::ensure!(item.id == id, "AMLL get returned a different ID");
+    Ok(Some(item))
+}
+
+async fn amll_get(req: &LyricsRequest) -> anyhow::Result<Option<Lyrics>> {
+    let items = amll_search_at(AMLL_ROOT, req, true).await?;
+    let Some(id) = amll_automatic_id(req, items) else { return Ok(None) };
+    let Some(item) = amll_get_at(AMLL_ROOT, id).await? else { return Ok(None) };
+    // Verify the resolved record as well as the search row before accepting its lyrics.
+    if !amll_automatic_matches(req, &item) {
+        return Ok(None);
+    }
+    Ok(Some(amll_lyrics(&item)?))
+}
+
+fn amll_automatic_id(req: &LyricsRequest, items: Vec<AmllSongItem>) -> Option<i64> {
+    let ranked: Vec<_> = amll_ranked_items(req, items)
+        .into_iter()
+        .filter(|(item, _, _)| amll_automatic_matches(req, item))
+        .collect();
+    let (best, _, rank) = ranked.first()?;
+    // Different albums tied at the top leave the version ambiguous without duration metadata.
+    if ranked.iter().skip(1).any(|(_, metadata, other_rank)| {
+        other_rank.tier == 4
+            && other_rank.score == rank.score
+            && metadata.album != ranked[0].1.album
+    }) {
+        return None;
+    }
+    Some(best.id)
+}
+
+fn amll_manual_items(req: &LyricsRequest, items: Vec<AmllSongItem>) -> Vec<AmllSongItem> {
+    amll_ranked_items(req, items)
+        .into_iter()
+        .take(AMLL_CANDIDATE_LIMIT)
+        .map(|(item, _, _)| item)
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2377,6 +2684,7 @@ enum ManualSearchProvider {
     BetterLyrics,
     YouLyPlus,
     Unison,
+    Amll,
     Paxsenix,
     Lrclib,
     YouTubeMusic,
@@ -2392,6 +2700,7 @@ impl ManualSearchProvider {
             Self::BetterLyrics => "betterlyrics",
             Self::YouLyPlus => "youlyplus",
             Self::Unison => "unison",
+            Self::Amll => "amll",
             Self::Paxsenix => "paxsenix",
             Self::Lrclib => "lrclib",
             Self::YouTubeMusic => "ytm",
@@ -2420,6 +2729,7 @@ fn manual_search_providers(
             "betterlyrics" => Some(ManualSearchProvider::BetterLyrics),
             "youlyplus" => Some(ManualSearchProvider::YouLyPlus),
             "unison" => Some(ManualSearchProvider::Unison),
+            "amll" => Some(ManualSearchProvider::Amll),
             "paxsenix" => Some(ManualSearchProvider::Paxsenix),
             "lrclib" => Some(ManualSearchProvider::Lrclib),
             "ytm" => Some(ManualSearchProvider::YouTubeMusic),
@@ -2538,6 +2848,34 @@ async fn search_manual_provider(
                 }
             }
         }
+        ManualSearchProvider::Amll => match amll_search_at(AMLL_ROOT, req, false).await {
+            Ok(items) => {
+                for item in amll_manual_items(req, items) {
+                    match amll_get_at(AMLL_ROOT, item.id).await {
+                        Ok(Some(resolved)) => match amll_lyrics(&resolved) {
+                            Ok(lyrics) => {
+                                let metadata = amll_metadata(req, &resolved);
+                                if let Some(candidate) = rank_candidate(
+                                    req,
+                                    format!("amll-{}", resolved.id),
+                                    AMLL_SOURCE.into(),
+                                    "amll".into(),
+                                    provider_priority,
+                                    metadata,
+                                    lyrics,
+                                ) {
+                                    candidates.push(candidate);
+                                }
+                            }
+                            Err(error) => tracing::warn!(%error, "manual AMLL TTML failed"),
+                        },
+                        Ok(None) => {}
+                        Err(error) => tracing::warn!(%error, "manual AMLL get failed"),
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(%error, "manual AMLL search failed"),
+        },
         ManualSearchProvider::Paxsenix => {
             for (item, metadata) in
                 select_relevant_metadata(req, itunes_song_search(req, 10).await, 2, itunes_metadata)
@@ -3754,6 +4092,285 @@ mod tests {
         }
     }
 
+    fn amll_request(title: &str, artist: &str) -> LyricsRequest {
+        LyricsRequest {
+            video_id: "test-video".into(),
+            title: title.into(),
+            artists: artist.into(),
+            album: None,
+            duration: Some(185.0),
+        }
+    }
+
+    fn amll_item(id: i64, titles: &[&str], artists: &[&str], xml: Option<&str>) -> AmllSongItem {
+        AmllSongItem {
+            id,
+            music_names: titles.iter().map(|s| (*s).into()).collect(),
+            artist_names: artists.iter().map(|s| (*s).into()).collect(),
+            album_names: vec!["Provider Album".into()],
+            lyrics: xml.map(str::to_owned),
+            format: Some("ttml".into()),
+        }
+    }
+
+    const AMLL_WORD_XML: &str = r#"<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="00:10.000" end="00:12.000"><span begin="00:10.000" end="00:10.500">Hello</span> <span begin="00:10.500" end="00:11.000">world</span></p></div></body></tt>"#;
+    const AMLL_LINE_XML: &str = r#"<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="00:10.000" end="00:12.000">Hello world</p></div></body></tt>"#;
+
+    #[test]
+    fn amll_search_json_preserves_aliases_and_provider_metadata() {
+        let body = serde_json::json!({"status":200,"data":{"items":[{
+            "id":123,"filename":"123.ttml","musicNames":["Other title","Provider Title"],
+            "artistNames":["Other Artist","Provider Artist"],"albumNames":["Provider Album"],
+            "format":"ttml"}],"pagination":{"page":1,"pageSize":10,"total":1,"totalPages":1,"hasMore":false}}});
+        let parsed: AmllResponse<AmllSearchData> = serde_json::from_value(body).unwrap();
+        let item = &parsed.data.unwrap().items[0];
+        assert!(item.lyrics.is_none());
+        let metadata = amll_metadata(&amll_request("Provider Title", "Provider Artist"), item);
+        assert_eq!(metadata.title.as_deref(), Some("Provider Title"));
+        assert_eq!(metadata.artist.as_deref(), Some("Provider Artist"));
+        assert_eq!(metadata.album.as_deref(), Some("Provider Album"));
+        assert_eq!(metadata.duration, None);
+    }
+
+    #[test]
+    fn amll_live_search_row_without_format_can_resolve_full_id() {
+        let id = 6_351_002_043_908_500;
+        let body = serde_json::json!({"status":200,"data":{"items":[{
+            "id":id,"musicNames":["Voyaging Star's Farewell"],
+            "artistNames":["Wuthering Waves"],"albumNames":["Provider Album"]
+        }]}});
+        let parsed: AmllResponse<AmllSearchData> = serde_json::from_value(body).unwrap();
+        let item = parsed.data.unwrap().items.pop().unwrap();
+        let req = amll_request("Voyaging Star's Farewell", "Wuthering Waves");
+
+        assert_eq!(item.id, id);
+        assert!(item.format.is_none());
+        assert!(amll_rank(&req, &item).is_some());
+        assert_eq!(amll_manual_items(&req, vec![item.clone()])[0].id, id);
+        assert_eq!(amll_automatic_id(&req, vec![item.clone()]), Some(id));
+
+        let mut unsupported = item;
+        unsupported.format = Some("lrc".into());
+        assert!(amll_rank(&req, &unsupported).is_none());
+    }
+
+    #[test]
+    fn amll_queries_are_structured_and_bounded() {
+        for (title, artist, expected) in [
+            ("Title", "Artist", vec!["musicName", "artistName"]),
+            ("Title", "", vec!["musicName"]),
+            ("", "Artist", vec!["artistName"]),
+        ] {
+            let params = amll_search_params(&amll_request(title, artist), false).unwrap();
+            let keys: Vec<_> = params.iter().map(|(key, _)| *key).collect();
+            for key in expected {
+                assert!(keys.contains(&key));
+            }
+            assert!(!keys.contains(&"q"));
+            assert_eq!(params.iter().find(|(key, _)| *key == "pageSize").unwrap().1, "10");
+            assert_eq!(params.iter().find(|(key, _)| *key == "page").unwrap().1, "1");
+        }
+        let mut automatic = amll_request("Title", "Artist");
+        automatic.album = Some("Trusted Album".into());
+        let params = amll_search_params(&automatic, true).unwrap();
+        assert!(params.iter().any(|(key, value)| *key == "albumName" && value == "Trusted Album"));
+        assert!(!params.iter().any(|(key, _)| *key == "q"));
+        assert!(amll_search_params(&amll_request("Title", ""), true).is_none());
+    }
+
+    #[test]
+    fn amll_automatic_requires_exact_aliases_and_unambiguous_album() {
+        let req = amll_request("Voyaging", "Wuthering Waves");
+        let partial = amll_item(1, &["Voyaging Star's Farewell"], &["Wuthering Waves"], None);
+        assert_eq!(amll_automatic_id(&req, vec![partial]), None);
+        let exact = amll_item(
+            2,
+            &["Different Title", "Voyaging"],
+            &["Other Artist", "Wuthering Waves"],
+            None,
+        );
+        assert_eq!(amll_automatic_id(&req, vec![exact.clone()]), Some(2));
+        let mut other_album = exact.clone();
+        other_album.id = 3;
+        other_album.album_names = vec!["Another Album".into()];
+        assert_eq!(amll_automatic_id(&req, vec![exact, other_album]), None);
+    }
+
+    #[test]
+    fn amll_automatic_accepts_complete_richer_artist_credits() {
+        let title = "Voyaging Star's Farewell";
+        let req = amll_request(title, "Wuthering Waves");
+        let richer = amll_item(11, &[title], &["Wuthering Waves, jixwang & VISION SOUND"], None);
+        assert_eq!(amll_automatic_id(&req, vec![richer.clone()]), Some(11));
+        assert_eq!(
+            amll_automatic_id(&req, vec![amll_item(12, &[title], &["Wuthering Waves"], None)]),
+            Some(12)
+        );
+
+        let wrong_title =
+            amll_item(13, &["Voyaging"], &["Wuthering Waves, jixwang & VISION SOUND"], None);
+        assert_eq!(amll_automatic_id(&req, vec![wrong_title]), None);
+
+        let other_first = amll_item(
+            14,
+            &["Different title", title],
+            &["Different Artist", "Wuthering Waves feat. jixwang"],
+            None,
+        );
+        assert_eq!(amll_automatic_id(&req, vec![other_first]), Some(14));
+        assert!(amll_artist_credit_matches("Wuthering Waves", "Wuthering Waves x jixwang"));
+        assert!(amll_artist_credit_matches("Wuthering Waves", "jixwang; Wuthering Waves"));
+    }
+
+    #[test]
+    fn amll_automatic_rejects_weak_artist_substrings() {
+        let title = "Exact Title";
+        for (requested, alias) in
+            [("Wave", "Wuthering Waves"), ("Vision", "VISION SOUND"), ("Star", "Starset")]
+        {
+            let req = amll_request(title, requested);
+            assert_eq!(amll_automatic_id(&req, vec![amll_item(1, &[title], &[alias], None)]), None);
+        }
+    }
+
+    #[test]
+    fn amll_get_json_uses_structured_ttml_and_canonical_word_quality() {
+        let body = serde_json::json!({"status":200,"data":{
+            "id":42,"musicNames":["Provider Title"],"artistNames":["Provider Artist"],
+            "albumNames":["Provider Album"],"format":"ttml","lyrics":AMLL_WORD_XML}});
+        let parsed: AmllResponse<AmllSongItem> = serde_json::from_value(body).unwrap();
+        let lyrics = amll_lyrics(&parsed.data.unwrap()).unwrap();
+        assert_eq!(lyrics.source, AMLL_SOURCE);
+        assert!(has_genuine_word_timings(&lyrics));
+        assert!(positive_lyrics_cache_allowed(&lyrics));
+        let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        assert!(persist_selected_lyrics(&db, "amll-test", &lyrics));
+        assert!(db.get_lyrics("amll-test", now_secs(), MISS_TTL_SECS).is_some());
+        let line =
+            amll_lyrics(&amll_item(43, &["Title"], &["Artist"], Some(AMLL_LINE_XML))).unwrap();
+        assert!(line.synced);
+        assert!(!has_genuine_word_timings(&line));
+        let rich = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="2s"><span begin="1s" end="1.5s">Hello </span><span begin="1.5s" end="2s">world</span><span ttm:role="x-translation" begin="1s" end="2s">Halo dunia</span><span ttm:role="x-roman" begin="1s" end="2s">he-lo</span><span ttm:role="x-bg" begin="1s" end="2s">echo</span></p></body></tt>"#;
+        let rich = amll_lyrics(&amll_item(45, &["Title"], &["Artist"], Some(rich))).unwrap();
+        assert_eq!(rich.lines[0].text, "Hello world");
+        assert_eq!(rich.lines[0].translation.as_deref(), Some("Halo dunia"));
+        assert!(has_genuine_word_timings(&rich));
+        assert!(
+            amll_lyrics(&amll_item(44, &["Title"], &["Artist"], Some("<tt><p>broken"))).is_err()
+        );
+
+        let mut unsupported = amll_item(46, &["Title"], &["Artist"], Some(AMLL_WORD_XML));
+        unsupported.format = Some("lrc".into());
+        assert!(amll_lyrics(&unsupported).is_err());
+        unsupported.format = None;
+        assert!(amll_lyrics(&unsupported).is_err());
+    }
+
+    #[test]
+    fn amll_manual_candidates_keep_provider_values_and_global_ranking() {
+        let req = amll_request("Provider Title", "Provider Artist");
+        let items: Vec<_> = (1..=5)
+            .map(|id| amll_item(id, &["Provider Title"], &["Provider Artist"], None))
+            .collect();
+        assert_eq!(amll_manual_items(&req, items).len(), AMLL_CANDIDATE_LIMIT);
+        let item = amll_item(
+            9,
+            &["Other title", "Provider Title"],
+            &["Other Artist", "Provider Artist"],
+            Some(AMLL_WORD_XML),
+        );
+        let metadata = amll_metadata(&req, &item);
+        let candidate = rank_candidate(
+            &req,
+            "amll-9".into(),
+            AMLL_SOURCE.into(),
+            "amll".into(),
+            1,
+            metadata,
+            amll_lyrics(&item).unwrap(),
+        )
+        .unwrap();
+        let selected = finish_ranked_candidates(vec![candidate]);
+        assert_eq!(selected[0].title.as_deref(), Some("Provider Title"));
+        assert_eq!(selected[0].artist.as_deref(), Some("Provider Artist"));
+        assert_eq!(selected[0].album.as_deref(), Some("Provider Album"));
+        assert_eq!(selected[0].duration, None);
+        assert!(selected[0].has_words);
+        let partial_req = amll_request("Provider", "Artist");
+        let provider_item =
+            amll_item(10, &["Provider Title"], &["Provider Artist"], Some(AMLL_LINE_XML));
+        let metadata = amll_metadata(&partial_req, &provider_item);
+        assert_eq!(metadata.title.as_deref(), Some("Provider Title"));
+        assert_eq!(metadata.artist.as_deref(), Some("Provider Artist"));
+        let artist_only = amll_metadata(&amll_request("", "Provider Artist"), &provider_item);
+        assert_eq!(artist_only.title.as_deref(), Some("Provider Title"));
+    }
+
+    fn amll_mock(status: &str, body: &str) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let status = status.to_owned();
+        let body = body.to_owned();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut buffer = [0u8; 8192];
+            let count = stream.read(&mut buffer).unwrap();
+            let _ = sender.send(String::from_utf8_lossy(&buffer[..count]).into_owned());
+            write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        (base, receiver)
+    }
+
+    #[tokio::test]
+    async fn amll_http_search_distinguishes_misses_from_provider_errors() {
+        let req = amll_request("Provider Title", "Provider Artist");
+        let empty = r#"{"status":200,"data":{"items":[],"pagination":{"page":1,"pageSize":10,"total":0,"totalPages":0,"hasMore":false}}}"#;
+        let (base, request) = amll_mock("200 OK", empty);
+        assert!(amll_search_at(&base, &req, true).await.unwrap().is_empty());
+        let request = request.recv().unwrap();
+        assert!(request.contains("musicName=Provider+Title"));
+        assert!(request.contains("artistName=Provider+Artist"));
+        assert!(request.contains("pageSize=10"));
+        assert!(!request.contains("?q="));
+        for (status, body, error) in [
+            ("404 Not Found", r#"{"status":404,"error":"Not Found","message":"none"}"#, false),
+            (
+                "429 Too Many Requests",
+                r#"{"status":429,"error":"Too Many Requests","message":"slow"}"#,
+                true,
+            ),
+            (
+                "500 Internal Server Error",
+                r#"{"status":500,"error":"Internal Server Error","message":"failed"}"#,
+                true,
+            ),
+            ("200 OK", "not json", true),
+        ] {
+            let (base, _) = amll_mock(status, body);
+            assert_eq!(amll_search_at(&base, &req, false).await.is_err(), error);
+        }
+    }
+
+    #[tokio::test]
+    async fn amll_http_get_resolves_only_the_requested_id() {
+        let body = serde_json::json!({"status":200,"data":{
+            "id":42,"musicNames":["Provider Title"],"artistNames":["Provider Artist"],
+            "albumNames":[],"format":"ttml","lyrics":AMLL_LINE_XML}})
+        .to_string();
+        let (base, request) = amll_mock("200 OK", &body);
+        let item = amll_get_at(&base, 42).await.unwrap().unwrap();
+        assert!(amll_lyrics(&item).is_ok());
+        assert!(request.recv().unwrap().contains("/v1/lyrics/get?id=42"));
+        let (base, _) =
+            amll_mock("404 Not Found", r#"{"status":404,"error":"Not Found","message":"none"}"#);
+        assert!(amll_get_at(&base, 42).await.unwrap().is_none());
+        let (base, _) = amll_mock("200 OK", &body);
+        assert!(amll_get_at(&base, 43).await.is_err());
+    }
+
     fn unison_manual_request(title: &str, artist: &str) -> LyricsRequest {
         LyricsRequest {
             video_id: "automatic-video-id-must-not-be-searched".into(),
@@ -4804,12 +5421,26 @@ mod tests {
         // Default when unset
         assert_eq!(
             resolve_providers(&db),
-            vec!["betterlyrics", "youlyplus", "unison", "paxsenix", "lrclib", "ytm", "qq", "kugou"]
+            vec![
+                "betterlyrics",
+                "amll",
+                "youlyplus",
+                "unison",
+                "paxsenix",
+                "lrclib",
+                "ytm",
+                "qq",
+                "kugou"
+            ]
         );
 
         // Comma separated list
         db.set_setting("lyrics_providers", "lrclib, betterlyrics, kugou");
         assert_eq!(resolve_providers(&db), vec!["lrclib", "betterlyrics", "kugou"]);
+        assert!(!resolve_providers(&db).iter().any(|provider| provider == "amll"));
+
+        db.set_setting("lyrics_providers", "amll, lrclib");
+        assert_eq!(resolve_providers(&db), vec!["amll", "lrclib"]);
 
         // JSON list
         db.set_setting("lyrics_providers", "[\"ytm\", \"qq\"]");
@@ -4832,12 +5463,15 @@ mod tests {
             format: "lrc".into(),
             enabled: false,
         };
-        let configured = vec!["lrclib".into(), "unison".into()];
+        let configured = vec!["lrclib".into(), "amll".into(), "unison".into()];
 
         let providers = manual_search_providers(&configured, vec![custom_enabled, custom_disabled]);
         let keys: Vec<_> = providers.iter().map(|(provider, _)| provider.key()).collect();
 
-        assert_eq!(keys, vec!["lrclib", "unison", "custom-enabled"]);
+        assert_eq!(keys, vec!["lrclib", "amll", "unison", "custom-enabled"]);
+        assert_eq!(providers[1].1, 1);
+        let disabled = manual_search_providers(&["lrclib".into()], Vec::new());
+        assert!(!disabled.iter().any(|(provider, _)| provider.key() == "amll"));
         assert!(!keys.contains(&"qq"));
         assert!(!keys.contains(&"custom-disabled"));
     }
