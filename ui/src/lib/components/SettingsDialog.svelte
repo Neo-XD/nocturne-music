@@ -991,7 +991,7 @@
 		{ id: 'LOW', label: 'Low' },
 		{ id: 'AUTO', label: 'Auto' },
 		{ id: 'HIGH', label: 'High' },
-		{ id: 'VERY_HIGH', label: 'Very High (320 kbps)' }
+		{ id: 'VERY_HIGH', label: 'Very High' }
 	];
 
 	async function setQuality(q: string) {
