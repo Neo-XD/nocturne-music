@@ -28,7 +28,9 @@
 		FavouriteIcon,
 		Edit02Icon,
 		Delete02Icon,
-		Tick02Icon
+		Tick02Icon,
+		SquareIcon,
+		MinimizeScreenIcon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -198,6 +200,14 @@
 	getVersion().then((v) => (version = v));
 	// Result of the last "Check for updates" click — shown inline (a toast renders behind the modal).
 	let updateResult = $state<{ message: string; error: boolean } | null>(null);
+	let isMaximized = $state(typeof window !== 'undefined' && localStorage.getItem('settings_maximized') === 'true');
+
+	function toggleMaximize() {
+		isMaximized = !isMaximized;
+		if (typeof window !== 'undefined') {
+			localStorage.setItem('settings_maximized', String(isMaximized));
+		}
+	}
 
 	// (Re)load whenever the modal opens, so it reflects the current persisted values. Also clear the
 	// stale update-check result so re-opening the modal doesn't show it until pressed again.
@@ -1232,10 +1242,22 @@
 <svelte:window onkeydown={recordingAction ? onKeyRecord : undefined} />
 
 <Dialog.Root bind:open={ui.settingsOpen}>
-	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 w-[94vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-[70rem] border border-border/80 shadow-2xl rounded-2xl">
+	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 transition-all duration-200 border border-border/80 shadow-2xl {isMaximized ? 'w-[98vw] max-w-[98vw] sm:max-w-[98vw] lg:max-w-[98vw] xl:max-w-[98vw] h-[96vh] rounded-xl' : 'w-[94vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-[70rem] h-[min(46rem,86vh)] rounded-2xl'}">
 		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
-		<div class="flex h-[min(46rem,86vh)]">
+		<!-- Maximize / Restore window button placed next to Close button -->
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			class="absolute top-4 right-12 z-50 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+			onclick={toggleMaximize}
+			title={isMaximized ? "Restore settings window" : "Maximize settings window"}
+			aria-label={isMaximized ? "Restore" : "Maximize"}
+		>
+			<HugeiconsIcon icon={isMaximized ? MinimizeScreenIcon : SquareIcon} size={15} strokeWidth={2} />
+		</Button>
+
+		<div class="flex h-full">
 			<!-- Tab rail -->
 			<nav class="settings-nav-rail flex w-60 shrink-0 flex-col border-r border-border/30 p-3.5 backdrop-blur-3xl">
 				<Dialog.Title class="px-3 pt-3 pb-4 font-heading text-base font-semibold text-foreground">
@@ -1270,7 +1292,10 @@
 			     (a long font name, a long path) widens the pane and pushes every tab off the modal. -->
 			<div class="settings-content-pane relative flex min-w-0 flex-1 flex-col overflow-hidden">
 				<!-- Header with generous top padding matching desired.png and no dividing border -->
-				<header class="shrink-0 px-8 pt-8 pb-3 pr-16">
+				<header
+					class="shrink-0 px-8 pt-8 pb-3 pr-24 cursor-default select-none"
+					ondblclick={toggleMaximize}
+				>
 					<h2 class="text-base font-bold tracking-tight text-foreground">{currentTab.label}</h2>
 					<p class="mt-0.5 truncate text-xs text-muted-foreground">{currentTab.hint}</p>
 				</header>
