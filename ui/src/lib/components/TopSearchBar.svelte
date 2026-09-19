@@ -48,16 +48,6 @@
 	$effect(() => {
 		if (open) {
 			updatePopupPosition();
-			let frameId: number;
-			const startTime = performance.now();
-			const tick = () => {
-				updatePopupPosition();
-				if (performance.now() - startTime < 350) {
-					frameId = requestAnimationFrame(tick);
-				}
-			};
-			frameId = requestAnimationFrame(tick);
-			return () => cancelAnimationFrame(frameId);
 		}
 	});
 
@@ -222,7 +212,7 @@
 			bind:value={query}
 			type="text"
 			placeholder="Search songs, artists, albums..."
-			class="h-7.5 w-full rounded-[var(--radius,0.45rem)] border border-border/60 bg-muted/40 pl-9 pr-22 text-xs text-foreground placeholder:text-muted-foreground/70 transition-all focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 hover:bg-muted/60"
+			class="h-7.5 w-full rounded-[var(--radius,0.45rem)] border border-border/60 bg-muted/40 pl-9 pr-22 text-xs text-foreground placeholder:text-muted-foreground/70 transition-colors focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 hover:bg-muted/60"
 			autocomplete="off"
 			spellcheck="false"
 			role="combobox"

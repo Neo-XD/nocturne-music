@@ -154,7 +154,7 @@
      at this z — it must outrank the panels below (LyricsPanel/QueuePanel, z-30). -->
 <header
 	data-tauri-drag-region
-	class="app-titlebar z-40 flex h-10.5 shrink-0 select-none items-center justify-between transition-all duration-200 {prefs.floatingTopBar
+	class="app-titlebar z-40 flex h-10.5 shrink-0 select-none items-center justify-between {prefs.floatingTopBar
 		? 'app-floating-panel mx-2 mt-2 rounded-2xl border border-border/70 bg-card/75 backdrop-blur-xl px-2 shadow-none'
 		: 'relative border-b border-border/60 bg-card/75 backdrop-blur-xl px-1 shadow-none'}"
 >
@@ -198,7 +198,7 @@
 	<!-- Centered sticky search bar -->
 	{#if prefs.visibleIcons.titlebar.search}
 		<div data-tauri-drag-region class="flex flex-1 justify-center mx-2 min-w-0">
-			<div class="w-64 sm:w-80 md:w-96 hover:w-full hover:max-w-xl focus-within:w-full focus-within:max-w-xl has-[input:not(:placeholder-shown)]:w-full has-[input:not(:placeholder-shown)]:max-w-xl transition-[width] duration-300 ease-out">
+			<div class="w-full max-w-xl">
 				<TopSearchBar />
 			</div>
 		</div>
