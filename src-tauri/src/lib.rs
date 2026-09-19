@@ -16,6 +16,7 @@ mod media;
 mod mini;
 mod orchestrator;
 mod potoken;
+pub mod recognition;
 pub mod remotesync;
 mod session;
 mod state;
@@ -150,6 +151,17 @@ pub fn run() {
             && std::env::var_os("LIMUSIC_FORCE_GPU").is_none()
         {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if std::env::var_os("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_none() {
+            std::env::set_var(
+                "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                "--enable-features=ResourceSuspension,ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes,CanvasOOMHandling \
+                 --disable-background-networking --disable-component-update --disable-features=TranslateUI",
+            );
         }
     }
 
@@ -305,6 +317,7 @@ pub fn run() {
                 lastfm,
             ));
             app.manage(app_state.clone());
+            spawn_heap_trimmer(app_state.db.clone());
 
             // Remote Device Playback Sync (Direct IP / Tailscale with PIN)
             let remote_sync = Arc::new(remotesync::RemoteSyncController::new());
@@ -598,10 +611,12 @@ pub fn run() {
             commands::spotify_status,
             commands::spotify_unlink,
             commands::spotify_get_playlists,
+            commands::spotify_get_playlist,
             commands::spotify_transfer_to_ytm,
             commands::ytm_transfer_to_spotify,
             commands::spotify_get_sync_mode,
             commands::spotify_set_sync_mode,
+            recognition::recognize_song_signature,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is

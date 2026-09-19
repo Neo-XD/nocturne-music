@@ -948,6 +948,8 @@ export type SpotifyPlaylistSyncMode = 'seperate' | 'sync' | 'transfer';
 
 export const spotifyGetPlaylists = () =>
 	invoke<SpotifyPlaylistSummary[]>('spotify_get_playlists');
+export const spotifyGetPlaylist = (spotifyPlaylistId: string) =>
+	invoke<PlaylistPage>('spotify_get_playlist', { spotifyPlaylistId });
 export const spotifyTransferToYtm = (spotifyPlaylistId: string) =>
 	invoke<string>('spotify_transfer_to_ytm', { spotifyPlaylistId });
 export const ytmTransferToSpotify = (ytmPlaylistId: string) =>
@@ -956,5 +958,19 @@ export const spotifyGetSyncMode = () =>
 	invoke<SpotifyPlaylistSyncMode>('spotify_get_sync_mode');
 export const spotifySetSyncMode = (mode: SpotifyPlaylistSyncMode) =>
 	invoke<void>('spotify_set_sync_mode', { mode });
+
+// --- PC Audio Music Recognition (Shazam / SongRec) ------------------------------------------
+export interface RecognizedSong {
+	found: boolean;
+	title?: string | null;
+	artist?: string | null;
+	album?: string | null;
+	cover?: string | null;
+	query?: string | null;
+}
+
+export const recognizeSongSignature = (signatureUri: string, sampleMs?: number) =>
+	invoke<RecognizedSong>('recognize_song_signature', { signatureUri, sampleMs });
+
 
 
