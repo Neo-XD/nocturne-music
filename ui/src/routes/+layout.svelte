@@ -184,7 +184,7 @@
 				target.getAttribute('rel')?.includes('noreferrer') ||
 				!href.startsWith(window.location.origin))
 		) {
-			const spMatch = href.match(/^https?:\/\/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/);
+			const spMatch = href.match(/^https?:\/\/open\.spotify\.com\/(?:intl-[a-z]+\/)?playlist\/([a-zA-Z0-9_]+)/);
 			if (spMatch) {
 				e.preventDefault();
 				goto(`/playlist/sp_${spMatch[1]}`);

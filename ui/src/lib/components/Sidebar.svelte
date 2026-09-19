@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { scale } from 'svelte/transition';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
@@ -707,6 +708,10 @@
 	<div class="group/row relative flex items-center justify-between rounded-lg py-1 pl-2 pr-2 hover:bg-sidebar-accent/50 transition-colors">
 		<a
 			href="/playlist/sp_{encodeURIComponent(pl.id)}"
+			onclick={(e) => {
+				e.preventDefault();
+				goto(`/playlist/sp_${encodeURIComponent(pl.id)}`);
+			}}
 			class="flex min-w-0 flex-1 items-center gap-2.5 text-left cursor-pointer"
 			title="{pl.title}"
 		>
@@ -750,6 +755,10 @@
 {#snippet collapsedSpotifyPlaylistButton(pl: api.SpotifyPlaylistSummary)}
 	<a
 		href="/playlist/sp_{encodeURIComponent(pl.id)}"
+		onclick={(e) => {
+			e.preventDefault();
+			goto(`/playlist/sp_${encodeURIComponent(pl.id)}`);
+		}}
 		class="relative flex h-9 w-9 items-center justify-center rounded-lg transition-transform duration-150 hover:scale-105 hover:bg-sidebar-accent/50 cursor-pointer {isActive('/playlist/sp_' + pl.id) ? 'bg-sidebar-accent/60 ring-1 ring-primary/60' : ''}"
 		title="{pl.title}"
 	>

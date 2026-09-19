@@ -2004,7 +2004,7 @@ pub async fn spotify_start_dev_auth(
 
     let (code_verifier, code_challenge) = generate_pkce_pair();
     let redirect_uri = "http://127.0.0.1:8888/callback";
-    let scopes = "user-read-private user-read-email playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private";
+    let scopes = "user-read-private user-read-email playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private streaming user-read-playback-state user-modify-playback-state user-read-currently-playing";
     let auth_url = format!(
         "https://accounts.spotify.com/authorize?client_id={}&response_type=code&redirect_uri={}&code_challenge_method=S256&code_challenge={}&scope={}&show_dialog=true",
         urlencoding::encode(&clean_id),
@@ -2038,7 +2038,7 @@ pub async fn spotify_start_dev_auth(
             let req = String::from_utf8_lossy(&buf[..n]);
 
             if let Some(code) = extract_code_from_query(&req) {
-                let html = "<!DOCTYPE html><html><body style=\"font-family:system-ui,-apple-system,sans-serif;background:#0d0d11;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\"><div style=\"text-align:center;padding:2.5rem;background:#18181f;border-radius:16px;border:1px solid rgba(255,255,255,0.1);max-width:400px;\"><div style=\"font-size:44px;margin-bottom:12px;\">✨</div><h1 style=\"color:#1ed760;margin:0 0 8px 0;font-size:22px;\">Linked with Nocturne!</h1><p style=\"color:#a1a1aa;margin:0;font-size:14px;line-height:1.5;\">Spotify authorization succeeded. You can safely close this tab and head back to Nocturne.</p></div></body></html>";
+                let html = "<!DOCTYPE html><html><body style=\"font-family:system-ui,-apple-system,sans-serif;background:#0d0d11;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;\"><div style=\"text-align:center;padding:2.5rem;background:#18181f;border-radius:16px;border:1px solid rgba(255,255,255,0.1);max-width:400px;\"><div style=\"font-size:44px;margin-bottom:12px;\">✨</div><h1 style=\"color:#1ed760;margin:0 0 8px 0;font-size:22px;\">Linked with Nocturne!</h1><p style=\"color:#a1a1aa;margin:0;font-size:14px;line-height:1.5;\">Spotify authorization succeeded. You can safely close this tab and head back to Nocturne.</p></div><script>setTimeout(function(){ window.close(); }, 1200);</script></body></html>";
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     html.len(),
@@ -2407,9 +2407,28 @@ pub async fn spotify_get_playlists(state: St<'_>) -> Result<Vec<SpotifyPlaylistS
                 _ => continue,
             };
             let title = item["name"].as_str().unwrap_or("Untitled Playlist").to_string();
-            let track_count = item["tracks"]["total"].as_u64().map(|c| c as u32);
-            let owner = item["owner"]["display_name"].as_str().unwrap_or("Spotify");
-            let subtitle = Some(format!("{} tracks • {}", track_count.unwrap_or(0), owner));
+            let track_count = item["tracks"]["total"]
+                .as_u64()
+                .or_else(|| item["tracks"]["total"].as_str().and_then(|s| s.parse::<u64>().ok()))
+                .or_else(|| item["total_tracks"].as_u64())
+                .or_else(|| item["total_tracks"].as_str().and_then(|s| s.parse::<u64>().ok()))
+                .or_else(|| item["tracks_total"].as_u64())
+                .or_else(|| item["item_count"].as_u64())
+                .or_else(|| item["tracks"]["items"].as_array().map(|a| a.len() as u64))
+                .map(|c| c as u32);
+
+            let owner = item["owner"]["display_name"]
+                .as_str()
+                .or_else(|| item["owner"]["id"].as_str())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("Spotify");
+
+            let subtitle = match track_count {
+                Some(count) if count > 0 => {
+                    Some(format!("{count} {} • {owner}", if count == 1 { "track" } else { "tracks" }))
+                }
+                _ => Some(owner.to_string()),
+            };
             let thumbnail = item["images"]
                 .as_array()
                 .and_then(|arr| arr.first())
