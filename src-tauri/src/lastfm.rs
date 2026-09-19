@@ -405,28 +405,40 @@ pub(crate) fn open_browser(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let cmd = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "windows")]
-    let cmd = {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let safe_url = url.replace('\'', "''");
-        let res = std::process::Command::new("powershell")
-            .creation_flags(CREATE_NO_WINDOW)
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &format!("Start-Process '{safe_url}'"),
-            ])
-            .spawn();
-        if res.is_err() {
+    {
+        use windows::core::HSTRING;
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let op = HSTRING::from("open");
+        let target = HSTRING::from(url);
+        let ret = unsafe {
+            ShellExecuteW(
+                Some(HWND::default()),
+                windows::core::PCWSTR(op.as_ptr()),
+                windows::core::PCWSTR(target.as_ptr()),
+                windows::core::PCWSTR::null(),
+                windows::core::PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if (ret.0 as usize) > 32 {
+            Ok(())
+        } else {
+            // Fallback to rundll32
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             std::process::Command::new("rundll32")
+                .creation_flags(CREATE_NO_WINDOW)
                 .arg("url.dll,FileProtocolHandler")
                 .arg(url)
                 .spawn()
-        } else {
-            res
+                .map(|_| ())
+                .map_err(|e| format!("Couldn't open the browser: {e}"))
         }
-    };
+    }
+    #[cfg(not(target_os = "windows"))]
     cmd.map(|_| ()).map_err(|e| format!("Couldn't open the browser: {e}"))
 }
 
