@@ -39,10 +39,16 @@
 	let popupStyle = $state('');
 	let shazamOpen = $state(false);
 
+	let isTyping = $state(false);
+	let typingTimer: ReturnType<typeof setTimeout> | undefined;
+
 	function updatePopupPosition() {
 		if (!inputEl) return;
 		const rect = inputEl.getBoundingClientRect();
-		popupStyle = `top: ${Math.round(rect.bottom + 6)}px; left: ${Math.round(rect.left)}px; width: ${Math.round(rect.width)}px;`;
+		// Spotlight-style centered geometry: comfortable width for reading results
+		const popupWidth = Math.min(Math.max(rect.width, 480), Math.max(300, window.innerWidth - 32));
+		const popupLeft = Math.max(16, Math.min(window.innerWidth - popupWidth - 16, rect.left + (rect.width - popupWidth) / 2));
+		popupStyle = `top: ${Math.round(rect.bottom + 8)}px; left: ${Math.round(popupLeft)}px; width: ${Math.round(popupWidth)}px;`;
 	}
 
 	$effect(() => {
@@ -84,6 +90,12 @@
 
 	function onType(e: Event & { currentTarget: HTMLInputElement }) {
 		clearTimeout(debounce);
+		clearTimeout(typingTimer);
+		isTyping = true;
+		typingTimer = setTimeout(() => {
+			isTyping = false;
+		}, 450);
+
 		const q = e.currentTarget.value.trim();
 		if (q.length < 2) {
 			close();
@@ -94,11 +106,13 @@
 			items = [];
 			loading = true;
 		}
-		debounce = setTimeout(() => load(q), 500);
+		debounce = setTimeout(() => load(q), 350);
 	}
 
 	function close() {
 		clearTimeout(debounce);
+		clearTimeout(typingTimer);
+		isTyping = false;
 		open = false;
 		loading = false;
 		active = -1;
@@ -193,7 +207,7 @@
 
 <div
 	bind:this={containerEl}
-	class="relative w-full max-w-xl mx-auto"
+	class="relative w-full max-w-[340px] mx-auto"
 >
 	<form
 		class="relative flex items-center"
@@ -202,9 +216,9 @@
 			submitSearch();
 		}}
 	>
-		<!-- Non-drag region on search input so clicks, typing and focus work smoothly -->
-		<div class="pointer-events-none absolute left-3 flex items-center justify-center text-muted-foreground">
-			<HugeiconsIcon icon={Search01Icon} class="h-4 w-4" />
+		<!-- Non-drag region on search input with smooth typing feedback on the icon -->
+		<div class="pointer-events-none absolute left-2.5 flex items-center justify-center transition-all duration-200 {loading ? 'text-primary animate-pulse scale-110' : isTyping ? 'text-primary scale-105' : 'text-muted-foreground'}">
+			<HugeiconsIcon icon={Search01Icon} class="h-3.5 w-3.5 transition-transform duration-200" />
 		</div>
 
 		<input
@@ -212,7 +226,7 @@
 			bind:value={query}
 			type="text"
 			placeholder="Search songs, artists, albums..."
-			class="h-7.5 w-full rounded-[var(--radius,0.45rem)] border border-border/60 bg-muted/40 pl-9 pr-22 text-xs text-foreground placeholder:text-muted-foreground/70 transition-colors focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 hover:bg-muted/60"
+			class="h-7 w-full rounded-full border border-border/60 bg-muted/40 pl-8 pr-20 text-xs text-foreground placeholder:text-muted-foreground/70 transition-all duration-200 ease-out focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/25 focus:shadow-[0_0_12px_rgba(var(--primary-rgb,59,130,246),0.15)] hover:bg-muted/60"
 			autocomplete="off"
 			spellcheck="false"
 			role="combobox"
@@ -226,7 +240,7 @@
 			{#if prefs.pcAudioRecognition}
 				<button
 					type="button"
-					class="flex h-5 w-5 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition hover:bg-primary/20 hover:text-primary cursor-pointer"
+					class="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-all duration-150 hover:bg-primary/20 hover:text-primary cursor-pointer hover:scale-105"
 					onclick={() => (shazamOpen = true)}
 					title="Recognize music playing on PC (Shazam)"
 					aria-label="Recognize music playing on PC"
@@ -237,7 +251,7 @@
 			{#if query}
 				<button
 					type="button"
-					class="flex h-5 w-5 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition hover:bg-accent/20 hover:text-foreground cursor-pointer"
+					class="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-all duration-150 hover:bg-accent/30 hover:text-foreground cursor-pointer hover:scale-105"
 					onclick={clearQuery}
 					aria-label="Clear search"
 				>
@@ -245,7 +259,7 @@
 				</button>
 			{:else}
 				<kbd
-					class="pointer-events-none rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[9px] font-medium text-muted-foreground select-none"
+					class="pointer-events-none rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[9px] font-medium text-muted-foreground select-none transition-opacity duration-200"
 				>
 					{formatKey(keybindings.search)}
 				</kbd>
@@ -260,7 +274,7 @@
 			id="top-search-suggest"
 			role="listbox"
 			aria-label="Search preview"
-			class="fixed z-[100] max-h-[75vh] overflow-y-auto rounded-[calc(var(--radius,0.45rem)+6px)] border border-border/80 bg-popover/55 dark:bg-popover/45 text-popover-foreground shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150"
+			class="fixed z-[100] max-h-[72vh] overflow-y-auto rounded-2xl border border-border/70 bg-popover/85 dark:bg-card/90 text-popover-foreground shadow-[0_20px_50px_-10px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/10 animate-in fade-in-0 zoom-in-[0.98] slide-in-from-top-2 duration-200 ease-out p-1.5"
 			style={popupStyle}
 		>
 			{#if loading && !items.length}
@@ -285,9 +299,9 @@
 						data-ctx
 						tabindex="-1"
 						aria-selected={i === active}
-						class="group relative flex w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors {i === active
-							? 'bg-accent/60'
-							: 'hover:bg-accent/40'} {hero ? 'border-b border-border/40 py-2.5' : 'py-1.5'}"
+						class="group relative flex w-full cursor-pointer items-center gap-3 rounded-xl px-2.5 text-left transition-all duration-150 ease-out {i === active
+							? 'bg-accent/80 text-accent-foreground shadow-xs translate-x-0.5'
+							: 'hover:bg-accent/40 text-muted-foreground hover:text-foreground'} {hero ? 'mb-1 border border-primary/20 bg-primary/5 py-2' : 'py-1.5'}"
 						onmouseenter={() => (active = i)}
 						onclick={(e) => {
 							if (e.target instanceof Element && e.target.closest('button.track-menu-trigger, .track-menu-portal')) return;
@@ -335,7 +349,7 @@
 						</div>
 						{#if hero}
 							<span
-								class="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary"
+								class="shrink-0 rounded-full bg-primary/15 border border-primary/25 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary shadow-xs"
 							>
 								Top result
 							</span>
@@ -360,12 +374,17 @@
 
 			<button
 				type="button"
-				class="flex w-full cursor-pointer items-center gap-2 border-t border-border/60 bg-muted/20 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition hover:bg-accent/40 hover:text-foreground"
+				class="flex w-full cursor-pointer items-center justify-between rounded-xl border border-transparent bg-muted/30 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-all duration-150 hover:bg-accent/50 hover:text-foreground hover:border-border/40 mt-1"
 				onmousedown={(e) => e.preventDefault()}
 				onclick={submitSearch}
 			>
-				<HugeiconsIcon icon={Search01Icon} class="h-3.5 w-3.5" />
-				<span>All results for “{query.trim()}”</span>
+				<div class="flex items-center gap-2">
+					<HugeiconsIcon icon={Search01Icon} class="h-3.5 w-3.5 text-primary" />
+					<span class="truncate">All results for “<span class="font-semibold text-foreground">{query.trim()}</span>”</span>
+				</div>
+				<kbd class="pointer-events-none rounded border border-border/60 bg-muted/60 px-1.5 py-0.5 font-mono text-[9px] font-medium text-muted-foreground select-none">
+					↵ Enter
+				</kbd>
 			</button>
 		</div>
 	{/if}
