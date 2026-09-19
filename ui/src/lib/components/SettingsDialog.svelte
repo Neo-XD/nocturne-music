@@ -130,6 +130,153 @@
 	const PALETTE_THEMES = THEMES.filter((t) => t.kind === 'palette');
 	const currentTheme = $derived(THEMES.find((t) => t.id === theme.id) ?? THEMES[0]);
 
+	interface ThemePreviewStyle {
+		bg: string;
+		sidebarBg: string;
+		cardBg: string;
+		accent: string;
+		accentFg: string;
+		text: string;
+		mutedText: string;
+		border: string;
+		artGradient: string;
+	}
+
+	const THEME_PREVIEWS: Record<string, ThemePreviewStyle> = {
+		monochrome: {
+			bg: '#0f0f12',
+			sidebarBg: '#141418',
+			cardBg: '#1c1c22',
+			accent: '#f4f4f5',
+			accentFg: '#09090b',
+			text: '#ffffff',
+			mutedText: '#71717a',
+			border: 'rgba(255,255,255,0.12)',
+			artGradient: 'linear-gradient(135deg, #27272a, #52525b)'
+		},
+		rose: {
+			bg: '#0f0c0e',
+			sidebarBg: '#161114',
+			cardBg: '#21181e',
+			accent: '#f43f5e',
+			accentFg: '#ffffff',
+			text: '#ffffff',
+			mutedText: '#9f7b88',
+			border: 'rgba(244,63,94,0.25)',
+			artGradient: 'linear-gradient(135deg, #e11d48, #fb7185)'
+		},
+		blue: {
+			bg: '#0c0f17',
+			sidebarBg: '#101622',
+			cardBg: '#172033',
+			accent: '#3b82f6',
+			accentFg: '#ffffff',
+			text: '#ffffff',
+			mutedText: '#7d8fa9',
+			border: 'rgba(59,130,246,0.25)',
+			artGradient: 'linear-gradient(135deg, #2563eb, #60a5fa)'
+		},
+		lime: {
+			bg: '#0d110d',
+			sidebarBg: '#131913',
+			cardBg: '#1a241a',
+			accent: '#84cc16',
+			accentFg: '#1a2e05',
+			text: '#ffffff',
+			mutedText: '#879b7b',
+			border: 'rgba(132,204,22,0.25)',
+			artGradient: 'linear-gradient(135deg, #65a30d, #a3e635)'
+		},
+		purple: {
+			bg: '#110d18',
+			sidebarBg: '#171221',
+			cardBg: '#221a31',
+			accent: '#a855f7',
+			accentFg: '#ffffff',
+			text: '#ffffff',
+			mutedText: '#9885ab',
+			border: 'rgba(168,85,247,0.25)',
+			artGradient: 'linear-gradient(135deg, #9333ea, #c084fc)'
+		},
+		teal: {
+			bg: '#0c1314',
+			sidebarBg: '#101c1d',
+			cardBg: '#16292b',
+			accent: '#14b8a6',
+			accentFg: '#042f2e',
+			text: '#ffffff',
+			mutedText: '#7ca2a5',
+			border: 'rgba(20,184,166,0.25)',
+			artGradient: 'linear-gradient(135deg, #0d9488, #2dd4bf)'
+		},
+		catppuccin: {
+			bg: '#181825',
+			sidebarBg: '#11111b',
+			cardBg: '#1e1e2e',
+			accent: '#cba6f7',
+			accentFg: '#11111b',
+			text: '#cdd6f4',
+			mutedText: '#6c7086',
+			border: 'rgba(203,166,247,0.25)',
+			artGradient: 'linear-gradient(135deg, #b4befe, #cba6f7)'
+		},
+		caffeine: {
+			bg: '#161210',
+			sidebarBg: '#1c1714',
+			cardBg: '#29211c',
+			accent: '#d97706',
+			accentFg: '#ffffff',
+			text: '#fef3c7',
+			mutedText: '#927d6d',
+			border: 'rgba(217,119,6,0.25)',
+			artGradient: 'linear-gradient(135deg, #b45309, #f59e0b)'
+		},
+		neon: {
+			bg: '#090714',
+			sidebarBg: '#0e0b21',
+			cardBg: '#171233',
+			accent: '#ec4899',
+			accentFg: '#ffffff',
+			text: '#fdf4ff',
+			mutedText: '#06b6d4',
+			border: 'rgba(236,72,153,0.35)',
+			artGradient: 'linear-gradient(135deg, #ec4899, #06b6d4)'
+		},
+		breeze: {
+			bg: '#0b1414',
+			sidebarBg: '#0f1c1c',
+			cardBg: '#152b2b',
+			accent: '#10b981',
+			accentFg: '#ffffff',
+			text: '#e6fffa',
+			mutedText: '#6ee7b7',
+			border: 'rgba(16,185,129,0.25)',
+			artGradient: 'linear-gradient(135deg, #059669, #34d399)'
+		},
+		glassy: {
+			bg: 'rgba(20,25,35,0.85)',
+			sidebarBg: 'rgba(30,40,60,0.6)',
+			cardBg: 'rgba(255,255,255,0.09)',
+			accent: '#38bdf8',
+			accentFg: '#082f49',
+			text: '#ffffff',
+			mutedText: '#94a3b8',
+			border: 'rgba(255,255,255,0.25)',
+			artGradient: 'linear-gradient(135deg, rgba(56,189,248,0.8), rgba(168,85,247,0.8))'
+		},
+		native: {
+			bg: '#181a1f',
+			sidebarBg: '#1f2229',
+			cardBg: '#282c34',
+			accent: '#4f8cff',
+			accentFg: '#ffffff',
+			text: '#d7dae0',
+			mutedText: '#7e8490',
+			border: 'rgba(255,255,255,0.15)',
+			artGradient: 'linear-gradient(135deg, #3574d4, #61afef)'
+		}
+	};
+
 	// --- Themes tab ---
 	type FontKey = 'fontSans' | 'fontHeading' | 'fontLyrics';
 	const FONT_ROWS: { key: FontKey; label: string; hint: string }[] = [
@@ -3334,31 +3481,86 @@
 {#snippet beatSyncWarpSwitch()}<Switch checked={prefs.beatSyncWarp} onCheckedChange={setBeatSyncWarp} />{/snippet}
 {#snippet themeBoxesWithPreview()}
 	<div class="space-y-3">
-		<!-- Visual Theme Selection Boxes -->
-		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+		<!-- Visual Theme Selection Boxes with Preview Mockups -->
+		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
 			{#each THEMES as t (t.id)}
 				{@const isSelected = theme.id === t.id}
+				{@const preview = THEME_PREVIEWS[t.id] ?? THEME_PREVIEWS.monochrome}
 				<button
 					type="button"
 					onclick={() => applyTheme(t.id)}
-					class="group/tbox relative flex flex-col justify-between rounded-xl border p-2.5 text-left transition-all cursor-pointer {isSelected
+					class="group/tbox relative flex flex-col justify-between rounded-xl border p-2 text-left transition-all cursor-pointer {isSelected
 						? 'border-primary bg-primary/10 ring-2 ring-primary/40 shadow-xs'
-						: 'border-border/60 bg-muted/25 hover:border-border hover:bg-muted/50'}"
+						: 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'}"
 				>
-					<div class="flex items-center justify-between mb-2">
+					<!-- Mini Desktop App Mockup Image above text -->
+					<div
+						class="relative mb-2 h-20 w-full overflow-hidden rounded-lg border transition-all duration-200 group-hover/tbox:scale-[1.02] shadow-2xs flex flex-col justify-between p-1.5"
+						style="background: {preview.bg}; border-color: {isSelected ? preview.accent : preview.border};"
+					>
+						<!-- Top App Bar / Window dots -->
+						<div class="flex items-center justify-between">
+							<div class="flex items-center gap-1">
+								<div class="size-1.5 rounded-full" style="background: {preview.accent}; opacity: 0.9;"></div>
+								<div class="h-1.5 w-7 rounded-full" style="background: {preview.cardBg};"></div>
+							</div>
+							{#if isSelected}
+								<span
+									class="flex size-3.5 items-center justify-center rounded-full shadow-xs"
+									style="background: {preview.accent}; color: {preview.accentFg};"
+								>
+									<HugeiconsIcon icon={Tick02Icon} class="size-2.5" />
+								</span>
+							{:else}
+								<div class="size-1.5 rounded-full" style="background: {preview.mutedText}; opacity: 0.4;"></div>
+							{/if}
+						</div>
+
+						<!-- Main Mock Content: Sidebar + Artwork Tile + Track Lines -->
+						<div class="flex items-center gap-1.5 flex-1 my-1">
+							<!-- Mini Sidebar representation -->
+							<div
+								class="h-full w-3 rounded-xs flex flex-col gap-0.5 justify-center py-0.5"
+								style="background: {preview.sidebarBg};"
+							>
+								<div class="h-1 w-1.5 rounded-2xs mx-auto" style="background: {preview.accent};"></div>
+								<div class="h-1 w-1.5 rounded-2xs mx-auto opacity-35" style="background: {preview.text};"></div>
+								<div class="h-1 w-1.5 rounded-2xs mx-auto opacity-35" style="background: {preview.text};"></div>
+							</div>
+
+							<!-- Mini Artwork Tile -->
+							<div
+								class="size-8 rounded-sm shrink-0 shadow-xs flex items-center justify-center overflow-hidden"
+								style="background: {preview.artGradient};"
+							>
+								<div class="size-3 rounded-full opacity-65" style="background: {preview.accentFg};"></div>
+							</div>
+
+							<!-- Mock Track Lines -->
+							<div class="flex-1 flex flex-col gap-1 min-w-0 pr-0.5">
+								<div class="h-1.5 w-4/5 rounded-full" style="background: {preview.text}; opacity: 0.9;"></div>
+								<div class="h-1 w-3/5 rounded-full" style="background: {preview.mutedText}; opacity: 0.65;"></div>
+							</div>
+						</div>
+
+						<!-- Bottom Player Seekbar Strip -->
+						<div class="w-full">
+							<div class="h-1 w-full rounded-full overflow-hidden" style="background: {preview.cardBg};">
+								<div class="h-full w-2/5 rounded-full" style="background: {preview.accent};"></div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Text label and color swatch -->
+					<div class="flex items-center justify-between px-0.5">
+						<div class="min-w-0 flex-1">
+							<div class="text-xs font-semibold text-foreground truncate">{t.label}</div>
+							<div class="text-[10px] text-muted-foreground capitalize">{t.kind}</div>
+						</div>
 						<span
-							class="size-4.5 rounded-full ring-1 ring-black/15 shadow-2xs shrink-0 transition-transform group-hover/tbox:scale-110"
+							class="size-3 rounded-full ring-1 ring-black/15 shadow-2xs shrink-0 ml-1.5"
 							style="background:{t.color}"
 						></span>
-						{#if isSelected}
-							<span class="flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-2xs">
-								<HugeiconsIcon icon={Tick02Icon} class="size-2.5" />
-							</span>
-						{/if}
-					</div>
-					<div>
-						<div class="text-xs font-semibold text-foreground truncate">{t.label}</div>
-						<div class="text-[10px] text-muted-foreground capitalize">{t.kind}</div>
 					</div>
 				</button>
 			{/each}
