@@ -6,14 +6,16 @@
 		Search01Icon,
 		MusicNote01Icon,
 		UserIcon,
-		Cancel01Icon
+		Cancel01Icon,
+		AudioWave01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import ExplicitIcon from './ExplicitIcon.svelte';
 	import type { BrowseItem } from '$lib/api';
 	import { asSong, openItem, searchPreview } from '$lib/browse';
-	import { openAddToPlaylist } from '$lib/player.svelte';
+	import { openAddToPlaylist, prefs } from '$lib/player.svelte';
 	import TrackMenu from './TrackMenu.svelte';
+	import SongRecognitionDialog from './SongRecognitionDialog.svelte';
 	import { formatKey, keybindings, registerSearchInput } from '$lib/shortcuts.svelte';
 	import { thumb } from '$lib/thumb';
 	import { toBody } from '$lib/menu';
@@ -35,6 +37,7 @@
 	let containerEl: HTMLElement | undefined = $state();
 	let popupEl: HTMLElement | undefined = $state();
 	let popupStyle = $state('');
+	let shazamOpen = $state(false);
 
 	function updatePopupPosition() {
 		if (!inputEl) return;
@@ -197,7 +200,7 @@
 
 <div
 	bind:this={containerEl}
-	class="relative w-full max-w-md mx-auto"
+	class="relative w-full max-w-xl mx-auto"
 >
 	<form
 		class="relative flex items-center"
@@ -216,7 +219,7 @@
 			bind:value={query}
 			type="text"
 			placeholder="Search songs, artists, albums..."
-			class="h-7.5 w-full rounded-full border border-border/60 bg-muted/40 pl-9 pr-20 text-xs text-foreground placeholder:text-muted-foreground/70 transition-all focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 hover:bg-muted/60"
+			class="h-7.5 w-full rounded-[var(--radius,0.45rem)] border border-border/60 bg-muted/40 pl-9 pr-22 text-xs text-foreground placeholder:text-muted-foreground/70 transition-all focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 hover:bg-muted/60"
 			autocomplete="off"
 			spellcheck="false"
 			role="combobox"
@@ -227,10 +230,21 @@
 		/>
 
 		<div class="absolute right-2 flex items-center gap-1">
+			{#if prefs.pcAudioRecognition}
+				<button
+					type="button"
+					class="flex h-5 w-5 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition hover:bg-primary/20 hover:text-primary cursor-pointer"
+					onclick={() => (shazamOpen = true)}
+					title="Recognize music playing on PC (Shazam)"
+					aria-label="Recognize music playing on PC"
+				>
+					<HugeiconsIcon icon={AudioWave01Icon} class="h-3.5 w-3.5" />
+				</button>
+			{/if}
 			{#if query}
 				<button
 					type="button"
-					class="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition hover:bg-accent/20 hover:text-foreground cursor-pointer"
+					class="flex h-5 w-5 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition hover:bg-accent/20 hover:text-foreground cursor-pointer"
 					onclick={clearQuery}
 					aria-label="Clear search"
 				>
@@ -253,7 +267,7 @@
 			id="top-search-suggest"
 			role="listbox"
 			aria-label="Search preview"
-			class="fixed z-[100] max-h-[75vh] overflow-y-auto rounded-xl border border-border/80 bg-popover/55 dark:bg-popover/45 text-popover-foreground shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150"
+			class="fixed z-[100] max-h-[75vh] overflow-y-auto rounded-[calc(var(--radius,0.45rem)+6px)] border border-border/80 bg-popover/55 dark:bg-popover/45 text-popover-foreground shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150"
 			style={popupStyle}
 		>
 			{#if loading && !items.length}
@@ -361,5 +375,9 @@
 				<span>All results for “{query.trim()}”</span>
 			</button>
 		</div>
+	{/if}
+
+	{#if prefs.pcAudioRecognition}
+		<SongRecognitionDialog bind:open={shazamOpen} />
 	{/if}
 </div>

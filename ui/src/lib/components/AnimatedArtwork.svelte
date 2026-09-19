@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { playback } from '$lib/player.svelte';
+	import { playback, prefs } from '$lib/player.svelte';
 
 	let {
 		src,
@@ -30,6 +30,8 @@
 	let startTime = performance.now();
 	let pausedAt = 0;
 	let totalPausedDuration = 0;
+	let accumulatedTime = 0;
+	let lastFrameTime = performance.now();
 	let isVisible = true;
 	let webglFailed = $state(false);
 
@@ -314,13 +316,31 @@
 			}
 		}
 
-		gl.useProgram(program);
+		const now = performance.now();
+		const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+		lastFrameTime = now;
 
-		const elapsed = (performance.now() - startTime - totalPausedDuration) / 1000;
-		gl.uniform1f(gl.getUniformLocation(program, 'u_time'), elapsed);
-		const effectiveSpeed = playback.paused ? speed * 0.6 : speed;
-		gl.uniform1f(gl.getUniformLocation(program, 'u_speed'), effectiveSpeed);
-		gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), intensity);
+		// Dynamic beat sync: forward-only acceleration during beats so animation never rewinds or jumps back
+		let beatSpeedMultiplier = 1.0;
+		let beatIntensityMultiplier = 1.0;
+		if (!playback.paused && prefs.beatSyncWarp !== false) {
+			const songTime = playback.positionAt > 0
+				? playback.position + (now - playback.positionAt) / 1000
+				: accumulatedTime;
+			// Gentle tempo pulse that advances the simulation forward faster on beats
+			const beatPhase = songTime * 2.066 * Math.PI;
+			const beatPulse = Math.pow(Math.max(0, Math.sin(beatPhase)), 6) * 0.30;
+			const barPulse = Math.pow(Math.max(0, Math.sin(beatPhase * 0.25)), 4) * 0.12;
+			beatSpeedMultiplier = 1.0 + beatPulse + barPulse;
+			beatIntensityMultiplier = 1.0 + (beatPulse + barPulse) * 0.06;
+		}
+
+		const stepRate = playback.paused ? speed * 0.6 : speed * beatSpeedMultiplier;
+		accumulatedTime += dt * stepRate;
+
+		gl.uniform1f(gl.getUniformLocation(program, 'u_time'), accumulatedTime);
+		gl.uniform1f(gl.getUniformLocation(program, 'u_speed'), 1.0);
+		gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), intensity * beatIntensityMultiplier);
 		gl.uniform1f(gl.getUniformLocation(program, 'u_mix'), textureMix);
 		const hasImage = currentTexture ? 1.0 : 0.0;
 		gl.uniform1f(gl.getUniformLocation(program, 'u_has_image'), hasImage);
@@ -353,6 +373,7 @@
 			pausedAt = performance.now();
 			cancelAnimationFrame(animId);
 		} else {
+			lastFrameTime = performance.now();
 			if (pausedAt > 0) {
 				totalPausedDuration += performance.now() - pausedAt;
 				pausedAt = 0;

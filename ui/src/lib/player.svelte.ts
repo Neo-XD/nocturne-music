@@ -154,6 +154,11 @@ export const prefs = $state({
 	floatingPlayerBar: browser ? localStorage.getItem('floating_playerbar') !== 'false' : true,
 	showAudioQuality: browser ? localStorage.getItem('show_audio_quality') !== 'false' : true,
 	homeInSidebar: browser ? localStorage.getItem('home_in_sidebar') === 'true' : false,
+	waveformSeekbar: browser ? localStorage.getItem('waveform_seekbar') === 'true' : false,
+	audioStreamSource: (browser ? (localStorage.getItem('audio_stream_source') as 'ytm' | 'spotify') : null) || 'ytm',
+	listeningHistoryTarget: (browser ? (localStorage.getItem('listening_history_target') as 'both' | 'ytm' | 'spotify') : null) || 'both',
+	pcAudioRecognition: browser ? localStorage.getItem('pc_audio_recognition') !== 'false' : true,
+	beatSyncWarp: browser ? localStorage.getItem('beat_sync_warp') !== 'false' : true,
 	visibleIcons: {
 		titlebar: {
 			navigation: browser ? localStorage.getItem('icon_tb_navigation') !== 'false' : true,
@@ -218,6 +223,37 @@ export function setFloatingPlayerBar(enabled: boolean) {
 export function setShowAudioQuality(enabled: boolean) {
 	prefs.showAudioQuality = enabled;
 	if (browser) localStorage.setItem('show_audio_quality', enabled ? 'true' : 'false');
+}
+
+export function setWaveformSeekbar(enabled: boolean) {
+	prefs.waveformSeekbar = enabled;
+	if (browser) localStorage.setItem('waveform_seekbar', enabled ? 'true' : 'false');
+}
+
+export function setAudioStreamSource(source: 'ytm' | 'spotify') {
+	prefs.audioStreamSource = source;
+	if (browser) {
+		localStorage.setItem('audio_stream_source', source);
+		api.setSetting('audio_stream_source', source).catch(() => {});
+	}
+}
+
+export function setListeningHistoryTarget(target: 'both' | 'ytm' | 'spotify') {
+	prefs.listeningHistoryTarget = target;
+	if (browser) {
+		localStorage.setItem('listening_history_target', target);
+		api.setSetting('listening_history_target', target).catch(() => {});
+	}
+}
+
+export function setPcAudioRecognition(enabled: boolean) {
+	prefs.pcAudioRecognition = enabled;
+	if (browser) localStorage.setItem('pc_audio_recognition', enabled ? 'true' : 'false');
+}
+
+export function setBeatSyncWarp(enabled: boolean) {
+	prefs.beatSyncWarp = enabled;
+	if (browser) localStorage.setItem('beat_sync_warp', enabled ? 'true' : 'false');
 }
 
 // --- Spotify Store & Sync Mode -------------------------------------------------------------
