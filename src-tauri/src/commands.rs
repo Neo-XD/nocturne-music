@@ -1504,6 +1504,39 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v084_note = ReleaseNote {
+        version: "0.8.4".to_string(),
+        date: "2026-09-20".to_string(),
+        body: r#"### Nocturne Music v0.8.4
+
+#### New Features
+- **Direct PC System Audio Recognition (Shazam)**: Identify songs playing directly on your PC from any browser, game, or application without needing a microphone. Powered by native WASAPI loopback capture on Windows, PulseAudio/PipeWire monitor capture on Linux, and loopback virtual device capture on macOS with direct Shazam signature matching.
+- **Enhanced Song Recognition Dialog**: Added "Listen for next song" to keep listening without reopening the modal and "Clear previous recognition" to reset results instantly.
+- **Spotify Developer App Integration (OAuth PKCE)**: Connect your Spotify account securely via Spotify Developer App with single-click PKCE authorization, local callback listener (`http://127.0.0.1:8888/callback`), and automatic token refresh.
+- **In-App Spotify Playlist Browsing & Playback**: View, search, and browse your Spotify playlists natively in the sidebar and in-app playlist views with live track count extraction.
+- **Spotify to YouTube Music Playlist Transfer**: One-click transfer of Spotify playlists into your YouTube Music library with automatic track matching.
+- **Dual-Path Spotify Track Resolution**: Support for Spotify's updated `/v1/playlists/{id}/items` API with seamless web embed fallback for external, followed, and curated playlists.
+- **Audio Stream Switching & History Routing**: Configure your audio stream source (YouTube Music vs Spotify) and listening history logging targets in Settings.
+- **Interactive Audio Waveform Seekbar**: Real-time interactive SVG waveform seekbar for the bottom PlayerBar and FullscreenPlayer with hover scrub preview.
+- **Settings Dialog Maximization & Header Double-Click**: Full maximize/restore button and header double-click support on the Settings dialog for comfortable navigation on large displays.
+- **Theme Visual Preview Mockups**: Interactive theme selection cards now feature illustrated mini UI mockups representing each theme visually above theme titles.
+- **Search Reset Button**: Dedicated clear button in Search views to instantly reset queries, clear cached results, and restore recommendations.
+- **Spotlight Search & Smooth Typing Animations**: Compact, shrunk top search bar (`340px`) with smooth typing glow feedback, reactive search icon pulse, and a centered frosted glass Spotlight-style suggestion popup.
+
+#### Improvements
+- **Natural Crossfade with Instant Manual Skip**: Automatic gapless crossfading when songs transition naturally, while manual track skips immediately bypass the fade-in delay for instant responsiveness.
+- **Very High Audio Quality Profile**: Added dedicated Very High audio quality preset in Playback Settings prioritizing maximum bitrate streams.
+- **Settings Dialog Navigation & Layout**: Reorganized Appearance categories into collapsible accordions with a dedicated Nocturne Sync section and independent scrolling.
+- **Instant External Link Opening**: Bypassed Windows shell spawn bottlenecks using native `ShellExecuteW` for instant browser launch when clicking external links.
+
+#### Bug Fixes
+- **Spotify Playlist Track Fetching & 403 Errors**: Fixed empty playlist views and failed transfers caused by Spotify API endpoint deprecations by supporting the `/items` endpoint and web embed fallback.
+- **Spotify Playlist ID Sanitization**: Properly clean and sanitize playlist IDs from route parameters, `sp_` prefixes, and raw Spotify URLs.
+- **Recognition Dialog UI**: Removed redundant duplicate close button from the PC audio recognition dialog.
+- **Theme Corner Radius Consistency**: Ensured buttons, inputs, queue controls, and lyrics interfaces strictly conform to the user-selected theme corner radius.
+- **Linux AppImage Packaging**: Bundled `libva` and `libwayland-cursor` in AppImage builds so minimal host distros can load Nocturne without missing shared libraries."#.to_string(),
+    };
+
     let v083_note = ReleaseNote {
         version: "0.8.3".to_string(),
         date: "2026-09-15".to_string(),
@@ -1714,7 +1747,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v083_note, v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note,
+        v084_note, v083_note, v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note,
         v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
 
@@ -1722,6 +1755,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "0.8.4".to_string(),
             "0.8.3".to_string(),
             "0.8.2".to_string(),
             "0.8.1".to_string(),
