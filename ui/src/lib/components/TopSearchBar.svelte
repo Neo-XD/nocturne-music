@@ -157,6 +157,9 @@
 	function clearQuery() {
 		query = '';
 		close();
+		if (page.url.pathname === '/search') {
+			goto('/search', { replaceState: true });
+		}
 		inputEl?.focus();
 	}
 

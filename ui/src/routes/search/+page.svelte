@@ -2,7 +2,7 @@
 	// Survives remounts (module scope), so coming back to /search — from a result you clicked, or
 	// from the sidebar — shows the last search instead of a blank page. The results themselves come
 	// back from the page cache, so the rerun paints instantly and just revalidates.
-	let lastQuery = '';
+	let lastQuery = $state('');
 </script>
 
 <script lang="ts">
@@ -10,7 +10,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { Search01Icon } from '@hugeicons/core-free-icons';
+	import { Search01Icon, RotateLeft01Icon } from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
@@ -39,6 +39,20 @@
 
 	// The query of the most recent runSearch call, so an older in-flight one can't clobber it.
 	let latest = '';
+
+	function resetSearch() {
+		query = '';
+		lastQuery = '';
+		res = null;
+		songs = [];
+		searched = '';
+		latest = '';
+		error = null;
+		lastUrlQuery = '';
+		if (page.url.searchParams.has('q')) {
+			goto('/search', { replaceState: true });
+		}
+	}
 
 	async function runSearch() {
 		if (!query.trim()) return;
@@ -89,6 +103,8 @@
 			lastUrlQuery = urlQuery;
 			query = urlQuery;
 			runSearch();
+		} else if (!urlQuery && lastUrlQuery) {
+			resetSearch();
 		}
 	});
 
@@ -129,11 +145,24 @@
 				bind:value={query}
 				placeholder="Search songs, albums, artists, playlists…"
 				onpick={() => (lastQuery = query)}
+				onclear={resetSearch}
 			/>
-			<Button type="submit" class="gap-2" disabled={searching}>
+			<Button type="submit" class="gap-2 shrink-0 cursor-pointer" disabled={searching}>
 				<HugeiconsIcon icon={Search01Icon} class="h-4 w-4" />
 				{searching ? 'Searching…' : 'Search'}
 			</Button>
+			{#if query || res || searched || lastQuery}
+				<Button
+					type="button"
+					variant="outline"
+					class="gap-1.5 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/80"
+					onclick={resetSearch}
+					title="Reset last search"
+				>
+					<HugeiconsIcon icon={RotateLeft01Icon} class="h-4 w-4" />
+					<span>Reset</span>
+				</Button>
+			{/if}
 		</form>
 		{#if error}<div class="mt-2"><ErrorState message={error} onRetry={runSearch} /></div>{/if}
 	</div>

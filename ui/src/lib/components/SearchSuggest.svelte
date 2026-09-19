@@ -7,7 +7,7 @@
 	// through to that form's onsubmit, which is where each caller decides what a full search means
 	// (run it in place, or navigate to /search).
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { Search01Icon, MusicNote01Icon, UserIcon } from '@hugeicons/core-free-icons';
+	import { Search01Icon, MusicNote01Icon, UserIcon, Cancel01Icon } from '@hugeicons/core-free-icons';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import ExplicitIcon from './ExplicitIcon.svelte';
@@ -24,7 +24,8 @@
 		inputClass = '',
 		/** Panel geometry. Default matches the field; a narrow field wants its own width. */
 		panelClass = 'left-0 right-0',
-		onpick
+		onpick,
+		onclear
 	}: {
 		value?: string;
 		placeholder?: string;
@@ -32,6 +33,8 @@
 		panelClass?: string;
 		/** Fired after a row is taken (played or navigated) — for callers that dismiss themselves. */
 		onpick?: () => void;
+		/** Fired when the input is cleared via the clear button */
+		onclear?: () => void;
 	} = $props();
 
 	let open = $state(false);
@@ -135,7 +138,23 @@
 	<!-- Advertises the palette, which searches the same thing from anywhere in the app
 	     (shortcuts.ts). Out of the way once there is a query to read, and never a click target:
 	     the field behind it is the target. -->
-	{#if !value}
+	{#if value}
+		<button
+			type="button"
+			class="absolute right-2.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/80 cursor-pointer transition-colors"
+			onclick={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				value = '';
+				close();
+				onclear?.();
+			}}
+			aria-label="Clear search"
+			title="Clear search"
+		>
+			<HugeiconsIcon icon={Cancel01Icon} class="h-3.5 w-3.5" />
+		</button>
+	{:else}
 		<kbd
 			class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] font-medium tracking-wide text-muted-foreground"
 		>
