@@ -16,6 +16,11 @@
 use std::time::Duration;
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
+use quick_xml::{
+    events::{BytesStart, Event},
+    name::{NamespaceResolver, ResolveResult},
+    reader::NsReader,
+};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
@@ -3002,89 +3007,496 @@ fn parse_lrc_or_ttml(text: &str) -> Vec<LyricLine> {
     }
 
     // 3. LRC / eLRC
-    parse_elrc(text)
-}
+    let lrc_lines = parse_elrc(text);
+    if !lrc_lines.is_empty() {
+        return lrc_lines;
+    }
 
-/// TTML and Apple Music AAML XML parser
-fn parse_ttml_aaml(xml: &str) -> Vec<LyricLine> {
-    let mut lines = Vec::new();
-    let mut pos = 0;
-    while let Some(p_start) = xml[pos..].find("<p") {
-        let abs_p_start = pos + p_start;
-        let Some(p_tag_end) = xml[abs_p_start..].find('>') else {
-            break;
-        };
-        let abs_p_tag_end = abs_p_start + p_tag_end;
-        let p_tag_str = &xml[abs_p_start..abs_p_tag_end + 1];
-
-        let Some(p_close) = xml[abs_p_tag_end..].find("</p>") else {
-            break;
-        };
-        let abs_p_close = abs_p_tag_end + p_close;
-        let inner_str = &xml[abs_p_tag_end + 1..abs_p_close];
-
-        pos = abs_p_close + 4;
-
-        let line_begin = parse_xml_attr(p_tag_str, "begin").and_then(|s| parse_ttml_time(&s));
-        let line_end = parse_xml_attr(p_tag_str, "end").and_then(|s| parse_ttml_time(&s));
-
-        let mut words: Vec<LyricWord> = Vec::new();
-        let mut span_pos = 0;
-        let mut plain_text_buf = String::new();
-
-        while let Some(s_start) = inner_str[span_pos..].find("<span") {
-            let abs_s_start = span_pos + s_start;
-            let Some(s_tag_end) = inner_str[abs_s_start..].find('>') else {
-                break;
-            };
-            let abs_s_tag_end = abs_s_start + s_tag_end;
-            let s_tag_str = &inner_str[abs_s_start..abs_s_tag_end + 1];
-
-            let before = strip_xml_tags(&inner_str[span_pos..abs_s_start]);
-            if !before.is_empty() {
-                plain_text_buf.push_str(&before);
-                if let Some(last_w) = words.last_mut() {
-                    last_w.text.push_str(&before);
-                }
-            }
-
-            let Some(s_close) = inner_str[abs_s_tag_end..].find("</span>") else {
-                break;
-            };
-            let abs_s_close = abs_s_tag_end + s_close;
-            let w_text = strip_xml_tags(&inner_str[abs_s_tag_end + 1..abs_s_close]);
-
-            let w_begin =
-                parse_xml_attr(s_tag_str, "begin").and_then(|s| parse_ttml_time(&s)).or(line_begin);
-            let w_end =
-                parse_xml_attr(s_tag_str, "end").and_then(|s| parse_ttml_time(&s)).or(line_end);
-
-            if let (Some(b), Some(e)) = (w_begin, w_end) {
-                if !w_text.is_empty() {
-                    words.push(LyricWord { text: w_text.clone(), start_ms: b, end_ms: e });
-                }
-            }
-            plain_text_buf.push_str(&w_text);
-            span_pos = abs_s_close + 7;
-        }
-
-        if span_pos < inner_str.len() {
-            plain_text_buf.push_str(&strip_xml_tags(&inner_str[span_pos..]));
-        }
-
-        let words_opt = if !words.is_empty() { Some(words) } else { None };
-        let full_text = plain_text_buf.trim().to_string();
-        if !full_text.is_empty() || line_begin.is_some() {
-            lines.push(LyricLine {
-                time_ms: line_begin,
-                end_time_ms: line_end,
-                text: full_text,
-                words: words_opt,
-                translation: None,
-            });
+    // A leading bracketed phrase is ordinary text when it cannot be an XML opening tag.
+    // Do not turn valid-looking HTML/XML error documents into plain lyrics.
+    if let Some((opening, _)) = trimmed.strip_prefix('<').and_then(|rest| rest.split_once('>')) {
+        let opening_name = opening.split_whitespace().next().unwrap_or_default();
+        let opening_local_name = opening_name.rsplit(':').next().unwrap_or_default();
+        if opening.split_whitespace().count() > 1
+            && !opening.contains(['=', '/', '<'])
+            && !opening.starts_with(['!', '?'])
+            && !matches!(
+                opening_local_name.to_ascii_lowercase().as_str(),
+                "tt" | "html" | "head" | "body" | "p" | "div" | "span" | "error" | "response"
+            )
+        {
+            return text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(|line| LyricLine::simple(None, line.to_owned()))
+                .collect();
         }
     }
-    lines.sort_by_key(|l| l.time_ms);
+    Vec::new()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TtmlAuxRole {
+    Translation,
+    Romanization,
+    Background,
+    RubyAnnotation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TtmlSpanKind {
+    Main,
+    Auxiliary { role: TtmlAuxRole, root: bool },
+}
+
+#[derive(Debug)]
+struct TtmlSpanFrame {
+    kind: TtmlSpanKind,
+    start_ms: Option<u64>,
+    end_ms: Option<u64>,
+    duration_ms: Option<u64>,
+    order: usize,
+    has_timed_descendant: bool,
+    text_start: usize,
+    text: String,
+}
+
+#[derive(Debug)]
+struct TtmlPendingWord {
+    text: String,
+    start_ms: Option<u64>,
+    end_ms: Option<u64>,
+    duration_ms: Option<u64>,
+    order: usize,
+}
+
+#[derive(Debug)]
+struct TtmlLineBuilder {
+    start_ms: Option<u64>,
+    end_ms: Option<u64>,
+    text: String,
+    words: Vec<TtmlPendingWord>,
+    translations: Vec<String>,
+}
+
+fn ttml_attribute(element: &BytesStart<'_>, local_name: &[u8]) -> Option<String> {
+    element
+        .attributes()
+        .with_checks(false)
+        .filter_map(Result::ok)
+        .find(|attribute| attribute.key.local_name().as_ref() == local_name)
+        .and_then(|attribute| attribute.unescape_value().ok().map(|value| value.into_owned()))
+}
+
+fn valid_ttml_element(element: &BytesStart<'_>, resolver: &NamespaceResolver) -> bool {
+    if matches!(resolver.resolve_element(element.name()).0, ResolveResult::Unknown(_)) {
+        return false;
+    }
+    for attribute in element.attributes() {
+        let Ok(attribute) = attribute else { return false };
+        if attribute.unescape_value().is_err() {
+            return false;
+        }
+        if attribute.key.as_ref() != b"xmlns"
+            && !attribute.key.as_ref().starts_with(b"xmlns:")
+            && matches!(resolver.resolve_attribute(attribute.key).0, ResolveResult::Unknown(_))
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn ttml_namespaced_attribute(
+    element: &BytesStart<'_>,
+    resolver: &NamespaceResolver,
+    namespace: &[u8],
+    local_name: &[u8],
+) -> Option<String> {
+    element.attributes().with_checks(false).filter_map(Result::ok).find_map(|attribute| {
+        let (resolved, local) = resolver.resolve_attribute(attribute.key);
+        (local.as_ref() == local_name
+            && matches!(resolved, ResolveResult::Bound(uri) if uri.as_ref() == namespace))
+        .then(|| attribute.unescape_value().ok().map(|value| value.into_owned()))
+        .flatten()
+    })
+}
+
+fn ttml_aux_role(element: &BytesStart<'_>, resolver: &NamespaceResolver) -> Option<TtmlAuxRole> {
+    const TTM_NAMESPACE: &[u8] = b"http://www.w3.org/ns/ttml#metadata";
+    const TTS_NAMESPACE: &[u8] = b"http://www.w3.org/ns/ttml#styling";
+    let role = ttml_namespaced_attribute(element, resolver, TTM_NAMESPACE, b"role")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let auxiliary = match role.as_str() {
+        "x-translation" | "translation" => Some(TtmlAuxRole::Translation),
+        "x-roman" | "x-romanization" | "roman" | "romanization" => Some(TtmlAuxRole::Romanization),
+        "x-bg" | "x-background" | "background" => Some(TtmlAuxRole::Background),
+        _ => None,
+    };
+    auxiliary.or_else(|| {
+        let ruby = ttml_namespaced_attribute(element, resolver, TTS_NAMESPACE, b"ruby")?;
+        matches!(ruby.as_str(), "text" | "textContainer").then_some(TtmlAuxRole::RubyAnnotation)
+    })
+}
+
+fn append_ttml_text(target: &mut String, text: &str) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    if text.chars().all(char::is_whitespace) {
+        // A literal inline space separates adjacent spans. Formatting indentation does not.
+        if text.contains(['\n', '\r', '\t']) {
+            return false;
+        }
+        target.push_str(text);
+        return true;
+    }
+    if text.contains(['\n', '\r', '\t']) {
+        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        target.push_str(&normalized);
+    } else {
+        target.push_str(text);
+    }
+    true
+}
+
+fn decoded_ttml_text(text: &quick_xml::events::BytesText<'_>) -> Option<String> {
+    let decoded = text.xml_content().ok()?;
+    quick_xml::escape::unescape(&decoded).ok().map(|value| value.into_owned())
+}
+
+fn decoded_ttml_reference(reference: &quick_xml::events::BytesRef<'_>) -> Option<String> {
+    if let Some(value) = reference.resolve_char_ref().ok().flatten() {
+        return Some(value.to_string());
+    }
+
+    match reference.decode().ok()?.as_ref() {
+        "amp" => Some("&".to_owned()),
+        "lt" => Some("<".to_owned()),
+        "gt" => Some(">".to_owned()),
+        "quot" => Some("\"".to_owned()),
+        "apos" => Some("'".to_owned()),
+        _ => None,
+    }
+}
+
+fn append_ttml_content(
+    text: &str,
+    line: &mut TtmlLineBuilder,
+    spans: &mut [TtmlSpanFrame],
+    current_role: Option<TtmlAuxRole>,
+) {
+    match current_role {
+        Some(TtmlAuxRole::Translation) => {
+            if let Some(translation) = spans.iter_mut().rev().find(|span| {
+                matches!(
+                    span.kind,
+                    TtmlSpanKind::Auxiliary { role: TtmlAuxRole::Translation, root: true }
+                )
+            }) {
+                append_ttml_text(&mut translation.text, text);
+            }
+        }
+        Some(_) => {}
+        None => {
+            let appended = append_ttml_text(&mut line.text, text);
+            if !appended {
+                return;
+            }
+            if text.chars().all(char::is_whitespace)
+                && (spans.is_empty() || spans.last().is_some_and(|span| span.has_timed_descendant))
+            {
+                // TTML permits the separator between two spans to live outside both spans. Keep
+                // that space on the preceding token so the existing renderer preserves it.
+                if let Some(word) = line.words.last_mut() {
+                    word.text.push_str(text);
+                }
+            }
+        }
+    }
+}
+
+fn resolved_ttml_words(
+    mut words: Vec<TtmlPendingWord>,
+    line_end: Option<u64>,
+    line_text: &str,
+) -> Option<Vec<LyricWord>> {
+    words.sort_by_key(|word| word.order);
+    let mut resolved = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        let start = word.start_ms?;
+        let end = word
+            .end_ms
+            .filter(|end| *end > start)
+            .or_else(|| {
+                word.duration_ms
+                    .and_then(|duration| start.checked_add(duration))
+                    .filter(|end| *end > start)
+            })
+            .or_else(|| {
+                words.get(index + 1).and_then(|next| next.start_ms).filter(|next| *next > start)
+            })
+            .or_else(|| {
+                (index + 1 == words.len()).then_some(line_end).flatten().filter(|end| *end > start)
+            });
+        let Some(end_ms) = end else {
+            // The renderer displays words instead of line text whenever any words exist. A
+            // partly timed line would hide its untimed token, so retain the whole line as text.
+            return None;
+        };
+        resolved.push(LyricWord { text: word.text.clone(), start_ms: start, end_ms });
+    }
+    if resolved.iter().map(|word| word.text.as_str()).collect::<String>().trim() != line_text {
+        return None;
+    }
+    (!resolved.is_empty()).then_some(resolved)
+}
+
+/// Structurally parse TTML / Apple Music AAML into the current main-vocal lyric model.
+///
+/// Auxiliary translation spans are mapped to `LyricLine::translation`; romanization,
+/// background-vocal, and Ruby-annotation structures are intentionally ignored until the public
+/// model can represent them. Unknown roles remain main lyrics.
+fn parse_ttml_aaml(xml: &str) -> Vec<LyricLine> {
+    const TTML_NAMESPACE: &[u8] = b"http://www.w3.org/ns/ttml";
+    let mut reader = NsReader::from_str(xml);
+    reader.config_mut().trim_text(false);
+
+    let mut lines = Vec::new();
+    let mut element_names: Vec<Vec<u8>> = Vec::new();
+    let mut element_roles: Vec<Option<TtmlAuxRole>> = Vec::new();
+    let mut span_frames: Vec<TtmlSpanFrame> = Vec::new();
+    let mut line: Option<TtmlLineBuilder> = None;
+    let mut head_depth = 0usize;
+    let mut span_order = 0usize;
+    let mut root_seen = false;
+    let mut root_closed = false;
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(element)) => {
+                if !valid_ttml_element(&element, reader.resolver()) {
+                    return Vec::new();
+                }
+                let name = element.local_name();
+                let name = name.as_ref();
+                if element_names.is_empty() {
+                    let root_namespace = match reader.resolver().resolve_element(element.name()).0 {
+                        ResolveResult::Unbound => true,
+                        ResolveResult::Bound(uri) => uri.as_ref() == TTML_NAMESPACE,
+                        ResolveResult::Unknown(_) => false,
+                    };
+                    if root_seen || name != b"tt" || !root_namespace {
+                        return Vec::new();
+                    }
+                    root_seen = true;
+                }
+                let parent_role = element_roles.last().copied().flatten();
+                let role = parent_role.or_else(|| ttml_aux_role(&element, reader.resolver()));
+
+                if name == b"head" {
+                    head_depth += 1;
+                } else if name == b"p" && line.is_some() {
+                    return Vec::new();
+                } else if name == b"p" && head_depth == 0 && line.is_none() && role.is_none() {
+                    line = Some(TtmlLineBuilder {
+                        start_ms: ttml_attribute(&element, b"begin")
+                            .as_deref()
+                            .and_then(parse_ttml_time),
+                        end_ms: ttml_attribute(&element, b"end")
+                            .as_deref()
+                            .and_then(parse_ttml_time),
+                        text: String::new(),
+                        words: Vec::new(),
+                        translations: Vec::new(),
+                    });
+                    span_frames.clear();
+                    span_order = 0;
+                } else if name == b"span" {
+                    if line.is_some() {
+                        let kind = if let Some(role) = role {
+                            TtmlSpanKind::Auxiliary { role, root: parent_role != Some(role) }
+                        } else {
+                            TtmlSpanKind::Main
+                        };
+                        span_frames.push(TtmlSpanFrame {
+                            kind,
+                            start_ms: ttml_attribute(&element, b"begin")
+                                .as_deref()
+                                .and_then(parse_ttml_time),
+                            end_ms: ttml_attribute(&element, b"end")
+                                .as_deref()
+                                .and_then(parse_ttml_time),
+                            duration_ms: ttml_attribute(&element, b"dur")
+                                .as_deref()
+                                .and_then(parse_ttml_time),
+                            order: span_order,
+                            has_timed_descendant: false,
+                            text_start: line.as_ref().map_or(0, |line| line.text.len()),
+                            text: String::new(),
+                        });
+                        span_order += 1;
+                    }
+                } else if name == b"br" {
+                    if let Some(line) = line.as_mut() {
+                        append_ttml_content(" ", line, &mut span_frames, role);
+                    }
+                }
+                element_names.push(element.name().as_ref().to_vec());
+                element_roles.push(role);
+            }
+            Ok(Event::Empty(element)) => {
+                if !valid_ttml_element(&element, reader.resolver()) {
+                    return Vec::new();
+                }
+                if element_names.is_empty() {
+                    let root_namespace = match reader.resolver().resolve_element(element.name()).0 {
+                        ResolveResult::Unbound => true,
+                        ResolveResult::Bound(uri) => uri.as_ref() == TTML_NAMESPACE,
+                        ResolveResult::Unknown(_) => false,
+                    };
+                    if root_seen || element.local_name().as_ref() != b"tt" || !root_namespace {
+                        return Vec::new();
+                    }
+                    root_seen = true;
+                    root_closed = true;
+                }
+                if element.local_name().as_ref() == b"p" && line.is_some() {
+                    return Vec::new();
+                }
+                if element.local_name().as_ref() == b"br" {
+                    if let Some(line) = line.as_mut() {
+                        let parent_role = element_roles.last().copied().flatten();
+                        let role =
+                            parent_role.or_else(|| ttml_aux_role(&element, reader.resolver()));
+                        append_ttml_content(" ", line, &mut span_frames, role);
+                    }
+                }
+            }
+            Ok(Event::Text(text)) => {
+                let Some(text) = decoded_ttml_text(&text) else { return Vec::new() };
+                if element_names.is_empty() && !text.trim().is_empty() {
+                    return Vec::new();
+                }
+                if let Some(line) = line.as_mut() {
+                    let role = element_roles.last().copied().flatten();
+                    append_ttml_content(&text, line, &mut span_frames, role);
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                let Some(text) = decoded_ttml_reference(&reference) else { return Vec::new() };
+                if element_names.is_empty() && !text.trim().is_empty() {
+                    return Vec::new();
+                }
+                if let Some(line) = line.as_mut() {
+                    let role = element_roles.last().copied().flatten();
+                    append_ttml_content(&text, line, &mut span_frames, role);
+                }
+            }
+            Ok(Event::CData(text)) => {
+                let Ok(text) = text.xml_content() else { return Vec::new() };
+                if element_names.is_empty() && !text.trim().is_empty() {
+                    return Vec::new();
+                }
+                if let Some(line) = line.as_mut() {
+                    let role = element_roles.last().copied().flatten();
+                    append_ttml_content(&text, line, &mut span_frames, role);
+                }
+            }
+            Ok(Event::End(element)) => {
+                if element_names.pop().as_deref() != Some(element.name().as_ref()) {
+                    return Vec::new();
+                }
+                let name = element.local_name();
+                let name = name.as_ref();
+                if name == b"span" {
+                    if let (Some(line), Some(span)) = (line.as_mut(), span_frames.pop()) {
+                        match span.kind {
+                            TtmlSpanKind::Main => {
+                                let main_text =
+                                    line.text.get(span.text_start..).unwrap_or_default();
+                                let timed_main = span.has_timed_descendant
+                                    || (span.start_ms.is_some() && !main_text.trim().is_empty());
+                                if timed_main {
+                                    for parent in span_frames
+                                        .iter_mut()
+                                        .filter(|parent| parent.kind == TtmlSpanKind::Main)
+                                    {
+                                        parent.has_timed_descendant = true;
+                                    }
+                                }
+                                if !span.has_timed_descendant && !main_text.trim().is_empty() {
+                                    if span.start_ms.is_some()
+                                        || !span_frames.iter().any(|parent| {
+                                            parent.kind == TtmlSpanKind::Main
+                                                && parent.start_ms.is_some()
+                                        })
+                                    {
+                                        line.words.push(TtmlPendingWord {
+                                            text: main_text.to_owned(),
+                                            start_ms: span.start_ms,
+                                            end_ms: span.end_ms,
+                                            duration_ms: span.duration_ms,
+                                            order: span.order,
+                                        });
+                                    }
+                                }
+                            }
+                            TtmlSpanKind::Auxiliary {
+                                role: TtmlAuxRole::Translation,
+                                root: true,
+                            } => {
+                                let translation = span.text.trim().to_owned();
+                                if !translation.is_empty() {
+                                    line.translations.push(translation);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                } else if name == b"p" {
+                    span_frames.clear();
+                    if let Some(line) = line.take() {
+                        let text = line.text.trim().to_owned();
+                        if !text.is_empty() || line.start_ms.is_some() {
+                            let words = resolved_ttml_words(line.words, line.end_ms, &text);
+                            lines.push(LyricLine {
+                                time_ms: line.start_ms,
+                                end_time_ms: line.end_ms,
+                                text,
+                                words,
+                                translation: line.translations.into_iter().next(),
+                            });
+                        }
+                    }
+                } else if name == b"head" {
+                    head_depth = head_depth.saturating_sub(1);
+                }
+                element_roles.pop();
+                if element_names.is_empty() {
+                    root_closed = true;
+                }
+            }
+            Ok(Event::Eof) => {
+                if !root_seen
+                    || !root_closed
+                    || !element_names.is_empty()
+                    || line.is_some()
+                    || !span_frames.is_empty()
+                {
+                    return Vec::new();
+                }
+                break;
+            }
+            Err(_) => return Vec::new(),
+            _ => {}
+        }
+    }
+
+    lines.sort_by_key(|line| line.time_ms);
     lines
 }
 
@@ -3196,7 +3608,7 @@ fn parse_ttml_time(s: &str) -> Option<u64> {
     }
     if let Some(rest) = s.strip_suffix('s') {
         let secs: f64 = rest.parse().ok()?;
-        return Some((secs * 1000.0) as u64);
+        return ttml_seconds_to_ms(secs);
     }
     if s.contains(':') {
         let parts: Vec<&str> = s.split(':').collect();
@@ -3204,46 +3616,23 @@ fn parse_ttml_time(s: &str) -> Option<u64> {
             let h: u64 = parts[0].parse().ok()?;
             let m: u64 = parts[1].parse().ok()?;
             let secs: f64 = parts[2].parse().ok()?;
-            return Some((h * 3600 + m * 60) * 1000 + (secs * 1000.0) as u64);
+            let base = h.checked_mul(3600)?.checked_add(m.checked_mul(60)?)?;
+            return ttml_seconds_to_ms(base as f64 + secs);
         } else if parts.len() == 2 {
             let m: u64 = parts[0].parse().ok()?;
             let secs: f64 = parts[1].parse().ok()?;
-            return Some(m * 60 * 1000 + (secs * 1000.0) as u64);
+            let base = m.checked_mul(60)?;
+            return ttml_seconds_to_ms(base as f64 + secs);
         }
     }
     let secs: f64 = s.parse().ok()?;
-    Some((secs * 1000.0) as u64)
+    ttml_seconds_to_ms(secs)
 }
 
-fn parse_xml_attr(tag: &str, attr: &str) -> Option<String> {
-    let pattern = format!("{attr}=\"");
-    if let Some(idx) = tag.find(&pattern) {
-        let start = idx + pattern.len();
-        let end = tag[start..].find('"')?;
-        return Some(tag[start..start + end].to_string());
-    }
-    let pattern_single = format!("{attr}='");
-    if let Some(idx) = tag.find(&pattern_single) {
-        let start = idx + pattern_single.len();
-        let end = tag[start..].find('\'')?;
-        return Some(tag[start..start + end].to_string());
-    }
-    None
-}
-
-fn strip_xml_tags(s: &str) -> String {
-    let mut out = String::new();
-    let mut in_tag = false;
-    for c in s.chars() {
-        if c == '<' {
-            in_tag = true;
-        } else if c == '>' {
-            in_tag = false;
-        } else if !in_tag {
-            out.push(c);
-        }
-    }
-    out
+fn ttml_seconds_to_ms(seconds: f64) -> Option<u64> {
+    let milliseconds = seconds * 1000.0;
+    (milliseconds.is_finite() && milliseconds >= 0.0 && milliseconds <= u64::MAX as f64)
+        .then_some(milliseconds as u64)
 }
 
 #[cfg(test)]
@@ -3751,6 +4140,358 @@ mod tests {
         assert_eq!(words[0].text, "Hello ");
         assert_eq!(words[0].start_ms, 10500);
         assert_eq!(words[0].end_ms, 11200);
+    }
+
+    #[test]
+    fn parses_structured_ttml_line_timing_and_entities() {
+        let xml = r#"<?xml version="1.0"?><tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="1.25s" end="2.75s">Hello &amp; goodbye</p></div></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_ms, Some(1250));
+        assert_eq!(lines[0].end_time_ms, Some(2750));
+        assert_eq!(lines[0].text, "Hello & goodbye");
+        assert!(lines[0].words.is_none());
+    }
+
+    #[test]
+    fn structured_ttml_preserves_explicit_syllable_intervals_and_spaces() {
+        let xml = r#"<tt><body><p begin="10s" end="12s"><span begin="10s" end="10.4s">Hel</span><span begin="10.4s" end="10.8s">lo</span> <span begin="10.8s" end="11.4s">world</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        let words = lines[0].words.as_ref().unwrap();
+
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(words.len(), 3);
+        assert_eq!(words[1].text, "lo ");
+        assert_eq!((words[0].start_ms, words[0].end_ms), (10000, 10400));
+        assert_eq!((words[2].start_ms, words[2].end_ms), (10800, 11400));
+    }
+
+    #[test]
+    fn structured_ttml_maps_translation_without_mixing_main_content() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="2s"><span begin="1s" end="1.4s">Hello </span><span begin="1.4s" end="2s">world</span><span ttm:role="x-translation" xml:lang="id">Halo dunia</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(lines[0].translation.as_deref(), Some("Halo dunia"));
+        assert_eq!(lines[0].words.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn structured_ttml_romanization_never_contaminates_main_content() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="2s"><span begin="1s" end="1.5s">君</span><span begin="1.5s" end="2s">の</span><span ttm:role="x-roman">kimi no</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+
+        assert_eq!(lines[0].text, "君の");
+        assert_eq!(lines[0].words.as_ref().unwrap().len(), 2);
+        assert!(lines[0].translation.is_none());
+    }
+
+    #[test]
+    fn structured_ttml_nested_background_vocals_are_not_main_words() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="3s"><span begin="1s" end="1.5s">Main </span><span ttm:role="x-bg" begin="1.2s" end="2s"><span begin="1.2s" end="1.5s">background </span><span begin="1.5s" end="2s">vocal</span></span><span begin="2s" end="3s">line</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        let words = lines[0].words.as_ref().unwrap();
+
+        assert_eq!(lines[0].text, "Main line");
+        assert_eq!(
+            words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>(),
+            ["Main ", "line"]
+        );
+    }
+
+    #[test]
+    fn structured_ttml_agent_metadata_does_not_enter_lyrics() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><head><metadata><ttm:agent type="person" xml:id="v1"><ttm:name>Singer One</ttm:name></ttm:agent><ttm:agent type="person" xml:id="v2"><ttm:name>Singer Two</ttm:name></ttm:agent></metadata></head><body><p begin="1s" end="2s" ttm:agent="v1">First</p><p begin="2s" end="3s" ttm:agent="v2">Second</p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+
+        assert_eq!(
+            lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>(),
+            ["First", "Second"]
+        );
+    }
+
+    #[test]
+    fn structured_ttml_preserves_overlapping_main_lines() {
+        let xml = r#"<tt><body><div><p begin="1s" end="3s">First voice</p><p begin="2s" end="4s">Second voice</p></div></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!((lines[0].time_ms, lines[0].end_time_ms), (Some(1000), Some(3000)));
+        assert_eq!((lines[1].time_ms, lines[1].end_time_ms), (Some(2000), Some(4000)));
+    }
+
+    #[test]
+    fn structured_ttml_tolerates_unknown_namespaced_attributes() {
+        let xml = r#"<tt xmlns:itunes="http://itunes.apple.com/lyric-ttml-extensions" xmlns:custom="urn:test" itunes:timing="Word"><body><div itunes:song-part="Verse" custom:flag="yes"><p begin="1s" end="2s" itunes:key="L1" custom:value="ignored">Line</p></div></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "Line");
+    }
+
+    #[test]
+    fn structured_ttml_ignores_unknown_auxiliary_roles_and_invalid_intervals() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="2s">Main<span ttm:role="x-roman"><span begin="1s" end="2s">noise</span></span><span begin="bad" end="999999999999999999999999s"> visible</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+
+        assert_eq!(lines[0].text, "Main visible");
+        assert!(lines[0].words.is_none());
+    }
+
+    #[test]
+    fn structured_ttml_malformed_tail_rejects_the_whole_document() {
+        let xml = r#"<tt><body><p begin="1s" end="2s">Complete</p><p begin="2s"><span>broken</p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+
+        assert!(lines.is_empty());
+        assert!(parse_lrc_or_ttml(xml).is_empty());
+    }
+
+    #[test]
+    fn structured_ttml_unclosed_document_rejects_a_complete_prefix() {
+        let xml = r#"<tt><body><p begin="1s" end="2s">Complete</p><p begin="2s">unfinished"#;
+        assert!(parse_ttml_aaml(xml).is_empty());
+    }
+
+    #[test]
+    fn structured_ttml_untimed_wrapper_keeps_timed_main_children() {
+        let xml = r#"<tt><body><p begin="1s" end="2s"><span><span begin="1s" end="1.5s">Hel</span><span begin="1.5s" end="2s">lo</span></span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        let words = lines[0].words.as_ref().unwrap();
+        assert_eq!(lines[0].text, "Hello");
+        assert_eq!(words.len(), 2);
+        assert_eq!((words[0].start_ms, words[0].end_ms), (1000, 1500));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (1500, 2000));
+    }
+
+    #[test]
+    fn structured_ttml_timed_wrapper_does_not_duplicate_timed_children() {
+        let xml = r#"<tt><body><p begin="1s" end="2s"><span begin="1s" end="2s"><span begin="1s" end="1.5s">Hel</span><span begin="1.5s" end="2s">lo</span></span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        let words = lines[0].words.as_ref().unwrap();
+        assert_eq!(lines[0].text, "Hello");
+        assert_eq!(words.len(), 2);
+        assert_eq!((words[0].start_ms, words[0].end_ms), (1000, 1500));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (1500, 2000));
+    }
+
+    #[test]
+    fn structured_ttml_ruby_base_is_main_but_annotation_is_not() {
+        let xml = r#"<tt xmlns:tts="http://www.w3.org/ns/ttml#styling"><body><p begin="1s" end="2s"><span tts:ruby="container"><span tts:ruby="base" begin="1s" end="1.5s">漢</span><span tts:ruby="textContainer"><span tts:ruby="text" begin="1s" end="1.5s">kan</span></span></span><span begin="1.5s" end="2s">字</span></p></body></tt>"#;
+        let lyrics = from_parsed("TTML Test", parse_ttml_aaml(xml)).unwrap();
+        assert_eq!(lyrics.lines[0].text, "漢字");
+        assert_eq!(lyrics.lines[0].words.as_ref().unwrap().len(), 2);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn structured_ttml_unknown_roles_and_unrelated_role_namespace_stay_main() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:custom="urn:custom"><body><p begin="1s" end="2s" ttm:role="dialog"><span begin="1s" end="1.5s" ttm:role="future-main">Hello </span><span begin="1.5s" end="2s" custom:role="x-bg">world</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(lines[0].words.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn structured_ttml_auxiliary_role_uses_namespace_not_prefix_spelling() {
+        let xml = r#"<tt xmlns:meta="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="2s">Main<span meta:role="x-translation">Translated</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        assert_eq!(lines[0].text, "Main");
+        assert_eq!(lines[0].translation.as_deref(), Some("Translated"));
+    }
+
+    #[test]
+    fn structured_ttml_known_auxiliary_roles_stay_out_of_main_timing() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="2s"><span begin="1s" end="1.5s">Hello </span><span begin="1.5s" end="2s">world</span><span ttm:role="x-translation" begin="1s" end="2s">Halo dunia</span><span ttm:role="x-roman" begin="1s" end="2s">he-lo</span><span ttm:role="x-bg" begin="1s" end="2s">echo</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(lines[0].translation.as_deref(), Some("Halo dunia"));
+        assert_eq!(lines[0].words.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn structured_ttml_begin_plus_duration_resolves_word_end() {
+        let xml = r#"<tt><body><p begin="1s" end="2s"><span begin="1s" dur="400ms">Hello </span><span begin="1.4s" end="2s">world</span></p></body></tt>"#;
+        let words = parse_ttml_aaml(xml)[0].words.clone().unwrap();
+        assert_eq!((words[0].start_ms, words[0].end_ms), (1000, 1400));
+    }
+
+    #[test]
+    fn structured_ttml_explicit_end_precedes_duration_fallback() {
+        let xml = r#"<tt><body><p begin="1s" end="2s"><span begin="1s" end="1.25s" dur="500ms">Hello </span><span begin="1.25s" end="2s">world</span></p></body></tt>"#;
+        let words = parse_ttml_aaml(xml)[0].words.clone().unwrap();
+        assert_eq!(words[0].end_ms, 1250);
+    }
+
+    #[test]
+    fn structured_ttml_begin_only_uses_next_main_start_then_final_line_end() {
+        let xml = r#"<tt><body><p begin="1s" end="3s"><span begin="1s">Hello </span><span begin="2s">world</span></p></body></tt>"#;
+        let words = parse_ttml_aaml(xml)[0].words.clone().unwrap();
+        assert_eq!((words[0].start_ms, words[0].end_ms), (1000, 2000));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (2000, 3000));
+    }
+
+    #[test]
+    fn structured_ttml_unresolved_begin_only_keeps_text_without_fake_timing() {
+        let xml =
+            r#"<tt><body><p begin="1s"><span begin="1s" dur="bad">Hello</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        assert_eq!(lines[0].text, "Hello");
+        assert!(lines[0].words.is_none());
+    }
+
+    #[test]
+    fn structured_ttml_partial_word_timing_falls_back_to_readable_line() {
+        let xml = r#"<tt><body><p begin="1s"><span begin="1s" end="1.5s">Hello </span><span begin="1.5s">world</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        assert_eq!(lines[0].text, "Hello world");
+        assert!(lines[0].words.is_none());
+    }
+
+    #[test]
+    fn structured_ttml_auxiliary_timing_cannot_close_a_main_word() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="4s"><span begin="1s">Hello </span><span ttm:role="x-translation" begin="1.5s" end="2s">Halo </span><span begin="3s" end="4s">world</span></p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        let words = lines[0].words.as_ref().unwrap();
+        assert_eq!((words[0].start_ms, words[0].end_ms), (1000, 3000));
+        assert_eq!(lines[0].translation.as_deref(), Some("Halo"));
+    }
+
+    #[test]
+    fn structured_ttml_break_separates_text_without_creating_timing() {
+        let xml = r#"<tt><body><p begin="1s" end="2s">Hello<br/>world</p><p begin="2s" end="3s">Good<br></br>bye</p></body></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(lines[1].text, "Good bye");
+        assert!(lines.iter().all(|line| line.words.is_none()));
+    }
+
+    #[test]
+    fn ttml_detection_does_not_consume_lrc_with_a_literal_ttml_fragment() {
+        let lines = parse_lrc_or_ttml("[00:01.00]Hello <tt world");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "Hello <tt world");
+    }
+
+    #[test]
+    fn structured_ttml_requires_a_tt_root_and_keeps_literal_angle_text() {
+        for xml in [
+            "<html><body><p>Server error</p></body></html>",
+            "<response><p>Server error</p></response>",
+            "<x:tt xmlns:x=\"urn:not-ttml\"><p>Wrong namespace</p></x:tt>",
+            "<tt bogus><p>Malformed TTML</p></tt>",
+        ] {
+            assert!(parse_ttml_aaml(xml).is_empty());
+            assert!(parse_lrc_or_ttml(xml).is_empty());
+        }
+
+        let minimal = parse_lrc_or_ttml("<tt><p>Hello</p></tt>");
+        assert_eq!(minimal.len(), 1);
+        assert_eq!(minimal[0].text, "Hello");
+
+        let prefixed = parse_lrc_or_ttml(
+            "<t:tt xmlns:t=\"http://www.w3.org/ns/ttml\"><t:p>Prefixed</t:p></t:tt>",
+        );
+        assert_eq!(prefixed[0].text, "Prefixed");
+
+        let literal = parse_lrc_or_ttml("<I love you> tonight");
+        assert_eq!(literal.len(), 1);
+        assert_eq!(literal[0].text, "<I love you> tonight");
+        assert!(literal[0].time_ms.is_none());
+    }
+
+    #[test]
+    fn structured_ttml_rejects_decode_attribute_and_namespace_errors_without_partial_lines() {
+        for xml in [
+            "<tt><p>Good</p><p>Bad &undefined;</p></tt>",
+            "<tt><p>Good</p><p><span begin=1s>Bad</span></p></tt>",
+            "<tt><p>Good</p><p><span begin=\"1s\" custom=\"&undefined;\">Bad</span></p></tt>",
+            "<tt><p>Good</p><p><unknown:span>Bad</unknown:span></p></tt>",
+            "<tt><p>Good</p></tt><tt><p>Second root</p></tt>",
+        ] {
+            assert!(parse_ttml_aaml(xml).is_empty());
+            assert!(parse_lrc_or_ttml(xml).is_empty());
+        }
+    }
+
+    #[test]
+    fn structured_ttml_only_uses_namespaced_metadata_roles() {
+        let xml = r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:meta="http://www.w3.org/ns/ttml#metadata" xmlns:custom="urn:custom"><p>One<span role="x-bg">bare</span><span custom:role="x-bg">custom</span><span ttm:role="x-bg">ignored</span><span meta:role="x-translation">Translated</span></p></tt>"#;
+        let lines = parse_ttml_aaml(xml);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "Onebarecustom");
+        assert_eq!(lines[0].translation.as_deref(), Some("Translated"));
+
+        let bare_paragraph = parse_ttml_aaml("<tt><p role=\"x-bg\">Still main</p></tt>");
+        assert_eq!(bare_paragraph[0].text, "Still main");
+        let auxiliary_paragraph = parse_ttml_aaml(
+            "<tt xmlns:ttm=\"http://www.w3.org/ns/ttml#metadata\"><p ttm:role=\"x-bg\">Not main</p></tt>",
+        );
+        assert!(auxiliary_paragraph.is_empty());
+    }
+
+    #[test]
+    fn structured_ttml_never_skips_an_invalid_immediate_next_word_for_end_inference() {
+        for xml in [
+            r#"<tt><p begin="1s" end="3s"><span begin="1s">A</span><span begin="1s" end="2s">B</span></p></tt>"#,
+            r#"<tt><p begin="1s" end="3s"><span begin="1s">A</span><span begin="0.5s" end="2s">B</span></p></tt>"#,
+            r#"<tt><p begin="1s" end="1001s"><span begin="1s">A</span><span begin="0.5s">B</span><span begin="1000s" end="1001s">C</span></p></tt>"#,
+            r#"<tt><p begin="1s" end="1001s"><span begin="1s">A</span><span begin="bad">B</span><span begin="1000s" end="1001s">C</span></p></tt>"#,
+        ] {
+            let lines = parse_ttml_aaml(xml);
+            assert_eq!(lines.len(), 1);
+            assert!(lines[0].words.is_none());
+            assert!(matches!(lines[0].text.as_str(), "AB" | "ABC"));
+        }
+    }
+
+    #[test]
+    fn structured_ttml_unresolved_middle_token_keeps_complete_line_without_word_badge() {
+        let xml = r#"<tt><p begin="1s" end="4s"><span begin="1s" end="1.5s">A</span><span begin="bad">B</span><span begin="3s" end="4s">C</span></p></tt>"#;
+        let lyrics = from_parsed("TTML Test", parse_ttml_aaml(xml)).unwrap();
+        assert_eq!(lyrics.lines[0].text, "ABC");
+        assert!(lyrics.lines[0].words.is_none());
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn structured_ttml_rejects_nested_paragraphs_without_leaking_an_outer_line() {
+        let xml = "<tt><p begin=\"1s\">Outer<p begin=\"2s\">Inner</p>tail</p></tt>";
+        assert!(parse_ttml_aaml(xml).is_empty());
+        assert!(parse_lrc_or_ttml(xml).is_empty());
+    }
+
+    #[test]
+    fn structured_ttml_ruby_annotation_cannot_create_false_word_timing() {
+        let xml = r#"<tt xmlns:tts="http://www.w3.org/ns/ttml#styling"><body><p begin="1s" end="2s">Hello world<span tts:ruby="textContainer"><span tts:ruby="text" begin="1s" end="1.5s">hel</span><span tts:ruby="text" begin="1.5s" end="2s">lo</span></span></p></body></tt>"#;
+        let lyrics = from_parsed("TTML Test", parse_ttml_aaml(xml)).unwrap();
+        assert_eq!(lyrics.lines[0].text, "Hello world");
+        assert!(lyrics.lines[0].words.is_none());
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn structured_ttml_real_words_still_pass_genuine_timing_detection() {
+        let lines = parse_ttml_aaml(
+            r#"<tt><body><p begin="10s" end="11s"><span begin="10s" end="10.5s">Hello </span><span begin="10.5s" end="11s">world</span></p></body></tt>"#,
+        );
+        let lyrics = from_parsed("TTML Test", lines).unwrap();
+
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn structured_ttml_auxiliary_spans_cannot_create_false_word_timing() {
+        let lines = parse_ttml_aaml(
+            r#"<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="10s" end="11s">Hello world<span ttm:role="x-translation" begin="10s" end="10.5s"><span begin="10s" end="10.25s">Halo </span><span begin="10.25s" end="10.5s">dunia</span></span></p></body></tt>"#,
+        );
+        let lyrics = from_parsed("TTML Test", lines).unwrap();
+
+        assert_eq!(lyrics.lines[0].text, "Hello world");
+        assert_eq!(lyrics.lines[0].translation.as_deref(), Some("Halo dunia"));
+        assert!(lyrics.lines[0].words.is_none());
+        assert!(!has_genuine_word_timings(&lyrics));
     }
 
     #[test]
