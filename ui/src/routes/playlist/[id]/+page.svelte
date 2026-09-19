@@ -129,10 +129,11 @@
 	const isLiked = $derived(id === api.LIKED_MUSIC_ID);
 	// On Repeat is built locally from play counts: no artwork, and no radio to seed autoplay from.
 	const isOnRepeat = $derived(id === ON_REPEAT_ID);
+	const isSpotify = $derived(id.startsWith('sp_'));
 	// Only offer rename/delete on playlists the signed-in user actually owns (backend `owned` flag).
 	// Liked Music reports owned but can't be renamed/deleted, so exclude it explicitly.
-	const editable = $derived((pl?.owned ?? false) && !isLiked);
-	const savable = $derived(!isOnRepeat && !isLiked && !editable);
+	const editable = $derived((pl?.owned ?? false) && !isLiked && !isSpotify);
+	const savable = $derived(!isOnRepeat && !isLiked && !editable && !isSpotify);
 	const inLibrary = $derived(isItemSavedInLibrary({ kind: 'playlist', id }));
 	// YouTube's header count includes rows that never make it into the list (unavailable or
 	// region-blocked tracks), so it reads high. Once every page is in, we know the real number, so

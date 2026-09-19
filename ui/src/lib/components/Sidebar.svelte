@@ -705,16 +705,10 @@
 
 {#snippet spotifyPlaylistRow(pl: api.SpotifyPlaylistSummary)}
 	<div class="group/row relative flex items-center justify-between rounded-lg py-1 pl-2 pr-2 hover:bg-sidebar-accent/50 transition-colors">
-		<button
-			type="button"
+		<a
+			href="/playlist/sp_{encodeURIComponent(pl.id)}"
 			class="flex min-w-0 flex-1 items-center gap-2.5 text-left cursor-pointer"
-			onclick={() => {
-				if (pl.url) {
-					api.openExternal(pl.url);
-					toast.info(`Opening "${pl.title}" on Spotify`);
-				}
-			}}
-			title="{pl.title} — Click to open on Spotify"
+			title="{pl.title}"
 		>
 			<div class="relative h-9 w-9 shrink-0 overflow-hidden rounded-md bg-muted">
 				{#if pl.thumbnail}
@@ -733,7 +727,7 @@
 					<div class="truncate text-[11px] text-muted-foreground">{pl.subtitle}</div>
 				{/if}
 			</div>
-		</button>
+		</a>
 		<button
 			type="button"
 			class="opacity-0 group-hover/row:opacity-100 px-1.5 py-0.5 text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10 transition rounded text-[10px] font-semibold cursor-pointer shrink-0"
@@ -754,16 +748,10 @@
 {/snippet}
 
 {#snippet collapsedSpotifyPlaylistButton(pl: api.SpotifyPlaylistSummary)}
-	<button
-		type="button"
-		class="relative flex h-9 w-9 items-center justify-center rounded-lg transition-transform duration-150 hover:scale-105 hover:bg-sidebar-accent/50 cursor-pointer"
-		onclick={() => {
-			if (pl.url) {
-				api.openExternal(pl.url);
-				toast.info(`Opening "${pl.title}" on Spotify`);
-			}
-		}}
-		title="{pl.title} — Click to view on Spotify"
+	<a
+		href="/playlist/sp_{encodeURIComponent(pl.id)}"
+		class="relative flex h-9 w-9 items-center justify-center rounded-lg transition-transform duration-150 hover:scale-105 hover:bg-sidebar-accent/50 cursor-pointer {isActive('/playlist/sp_' + pl.id) ? 'bg-sidebar-accent/60 ring-1 ring-primary/60' : ''}"
+		title="{pl.title}"
 	>
 		<div class="relative h-7 w-7 shrink-0 overflow-hidden rounded-md bg-muted shadow-xs">
 			{#if pl.thumbnail}
@@ -776,7 +764,7 @@
 				</div>
 			{/if}
 		</div>
-	</button>
+	</a>
 {/snippet}
 
 

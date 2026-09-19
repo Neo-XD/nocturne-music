@@ -21,7 +21,10 @@
 		ui,
 		spotify,
 		refreshSpotify,
-		setSpotifySyncMode
+		setSpotifySyncMode,
+		prefs,
+		setAudioStreamSource,
+		setListeningHistoryTarget
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
@@ -335,6 +338,67 @@
 							</button>
 						{/if}
 					</div>
+
+					{#if auth.account?.signedIn && spotify.status.linked}
+						<!-- Audio Stream Source & Listening History Target (Dual-Logged in only) -->
+						<div class="mt-2.5 border-t border-border/40 pt-2">
+							<div class="flex items-center justify-between mb-1">
+								<span class="text-[10px] font-medium text-muted-foreground">Audio Stream Source:</span>
+								<span class="text-[10px] font-bold text-foreground uppercase">{prefs.audioStreamSource === 'spotify' ? 'Spotify' : 'YouTube Music'}</span>
+							</div>
+							<div class="grid grid-cols-2 gap-1 rounded-md bg-muted/60 p-0.5 mb-2">
+								<button
+									type="button"
+									class="rounded py-1 text-[10px] font-semibold transition cursor-pointer {prefs.audioStreamSource === 'ytm' ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => setAudioStreamSource('ytm')}
+									title="Stream audio from YouTube Music"
+								>
+									YouTube Music
+								</button>
+								<button
+									type="button"
+									class="rounded py-1 text-[10px] font-semibold transition cursor-pointer {prefs.audioStreamSource === 'spotify' ? 'bg-emerald-500/20 text-emerald-400 font-bold shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => setAudioStreamSource('spotify')}
+									title="Stream audio from Spotify"
+								>
+									Spotify
+								</button>
+							</div>
+
+							<div class="flex items-center justify-between mb-1">
+								<span class="text-[10px] font-medium text-muted-foreground">Listening History:</span>
+								<span class="text-[10px] font-bold text-foreground">
+									{prefs.listeningHistoryTarget === 'spotify' ? 'Spot Only' : prefs.listeningHistoryTarget === 'ytm' ? 'YTM Only' : 'Both'}
+								</span>
+							</div>
+							<div class="grid grid-cols-3 gap-1 rounded-md bg-muted/60 p-0.5">
+								<button
+									type="button"
+									class="rounded py-1 text-[10px] font-semibold transition cursor-pointer {prefs.listeningHistoryTarget === 'ytm' ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => setListeningHistoryTarget('ytm')}
+									title="Save listening history to YouTube Music only"
+								>
+									YTM Only
+								</button>
+								<button
+									type="button"
+									class="rounded py-1 text-[10px] font-semibold transition cursor-pointer {prefs.listeningHistoryTarget === 'spotify' ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => setListeningHistoryTarget('spotify')}
+									title="Save listening history to Spotify only"
+								>
+									Spot Only
+								</button>
+								<button
+									type="button"
+									class="rounded py-1 text-[10px] font-semibold transition cursor-pointer {prefs.listeningHistoryTarget === 'both' ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}"
+									onclick={() => setListeningHistoryTarget('both')}
+									title="Save listening history to both services"
+								>
+									Both
+								</button>
+							</div>
+						</div>
+					{/if}
 
 					<Button
 						variant="ghost"

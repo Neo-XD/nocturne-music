@@ -972,6 +972,51 @@ impl AppState {
         video_id: &str,
         is_upload: bool,
     ) -> Result<PlaybackData, ResolveError> {
+        let mut actual_id = video_id.to_string();
+        if let Some(sp_info) = video_id.strip_prefix("SP:") {
+            let parts: Vec<&str> = sp_info.split(':').collect();
+            let query = parts
+                .get(1)
+                .and_then(|q| urlencoding::decode(q).ok())
+                .unwrap_or_default();
+            let preview_url = parts
+                .get(2)
+                .and_then(|p| urlencoding::decode(p).ok())
+                .unwrap_or_default();
+            let audio_source = self
+                .db
+                .get_setting("audio_stream_source")
+                .unwrap_or_else(|| "ytm".to_string());
+
+            if audio_source == "spotify" && !preview_url.trim().is_empty() {
+                return Ok(PlaybackData {
+                    video_id: video_id.to_owned(),
+                    stream_url: preview_url.to_string(),
+                    itag: 140,
+                    headers: Default::default(),
+                    expires_in_seconds: 3600,
+                    loudness_db: None,
+                    playback_ping: None,
+                    title: None,
+                    artists: None,
+                    duration: None,
+                    thumbnail: None,
+                    is_video: Some(false),
+                    stream_client: "spotify".to_owned(),
+                    audio_quality: Some("Spotify Stream (Preview)".into()),
+                });
+            }
+
+            if let Some(client) = self.clients.get(innertube::METADATA_CLIENT) {
+                if let Ok(results) = self.it.search_songs(client, &query).await {
+                    if let Some(first) = results.items.first() {
+                        actual_id = first.video_id.clone();
+                    }
+                }
+            }
+        }
+        let video_id = actual_id.as_str();
+
         // A local file is its own "stream": no network, no cache, no extraction (local.rs).
         if let Some(path) = crate::local::song_path(video_id) {
             return crate::local::playback_data(video_id, path).map_err(|_| {
@@ -2279,6 +2324,16 @@ impl AppState {
             if let Ok(json) = serde_json::to_string(&item) {
                 self.db.record_play(&item.video_id, &json, now_secs(), ON_REPEAT_WINDOW_SECS);
             }
+        }
+
+        let history_target = self
+            .db
+            .get_setting("listening_history_target")
+            .unwrap_or_else(|| "both".to_string());
+
+        if history_target == "spotify" {
+            // User requested history only for Spotify, skip YouTube Music watch ping
+            return;
         }
 
         if !self.history_enabled() || !self.it.is_logged_in() {

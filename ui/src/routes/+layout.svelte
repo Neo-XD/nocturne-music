@@ -9,6 +9,7 @@
 		InformationCircleIcon
 	} from '@hugeicons/core-free-icons';
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { fly, fade, slide } from 'svelte/transition';
@@ -183,6 +184,12 @@
 				target.getAttribute('rel')?.includes('noreferrer') ||
 				!href.startsWith(window.location.origin))
 		) {
+			const spMatch = href.match(/^https?:\/\/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/);
+			if (spMatch) {
+				e.preventDefault();
+				goto(`/playlist/sp_${spMatch[1]}`);
+				return;
+			}
 			e.preventDefault();
 			openExternal(href).catch((err) => console.error('Failed to open external URL:', err));
 		}

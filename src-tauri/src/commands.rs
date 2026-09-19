@@ -746,6 +746,9 @@ pub async fn get_playlist(
     sort: Option<PlaylistSort>,
     desc: Option<bool>,
 ) -> Result<PlaylistPage, String> {
+    if let Some(sp_id) = id.strip_prefix("sp_") {
+        return get_spotify_playlist_page(&state, sp_id).await;
+    }
     if id == ON_REPEAT_ID {
         let items = on_repeat_songs(&state);
         return Ok(PlaylistPage {
@@ -2426,6 +2429,129 @@ pub async fn spotify_get_playlists(state: St<'_>) -> Result<Vec<SpotifyPlaylistS
     }
 
     Ok(playlists)
+}
+
+pub async fn get_spotify_playlist_page(
+    state: &Arc<AppState>,
+    spotify_playlist_id: &str,
+) -> Result<PlaylistPage, String> {
+    let token = get_spotify_token(state).await?;
+    let client = crate::http::client();
+    let res = client
+        .get(format!("https://api.spotify.com/v1/playlists/{spotify_playlist_id}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Spotify playlist: {e}"))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Spotify returned error {}", res.status()));
+    }
+
+    let pl_json: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Spotify playlist JSON: {e}"))?;
+
+    let title = pl_json["name"].as_str().unwrap_or("Spotify Playlist").to_string();
+    let description = pl_json["description"].as_str().map(|s| s.to_string());
+    let owner = pl_json["owner"]["display_name"].as_str().unwrap_or("Spotify");
+    let thumbnail = pl_json["images"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|img| img["url"].as_str())
+        .map(|u| u.to_string());
+
+    let mut items = Vec::new();
+    if let Some(track_items) = pl_json["tracks"]["items"].as_array() {
+        for track_item in track_items {
+            let track = &track_item["track"];
+            let track_id = track["id"].as_str().unwrap_or_default();
+            let name = track["name"].as_str().unwrap_or("Unknown Track");
+            let mut artists_vec = Vec::new();
+            if let Some(arr) = track["artists"].as_array() {
+                for a in arr {
+                    if let Some(aname) = a["name"].as_str() {
+                        artists_vec.push(aname);
+                    }
+                }
+            }
+            let artists = artists_vec.join(", ");
+            let album = track["album"]["name"].as_str().unwrap_or("").to_string();
+            let duration_ms = track["duration_ms"].as_u64().unwrap_or(0);
+            let duration = {
+                let total_secs = duration_ms / 1000;
+                let mins = total_secs / 60;
+                let secs = total_secs % 60;
+                Some(format!("{mins}:{secs:02}"))
+            };
+            let track_thumb = track["album"]["images"]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|img| img["url"].as_str())
+                .map(|u| u.to_string());
+            let preview_url = track["preview_url"].as_str().unwrap_or("");
+
+            let search_query = format!("{name} {artists}");
+            let video_id = format!(
+                "SP:{}:{}:{}",
+                track_id,
+                urlencoding::encode(&search_query),
+                urlencoding::encode(preview_url)
+            );
+
+            items.push(SongItem {
+                video_id,
+                title: name.to_string(),
+                artists,
+                artist_id: None,
+                artist_runs: Vec::new(),
+                album: if album.is_empty() { None } else { Some(album) },
+                album_id: None,
+                duration,
+                play_count: None,
+                thumbnail: track_thumb,
+                set_video_id: None,
+                added_by: None,
+                added_by_avatar: None,
+                rating: None,
+                queued_by: None,
+                queued: false,
+                queued_end: false,
+                queued_from: None,
+                autoplay: false,
+                is_video: false,
+                is_upload: false,
+                explicit: track["explicit"].as_bool().unwrap_or(false),
+            });
+        }
+    }
+
+    let track_count = items.len();
+    let subtitle = Some(format!("{track_count} songs • {owner} (Spotify)"));
+
+    Ok(PlaylistPage {
+        title: Some(title),
+        subtitle,
+        thumbnail: thumbnail.clone(),
+        description,
+        privacy: Some("PUBLIC".into()),
+        cover: thumbnail,
+        items,
+        continuation: None,
+        owned: false,
+        collaborative: pl_json["collaborative"].as_bool().unwrap_or(false),
+        sort_menu: None,
+    })
+}
+
+#[tauri::command]
+pub async fn spotify_get_playlist(
+    state: St<'_>,
+    spotify_playlist_id: String,
+) -> Result<PlaylistPage, String> {
+    get_spotify_playlist_page(&state, &spotify_playlist_id).await
 }
 
 #[tauri::command]
