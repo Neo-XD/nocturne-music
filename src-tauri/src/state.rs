@@ -429,6 +429,7 @@ impl AppState {
         match self.db.get_setting("quality").as_deref() {
             Some("LOW") => AudioQuality::Low,
             Some("AUTO") => AudioQuality::Auto,
+            Some("VERY_HIGH") => AudioQuality::VeryHigh,
             _ => AudioQuality::High,
         }
     }

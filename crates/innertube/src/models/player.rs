@@ -214,9 +214,9 @@ impl Format {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioQuality {
+    VeryHigh,
     High,
     Low,
-    /// Desktop has no metered-network concept → treat AUTO as "prefer HIGH" (context/12).
     Auto,
 }
 
@@ -228,6 +228,13 @@ pub fn find_format(data: &StreamingData, quality: AudioQuality) -> Option<&Forma
         return None;
     }
     match quality {
+        AudioQuality::VeryHigh => audio.into_iter().max_by(|a, b| {
+            a.bitrate
+                .cmp(&b.bitrate)
+                .then(a.quality_rank().cmp(&b.quality_rank()))
+                .then(a.audio_channels.unwrap_or(2).cmp(&b.audio_channels.unwrap_or(2)))
+                .then(a.codec_score().cmp(&b.codec_score()))
+        }),
         AudioQuality::High | AudioQuality::Auto => audio.into_iter().max_by(|a, b| {
             a.quality_rank()
                 .cmp(&b.quality_rank())
