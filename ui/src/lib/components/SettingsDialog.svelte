@@ -50,7 +50,6 @@
 		setFloatingPlayerBar,
 		setShowAudioQuality,
 		setWaveformSeekbar,
-		setBeatSyncWarp,
 		setPcAudioRecognition,
 		setHomeInSidebar,
 		setVisibleIcon,
@@ -1808,12 +1807,6 @@
 											tall: true
 										})}
 										{@render row({
-											title: 'Beat-synced warp speedup',
-											desc: 'Smoothly accelerates fluid background liquid motion to the rhythm and beat drops of the music.',
-											control: beatSyncWarpSwitch,
-											tall: true
-										})}
-										{@render row({
 											title: 'Brightness & opacity',
 											desc: 'Adjusts how brightly the ambient album art shines through behind the UI.',
 											control: glassyLightnessSlider,
@@ -1870,12 +1863,6 @@
 											title: 'Animation speed',
 											desc: 'Sets the speed of fluid wave motion behind the fullscreen player.',
 											control: fullscreenSpeedSlider,
-											tall: true
-										})}
-										{@render row({
-											title: 'Beat-synced warp speedup',
-											desc: 'Smoothly accelerates fluid wave motion behind fullscreen player with incoming beats.',
-											control: beatSyncWarpSwitch,
 											tall: true
 										})}
 										{@render row({
@@ -3478,7 +3465,6 @@
 	</div>
 {/snippet}
 {#snippet waveformSeekbarSwitch()}<Switch checked={prefs.waveformSeekbar} onCheckedChange={setWaveformSeekbar} />{/snippet}
-{#snippet beatSyncWarpSwitch()}<Switch checked={prefs.beatSyncWarp} onCheckedChange={setBeatSyncWarp} />{/snippet}
 {#snippet themeBoxesWithPreview()}
 	<div class="space-y-3">
 		<!-- Visual Theme Selection Boxes with Preview Mockups -->

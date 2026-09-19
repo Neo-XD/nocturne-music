@@ -320,26 +320,12 @@
 		const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
 		lastFrameTime = now;
 
-		// Dynamic beat sync: forward-only acceleration during beats so animation never rewinds or jumps back
-		let beatSpeedMultiplier = 1.0;
-		let beatIntensityMultiplier = 1.0;
-		if (!playback.paused && prefs.beatSyncWarp !== false) {
-			const songTime = playback.positionAt > 0
-				? playback.position + (now - playback.positionAt) / 1000
-				: accumulatedTime;
-			// Speed goes up by +0.5x the current warp speed on each beat
-			const beatPhase = songTime * 2.066 * Math.PI;
-			const beatPulse = Math.pow(Math.max(0, Math.sin(beatPhase)), 6) * 0.50;
-			beatSpeedMultiplier = 1.0 + beatPulse;
-			beatIntensityMultiplier = 1.0 + beatPulse * 0.12;
-		}
-
-		const stepRate = playback.paused ? speed * 0.6 : speed * beatSpeedMultiplier;
+		const stepRate = playback.paused ? speed * 0.6 : speed;
 		accumulatedTime += dt * stepRate;
 
 		gl.uniform1f(gl.getUniformLocation(program, 'u_time'), accumulatedTime);
 		gl.uniform1f(gl.getUniformLocation(program, 'u_speed'), 1.0);
-		gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), intensity * beatIntensityMultiplier);
+		gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), intensity);
 		gl.uniform1f(gl.getUniformLocation(program, 'u_mix'), textureMix);
 		const hasImage = currentTexture ? 1.0 : 0.0;
 		gl.uniform1f(gl.getUniformLocation(program, 'u_has_image'), hasImage);

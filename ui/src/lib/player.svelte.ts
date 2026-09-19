@@ -158,7 +158,6 @@ export const prefs = $state({
 	audioStreamSource: (browser ? (localStorage.getItem('audio_stream_source') as 'ytm' | 'spotify') : null) || 'ytm',
 	listeningHistoryTarget: (browser ? (localStorage.getItem('listening_history_target') as 'both' | 'ytm' | 'spotify') : null) || 'both',
 	pcAudioRecognition: browser ? localStorage.getItem('pc_audio_recognition') !== 'false' : true,
-	beatSyncWarp: browser ? localStorage.getItem('beat_sync_warp') !== 'false' : true,
 	visibleIcons: {
 		titlebar: {
 			navigation: browser ? localStorage.getItem('icon_tb_navigation') !== 'false' : true,
@@ -249,11 +248,6 @@ export function setListeningHistoryTarget(target: 'both' | 'ytm' | 'spotify') {
 export function setPcAudioRecognition(enabled: boolean) {
 	prefs.pcAudioRecognition = enabled;
 	if (browser) localStorage.setItem('pc_audio_recognition', enabled ? 'true' : 'false');
-}
-
-export function setBeatSyncWarp(enabled: boolean) {
-	prefs.beatSyncWarp = enabled;
-	if (browser) localStorage.setItem('beat_sync_warp', enabled ? 'true' : 'false');
 }
 
 // --- Spotify Store & Sync Mode -------------------------------------------------------------
