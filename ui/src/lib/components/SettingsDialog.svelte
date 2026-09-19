@@ -1179,11 +1179,17 @@
 	);
 	let activeAppearanceSection = $state('sec-theme');
 	let collapsedCategories = $state<Record<string, boolean>>({});
+	let settingsScrollEl = $state<HTMLDivElement | null>(null);
 
 	function scrollToAppearanceSection(id: string) {
 		activeAppearanceSection = id;
 		const el = document.getElementById(id);
-		el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		if (el && settingsScrollEl) {
+			const containerRect = settingsScrollEl.getBoundingClientRect();
+			const elRect = el.getBoundingClientRect();
+			const targetScroll = settingsScrollEl.scrollTop + (elRect.top - containerRect.top) - 16;
+			settingsScrollEl.scrollTo({ top: targetScroll, behavior: 'smooth' });
+		}
 	}
 
 	function toggleAllCategories(collapse: boolean) {
@@ -1242,7 +1248,7 @@
 <svelte:window onkeydown={recordingAction ? onKeyRecord : undefined} />
 
 <Dialog.Root bind:open={ui.settingsOpen}>
-	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 transition-all duration-200 border border-border/80 shadow-2xl {isMaximized ? 'w-[98vw] max-w-[98vw] sm:max-w-[98vw] lg:max-w-[98vw] xl:max-w-[98vw] h-[96vh] rounded-xl' : 'w-[94vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-[70rem] h-[min(46rem,86vh)] rounded-2xl'}">
+	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 transition-all duration-200 border border-border/80 shadow-2xl {isMaximized ? 'w-[98vw] max-w-[98vw] sm:max-w-[98vw] lg:max-w-[98vw] xl:max-w-[98vw] h-[96vh] max-h-[96vh] rounded-xl' : 'w-[94vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-[70rem] h-[min(46rem,86vh)] max-h-[86vh] rounded-2xl'}">
 		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
 		<!-- Maximize / Restore window button placed next to Close button -->
@@ -1257,9 +1263,9 @@
 			<HugeiconsIcon icon={isMaximized ? MinimizeScreenIcon : SquareIcon} size={15} strokeWidth={2} />
 		</Button>
 
-		<div class="flex h-full">
+		<div class="flex h-full min-h-0 overflow-hidden">
 			<!-- Tab rail -->
-			<nav class="settings-nav-rail flex w-60 shrink-0 flex-col border-r border-border/30 p-3.5 backdrop-blur-3xl">
+			<nav class="settings-nav-rail flex w-60 shrink-0 flex-col border-r border-border/30 p-3.5 backdrop-blur-3xl min-h-0 overflow-y-auto">
 				<Dialog.Title class="px-3 pt-3 pb-4 font-heading text-base font-semibold text-foreground">
 					Settings
 				</Dialog.Title>
@@ -1290,7 +1296,7 @@
 
 			<!-- Content pane. min-w-0: a flex child's min-width is auto, so without it one wide row
 			     (a long font name, a long path) widens the pane and pushes every tab off the modal. -->
-			<div class="settings-content-pane relative flex min-w-0 flex-1 flex-col overflow-hidden">
+			<div class="settings-content-pane relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
 				<!-- Header with generous top padding matching desired.png and no dividing border -->
 				<header
 					class="shrink-0 px-8 pt-8 pb-3 pr-24 cursor-default select-none"
@@ -1301,7 +1307,8 @@
 				</header>
 
 				<div
-					class="relative min-w-0 flex-1 overflow-y-auto px-8 {tab === 'themes' ? 'pr-14' : ''} pb-12"
+					bind:this={settingsScrollEl}
+					class="relative min-w-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-8 {tab === 'themes' ? 'pr-14' : ''} pb-12"
 					onscroll={(e) => {
 						if (tab !== 'themes') return;
 						const target = e.currentTarget;
