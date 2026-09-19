@@ -972,5 +972,8 @@ export interface RecognizedSong {
 export const recognizeSongSignature = (signatureUri: string, sampleMs?: number) =>
 	invoke<RecognizedSong>('recognize_song_signature', { signatureUri, sampleMs });
 
+export const capturePcAudio = (sampleMs?: number) =>
+	invoke<number[]>('capture_pc_audio', { sampleMs });
+
 
 

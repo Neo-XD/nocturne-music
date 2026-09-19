@@ -617,6 +617,7 @@ pub fn run() {
             commands::spotify_get_sync_mode,
             commands::spotify_set_sync_mode,
             recognition::recognize_song_signature,
+            recognition::capture_pc_audio,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is

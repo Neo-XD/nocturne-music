@@ -139,3 +139,152 @@ pub async fn recognize_song_signature(
         query: None,
     })
 }
+
+#[tauri::command]
+pub async fn capture_pc_audio(sample_ms: Option<u32>) -> Result<Vec<f32>, String> {
+    let dur = sample_ms.unwrap_or(4500);
+    #[cfg(target_os = "windows")]
+    {
+        tokio::task::spawn_blocking(move || capture_wasapi_loopback(dur))
+            .await
+            .map_err(|e| format!("Capture task error: {e}"))?
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Direct PC audio capture is only supported on Windows".to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn capture_wasapi_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+    };
+    use windows::Win32::Media::Audio::{
+        eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator,
+        MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
+        WAVEFORMATEX,
+    };
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        struct CoUninitGuard;
+        impl Drop for CoUninitGuard {
+            fn drop(&mut self) {
+                unsafe { CoUninitialize() };
+            }
+        }
+        let _guard = CoUninitGuard;
+
+        let enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| format!("Failed to create MMDeviceEnumerator: {e}"))?;
+
+        let device = enumerator
+            .GetDefaultAudioEndpoint(eRender, eConsole)
+            .map_err(|e| format!("Failed to get default audio endpoint: {e}"))?;
+
+        let audio_client: IAudioClient = device
+            .Activate(CLSCTX_ALL, None)
+            .map_err(|e| format!("Failed to activate IAudioClient: {e}"))?;
+
+        let pwfx = audio_client
+            .GetMixFormat()
+            .map_err(|e| format!("Failed to get audio mix format: {e}"))?;
+
+        let wfx: &WAVEFORMATEX = &*pwfx;
+        let sample_rate = wfx.nSamplesPerSec as usize;
+        let channels = wfx.nChannels as usize;
+        let bits_per_sample = wfx.wBitsPerSample as usize;
+
+        // Initialize audio client in loopback mode
+        audio_client
+            .Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_LOOPBACK,
+                (duration_ms as i64) * 10000,
+                0,
+                pwfx,
+                None,
+            )
+            .map_err(|e| format!("Failed to initialize audio client: {e}"))?;
+
+        let capture_client: IAudioCaptureClient = audio_client
+            .GetService()
+            .map_err(|e| format!("Failed to get IAudioCaptureClient: {e}"))?;
+
+        audio_client
+            .Start()
+            .map_err(|e| format!("Failed to start audio client: {e}"))?;
+
+        let start_time = std::time::Instant::now();
+        let target_duration = std::time::Duration::from_millis(duration_ms as u64);
+
+        let mut raw_mono_samples: Vec<f32> = Vec::new();
+
+        while start_time.elapsed() < target_duration {
+            if let Ok(packet_size) = capture_client.GetNextPacketSize() {
+                if packet_size == 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+
+                let mut p_data = std::ptr::null_mut();
+                let mut num_frames_read = 0u32;
+                let mut flags = 0u32;
+
+                if capture_client
+                    .GetBuffer(&mut p_data, &mut num_frames_read, &mut flags, None, None)
+                    .is_ok()
+                {
+                    if num_frames_read > 0 && !p_data.is_null() {
+                        let is_silent = (flags & 0x01) != 0; // AUDCLNT_BUFFERFLAGS_SILENT
+
+                        if is_silent {
+                            raw_mono_samples.resize(raw_mono_samples.len() + num_frames_read as usize, 0.0);
+                        } else if bits_per_sample == 32 {
+                            let slice = std::slice::from_raw_parts(
+                                p_data as *const f32,
+                                (num_frames_read as usize) * channels,
+                            );
+                            for frame in slice.chunks(channels) {
+                                let sum: f32 = frame.iter().copied().sum();
+                                raw_mono_samples.push(sum / channels as f32);
+                            }
+                        } else if bits_per_sample == 16 {
+                            let slice = std::slice::from_raw_parts(
+                                p_data as *const i16,
+                                (num_frames_read as usize) * channels,
+                            );
+                            for frame in slice.chunks(channels) {
+                                let sum: f32 = frame.iter().map(|&s| s as f32 / 32768.0).sum();
+                                raw_mono_samples.push(sum / channels as f32);
+                            }
+                        }
+                    }
+                    let _ = capture_client.ReleaseBuffer(num_frames_read);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        let _ = audio_client.Stop();
+
+        // Resample from `sample_rate` down to 16,000 Hz for Shazam
+        let target_rate = 16000.0;
+        let source_rate = sample_rate as f64;
+        let total_target_samples = ((raw_mono_samples.len() as f64) * target_rate / source_rate) as usize;
+
+        let mut resampled = Vec::with_capacity(total_target_samples);
+        for i in 0..total_target_samples {
+            let src_idx = (i as f64) * source_rate / target_rate;
+            let idx0 = src_idx.floor() as usize;
+            let frac = (src_idx - idx0 as f64) as f32;
+            let s0 = raw_mono_samples.get(idx0).copied().unwrap_or(0.0);
+            let s1 = raw_mono_samples.get(idx0 + 1).copied().unwrap_or(s0);
+            resampled.push(s0 + frac * (s1 - s0));
+        }
+
+        Ok(resampled)
+    }
+}

@@ -228,11 +228,25 @@ export function generateShazamUriFromPcm(samples: Float32Array, sampleRate = 160
 export async function captureAndRecognizeAudio(
 	onProgress?: (state: string) => void
 ): Promise<RecognizedSong> {
+	onProgress?.('Listening to PC audio…');
+
+	// Attempt direct system audio loopback capture without needing a microphone
+	try {
+		const pcSamples = await api.capturePcAudio(4500);
+		if (pcSamples && pcSamples.length > 0) {
+			onProgress?.('Identifying song with Shazam…');
+			const recorded = new Float32Array(pcSamples);
+			const uri = generateShazamUriFromPcm(recorded, 16000);
+			const durationMs = Math.round((recorded.length / 16000) * 1000);
+			return await api.recognizeSongSignature(uri, durationMs);
+		}
+	} catch (err) {
+		console.warn('Direct PC loopback capture failed or unavailable, falling back to mic:', err);
+	}
+
 	if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
 		throw new Error('Microphone and PC audio capture not supported in this environment');
 	}
-
-	onProgress?.('Listening to PC audio…');
 
 	// Request capture: try standard audio input (microphone or Stereo Mix / loopback)
 	const stream = await navigator.mediaDevices.getUserMedia({
