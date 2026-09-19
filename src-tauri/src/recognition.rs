@@ -149,9 +149,21 @@ pub async fn capture_pc_audio(sample_ms: Option<u32>) -> Result<Vec<f32>, String
             .await
             .map_err(|e| format!("Capture task error: {e}"))?
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     {
-        Err("Direct PC audio capture is only supported on Windows".to_string())
+        tokio::task::spawn_blocking(move || capture_linux_loopback(dur))
+            .await
+            .map_err(|e| format!("Capture task error: {e}"))?
+    }
+    #[cfg(target_os = "macos")]
+    {
+        tokio::task::spawn_blocking(move || capture_macos_loopback(dur))
+            .await
+            .map_err(|e| format!("Capture task error: {e}"))?
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        Err("Direct system audio capture is not supported on this platform".to_string())
     }
 }
 
@@ -288,3 +300,259 @@ fn capture_wasapi_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
         Ok(resampled)
     }
 }
+
+#[cfg(target_os = "linux")]
+fn capture_linux_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    let target_samples = (16000 * duration_ms as usize) / 1000;
+    let target_bytes = target_samples * 2;
+
+    // Detect default sink to monitor via pactl
+    let monitor_source = Command::new("pactl")
+        .arg("get-default-sink")
+        .output()
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                let sink = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !sink.is_empty() {
+                    return Some(format!("{sink}.monitor"));
+                }
+            }
+            None
+        });
+
+    // Try parec with specific monitor device first, then default monitor, then pw-record
+    let mut child = if let Some(ref dev) = monitor_source {
+        Command::new("parec")
+            .args(["--format=s16le", "--rate=16000", "--channels=1", "-d", dev])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+    } else {
+        Command::new("parec")
+            .args(["--format=s16le", "--rate=16000", "--channels=1", "-d", "@DEFAULT_MONITOR@"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+    };
+
+    if child.is_err() {
+        child = Command::new("parec")
+            .args(["--format=s16le", "--rate=16000", "--channels=1"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+    }
+
+    if child.is_err() {
+        child = Command::new("pw-record")
+            .args(["--rate", "16000", "--channels", "1", "--format", "s16", "-"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+    }
+
+    let mut child = child.map_err(|e| {
+        format!("Failed to start Linux loopback audio capture (parec / pw-record not available): {e}")
+    })?;
+
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to capture stdout of Linux audio recorder".to_string())?;
+
+    let mut raw_bytes = Vec::with_capacity(target_bytes);
+    let mut buf = [0u8; 4096];
+    let start = std::time::Instant::now();
+    let max_dur = std::time::Duration::from_millis(duration_ms as u64 + 1000);
+
+    while raw_bytes.len() < target_bytes && start.elapsed() < max_dur {
+        match stdout.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let needed = target_bytes - raw_bytes.len();
+                let take = n.min(needed);
+                raw_bytes.extend_from_slice(&buf[..take]);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Error reading Linux audio stream: {e}"));
+            }
+        }
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    if raw_bytes.is_empty() {
+        return Err("No audio captured from Linux system output".to_string());
+    }
+
+    let mut samples = Vec::with_capacity(raw_bytes.len() / 2);
+    for chunk in raw_bytes.chunks_exact(2) {
+        let val = i16::from_le_bytes([chunk[0], chunk[1]]);
+        samples.push(val as f32 / 32768.0);
+    }
+
+    Ok(samples)
+}
+
+#[cfg(target_os = "macos")]
+fn capture_macos_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    let target_samples = (16000 * duration_ms as usize) / 1000;
+    let target_bytes = target_samples * 2;
+    let dur_sec = format!("{:.2}", (duration_ms as f64) / 1000.0);
+
+    let candidates = [
+        "BlackHole 2ch",
+        "BlackHole 16ch",
+        "Soundflower (2ch)",
+        "Background Music",
+        "Loopback",
+    ];
+
+    let mut child = None;
+
+    // Try ffmpeg with candidate virtual devices
+    for dev in candidates {
+        if let Ok(c) = Command::new("ffmpeg")
+            .args([
+                "-nostdin",
+                "-f",
+                "avfoundation",
+                "-i",
+                &format!(":{dev}"),
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-f",
+                "s16le",
+                "-t",
+                &dur_sec,
+                "-",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            child = Some(c);
+            break;
+        }
+    }
+
+    // Try sox with candidate devices if ffmpeg was not used
+    if child.is_none() {
+        for dev in candidates {
+            if let Ok(c) = Command::new("sox")
+                .args([
+                    "-t",
+                    "coreaudio",
+                    dev,
+                    "-r",
+                    "16000",
+                    "-c",
+                    "1",
+                    "-b",
+                    "16",
+                    "-e",
+                    "signed-integer",
+                    "-t",
+                    "raw",
+                    "-",
+                    "trim",
+                    "0",
+                    &dur_sec,
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                child = Some(c);
+                break;
+            }
+        }
+    }
+
+    // If still none, try rec with default input
+    if child.is_none() {
+        if let Ok(c) = Command::new("rec")
+            .args([
+                "-r",
+                "16000",
+                "-c",
+                "1",
+                "-b",
+                "16",
+                "-e",
+                "signed-integer",
+                "-t",
+                "raw",
+                "-",
+                "trim",
+                "0",
+                &dur_sec,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            child = Some(c);
+        }
+    }
+
+    let mut child = child.ok_or_else(|| {
+        "Direct system audio capture on macOS requires a virtual loopback device (such as BlackHole or Soundflower) with ffmpeg/sox. Falling back to microphone.".to_string()
+    })?;
+
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to capture stdout of macOS audio recorder".to_string())?;
+
+    let mut raw_bytes = Vec::with_capacity(target_bytes);
+    let mut buf = [0u8; 4096];
+    let start = std::time::Instant::now();
+    let max_dur = std::time::Duration::from_millis(duration_ms as u64 + 1000);
+
+    while raw_bytes.len() < target_bytes && start.elapsed() < max_dur {
+        match stdout.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let needed = target_bytes - raw_bytes.len();
+                let take = n.min(needed);
+                raw_bytes.extend_from_slice(&buf[..take]);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Error reading macOS audio stream: {e}"));
+            }
+        }
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    if raw_bytes.is_empty() {
+        return Err("No audio captured from macOS system output".to_string());
+    }
+
+    let mut samples = Vec::with_capacity(raw_bytes.len() / 2);
+    for chunk in raw_bytes.chunks_exact(2) {
+        let val = i16::from_le_bytes([chunk[0], chunk[1]]);
+        samples.push(val as f32 / 32768.0);
+    }
+
+    Ok(samples)
+}
+
