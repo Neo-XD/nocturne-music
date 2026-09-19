@@ -327,12 +327,11 @@
 			const songTime = playback.positionAt > 0
 				? playback.position + (now - playback.positionAt) / 1000
 				: accumulatedTime;
-			// Gentle tempo pulse that advances the simulation forward faster on beats
+			// Speed goes up by +0.5x the current warp speed on each beat
 			const beatPhase = songTime * 2.066 * Math.PI;
-			const beatPulse = Math.pow(Math.max(0, Math.sin(beatPhase)), 6) * 0.30;
-			const barPulse = Math.pow(Math.max(0, Math.sin(beatPhase * 0.25)), 4) * 0.12;
-			beatSpeedMultiplier = 1.0 + beatPulse + barPulse;
-			beatIntensityMultiplier = 1.0 + (beatPulse + barPulse) * 0.06;
+			const beatPulse = Math.pow(Math.max(0, Math.sin(beatPhase)), 6) * 0.50;
+			beatSpeedMultiplier = 1.0 + beatPulse;
+			beatIntensityMultiplier = 1.0 + beatPulse * 0.12;
 		}
 
 		const stepRate = playback.paused ? speed * 0.6 : speed * beatSpeedMultiplier;
