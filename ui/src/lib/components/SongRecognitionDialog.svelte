@@ -23,6 +23,13 @@
 	let statusText = $state('Listening to PC audio…');
 	let result = $state<RecognizedSong | null>(null);
 	let errorMsg = $state<string | null>(null);
+	let autoStarted = $state(false);
+
+	function clearRecognition() {
+		result = null;
+		errorMsg = null;
+		listening = false;
+	}
 
 	async function startListening() {
 		listening = true;
@@ -46,8 +53,13 @@
 	}
 
 	$effect(() => {
-		if (open && !listening && !result && !errorMsg) {
-			startListening();
+		if (open) {
+			if (!autoStarted && !result && !errorMsg) {
+				autoStarted = true;
+				startListening();
+			}
+		} else {
+			autoStarted = false;
 		}
 	});
 
@@ -95,6 +107,16 @@
 					<p class="text-[11px] text-muted-foreground">Identify songs playing on your PC (Shazam)</p>
 				</div>
 			</div>
+			{#if result || errorMsg}
+				<button
+					type="button"
+					class="text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-2 py-0.5 rounded-md hover:bg-muted/60"
+					onclick={clearRecognition}
+					title="Clear previous recognition"
+				>
+					Clear
+				</button>
+			{/if}
 		</div>
 
 		<!-- Listening State -->
@@ -156,6 +178,29 @@
 						Search Results
 					</Button>
 				</div>
+
+				<div class="flex items-center justify-between border-t border-border/40 pt-3">
+					<Button
+						variant="ghost"
+						size="sm"
+						class="text-xs text-muted-foreground hover:text-foreground gap-1.5 cursor-pointer h-8 px-2.5"
+						onclick={clearRecognition}
+						title="Clear previous recognition"
+					>
+						<HugeiconsIcon icon={Cancel01Icon} class="size-3.5" />
+						Clear previous
+					</Button>
+					<Button
+						variant="outline"
+						size="sm"
+						class="text-xs gap-1.5 cursor-pointer rounded-[var(--radius,0.45rem)] h-8 px-3"
+						onclick={startListening}
+						title="Listen for next song"
+					>
+						<HugeiconsIcon icon={Refresh01Icon} class="size-3.5" />
+						Listen for next song
+					</Button>
+				</div>
 			</div>
 
 		<!-- Error or No Match -->
@@ -168,14 +213,46 @@
 					<h3 class="text-sm font-bold text-foreground">No Match Identified</h3>
 					<p class="mt-1 text-xs text-muted-foreground max-w-xs">{errorMsg}</p>
 				</div>
+				<div class="flex items-center gap-2">
+					<Button
+						variant="outline"
+						size="sm"
+						class="gap-1.5 cursor-pointer rounded-[var(--radius,0.45rem)]"
+						onclick={startListening}
+					>
+						<HugeiconsIcon icon={Refresh01Icon} class="size-3.5" />
+						Try Listening Again
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						class="gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground"
+						onclick={clearRecognition}
+					>
+						<HugeiconsIcon icon={Cancel01Icon} class="size-3.5" />
+						Clear
+					</Button>
+				</div>
+			</div>
+
+		<!-- Ready / Idle State -->
+		{:else if !listening && !result && !errorMsg}
+			<div class="flex flex-col items-center justify-center py-8 text-center space-y-4">
+				<div class="flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+					<HugeiconsIcon icon={AudioWave01Icon} class="size-7" />
+				</div>
+				<div>
+					<h3 class="text-sm font-bold text-foreground">Ready to Listen</h3>
+					<p class="mt-1 text-xs text-muted-foreground max-w-xs">Play music on your PC and click below to identify the song.</p>
+				</div>
 				<Button
-					variant="outline"
+					variant="default"
 					size="sm"
 					class="gap-1.5 cursor-pointer rounded-[var(--radius,0.45rem)]"
 					onclick={startListening}
 				>
-					<HugeiconsIcon icon={Refresh01Icon} class="size-3.5" />
-					Try Listening Again
+					<HugeiconsIcon icon={AudioWave01Icon} class="size-3.5" />
+					Listen to PC Audio
 				</Button>
 			</div>
 		{/if}
