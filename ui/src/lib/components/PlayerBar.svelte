@@ -44,6 +44,7 @@
 	import ArtistLine from './ArtistLine.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
+	import WaveformSeekbar from './WaveformSeekbar.svelte';
 
 	let {
 		onToggleQueue,
@@ -352,17 +353,34 @@
 		</div>
 		<div class="flex w-full max-w-md items-center gap-2 text-xs text-muted-foreground">
 			<span class="tabular-nums">{fmt(shownPosition)}</span>
-			<input
-				type="range"
-				class="range flex-1"
-				style="--pct:{playback.duration ? (shownPosition / playback.duration) * 100 : 0}%"
-				min="0"
-				max={playback.duration || 0}
-				value={shownPosition}
-				oninput={onSeekInput}
-				onchange={onSeekCommit}
-				aria-label="Seek"
-			/>
+			{#if prefs.waveformSeekbar}
+				<div class="flex-1">
+					<WaveformSeekbar
+						position={shownPosition}
+						duration={playback.duration}
+						height={18}
+						barCount={60}
+						onSeek={(v) => (seekDrag = v)}
+						onCommit={(v) => {
+							playback.position = v;
+							seekDrag = null;
+							api.seek(v);
+						}}
+					/>
+				</div>
+			{:else}
+				<input
+					type="range"
+					class="range flex-1"
+					style="--pct:{playback.duration ? (shownPosition / playback.duration) * 100 : 0}%"
+					min="0"
+					max={playback.duration || 0}
+					value={shownPosition}
+					oninput={onSeekInput}
+					onchange={onSeekCommit}
+					aria-label="Seek"
+				/>
+			{/if}
 			<span class="tabular-nums">{fmt(playback.duration)}</span>
 		</div>
 	</div>

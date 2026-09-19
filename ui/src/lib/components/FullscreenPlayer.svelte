@@ -38,6 +38,7 @@
 	import ArtistLine from './ArtistLine.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import AnimatedArtwork from './AnimatedArtwork.svelte';
+	import WaveformSeekbar from './WaveformSeekbar.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import LyricsView from './LyricsView.svelte';
 	import QueueList from './QueueList.svelte';
@@ -188,7 +189,7 @@
 		<!-- Top Right Action Cluster (Lyrics / Queue Switcher + Exit) -->
 		<div class="flex items-center gap-3 shrink-0">
 			<!-- Translucent glass switcher between Lyrics and Queue -->
-			<div class="flex items-center rounded-full border border-white/20 dark:border-white/10 bg-white/10 dark:bg-black/25 p-0.5 backdrop-blur-xl shadow-lg">
+			<div class="flex items-center rounded-[calc(var(--radius,0.45rem)+4px)] border border-white/20 dark:border-white/10 bg-white/10 dark:bg-black/25 p-0.5 backdrop-blur-xl shadow-lg">
 				<button
 					type="button"
 					onclick={() => {
@@ -200,7 +201,7 @@
 						}
 					}}
 					aria-label="Toggle Lyrics (L)"
-					class="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer {userShowPanel && activeTab === 'lyrics'
+					class="flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer {userShowPanel && activeTab === 'lyrics'
 						? 'bg-white/25 dark:bg-white/15 text-foreground shadow-xs font-semibold'
 						: 'text-foreground/70 hover:text-foreground hover:bg-white/10'}"
 				>
@@ -218,7 +219,7 @@
 						}
 					}}
 					aria-label="Toggle Queue (Q)"
-					class="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer {userShowPanel && activeTab === 'queue'
+					class="flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer {userShowPanel && activeTab === 'queue'
 						? 'bg-white/25 dark:bg-white/15 text-foreground shadow-xs font-semibold'
 						: 'text-foreground/70 hover:text-foreground hover:bg-white/10'}"
 				>
@@ -232,7 +233,7 @@
 				size="sm"
 				onclick={() => (np.fullscreenOpen = false)}
 				aria-label="Exit Fullscreen (Esc)"
-				class="gap-1.5 rounded-full border-white/20 dark:border-white/10 bg-white/10 dark:bg-black/25 px-3.5 py-1.5 text-xs font-medium text-foreground backdrop-blur-xl transition-all duration-200 hover:bg-white/20 dark:hover:bg-black/40 hover:scale-[1.02] cursor-pointer shadow-lg"
+				class="gap-1.5 rounded-[var(--radius,0.45rem)] border-white/20 dark:border-white/10 bg-white/10 dark:bg-black/25 px-3.5 py-1.5 text-xs font-medium text-foreground backdrop-blur-xl transition-all duration-200 hover:bg-white/20 dark:hover:bg-black/40 hover:scale-[1.02] cursor-pointer shadow-lg"
 			>
 				<HugeiconsIcon icon={Cancel01Icon} class="h-3.5 w-3.5" />
 				<span>Exit</span>
@@ -332,17 +333,32 @@
 
 						<!-- Upstream-style Seek Scrubber -->
 						<div class="mt-6 w-full">
-							<input
-								type="range"
-								class="range theater-range w-full cursor-pointer"
-								style="--pct:{progressPct}%"
-								min="0"
-								max={durationNum || 0}
-								value={currentPos}
-								oninput={onSeekInput}
-								onchange={onSeekCommit}
-								aria-label="Seek position"
-							/>
+							{#if prefs.waveformSeekbar}
+								<WaveformSeekbar
+									position={currentPos}
+									duration={durationNum || 0}
+									height={26}
+									barCount={72}
+									onSeek={(v) => (seekDrag = v)}
+									onCommit={(v) => {
+										playback.position = v;
+										seekDrag = null;
+										api.seek(v);
+									}}
+								/>
+							{:else}
+								<input
+									type="range"
+									class="range theater-range w-full cursor-pointer"
+									style="--pct:{progressPct}%"
+									min="0"
+									max={durationNum || 0}
+									value={currentPos}
+									oninput={onSeekInput}
+									onchange={onSeekCommit}
+									aria-label="Seek position"
+								/>
+							{/if}
 							<div class="mt-2 flex justify-between text-xs font-medium tabular-nums text-muted-foreground">
 								<span>{fmt(currentPos)}</span>
 								<span>{playback.now?.duration ?? fmt(durationNum)}</span>
