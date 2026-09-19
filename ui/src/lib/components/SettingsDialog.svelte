@@ -47,6 +47,9 @@
 		setFloatingSidebarRight,
 		setFloatingPlayerBar,
 		setShowAudioQuality,
+		setWaveformSeekbar,
+		setBeatSyncWarp,
+		setPcAudioRecognition,
 		setHomeInSidebar,
 		setVisibleIcon,
 		setCustomizationMode,
@@ -100,11 +103,12 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
 	const TABS: { id: TabId; label: string; hint: string; icon: typeof Settings02Icon }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
 		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and stream clients.', icon: PlayCircleIcon },
+		{ id: 'sync', label: 'Nocturne Sync', hint: 'Pair and control playback across PC and mobile devices.', icon: Wifi01Icon },
 		{ id: 'performance', label: 'Performance', hint: 'Graphics, animation speed and resource optimizations.', icon: FlashIcon },
 		{ id: 'lyrics', label: 'Lyrics', hint: 'Provider priority, sources and synchronization.', icon: Mic01Icon },
 		{ id: 'keybindings', label: 'Keybindings', hint: 'Keyboard shortcuts and custom key mappings.', icon: KeyboardIcon },
@@ -825,10 +829,13 @@
 		)
 	);
 
+	let discordCollapsed = $state(false);
+
 	const QUALITIES = [
 		{ id: 'LOW', label: 'Low' },
 		{ id: 'AUTO', label: 'Auto' },
-		{ id: 'HIGH', label: 'High' }
+		{ id: 'HIGH', label: 'High' },
+		{ id: 'VERY_HIGH', label: 'Very High (320 kbps)' }
 	];
 
 	async function setQuality(q: string) {
@@ -1150,11 +1157,11 @@
 
 	const APPEARANCE_SECTIONS = [
 		{ id: 'sec-theme', label: 'Theme & Accent' },
+		{ id: 'sec-player', label: 'Player View' },
 		{ id: 'sec-translucency', label: 'Translucency', extremeOnly: true },
-		{ id: 'sec-typography', label: 'Typography' },
-		{ id: 'sec-player', label: 'Player & Visuals' },
-		{ id: 'sec-glassy', label: 'Glassy Theme', extremeOnly: true },
+		{ id: 'sec-glassy', label: 'Glassy Warp', extremeOnly: true },
 		{ id: 'sec-fullscreen', label: 'Fullscreen Player', extremeOnly: true },
+		{ id: 'sec-typography', label: 'Typography' },
 		{ id: 'sec-layout', label: 'Layout & Icons' }
 	];
 	const visibleAppearanceSections = $derived(
@@ -1225,12 +1232,12 @@
 <svelte:window onkeydown={recordingAction ? onKeyRecord : undefined} />
 
 <Dialog.Root bind:open={ui.settingsOpen}>
-	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl border border-border/80 shadow-2xl rounded-2xl">
+	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 w-[94vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-[70rem] border border-border/80 shadow-2xl rounded-2xl">
 		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
-		<div class="flex h-[min(38rem,80vh)]">
+		<div class="flex h-[min(46rem,86vh)]">
 			<!-- Tab rail -->
-			<nav class="settings-nav-rail flex w-52 shrink-0 flex-col border-r border-border/30 p-3 backdrop-blur-3xl">
+			<nav class="settings-nav-rail flex w-60 shrink-0 flex-col border-r border-border/30 p-3.5 backdrop-blur-3xl">
 				<Dialog.Title class="px-3 pt-3 pb-4 font-heading text-base font-semibold text-foreground">
 					Settings
 				</Dialog.Title>
@@ -1347,17 +1354,6 @@
 								})}
 							</div>
 						</section>
-						<section class={GROUP}>
-							<h3 class={LABEL}>Remote Device Sync (Tailscale / LAN)</h3>
-							<div class={CARD}>
-								{@render row({
-									title: 'Mobile Sync Server',
-									desc: 'Allow Nocturne Mobile to connect directly over Tailscale or Local Wi-Fi to sync and control playback.',
-									control: remoteSyncSwitch,
-									below: remoteSyncConfig
-								})}
-							</div>
-						</section>
 					{:else if tab === 'themes'}
 						<!-- Customization Mode Segmented Switch -->
 						<div class="mb-4 flex items-center justify-between rounded-xl border border-border/80 bg-card/60 p-3 backdrop-blur-md">
@@ -1431,9 +1427,10 @@
 							{#if !collapsedCategories['sec-theme']}
 								<div class={CARD}>
 									{@render row({
-										title: 'Preset',
-										desc: 'Accent colors tint the default look; palettes swap every color.',
-										control: presetSelect
+										title: 'Theme presets',
+										desc: 'Pick a theme preset. Palettes customize the full interface, accents style highlights.',
+										below: themeBoxesWithPreview,
+										tall: true
 									})}
 									{@render row({
 										title: 'Accent color',
@@ -1454,106 +1451,17 @@
 										desc: 'Corner radius of cards, buttons and artwork.',
 										control: radiusSlider
 									})}
-								</div>
-							{/if}
-						</section>
-
-						{#if prefs.customizationMode === 'extreme'}
-							<!-- 2. Translucency & Opacity -->
-							<section id="sec-translucency" class="{GROUP} scroll-mt-3">
-								<button
-									type="button"
-									onclick={() => (collapsedCategories['sec-translucency'] = !collapsedCategories['sec-translucency'])}
-									class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
-								>
-									<div class="flex items-center gap-1.5">
-										<HugeiconsIcon
-											icon={collapsedCategories['sec-translucency'] ? ArrowRight01Icon : ArrowDown01Icon}
-											class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
-										/>
-										<span>Translucency & Opacity</span>
-									</div>
-									<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
-										{collapsedCategories['sec-translucency'] ? 'expand' : 'collapse'}
-									</span>
-								</button>
-								{#if !collapsedCategories['sec-translucency']}
-									<div class={CARD}>
-										{@render row({
-											title: 'Settings content opacity',
-											desc: 'Controls how translucent or opaque the settings content panel is (macOS vibrant style).',
-											control: dialogOpacitySlider,
-											tall: true
-										})}
-										{@render row({
-											title: 'Navigation sidebar rail opacity',
-											desc: 'Controls the transparency level of the left navigation sidebar column.',
-											control: sidebarOpacitySlider,
-											tall: true
-										})}
-										{@render row({
-											title: 'Card & surface opacity',
-											desc: 'Adjusts background opacity for settings cards and elevated rows.',
-											control: cardOpacitySlider,
-											tall: true
-										})}
-										{@render row({
-											title: 'Dialog backdrop dimming',
-											desc: 'Dimming intensity applied behind open modals and dialogs.',
-											control: overlayDimmingSlider,
-											tall: true
-										})}
-										{@render row({
-											title: 'Reset translucency',
-											desc: 'Restore default settings window opacity (80% content, 60% sidebar, 25% scrim).',
-											control: resetTranslucencyButton
-										})}
-									</div>
-								{/if}
-							</section>
-						{/if}
-
-						<!-- 3. Typography -->
-						<section id="sec-typography" class="{GROUP} scroll-mt-3">
-							<button
-								type="button"
-								onclick={() => (collapsedCategories['sec-typography'] = !collapsedCategories['sec-typography'])}
-								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
-							>
-								<div class="flex items-center gap-1.5">
-									<HugeiconsIcon
-										icon={collapsedCategories['sec-typography'] ? ArrowRight01Icon : ArrowDown01Icon}
-										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
-									/>
-									<span>Typography</span>
-								</div>
-								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
-									{collapsedCategories['sec-typography'] ? 'expand' : 'collapse'}
-								</span>
-							</button>
-							{#if !collapsedCategories['sec-typography']}
-								<div class={CARD}>
-									{#each FONT_ROWS as fr (fr.key)}
-										{#snippet pick()}{@render fontSelect(fr.key, fr.label)}{/snippet}
-										{#snippet type()}{@render fontInput(fr.key, fr.label)}{/snippet}
-										{@render row({
-											title: fr.label,
-											desc: fr.hint,
-											control: pick,
-											below: isCustomFont[fr.key] ? type : undefined
-										})}
-									{/each}
 									{@render row({
-										title: 'Font files',
-										desc: 'Load a .ttf, .otf or .woff from anywhere on this computer. It joins both dropdowns above.',
-										control: addFontButton,
-										below: custom.fontFiles.length ? fontFileList : undefined
+										title: 'Seekbar style',
+										desc: 'Choose how audio progress and seeking are displayed: classic progress line or interactive audio waveform.',
+										below: seekbarStyleSelector,
+										tall: true
 									})}
 								</div>
 							{/if}
 						</section>
 
-						<!-- 4. Player View & Effects -->
+						<!-- 2. Player View & Effects -->
 						<section id="sec-player" class="{GROUP} scroll-mt-3">
 							<button
 								type="button"
@@ -1635,7 +1543,60 @@
 						</section>
 
 						{#if prefs.customizationMode === 'extreme'}
-							<!-- 5. Glassy Theme Background -->
+							<!-- 3. Translucency & Opacity (placed right above warp animation settings) -->
+							<section id="sec-translucency" class="{GROUP} scroll-mt-3">
+								<button
+									type="button"
+									onclick={() => (collapsedCategories['sec-translucency'] = !collapsedCategories['sec-translucency'])}
+									class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+								>
+									<div class="flex items-center gap-1.5">
+										<HugeiconsIcon
+											icon={collapsedCategories['sec-translucency'] ? ArrowRight01Icon : ArrowDown01Icon}
+											class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+										/>
+										<span>Translucency & Opacity</span>
+									</div>
+									<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+										{collapsedCategories['sec-translucency'] ? 'expand' : 'collapse'}
+									</span>
+								</button>
+								{#if !collapsedCategories['sec-translucency']}
+									<div class={CARD}>
+										{@render row({
+											title: 'Settings content opacity',
+											desc: 'Controls how translucent or opaque the settings content panel is (macOS vibrant style).',
+											control: dialogOpacitySlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Navigation sidebar rail opacity',
+											desc: 'Controls the transparency level of the left navigation sidebar column.',
+											control: sidebarOpacitySlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Card & surface opacity',
+											desc: 'Adjusts background opacity for settings cards and elevated rows.',
+											control: cardOpacitySlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Dialog backdrop dimming',
+											desc: 'Dimming intensity applied behind open modals and dialogs.',
+											control: overlayDimmingSlider,
+											tall: true
+										})}
+										{@render row({
+											title: 'Reset translucency',
+											desc: 'Restore default settings window opacity (80% content, 60% sidebar, 25% scrim).',
+											control: resetTranslucencyButton
+										})}
+									</div>
+								{/if}
+							</section>
+
+							<!-- 4. Glassy Theme Background -->
 							<section id="sec-glassy" class="{GROUP} scroll-mt-3">
 								<button
 									type="button"
@@ -1668,6 +1629,12 @@
 											tall: true
 										})}
 										{@render row({
+											title: 'Beat-synced warp speedup',
+											desc: 'Smoothly accelerates fluid background liquid motion to the rhythm and beat drops of the music.',
+											control: beatSyncWarpSwitch,
+											tall: true
+										})}
+										{@render row({
 											title: 'Brightness & opacity',
 											desc: 'Adjusts how brightly the ambient album art shines through behind the UI.',
 											control: glassyLightnessSlider,
@@ -1694,7 +1661,7 @@
 								{/if}
 							</section>
 
-							<!-- 6. Fullscreen Player Background -->
+							<!-- 5. Fullscreen Player Background -->
 							<section id="sec-fullscreen" class="{GROUP} scroll-mt-3">
 								<button
 									type="button"
@@ -1727,6 +1694,12 @@
 											tall: true
 										})}
 										{@render row({
+											title: 'Beat-synced warp speedup',
+											desc: 'Smoothly accelerates fluid wave motion behind fullscreen player with incoming beats.',
+											control: beatSyncWarpSwitch,
+											tall: true
+										})}
+										{@render row({
 											title: 'Brightness & opacity',
 											desc: 'Adjusts background brightness and opacity in fullscreen mode.',
 											control: fullscreenLightnessSlider,
@@ -1753,6 +1726,46 @@
 								{/if}
 							</section>
 						{/if}
+
+						<!-- 6. Typography (moved down above Layout & Icons) -->
+						<section id="sec-typography" class="{GROUP} scroll-mt-3">
+							<button
+								type="button"
+								onclick={() => (collapsedCategories['sec-typography'] = !collapsedCategories['sec-typography'])}
+								class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+							>
+								<div class="flex items-center gap-1.5">
+									<HugeiconsIcon
+										icon={collapsedCategories['sec-typography'] ? ArrowRight01Icon : ArrowDown01Icon}
+										class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+									/>
+									<span>Typography</span>
+								</div>
+								<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+									{collapsedCategories['sec-typography'] ? 'expand' : 'collapse'}
+								</span>
+							</button>
+							{#if !collapsedCategories['sec-typography']}
+								<div class={CARD}>
+									{#each FONT_ROWS as fr (fr.key)}
+										{#snippet pick()}{@render fontSelect(fr.key, fr.label)}{/snippet}
+										{#snippet type()}{@render fontInput(fr.key, fr.label)}{/snippet}
+										{@render row({
+											title: fr.label,
+											desc: fr.hint,
+											control: pick,
+											below: isCustomFont[fr.key] ? type : undefined
+										})}
+									{/each}
+									{@render row({
+										title: 'Font files',
+										desc: 'Load a .ttf, .otf or .woff from anywhere on this computer. It joins both dropdowns above.',
+										control: addFontButton,
+										below: custom.fontFiles.length ? fontFileList : undefined
+									})}
+								</div>
+							{/if}
+						</section>
 
 						<!-- 7. Layout & Icons -->
 						<section id="sec-layout" class="{GROUP} scroll-mt-3">
@@ -1822,6 +1835,11 @@
 									title: 'Audio quality indicator',
 									desc: 'Show an audio codec and bitrate badge below the artist name in the bottom player bar.',
 									control: showAudioQualitySwitch
+								})}
+								{@render row({
+									title: 'Music recognition (PC audio Shazam)',
+									desc: 'Identify songs playing on your PC or through your microphone with instant Shazam recognition inspired by SongRec.',
+									control: pcAudioRecognitionSwitch
 								})}
 								{@render row({
 									title: 'Autoplay',
@@ -2042,6 +2060,18 @@
 							<h3 class={LABEL}>Advanced</h3>
 							<div class={CARD}>
 								{@render row({ title: 'Stream clients', below: clientList })}
+							</div>
+						</section>
+					{:else if tab === 'sync'}
+						<section class={GROUP}>
+							<h3 class={LABEL}>Nocturne Sync (Tailscale / Local Wi-Fi)</h3>
+							<div class={CARD}>
+								{@render row({
+									title: 'Mobile Sync Server',
+									desc: 'Allow Nocturne Mobile to connect directly over Tailscale or Local Wi-Fi to sync and control playback.',
+									control: remoteSyncSwitch,
+									below: remoteSyncConfig
+								})}
 							</div>
 						</section>
 					{:else if tab === 'performance'}
@@ -2578,98 +2608,108 @@
 {#snippet discordSwitch()}<Switch checked={discordOn} onCheckedChange={setDiscord} />{/snippet}
 {#snippet discordConfig()}
 	<div class="mt-2.5 space-y-3 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3.5 backdrop-blur-md">
-		<div class="text-xs font-semibold text-foreground">Discord RPC Customization</div>
+		<button
+			type="button"
+			onclick={() => (discordCollapsed = !discordCollapsed)}
+			class="flex w-full items-center justify-between text-left cursor-pointer transition-colors hover:text-primary"
+		>
+			<div class="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+				<HugeiconsIcon icon={discordCollapsed ? ArrowRight01Icon : ArrowDown01Icon} class="h-3.5 w-3.5 text-muted-foreground" />
+				<span>Discord RPC Customization</span>
+			</div>
+			<span class="text-[10px] text-muted-foreground/80 hover:text-primary">
+				{discordCollapsed ? 'Expand' : 'Collapse'}
+			</span>
+		</button>
 
-		<!-- Details & State Templates -->
-		<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-			<div>
-				<label for="discord-details-input" class="mb-1 block font-medium text-muted-foreground">Top line (Details)</label>
-				<Input
-					id="discord-details-input"
-					type="text"
-					value={discordDetails}
-					oninput={(e) => setDiscordDetails(e.currentTarget.value)}
-					placeholder={'{title}'}
-					class="h-8 text-xs font-mono"
-				/>
-				<div class="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-					<span>Tokens:</span>
-					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{title}')}>{"{title}"}</button>
-					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{artist}')}>{"{artist}"}</button>
-					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{album}')}>{"{album}"}</button>
-				</div>
-			</div>
-			<div>
-				<label for="discord-state-input" class="mb-1 block font-medium text-muted-foreground">Bottom line (State)</label>
-				<Input
-					id="discord-state-input"
-					type="text"
-					value={discordState}
-					oninput={(e) => setDiscordState(e.currentTarget.value)}
-					placeholder={'{artist}'}
-					class="h-8 text-xs font-mono"
-				/>
-				<div class="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-					<span>Tokens:</span>
-					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{title}')}>{"{title}"}</button>
-					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{artist}')}>{"{artist}"}</button>
-					<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{album}')}>{"{album}"}</button>
-				</div>
-			</div>
-		</div>
-
-		<!-- Toggles -->
-		<div class="space-y-2 rounded-lg border border-border/60 bg-card/75 dark:bg-card/60 backdrop-blur-sm p-3 text-xs">
-			<div class="flex items-center justify-between">
+		{#if !discordCollapsed}
+			<!-- Details & State Templates -->
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
 				<div>
-					<div class="font-medium text-foreground">Show track time</div>
-					<div class="text-[11px] text-muted-foreground">Display elapsed time and progress bar in Discord</div>
-				</div>
-				<Switch checked={discordShowTime} onCheckedChange={setDiscordShowTime} />
-			</div>
-			<div class="flex items-center justify-between border-t border-border/40 pt-2">
-				<div>
-					<div class="font-medium text-foreground">Show presence when paused</div>
-					<div class="text-[11px] text-muted-foreground">Keep profile status active with (Paused) badge</div>
-				</div>
-				<Switch checked={discordShowPause} onCheckedChange={setDiscordShowPause} />
-			</div>
-			<div class="flex items-center justify-between border-t border-border/40 pt-2">
-				<div>
-					<div class="font-medium text-foreground">Show button on Discord</div>
-					<div class="text-[11px] text-muted-foreground">Adds clickable link button to your Discord presence</div>
-				</div>
-				<Switch checked={discordShowButton} onCheckedChange={setDiscordShowButton} />
-			</div>
-		</div>
-
-		<!-- Button Label and App ID -->
-		<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-			{#if discordShowButton}
-				<div>
-					<label for="discord-btn-label" class="mb-1 block font-medium text-muted-foreground">Button label</label>
+					<label for="discord-details-input" class="mb-1 block font-medium text-muted-foreground">Top line (Details)</label>
 					<Input
-						id="discord-btn-label"
+						id="discord-details-input"
 						type="text"
-						value={discordButtonLabel}
-						oninput={(e) => setDiscordButtonLabel(e.currentTarget.value)}
-						placeholder="Listen on Nocturne"
-						class="h-8 text-xs"
+						value={discordDetails}
+						oninput={(e) => setDiscordDetails(e.currentTarget.value)}
+						placeholder={'{title}'}
+						class="h-8 text-xs font-mono"
+					/>
+					<div class="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+						<span>Tokens:</span>
+						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{title}')}>{"{title}"}</button>
+						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{artist}')}>{"{artist}"}</button>
+						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{album}')}>{"{album}"}</button>
+					</div>
+				</div>
+				<div>
+					<label for="discord-state-input" class="mb-1 block font-medium text-muted-foreground">Bottom line (State)</label>
+					<Input
+						id="discord-state-input"
+						type="text"
+						value={discordState}
+						oninput={(e) => setDiscordState(e.currentTarget.value)}
+						placeholder={'{artist}'}
+						class="h-8 text-xs font-mono"
+					/>
+					<div class="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+						<span>Tokens:</span>
+						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{title}')}>{"{title}"}</button>
+						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{artist}')}>{"{artist}"}</button>
+						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{album}')}>{"{album}"}</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Toggles -->
+			<div class="space-y-2 rounded-lg border border-border/60 bg-card/75 dark:bg-card/60 backdrop-blur-sm p-3 text-xs">
+				<div class="flex items-center justify-between">
+					<div>
+						<div class="font-medium text-foreground">Show track time</div>
+						<div class="text-[11px] text-muted-foreground">Display elapsed time and progress bar in Discord</div>
+					</div>
+					<Switch checked={discordShowTime} onCheckedChange={setDiscordShowTime} />
+				</div>
+				<div class="flex items-center justify-between border-t border-border/40 pt-2">
+					<div>
+						<div class="font-medium text-foreground">Show presence when paused</div>
+						<div class="text-[11px] text-muted-foreground">Keep profile status active with (Paused) badge</div>
+					</div>
+					<Switch checked={discordShowPause} onCheckedChange={setDiscordShowPause} />
+				</div>
+				<div class="flex items-center justify-between border-t border-border/40 pt-2">
+					<div>
+						<div class="font-medium text-foreground">Show button on Discord</div>
+						<div class="text-[11px] text-muted-foreground">Adds clickable link button to your Discord presence</div>
+					</div>
+					<Switch checked={discordShowButton} onCheckedChange={setDiscordShowButton} />
+				</div>
+				{#if discordShowButton}
+					<div class="border-t border-border/40 pt-2">
+						<label for="discord-btn-label" class="mb-1 block font-medium text-muted-foreground">Button label</label>
+						<Input
+							id="discord-btn-label"
+							type="text"
+							value={discordButtonLabel}
+							oninput={(e) => setDiscordButtonLabel(e.currentTarget.value)}
+							placeholder="Listen on Nocturne"
+							class="h-8 text-xs"
+						/>
+					</div>
+				{/if}
+				<div>
+					<label for="discord-app-id" class="mb-1 block font-medium text-muted-foreground">Custom Application ID (optional)</label>
+					<Input
+						id="discord-app-id"
+						type="text"
+						value={discordAppId}
+						oninput={(e) => setDiscordAppId(e.currentTarget.value)}
+						placeholder="Default: Nocturne Music"
+						class="h-8 text-xs font-mono"
 					/>
 				</div>
-			{/if}
-			<div>
-				<label for="discord-app-id" class="mb-1 block font-medium text-muted-foreground">Custom Application ID (optional)</label>
-				<Input
-					id="discord-app-id"
-					type="text"
-					value={discordAppId}
-					oninput={(e) => setDiscordAppId(e.currentTarget.value)}
-					placeholder="Default: Nocturne Music"
-					class="h-8 text-xs font-mono"
-				/>
 			</div>
-		</div>
+		{/if}
 	</div>
 {/snippet}
 {#snippet crossfadeSlider()}
@@ -3163,6 +3203,199 @@
 {#snippet autostartSwitch()}<Switch checked={autostartOn} onCheckedChange={setAutostart} />{/snippet}
 {#snippet autoplaySwitch()}<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />{/snippet}
 {#snippet showAudioQualitySwitch()}<Switch checked={prefs.showAudioQuality} onCheckedChange={setShowAudioQuality} />{/snippet}
+{#snippet seekbarStyleSelector()}
+	<div class="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+		<!-- Classic Progress Bar Option -->
+		<button
+			type="button"
+			onclick={() => setWaveformSeekbar(false)}
+			class="group/opt relative flex flex-col rounded-xl border p-3.5 text-left transition-all cursor-pointer {
+				!prefs.waveformSeekbar
+					? 'border-primary/80 bg-primary/10 shadow-sm ring-1 ring-primary/40'
+					: 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'
+			}"
+		>
+			<div class="flex items-center justify-between mb-1.5">
+				<div class="flex items-center gap-2">
+					<span class="text-xs font-bold text-foreground">Classic Progress Line</span>
+					{#if !prefs.waveformSeekbar}
+						<span class="rounded-full bg-primary/20 px-1.5 py-0.2 text-[9px] font-bold text-primary">Active</span>
+					{/if}
+				</div>
+				<div class="flex h-4 w-4 items-center justify-center rounded-full border {!prefs.waveformSeekbar ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40'}">
+					{#if !prefs.waveformSeekbar}
+						<svg class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5">
+							<polyline points="20 6 9 17 4 12"></polyline>
+						</svg>
+					{/if}
+				</div>
+			</div>
+			<p class="text-[11px] text-muted-foreground mb-3 leading-relaxed">
+				Clean minimalist track bar with smooth hover scrubbing and time badges.
+			</p>
+
+			<!-- Visual Preview of Classic Seekbar -->
+			<div class="mt-auto rounded-lg border border-border/50 bg-card/70 p-3">
+				<div class="flex items-center justify-between text-[10px] font-mono text-muted-foreground/70 mb-2">
+					<span>1:42</span>
+					<span>3:50</span>
+				</div>
+				<div class="relative flex items-center h-4 w-full">
+					<div class="h-1.5 w-full rounded-full bg-muted/80 overflow-hidden">
+						<div class="h-full w-[45%] rounded-full bg-primary"></div>
+					</div>
+					<!-- Thumb dot -->
+					<div class="absolute left-[45%] -translate-x-1/2 h-3.5 w-3.5 rounded-full bg-primary shadow ring-2 ring-background"></div>
+				</div>
+			</div>
+		</button>
+
+		<!-- Waveform Seekbar Option -->
+		<button
+			type="button"
+			onclick={() => setWaveformSeekbar(true)}
+			class="group/opt relative flex flex-col rounded-xl border p-3.5 text-left transition-all cursor-pointer {
+				prefs.waveformSeekbar
+					? 'border-primary/80 bg-primary/10 shadow-sm ring-1 ring-primary/40'
+					: 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'
+			}"
+		>
+			<div class="flex items-center justify-between mb-1.5">
+				<div class="flex items-center gap-2">
+					<span class="text-xs font-bold text-foreground">Interactive Waveform</span>
+					{#if prefs.waveformSeekbar}
+						<span class="rounded-full bg-primary/20 px-1.5 py-0.2 text-[9px] font-bold text-primary">Active</span>
+					{/if}
+				</div>
+				<div class="flex h-4 w-4 items-center justify-center rounded-full border {prefs.waveformSeekbar ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40'}">
+					{#if prefs.waveformSeekbar}
+						<svg class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5">
+							<polyline points="20 6 9 17 4 12"></polyline>
+						</svg>
+					{/if}
+				</div>
+			</div>
+			<p class="text-[11px] text-muted-foreground mb-3 leading-relaxed">
+				Dynamic audio soundwave bars reflecting audio amplitudes and beat peaks.
+			</p>
+
+			<!-- Visual Preview of Waveform Seekbar -->
+			<div class="mt-auto rounded-lg border border-border/50 bg-card/70 p-3">
+				<div class="flex items-center justify-between text-[10px] font-mono text-muted-foreground/70 mb-2">
+					<span>1:42</span>
+					<span>3:50</span>
+				</div>
+				<div class="flex h-5 w-full items-center gap-[2.5px]">
+					{#each [25, 40, 65, 45, 80, 95, 50, 85, 100, 70, 90, 55, 75, 95, 65, 45, 85, 60, 35, 75, 90, 70, 50, 85, 65, 40, 55, 80, 45, 30] as heightPct, i}
+						{@const isPast = i < 13}
+						<div
+							class="flex-1 rounded-full transition-all {isPast ? 'bg-primary' : 'bg-muted-foreground/30'}"
+							style="height: {heightPct}%;"
+						></div>
+					{/each}
+				</div>
+			</div>
+		</button>
+	</div>
+{/snippet}
+{#snippet waveformSeekbarSwitch()}<Switch checked={prefs.waveformSeekbar} onCheckedChange={setWaveformSeekbar} />{/snippet}
+{#snippet beatSyncWarpSwitch()}<Switch checked={prefs.beatSyncWarp} onCheckedChange={setBeatSyncWarp} />{/snippet}
+{#snippet themeBoxesWithPreview()}
+	<div class="space-y-3">
+		<!-- Visual Theme Selection Boxes -->
+		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+			{#each THEMES as t (t.id)}
+				{@const isSelected = theme.id === t.id}
+				<button
+					type="button"
+					onclick={() => applyTheme(t.id)}
+					class="group/tbox relative flex flex-col justify-between rounded-xl border p-2.5 text-left transition-all cursor-pointer {isSelected
+						? 'border-primary bg-primary/10 ring-2 ring-primary/40 shadow-xs'
+						: 'border-border/60 bg-muted/25 hover:border-border hover:bg-muted/50'}"
+				>
+					<div class="flex items-center justify-between mb-2">
+						<span
+							class="size-4.5 rounded-full ring-1 ring-black/15 shadow-2xs shrink-0 transition-transform group-hover/tbox:scale-110"
+							style="background:{t.color}"
+						></span>
+						{#if isSelected}
+							<span class="flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-2xs">
+								<HugeiconsIcon icon={Tick02Icon} class="size-2.5" />
+							</span>
+						{/if}
+					</div>
+					<div>
+						<div class="text-xs font-semibold text-foreground truncate">{t.label}</div>
+						<div class="text-[10px] text-muted-foreground capitalize">{t.kind}</div>
+					</div>
+				</button>
+			{/each}
+		</div>
+
+		<!-- Live Selected Theme Preview Card -->
+		<div class="overflow-hidden rounded-xl border border-border/80 bg-background/80 p-3 shadow-xs backdrop-blur-md">
+			<div class="flex items-center justify-between border-b border-border/40 pb-2 mb-2.5">
+				<div class="flex items-center gap-2">
+					<span
+						class="size-3.5 rounded-full ring-2 ring-primary/40"
+						style="background:{currentTheme.color}"
+					></span>
+					<div class="text-xs font-bold text-foreground">{currentTheme.label} Theme Preview</div>
+				</div>
+				<span class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary capitalize">
+					{currentTheme.kind} Theme Active
+				</span>
+			</div>
+
+			<!-- Mini Mock Player Window Preview -->
+			<div class="rounded-lg border border-border/60 bg-card/60 p-2.5 space-y-2">
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-2 min-w-0">
+						<div class="size-7 rounded-[var(--radius,0.45rem)] bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-bold text-xs shrink-0">
+							♪
+						</div>
+						<div class="min-w-0">
+							<div class="text-[11px] font-semibold text-foreground truncate">Nocturne Serenade</div>
+							<div class="text-[9px] text-muted-foreground truncate">Chopin • Nocturne Op. 9 No. 2</div>
+						</div>
+					</div>
+					<div class="flex items-center gap-1.5">
+						<span class="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
+						<span class="text-[9px] font-mono text-muted-foreground">Playing</span>
+					</div>
+				</div>
+
+				<div class="space-y-0.5">
+					<div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+						<div class="h-full w-[45%] rounded-full bg-primary"></div>
+					</div>
+					<div class="flex justify-between text-[8px] font-mono text-muted-foreground">
+						<span>1:42</span>
+						<span>3:48</span>
+					</div>
+				</div>
+
+				<div class="flex items-center justify-between pt-1 border-t border-border/30">
+					<div class="flex items-center gap-1.5">
+						<span class="rounded px-1.5 py-0.5 text-[9px] font-semibold bg-primary text-primary-foreground">
+							Accent
+						</span>
+						<span class="rounded px-1.5 py-0.5 text-[9px] font-medium bg-muted text-muted-foreground">
+							Surface
+						</span>
+					</div>
+					<div class="flex items-center gap-1">
+						<span class="size-3 rounded-full bg-background border border-border/60" title="Background"></span>
+						<span class="size-3 rounded-full bg-card border border-border/60" title="Card"></span>
+						<span class="size-3 rounded-full bg-muted border border-border/60" title="Muted"></span>
+						<span class="size-3 rounded-full bg-primary" title="Primary Accent"></span>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{/snippet}
+{#snippet pcAudioRecognitionSwitch()}<Switch checked={prefs.pcAudioRecognition} onCheckedChange={setPcAudioRecognition} />{/snippet}
 {#snippet dupSwitch()}<Switch
 		checked={preventDuplicatesOn}
 		onCheckedChange={setPreventDuplicates}
