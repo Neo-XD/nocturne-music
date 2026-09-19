@@ -198,7 +198,7 @@
 	<!-- Centered sticky search bar -->
 	{#if prefs.visibleIcons.titlebar.search}
 		<div data-tauri-drag-region class="flex flex-1 justify-center mx-2 min-w-0">
-			<div class="w-48 sm:w-56 hover:w-full hover:max-w-md focus-within:w-full focus-within:max-w-md has-[input:not(:placeholder-shown)]:w-full has-[input:not(:placeholder-shown)]:max-w-md transition-[width] duration-300 ease-out">
+			<div class="w-64 sm:w-80 md:w-96 hover:w-full hover:max-w-xl focus-within:w-full focus-within:max-w-xl has-[input:not(:placeholder-shown)]:w-full has-[input:not(:placeholder-shown)]:max-w-xl transition-[width] duration-300 ease-out">
 				<TopSearchBar />
 			</div>
 		</div>
