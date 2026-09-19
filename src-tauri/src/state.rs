@@ -1137,6 +1137,7 @@ impl AppState {
             q.shuffle_orig = q.shuffle_orig.is_some().then(|| q.items.clone());
         }
 
+        let _ = self.player.set_skip_fade_in(true);
         if !self.start_current(gen).await {
             return;
         }
@@ -1260,6 +1261,7 @@ impl AppState {
             }
         }
         // start_current emits now-playing + queue + persists; prime the gapless lookahead after.
+        let _ = self.player.set_skip_fade_in(true);
         if self.start_current(gen).await {
             self.prime_lookahead(gen).await;
         }
@@ -1532,6 +1534,7 @@ impl AppState {
         // The next mpv tick is seconds away (a resolve has to finish first); until then
         // `current_position` would still report the outgoing track's position.
         self.latest_position.store(0f64.to_bits(), Ordering::SeqCst);
+        let _ = self.player.set_skip_fade_in(true);
         if self.start_current(gen).await {
             self.prime_lookahead(gen).await;
         }
@@ -1600,12 +1603,14 @@ impl AppState {
             // against an entry mpv no longer holds, and the next track end finds nothing to
             // advance into.
             self.queue.lock().await.lookahead_loaded = None;
+            let _ = self.player.set_skip_fade_in(false);
             if self.start_current(gen).await {
                 self.prime_lookahead(gen).await;
             }
             return;
         }
         // mpv already advanced into the primed lookahead. Sync pointer + UI, prime the next.
+        let _ = self.player.set_skip_fade_in(false);
         let gen = self.generation.load(Ordering::SeqCst);
         {
             let mut q = self.queue.lock().await;
@@ -1932,6 +1937,7 @@ impl AppState {
             tracing::warn!(error = %e, "enqueue lookahead failed");
             return;
         }
+        let _ = self.player.set_skip_fade_in(false);
         q.lookahead_loaded = Some(next_idx);
         q.lookahead_client = Some(data.stream_client.clone());
         q.lookahead_audio_quality = data.audio_quality.clone();

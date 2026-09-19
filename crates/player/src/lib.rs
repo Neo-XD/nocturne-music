@@ -83,6 +83,7 @@ struct AudioFilters {
     gain_db: Option<f64>,
     semitones: i32,
     crossfade_secs: f64,
+    skip_fade_in: bool,
     track_duration: Option<f64>,
     eq_enabled: bool,
     eq_preamp_db: f64,
@@ -296,6 +297,12 @@ impl Player {
         self.apply_af()
     }
 
+    /// Set whether the incoming track should bypass the crossfade fade-in (e.g. on manual skip/jump).
+    pub fn set_skip_fade_in(&self, skip: bool) -> Result<(), Error> {
+        self.af.lock().unwrap().skip_fade_in = skip;
+        self.apply_af()
+    }
+
     /// Update current track duration for crossfade out timing.
     pub fn set_track_duration(&self, dur: Option<f64>) -> Result<(), Error> {
         self.af.lock().unwrap().track_duration = dur;
@@ -389,7 +396,9 @@ fn af_chain(af: &AudioFilters) -> String {
     }
     if af.crossfade_secs > 0.0 {
         let xf = af.crossfade_secs;
-        chain.push(format!("lavfi=[afade=t=in:ss=0:d={xf:.2}]"));
+        if !af.skip_fade_in {
+            chain.push(format!("lavfi=[afade=t=in:ss=0:d={xf:.2}]"));
+        }
         if let Some(dur) = af.track_duration {
             if dur > xf * 2.0 {
                 let start_out = dur - xf;
