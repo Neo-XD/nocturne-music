@@ -337,7 +337,8 @@ impl Orchestrator {
         custom_priority: Option<&[String]>,
         auto_rank: bool,
     ) -> Result<PlaybackData, ResolveError> {
-        let prefer_high = matches!(quality, AudioQuality::VeryHigh | AudioQuality::High | AudioQuality::Auto);
+        let prefer_high =
+            matches!(quality, AudioQuality::VeryHigh | AudioQuality::High | AudioQuality::Auto);
         let logged_in = self.it.is_logged_in();
         let visitor = self.it.visitor_data();
         let ranked_clients: Vec<String> = if is_upload {

@@ -1,6 +1,6 @@
+use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,10 +87,8 @@ pub async fn recognize_song_signature(
         return Err(format!("Shazam server responded with status {}", res.status()));
     }
 
-    let json: serde_json::Value = res
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Shazam JSON: {e}"))?;
+    let json: serde_json::Value =
+        res.json().await.map_err(|e| format!("Failed to parse Shazam JSON: {e}"))?;
 
     if let Some(track) = json.get("track") {
         let title = track["title"].as_str().map(|s| s.to_string());
@@ -120,14 +118,7 @@ pub async fn recognize_song_signature(
             _ => None,
         };
 
-        return Ok(RecognizedSong {
-            found: title.is_some(),
-            title,
-            artist,
-            album,
-            cover,
-            query,
-        });
+        return Ok(RecognizedSong { found: title.is_some(), title, artist, album, cover, query });
     }
 
     Ok(RecognizedSong {
@@ -169,13 +160,12 @@ pub async fn capture_pc_audio(sample_ms: Option<u32>) -> Result<Vec<f32>, String
 
 #[cfg(target_os = "windows")]
 fn capture_wasapi_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
-    use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
-    };
     use windows::Win32::Media::Audio::{
         eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator,
-        MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
-        WAVEFORMATEX,
+        MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, WAVEFORMATEX,
+    };
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
     };
 
     unsafe {
@@ -225,9 +215,7 @@ fn capture_wasapi_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
             .GetService()
             .map_err(|e| format!("Failed to get IAudioCaptureClient: {e}"))?;
 
-        audio_client
-            .Start()
-            .map_err(|e| format!("Failed to start audio client: {e}"))?;
+        audio_client.Start().map_err(|e| format!("Failed to start audio client: {e}"))?;
 
         let start_time = std::time::Instant::now();
         let target_duration = std::time::Duration::from_millis(duration_ms as u64);
@@ -253,7 +241,8 @@ fn capture_wasapi_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
                         let is_silent = (flags & 0x01) != 0; // AUDCLNT_BUFFERFLAGS_SILENT
 
                         if is_silent {
-                            raw_mono_samples.resize(raw_mono_samples.len() + num_frames_read as usize, 0.0);
+                            raw_mono_samples
+                                .resize(raw_mono_samples.len() + num_frames_read as usize, 0.0);
                         } else if bits_per_sample == 32 {
                             let slice = std::slice::from_raw_parts(
                                 p_data as *const f32,
@@ -285,7 +274,8 @@ fn capture_wasapi_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
         // Resample from `sample_rate` down to 16,000 Hz for Shazam
         let target_rate = 16000.0;
         let source_rate = sample_rate as f64;
-        let total_target_samples = ((raw_mono_samples.len() as f64) * target_rate / source_rate) as usize;
+        let total_target_samples =
+            ((raw_mono_samples.len() as f64) * target_rate / source_rate) as usize;
 
         let mut resampled = Vec::with_capacity(total_target_samples);
         for i in 0..total_target_samples {
@@ -310,11 +300,8 @@ fn capture_linux_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
     let target_bytes = target_samples * 2;
 
     // Detect default sink to monitor via pactl
-    let monitor_source = Command::new("pactl")
-        .arg("get-default-sink")
-        .output()
-        .ok()
-        .and_then(|out| {
+    let monitor_source =
+        Command::new("pactl").arg("get-default-sink").output().ok().and_then(|out| {
             if out.status.success() {
                 let sink = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if !sink.is_empty() {
@@ -356,7 +343,9 @@ fn capture_linux_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
     }
 
     let mut child = child.map_err(|e| {
-        format!("Failed to start Linux loopback audio capture (parec / pw-record not available): {e}")
+        format!(
+            "Failed to start Linux loopback audio capture (parec / pw-record not available): {e}"
+        )
     })?;
 
     let mut stdout = child
@@ -411,13 +400,8 @@ fn capture_macos_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
     let target_bytes = target_samples * 2;
     let dur_sec = format!("{:.2}", (duration_ms as f64) / 1000.0);
 
-    let candidates = [
-        "BlackHole 2ch",
-        "BlackHole 16ch",
-        "Soundflower (2ch)",
-        "Background Music",
-        "Loopback",
-    ];
+    let candidates =
+        ["BlackHole 2ch", "BlackHole 16ch", "Soundflower (2ch)", "Background Music", "Loopback"];
 
     let mut child = None;
 
@@ -555,4 +539,3 @@ fn capture_macos_loopback(duration_ms: u32) -> Result<Vec<f32>, String> {
 
     Ok(samples)
 }
-

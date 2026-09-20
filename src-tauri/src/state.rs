@@ -976,18 +976,11 @@ impl AppState {
         let mut actual_id = video_id.to_string();
         if let Some(sp_info) = video_id.strip_prefix("SP:") {
             let parts: Vec<&str> = sp_info.split(':').collect();
-            let query = parts
-                .get(1)
-                .and_then(|q| urlencoding::decode(q).ok())
-                .unwrap_or_default();
-            let preview_url = parts
-                .get(2)
-                .and_then(|p| urlencoding::decode(p).ok())
-                .unwrap_or_default();
-            let audio_source = self
-                .db
-                .get_setting("audio_stream_source")
-                .unwrap_or_else(|| "ytm".to_string());
+            let query = parts.get(1).and_then(|q| urlencoding::decode(q).ok()).unwrap_or_default();
+            let preview_url =
+                parts.get(2).and_then(|p| urlencoding::decode(p).ok()).unwrap_or_default();
+            let audio_source =
+                self.db.get_setting("audio_stream_source").unwrap_or_else(|| "ytm".to_string());
 
             if audio_source == "spotify" && !preview_url.trim().is_empty() {
                 return Ok(PlaybackData {
@@ -2333,10 +2326,8 @@ impl AppState {
             }
         }
 
-        let history_target = self
-            .db
-            .get_setting("listening_history_target")
-            .unwrap_or_else(|| "both".to_string());
+        let history_target =
+            self.db.get_setting("listening_history_target").unwrap_or_else(|| "both".to_string());
 
         if history_target == "spotify" {
             // User requested history only for Spotify, skip YouTube Music watch ping

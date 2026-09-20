@@ -1747,8 +1747,8 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v084_note, v083_note, v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note,
-        v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
+        v084_note, v083_note, v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note,
+        v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
@@ -2318,10 +2318,8 @@ async fn refresh_spotify_dev_token(state: &AppState) -> Result<String, String> {
     let refresh_token = state.db.get_setting("spotify_refresh_token").unwrap_or_default();
 
     if refresh_token.is_empty() || client_id.is_empty() {
-        return Err(
-            "Spotify Developer credentials missing or expired. Please re-link in profile."
-                .to_string(),
-        );
+        return Err("Spotify Developer credentials missing or expired. Please re-link in profile."
+            .to_string());
     }
 
     let now = std::time::SystemTime::now()
@@ -2342,10 +2340,8 @@ async fn refresh_spotify_dev_token(state: &AppState) -> Result<String, String> {
         req = req.basic_auth(&client_id, Some(&client_secret));
     }
 
-    let res = req
-        .send()
-        .await
-        .map_err(|e| format!("Network error refreshing Spotify token: {e}"))?;
+    let res =
+        req.send().await.map_err(|e| format!("Network error refreshing Spotify token: {e}"))?;
 
     if !res.status().is_success() {
         let err_txt = res.text().await.unwrap_or_default();
@@ -2442,7 +2438,10 @@ pub async fn spotify_get_playlists(state: St<'_>) -> Result<Vec<SpotifyPlaylistS
             if let Ok(retry_res) = client
                 .get("https://api.spotify.com/v1/me/playlists?limit=50")
                 .header("Authorization", format!("Bearer {new_token}"))
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                )
                 .send()
                 .await
             {
@@ -2486,9 +2485,10 @@ pub async fn spotify_get_playlists(state: St<'_>) -> Result<Vec<SpotifyPlaylistS
                 .unwrap_or("Spotify");
 
             let subtitle = match track_count {
-                Some(count) if count > 0 => {
-                    Some(format!("{count} {} • {owner}", if count == 1 { "track" } else { "tracks" }))
-                }
+                Some(count) if count > 0 => Some(format!(
+                    "{count} {} • {owner}",
+                    if count == 1 { "track" } else { "tracks" }
+                )),
                 _ => Some(owner.to_string()),
             };
             let thumbnail = item["images"]
@@ -2584,7 +2584,10 @@ pub async fn fetch_spotify_playlist_info(
                     pl_res = client
                         .get(format!("https://api.spotify.com/v1/playlists/{clean_id}"))
                         .header("Authorization", format!("Bearer {token}"))
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        .header(
+                            "User-Agent",
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        )
                         .send()
                         .await;
                 }
@@ -2596,7 +2599,8 @@ pub async fn fetch_spotify_playlist_info(
                 if let Ok(pl_json) = res.json::<serde_json::Value>().await {
                     let title = pl_json["name"].as_str().unwrap_or("Spotify Playlist").to_string();
                     let description = pl_json["description"].as_str().map(|s| s.to_string());
-                    let owner = pl_json["owner"]["display_name"].as_str().unwrap_or("Spotify").to_string();
+                    let owner =
+                        pl_json["owner"]["display_name"].as_str().unwrap_or("Spotify").to_string();
                     let thumbnail = pl_json["images"]
                         .as_array()
                         .and_then(|arr| arr.first())
@@ -2606,9 +2610,14 @@ pub async fn fetch_spotify_playlist_info(
 
                     // Fetch playlist items via /items (Spotify's current endpoint)
                     let mut items_res = client
-                        .get(format!("https://api.spotify.com/v1/playlists/{clean_id}/items?limit=100"))
+                        .get(format!(
+                            "https://api.spotify.com/v1/playlists/{clean_id}/items?limit=100"
+                        ))
                         .header("Authorization", format!("Bearer {token}"))
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        .header(
+                            "User-Agent",
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        )
                         .send()
                         .await;
 
@@ -2637,8 +2646,10 @@ pub async fn fetch_spotify_playlist_info(
                                         } else {
                                             &entry["track"]
                                         };
-                                        let track_id = track["id"].as_str().unwrap_or_default().to_string();
-                                        let name = track["name"].as_str().unwrap_or_default().to_string();
+                                        let track_id =
+                                            track["id"].as_str().unwrap_or_default().to_string();
+                                        let name =
+                                            track["name"].as_str().unwrap_or_default().to_string();
                                         if name.is_empty() {
                                             continue;
                                         }
@@ -2651,14 +2662,19 @@ pub async fn fetch_spotify_playlist_info(
                                             }
                                         }
                                         let artists = artists_vec.join(", ");
-                                        let album = track["album"]["name"].as_str().map(|s| s.to_string());
-                                        let duration_ms = track["duration_ms"].as_u64().unwrap_or(0);
+                                        let album =
+                                            track["album"]["name"].as_str().map(|s| s.to_string());
+                                        let duration_ms =
+                                            track["duration_ms"].as_u64().unwrap_or(0);
                                         let track_thumb = track["album"]["images"]
                                             .as_array()
                                             .and_then(|arr| arr.first())
                                             .and_then(|img| img["url"].as_str())
                                             .map(|u| u.to_string());
-                                        let preview_url = track["preview_url"].as_str().unwrap_or_default().to_string();
+                                        let preview_url = track["preview_url"]
+                                            .as_str()
+                                            .unwrap_or_default()
+                                            .to_string();
                                         let explicit = track["explicit"].as_bool().unwrap_or(false);
 
                                         tracks.push(ExtractedSpotifyTrack {
@@ -2704,8 +2720,11 @@ pub async fn fetch_spotify_playlist_info(
     if let Ok(res) = embed_res {
         if res.status().is_success() {
             if let Ok(html) = res.text().await {
-                if let Some(start) = html.find("<script id=\"__NEXT_DATA__\" type=\"application/json\">") {
-                    let json_start = start + "<script id=\"__NEXT_DATA__\" type=\"application/json\">".len();
+                if let Some(start) =
+                    html.find("<script id=\"__NEXT_DATA__\" type=\"application/json\">")
+                {
+                    let json_start =
+                        start + "<script id=\"__NEXT_DATA__\" type=\"application/json\">".len();
                     if let Some(end) = html[json_start..].find("</script>") {
                         let json_str = &html[json_start..json_start + end];
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) {
@@ -2726,14 +2745,21 @@ pub async fn fetch_spotify_playlist_info(
                             if let Some(track_list) = entity["trackList"].as_array() {
                                 for t in track_list {
                                     let uri = t["uri"].as_str().unwrap_or_default();
-                                    let track_id = uri.strip_prefix("spotify:track:").unwrap_or(uri).to_string();
+                                    let track_id = uri
+                                        .strip_prefix("spotify:track:")
+                                        .unwrap_or(uri)
+                                        .to_string();
                                     let name = t["title"].as_str().unwrap_or_default().to_string();
                                     if name.is_empty() {
                                         continue;
                                     }
-                                    let artists = t["subtitle"].as_str().unwrap_or_default().to_string();
+                                    let artists =
+                                        t["subtitle"].as_str().unwrap_or_default().to_string();
                                     let duration_ms = t["duration"].as_u64().unwrap_or(0);
-                                    let preview_url = t["audioPreview"]["url"].as_str().unwrap_or_default().to_string();
+                                    let preview_url = t["audioPreview"]["url"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .to_string();
                                     let explicit = t["isExplicit"].as_bool().unwrap_or(false);
 
                                     tracks.push(ExtractedSpotifyTrack {
@@ -2861,9 +2887,9 @@ pub async fn spotify_transfer_to_ytm(
     } else {
         playlist_info.title
     };
-    let desc = playlist_info.description.unwrap_or_else(|| {
-        "Transferred from Spotify to Nocturne / YouTube Music".to_string()
-    });
+    let desc = playlist_info
+        .description
+        .unwrap_or_else(|| "Transferred from Spotify to Nocturne / YouTube Music".to_string());
 
     if playlist_info.tracks.is_empty() {
         return Err(format!("No tracks could be found in Spotify playlist \"{}\"", title));
@@ -2881,10 +2907,8 @@ pub async fn spotify_transfer_to_ytm(
         let search_query = format!("{} {}", t.name, t.artists);
         if let Ok(results) = state.it.search_songs(ytm_client, &search_query).await {
             if let Some(first) = results.items.first() {
-                let _ = state
-                    .it
-                    .playlist_add(ytm_client, &new_ytm_playlist_id, &first.video_id)
-                    .await;
+                let _ =
+                    state.it.playlist_add(ytm_client, &new_ytm_playlist_id, &first.video_id).await;
                 state.db.add_playlist_track(&new_ytm_playlist_id, &first.video_id);
                 added_count += 1;
             }
