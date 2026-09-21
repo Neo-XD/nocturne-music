@@ -2381,6 +2381,7 @@ enum ManualSearchProvider {
 }
 
 impl ManualSearchProvider {
+    #[cfg(test)]
     fn key(&self) -> &str {
         match self {
             Self::BetterLyrics => "betterlyrics",
