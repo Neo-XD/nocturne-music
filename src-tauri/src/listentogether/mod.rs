@@ -260,7 +260,25 @@ impl LtSession {
 
     /// Leave the room and tear down the connection.
     pub async fn leave(&self) {
-        self.send(ClientMessage::LeaveRoom).await;
+        // If we are host and have peers, kick them before leaving so the room actually closes
+        // for everyone instead of staying alive with an auto-promoted guest.
+        let (outbound, users, my_id) = {
+            let inner = self.inner.lock().await;
+            (inner.outbound.clone(), inner.users.clone(), inner.my_id.clone())
+        };
+        if let Some(tx) = outbound {
+            if let Some(me) = my_id {
+                let is_host = users.iter().any(|u| u.user_id == me && u.is_host);
+                if is_host {
+                    for u in &users {
+                        if u.user_id != me {
+                            let _ = tx.send(ClientMessage::KickUser { user_id: u.user_id.clone() });
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(ClientMessage::LeaveRoom);
+        }
         self.gen.fetch_add(1, Ordering::SeqCst); // cancel the connection loop
         self.inner.lock().await.reset_room();
         let _ = self.sync_tx.send(SyncCommand::Release);
@@ -277,7 +295,7 @@ impl LtSession {
 
     async fn start(self: &Arc<Self>, initial: ClientMessage) {
         // Cancel any existing connection, reset, then spawn a fresh loop.
-        self.gen.fetch_add(1, Ordering::SeqCst);
+        let gen = self.gen.fetch_add(1, Ordering::SeqCst) + 1;
         {
             let mut inner = self.inner.lock().await;
             inner.reset_room();
@@ -285,7 +303,6 @@ impl LtSession {
             inner.requesting = true; // waiting for the room to materialize
         }
         self.emit_state().await;
-        let gen = self.gen.load(Ordering::SeqCst);
         let me = self.clone();
         tokio::spawn(async move {
             me.run(gen, initial).await;
@@ -311,8 +328,18 @@ impl LtSession {
             }
             self.emit_state().await;
 
-            match tokio_tungstenite::connect_async(&url).await {
-                Ok((ws, _)) => {
+            let connect_future = tokio_tungstenite::connect_async(&url);
+            let connect_res = tokio::time::timeout(Duration::from_secs(8), connect_future).await;
+
+            if self.gen.load(Ordering::SeqCst) != gen {
+                return;
+            }
+
+            match connect_res {
+                Ok(Ok((ws, _))) => {
+                    if self.gen.load(Ordering::SeqCst) != gen {
+                        return;
+                    }
                     attempt = 0;
                     let (mut sink, mut read) = ws.split();
                     let (otx, mut orx) = mpsc::unbounded_channel::<ClientMessage>();
@@ -347,17 +374,20 @@ impl LtSession {
                     };
 
                     loop {
+                        if self.gen.load(Ordering::SeqCst) != gen {
+                            break;
+                        }
                         // Poll the cancel generation even when idle: `leave()` bumps it but the
                         // server doesn't close the socket on LeaveRoom, so we'd otherwise park here.
                         let next = tokio::select! {
                             biased;
-                            next = read.next() => next,
-                            _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                            _ = tokio::time::sleep(Duration::from_millis(250)) => {
                                 if self.gen.load(Ordering::SeqCst) != gen {
                                     break;
                                 }
                                 continue;
                             }
+                            next = read.next() => next,
                         };
                         if self.gen.load(Ordering::SeqCst) != gen {
                             break;
@@ -365,8 +395,14 @@ impl LtSession {
                         let Some(next) = next else { break }; // stream ended
                         match next {
                             Ok(Message::Text(t)) => {
+                                if self.gen.load(Ordering::SeqCst) != gen {
+                                    break;
+                                }
                                 match serde_json::from_str::<ServerMessage>(&t) {
                                     Ok(sm) => {
+                                        if self.gen.load(Ordering::SeqCst) != gen {
+                                            break;
+                                        }
                                         if self.handle(sm).await {
                                             break; // fatal (kicked / rejected) — stop reading
                                         }
@@ -382,8 +418,11 @@ impl LtSession {
                     ping.abort();
                     self.inner.lock().await.outbound = None;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::warn!(error = %e, "listen-together connect failed");
+                }
+                Err(_) => {
+                    tracing::warn!("listen-together connect timed out");
                 }
             }
 
@@ -415,6 +454,12 @@ impl LtSession {
 
     /// Handle one server message. Returns `true` if the connection should close (fatal).
     async fn handle(&self, sm: ServerMessage) -> bool {
+        {
+            let inner = self.inner.lock().await;
+            if inner.role == Role::None && !inner.requesting {
+                return true;
+            }
+        }
         match sm {
             ServerMessage::Pong => return false,
 
@@ -504,6 +549,9 @@ impl LtSession {
             ServerMessage::HostChanged { host_id } => {
                 let became_host = {
                     let mut inner = self.inner.lock().await;
+                    if inner.role == Role::None {
+                        return true;
+                    }
                     for u in &mut inner.users {
                         u.is_host = u.user_id == host_id;
                     }

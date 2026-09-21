@@ -180,10 +180,13 @@ pub fn run() {
             tray::show_main(app);
             for arg in &args {
                 if arg.contains("listen-together") || arg.contains("join-lt") {
-                    let _ = app.emit("incoming-lt-request", serde_json::json!({
-                        "username": "Discord Friend",
-                        "userId": null
-                    }));
+                    let _ = app.emit(
+                        "incoming-lt-request",
+                        serde_json::json!({
+                            "username": "Discord Friend",
+                            "userId": null
+                        }),
+                    );
                     break;
                 }
             }

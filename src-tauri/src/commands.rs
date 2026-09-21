@@ -1581,7 +1581,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
 #### Bug Fixes
 - **Library Duplicate Key Crashes**: Added deduplication when paging through library card grids to prevent Svelte 5 duplicate key runtime crashes.
 - **Autoplay Race Conditions**: Fixed duplicate tracks appearing at the queue tail when fast-skipping while background radio hydration was in flight.
-- **Discord IPC Rate-Limiting & Branding**: Hardened Discord IPC connection loop, resolved official registered Nocturne application ID (`1543224160166092828`), and removed clutter from General settings."#.to_string(),
+- **Discord IPC Rate-Limiting & Branding**: Hardened Discord IPC connection loop, resolved official registered Nocturne application ID, and removed clutter from General settings."#.to_string(),
     };
 
     let v084_note = ReleaseNote {

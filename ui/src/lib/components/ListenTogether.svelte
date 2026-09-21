@@ -16,7 +16,7 @@
 	import * as api from '$lib/api';
 	import { copyText } from '$lib/clipboard';
 	import { ui, toast } from '$lib/player.svelte';
-	import { lt } from '$lib/lt.svelte';
+	import { lt, applyLtState } from '$lib/lt.svelte';
 
 	let mode = $state<'join' | 'host'>('join');
 	let name = $state('');
@@ -101,7 +101,29 @@
 	}
 
 	async function leave() {
-		await api.ltLeave();
+		busy = true;
+		try {
+			await api.ltLeave();
+			applyLtState({
+				status: 'disconnected',
+				role: 'none',
+				requesting: false,
+				roomCode: null,
+				myId: null,
+				serverUrl: lt.serverUrl,
+				users: [],
+				currentTrack: null,
+				queue: [],
+				pendingJoins: [],
+				suggestions: []
+			});
+			toast.info(isHost ? 'Ended Listen Together session' : 'Left Listen Together session');
+			ui.ltOpen = false;
+		} catch (e) {
+			toast.error(`Failed to close session: ${String(e)}`);
+		} finally {
+			busy = false;
+		}
 	}
 
 	function copyInvite() {
@@ -130,7 +152,7 @@
 						? 'Connecting…'
 						: 'Waiting for the host to let you in…'}
 				</p>
-				<Button variant="outline" size="sm" onclick={leave}>Cancel</Button>
+				<Button variant="outline" size="sm" onclick={leave} disabled={busy}>Cancel</Button>
 			</div>
 		{:else if !inRoom}
 			<!-- Setup: join a friend (just a name + invite) or host your own. -->
@@ -311,9 +333,9 @@
 						</Button>
 					{/if}
 					<div class="flex-1"></div>
-					<Button variant="destructive" size="sm" onclick={leave}>
+					<Button variant="destructive" size="sm" onclick={leave} disabled={busy}>
 						<HugeiconsIcon icon={Logout01Icon} class="h-4 w-4" />
-						Leave
+						{isHost ? 'End Session' : 'Leave'}
 					</Button>
 				</div>
 			</div>

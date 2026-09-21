@@ -40,12 +40,16 @@
 		};
 	});
 
+	let dismissed = $state<Set<string>>(new Set());
+
 	// Also watch pendingJoins when in host mode
 	$effect(() => {
 		if (lt.role === 'host' && lt.pendingJoins.length > 0 && !open) {
-			const first = lt.pendingJoins[0];
-			request = { userId: first.userId, username: first.username };
-			open = true;
+			const first = lt.pendingJoins.find((p) => !dismissed.has(p.userId));
+			if (first) {
+				request = { userId: first.userId, username: first.username };
+				open = true;
+			}
 		}
 	});
 
@@ -79,8 +83,11 @@
 	}
 
 	async function handleDecline() {
-		if (request && lt.role === 'host' && request.userId) {
-			await api.ltRejectJoin(request.userId).catch(() => {});
+		if (request) {
+			if (request.userId) dismissed.add(request.userId);
+			if (lt.role === 'host' && request.userId) {
+				await api.ltRejectJoin(request.userId).catch(() => {});
+			}
 		}
 		toast.info('Declined join request');
 		open = false;
@@ -88,7 +95,14 @@
 	}
 </script>
 
-<Dialog.Root bind:open>
+<Dialog.Root
+	bind:open
+	onOpenChange={(val) => {
+		if (!val && request?.userId) {
+			dismissed.add(request.userId);
+		}
+	}}
+>
 	<Dialog.Content class="w-[92vw] max-w-md overflow-hidden rounded-2xl border border-border/80 bg-card/95 backdrop-blur-xl shadow-2xl p-5 sm:p-6">
 		<div class="flex items-start gap-3.5">
 			<div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/25">
