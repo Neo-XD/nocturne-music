@@ -39,7 +39,9 @@
 	import VideoSurface from '$lib/components/VideoSurface.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
+	import LyricSelectorModal from '$lib/components/LyricSelectorModal.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { lyricSelector } from '$lib/lyric-selector.svelte';
 	import { auth, initApp, np, playback, prefs, ui } from '$lib/player.svelte';
 	import { win, initWin, setWindowFullscreen, onFullscreenExit } from '$lib/win.svelte';
 	import { initZoom } from '$lib/zoom';
@@ -105,6 +107,14 @@
 	const lyricsOpen = $derived(!tabbed && activeRightSidebar === 'lyrics');
 	const devicesOpen = $derived(activeRightSidebar === 'devices');
 	const npSidebarOpen = $derived(activeRightSidebar === 'np' && !np.open);
+
+	// Tabbed Now Playing owns Queue and Lyrics. Clear the external panel's source of truth so it
+	// cannot render alongside the matching tab or reappear when Now Playing closes.
+	$effect.pre(() => {
+		if (tabbed && (activeRightSidebar === 'queue' || activeRightSidebar === 'lyrics')) {
+			activeRightSidebar = null;
+		}
+	});
 
 	$effect(() => {
 		if (np.sidebarOpen && activeRightSidebar === null && !np.open) {
@@ -325,6 +335,17 @@
 	<ChannelPicker />
 	<ListenTogether />
 	<LinkDialog />
+	{#if lyricSelector.request}
+		{@const request = lyricSelector.request}
+		<LyricSelectorModal
+			bind:open={lyricSelector.open}
+			videoId={request.videoId}
+			initialTitle={request.initialTitle}
+			initialArtist={request.initialArtist}
+			album={request.album}
+			duration={request.duration}
+		/>
+	{/if}
 
 	{#if np.fullscreenOpen && playback.now}
 		<FullscreenPlayer />

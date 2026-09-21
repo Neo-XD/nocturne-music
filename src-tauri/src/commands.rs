@@ -3123,10 +3123,11 @@ pub async fn search_lyrics_candidates(
     state: St<'_>,
     title: String,
     artist: String,
+    album: Option<String>,
     duration: Option<f64>,
     video_id: Option<String>,
 ) -> Result<Vec<crate::lyrics::LyricCandidate>, String> {
-    Ok(crate::lyrics::search_all_lyrics(&state, title, artist, duration, video_id).await)
+    Ok(crate::lyrics::search_all_lyrics(&state, title, artist, album, duration, video_id).await)
 }
 
 #[tauri::command]

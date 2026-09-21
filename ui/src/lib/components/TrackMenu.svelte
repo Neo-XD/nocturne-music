@@ -43,8 +43,8 @@
 		toggleRating,
 		toast
 	} from '$lib/player.svelte';
+	import { openLyricSelector } from '$lib/lyric-selector.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
-	import LyricSelectorModal from './LyricSelectorModal.svelte';
 
 	let {
 		song,
@@ -73,8 +73,22 @@
 	let menuOpen = $state(false);
 	// Player-bar only: tempo/pitch belong to playback, not to a row you happen to be pointing at.
 	let advancedOpen = $state(false);
-	let lyricModalOpen = $state(false);
 	let anchor = $state(NO_ANCHOR);
+
+	/** "3:21" / "1:02:03" → seconds. */
+	function durationSecs(duration?: string): number | undefined {
+		if (!duration) return undefined;
+		const parts = duration.split(':');
+		if (
+			(parts.length !== 2 && parts.length !== 3) ||
+			parts.some((part) => !/^\d+$/.test(part))
+		) {
+			return undefined;
+		}
+		const values = parts.map(Number);
+		if (values.slice(1).some((part) => part >= 60)) return undefined;
+		return values.reduce((total, part) => total * 60 + part, 0);
+	}
 
 	async function startDownload() {
 		try {
@@ -284,7 +298,16 @@
 			</button>
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
-				onclick={(e) => run(e, () => (lyricModalOpen = true))}
+				onclick={(e) =>
+					run(e, () =>
+						openLyricSelector({
+							videoId: song.video_id,
+							initialTitle: song.title,
+							initialArtist: song.artists,
+							album: song.album,
+							duration: durationSecs(song.duration)
+						})
+					)}
 			>
 				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
@@ -323,13 +346,4 @@
 
 {#if linksOnly}
 	<TempoPitchDialog bind:open={advancedOpen} />
-{/if}
-
-{#if !isLocal}
-	<LyricSelectorModal
-		bind:open={lyricModalOpen}
-		videoId={song.video_id}
-		initialTitle={song.title}
-		initialArtist={song.artists}
-	/>
 {/if}

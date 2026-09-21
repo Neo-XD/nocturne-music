@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import * as api from '$lib/api';
 	import { toast } from '$lib/player.svelte';
 
@@ -7,15 +8,15 @@
 		videoId,
 		initialTitle = '',
 		initialArtist = '',
-		duration,
-		onApplied
+		album,
+		duration
 	}: {
 		open: boolean;
 		videoId: string;
 		initialTitle?: string;
 		initialArtist?: string;
+		album?: string;
 		duration?: number;
-		onApplied?: (lyrics: api.Lyrics) => void;
 	} = $props();
 
 	let titleQuery = $state('');
@@ -24,28 +25,71 @@
 	let candidates = $state<api.LyricCandidate[]>([]);
 	let selectedCandidate = $state<api.LyricCandidate | null>(null);
 	let applying = $state(false);
+	let wasOpen = false;
+	let searchGeneration = 0;
 
 	$effect(() => {
-		if (open) {
-			titleQuery = initialTitle;
-			artistQuery = initialArtist;
-			selectedCandidate = null;
-			if (initialTitle || initialArtist) {
-				handleSearch();
+		const isOpen = open;
+		if (isOpen === wasOpen) return;
+		wasOpen = isOpen;
+
+		// Only `open` is tracked. Query initialization and the initial search must not make the
+		// editable fields dependencies of this effect, or typing resets them to the initial props.
+		untrack(() => {
+			if (!isOpen) {
+				if (searching) invalidateSearch();
+				return;
 			}
-		}
+
+			const title = initialTitle;
+			const artist = initialArtist;
+			titleQuery = title;
+			artistQuery = artist;
+			candidates = [];
+			selectedCandidate = null;
+			if (title || artist) {
+				void search(title.trim(), artist.trim());
+			}
+		});
 	});
 
-	async function handleSearch() {
-		if (!titleQuery.trim() && !artistQuery.trim()) return;
+	function invalidateSearch() {
+		searchGeneration += 1;
+		searching = false;
+	}
+
+	function closeModal() {
+		invalidateSearch();
+		open = false;
+	}
+
+	function handleSearch() {
+		const title = titleQuery.trim();
+		const artist = artistQuery.trim();
+		return search(title, artist);
+	}
+
+	async function search(title: string, artist: string) {
+		const generation = ++searchGeneration;
+		const requestAlbum = album;
+		const requestDuration = duration;
+		const requestVideoId = videoId;
+		candidates = [];
+		selectedCandidate = null;
+		if (!title && !artist) {
+			searching = false;
+			return;
+		}
 		searching = true;
 		try {
 			const res = await api.searchLyricsCandidates({
-				title: titleQuery.trim(),
-				artist: artistQuery.trim(),
-				duration,
-				videoId
+				title,
+				artist,
+				album: requestAlbum,
+				duration: requestDuration,
+				videoId: requestVideoId
 			});
+			if (generation !== searchGeneration) return;
 			candidates = res;
 			if (res.length > 0) {
 				selectedCandidate = res[0];
@@ -53,9 +97,10 @@
 				selectedCandidate = null;
 			}
 		} catch (e) {
+			if (generation !== searchGeneration) return;
 			toast.error(`Search error: ${e}`);
 		} finally {
-			searching = false;
+			if (generation === searchGeneration) searching = false;
 		}
 	}
 
@@ -67,8 +112,7 @@
 				lyrics: candidate.lyrics
 			});
 			toast.success(`Lyrics applied from ${candidate.source}`);
-			onApplied?.(candidate.lyrics);
-			open = false;
+			closeModal();
 		} catch (e) {
 			toast.error(`Failed to apply lyrics: ${e}`);
 		} finally {
@@ -77,8 +121,8 @@
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			open = false;
+		if (e.key === 'Escape' && open) {
+			closeModal();
 		}
 	}
 </script>
@@ -87,9 +131,9 @@
 
 {#if open}
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+		class="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
 		onclick={(e) => {
-			if (e.target === e.currentTarget) open = false;
+			if (e.target === e.currentTarget) closeModal();
 		}}
 		role="dialog"
 		aria-modal="true"
@@ -112,7 +156,7 @@
 					</p>
 				</div>
 				<button
-					onclick={() => (open = false)}
+					onclick={closeModal}
 					class="p-1.5 rounded-full hover:bg-foreground/10 text-muted-foreground hover:text-foreground transition-colors"
 					aria-label="Close"
 				>
@@ -269,7 +313,7 @@
 			<div class="px-6 py-3 border-t border-border/40 flex justify-between items-center text-xs text-muted-foreground bg-muted/10">
 				<span>Nocturne Lyric Matcher</span>
 				<button
-					onclick={() => (open = false)}
+					onclick={closeModal}
 					class="px-3 py-1.5 rounded-lg hover:bg-foreground/10 text-foreground transition-colors font-medium"
 				>
 					Close

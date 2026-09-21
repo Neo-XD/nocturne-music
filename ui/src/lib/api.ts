@@ -690,6 +690,10 @@ export interface Lyrics {
 	instrumental: boolean;
 	lines: LyricLine[];
 }
+export interface LyricsUpdatedEvent {
+	video_id: string;
+	lyrics: Lyrics;
+}
 /** Cached on the Rust side (provider chain: LRCLIB → YT Music). `null` = none found. */
 export const getLyrics = (args: {
 	videoId: string;
@@ -840,11 +844,13 @@ export const saveCustomLyricProviders = (providers: CustomLyricProvider[]) =>
 	invoke<void>('save_custom_lyric_providers', { providers });
 
 export interface LyricCandidate {
+	id: string;
 	source: string;
 	title: string;
 	artist: string;
-	album?: string;
-	duration?: number;
+	album: string | null;
+	/** Track duration in seconds. */
+	duration: number | null;
 	synced: boolean;
 	has_words: boolean;
 	lyrics: Lyrics;
@@ -853,12 +859,16 @@ export interface LyricCandidate {
 export const searchLyricsCandidates = (args: {
 	title: string;
 	artist: string;
+	album?: string;
 	duration?: number;
 	videoId?: string;
 }) => invoke<LyricCandidate[]>('search_lyrics_candidates', args);
 
 export const applySelectedLyric = (args: { videoId: string; lyrics: Lyrics }) =>
 	invoke<void>('apply_selected_lyric', args);
+
+export const onLyricsUpdated = (cb: (event: LyricsUpdatedEvent) => void): Promise<UnlistenFn> =>
+	listen<LyricsUpdatedEvent>('lyrics-updated', (e) => cb(e.payload));
 
 export interface CacheStats {
 	total_bytes: number;

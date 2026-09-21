@@ -7,8 +7,7 @@
 		type LyricsAnimationStyle
 	} from '$lib/player.svelte';
 	import LyricsSyncDock from '$lib/components/LyricsSyncDock.svelte';
-	import LyricSelectorModal from '$lib/components/LyricSelectorModal.svelte';
-	import { listen } from '@tauri-apps/api/event';
+	import { openLyricSelector } from '$lib/lyric-selector.svelte';
 
 	// `expanded` only sizes the type and centres the column. The owner of the extra room (the side
 	// panel, or the now-playing view) decides how much there is. Toggling it must not remount this
@@ -33,17 +32,31 @@
 
 	let lyrics = $state<api.Lyrics | null>(null);
 	let loading = $state(true);
-	let selectorOpen = $state(false);
 	let scroller: HTMLElement | undefined = $state();
 
 	$effect(() => {
-		const unlisten = listen<api.Lyrics>('lyrics-updated', (e) => {
-			lyrics = e.payload;
+		const unlisten = api.onLyricsUpdated((payload) => {
+			if (payload.video_id !== playback.now?.videoId) return;
+			lyrics = payload.lyrics;
 		});
 		return () => {
 			unlisten.then((u) => u());
 		};
 	});
+
+	function openSelector() {
+		const now = playback.now;
+		if (!now) return;
+		const queueItem = playback.queue.items[playback.queue.currentIndex];
+		const album = queueItem?.video_id === now.videoId ? queueItem.album : undefined;
+		openLyricSelector({
+			videoId: now.videoId,
+			initialTitle: now.title,
+			initialArtist: now.artists,
+			album,
+			duration: durationSecs(now.duration)
+		});
+	}
 
 	// videoId of the fetch whose result is (or will be) shown — guards stale responses.
 	let requested = '';
@@ -608,7 +621,7 @@
 				<p class="text-sm text-muted-foreground">No lyrics found for this track.</p>
 				{#if !loading && playback.now}
 					<button
-						onclick={() => (selectorOpen = true)}
+						onclick={openSelector}
 						class="px-3 py-1.5 rounded-lg bg-muted/60 hover:bg-muted text-xs font-medium text-foreground transition-colors inline-flex items-center gap-1.5"
 					>
 						<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -632,7 +645,7 @@
 			<div class="flex items-center gap-2.5">
 				<span>{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}</span>
 				<button
-					onclick={() => (selectorOpen = true)}
+					onclick={openSelector}
 					class="hover:text-foreground inline-flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded hover:bg-foreground/5 text-[11px]"
 					title="Change lyrics / search other sources"
 				>
@@ -651,17 +664,4 @@
 		</div>
 	{/if}
 </div>
-
-{#if playback.now}
-	<LyricSelectorModal
-		bind:open={selectorOpen}
-		videoId={playback.now.videoId}
-		initialTitle={playback.now.title}
-		initialArtist={playback.now.artists}
-		duration={durationSecs(playback.now.duration)}
-		onApplied={(l) => {
-			lyrics = l;
-		}}
-	/>
-{/if}
 
