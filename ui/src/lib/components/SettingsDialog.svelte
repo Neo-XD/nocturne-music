@@ -56,10 +56,12 @@
 		setCustomizationMode,
 		setLyricsAnimationStyle,
 		LYRICS_ANIMATION_OPTIONS,
-		type LyricsAnimationStyle,
 		blockedArtists,
-		unblockArtist
+		unblockArtist,
+		playback
 	} from '$lib/player.svelte';
+	import DiscordSettings from '$lib/components/DiscordSettings.svelte';
+	import DiscordIcon from '$lib/components/DiscordIcon.svelte';
 	import {
 		formatKey,
 		keybindings,
@@ -104,11 +106,12 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
-	const TABS: { id: TabId; label: string; hint: string; icon: typeof Settings02Icon }[] = [
+	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
+	const TABS: { id: TabId; label: string; hint: string; icon?: typeof Settings02Icon; customIcon?: any }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
 		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and stream clients.', icon: PlayCircleIcon },
+		{ id: 'discord', label: 'Discord RPC', hint: 'Rich presence, custom activity text and live preview.', customIcon: DiscordIcon },
 		{ id: 'sync', label: 'Nocturne Sync', hint: 'Pair and control playback across PC and mobile devices.', icon: Wifi01Icon },
 		{ id: 'performance', label: 'Performance', hint: 'Graphics, animation speed and resource optimizations.', icon: FlashIcon },
 		{ id: 'lyrics', label: 'Lyrics', hint: 'Provider priority, sources and synchronization.', icon: Mic01Icon },
@@ -796,15 +799,7 @@
 	const animatedArtworkOn = $derived(settings.animated_artwork !== 'false');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
-	const discordOn = $derived(settings.discord_rpc === 'true');
 	const crossfadeSecs = $derived(parseInt(settings.crossfade_seconds || '0', 10) || 0);
-	const discordShowTime = $derived(settings.discord_rpc_show_time !== 'false');
-	const discordShowPause = $derived(settings.discord_rpc_show_pause !== 'false');
-	const discordShowButton = $derived(settings.discord_rpc_show_button !== 'false');
-	const discordButtonLabel = $derived(settings.discord_rpc_button_label ?? 'Listen on Nocturne');
-	const discordDetails = $derived(settings.discord_rpc_details ?? '{title}');
-	const discordState = $derived(settings.discord_rpc_state ?? '{artist}');
-	const discordAppId = $derived(settings.discord_rpc_app_id ?? '');
 
 	async function setCrossfade(secs: number) {
 		settings.crossfade_seconds = secs.toString();
@@ -940,40 +935,6 @@
 		selectEqPreset('Flat');
 	}
 
-	async function setDiscordShowTime(on: boolean) {
-		settings.discord_rpc_show_time = on ? 'true' : 'false';
-		await api.setSetting('discord_rpc_show_time', settings.discord_rpc_show_time);
-	}
-
-	async function setDiscordShowPause(on: boolean) {
-		settings.discord_rpc_show_pause = on ? 'true' : 'false';
-		await api.setSetting('discord_rpc_show_pause', settings.discord_rpc_show_pause);
-	}
-
-	async function setDiscordShowButton(on: boolean) {
-		settings.discord_rpc_show_button = on ? 'true' : 'false';
-		await api.setSetting('discord_rpc_show_button', settings.discord_rpc_show_button);
-	}
-
-	async function setDiscordButtonLabel(label: string) {
-		settings.discord_rpc_button_label = label;
-		await api.setSetting('discord_rpc_button_label', label);
-	}
-
-	async function setDiscordDetails(val: string) {
-		settings.discord_rpc_details = val;
-		await api.setSetting('discord_rpc_details', val);
-	}
-
-	async function setDiscordState(val: string) {
-		settings.discord_rpc_state = val;
-		await api.setSetting('discord_rpc_state', val);
-	}
-
-	async function setDiscordAppId(val: string) {
-		settings.discord_rpc_app_id = val;
-		await api.setSetting('discord_rpc_app_id', val);
-	}
 	const trayOn = $derived(settings.close_to_tray !== 'false');
 	const autostartOn = $derived(settings.autostart === 'true');
 	const disabled = $derived(
@@ -984,8 +945,6 @@
 				.filter(Boolean)
 		)
 	);
-
-	let discordCollapsed = $state(false);
 
 	const QUALITIES = [
 		{ id: 'LOW', label: 'Low' },
@@ -1050,11 +1009,6 @@
 	async function setUpdateBanner(on: boolean) {
 		settings.update_banner = on ? 'true' : 'false';
 		await api.setSetting('update_banner', settings.update_banner);
-	}
-
-	async function setDiscord(on: boolean) {
-		settings.discord_rpc = on ? 'true' : 'false';
-		await api.setSetting('discord_rpc', settings.discord_rpc);
 	}
 
 	async function setTray(on: boolean) {
@@ -1425,12 +1379,16 @@
 								? 'bg-white/15 dark:bg-white/10 text-foreground shadow-xs ring-1 ring-white/10 font-semibold'
 								: 'text-muted-foreground hover:bg-white/5 hover:text-foreground'}"
 						>
-							<HugeiconsIcon
-								icon={t.icon}
-								size={17}
-								strokeWidth={2}
-								class={tab === t.id ? 'text-primary' : ''}
-							/>
+							{#if t.customIcon}
+								<t.customIcon class="h-[17px] w-[17px] shrink-0 {tab === t.id ? 'text-primary' : ''}" />
+							{:else if t.icon}
+								<HugeiconsIcon
+									icon={t.icon}
+									size={17}
+									strokeWidth={2}
+									class={tab === t.id ? 'text-primary' : ''}
+								/>
+							{/if}
 							<span class="truncate">{t.label}</span>
 						</button>
 					{/each}
@@ -1493,12 +1451,6 @@
 									title: 'Watch history',
 									desc: 'Register plays in your YouTube Music history. Needs sign-in.',
 									control: historySwitch
-								})}
-								{@render row({
-									title: 'Discord rich presence',
-									desc: "Show what you're listening to on your Discord profile. Needs the Discord desktop app running, no login here.",
-									control: discordSwitch,
-									below: discordOn ? discordConfig : undefined
 								})}
 								{@render row({
 									title: 'Last.fm scrobbling',
@@ -2228,6 +2180,8 @@
 								{@render row({ title: 'Stream clients', below: clientList })}
 							</div>
 						</section>
+					{:else if tab === 'discord'}
+						<DiscordSettings {settings} />
 					{:else if tab === 'sync'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Nocturne Sync (Tailscale / Local Wi-Fi)</h3>
@@ -2771,113 +2725,6 @@
 
 <!-- Controls. Split out so the rows above read as a list of settings rather than a wall of markup. -->
 {#snippet historySwitch()}<Switch checked={historyOn} onCheckedChange={setHistory} />{/snippet}
-{#snippet discordSwitch()}<Switch checked={discordOn} onCheckedChange={setDiscord} />{/snippet}
-{#snippet discordConfig()}
-	<div class="mt-2.5 space-y-3 rounded-xl border border-border/60 bg-muted/35 dark:bg-muted/20 p-3.5 backdrop-blur-md">
-		<button
-			type="button"
-			onclick={() => (discordCollapsed = !discordCollapsed)}
-			class="flex w-full items-center justify-between text-left cursor-pointer transition-colors hover:text-primary"
-		>
-			<div class="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-				<HugeiconsIcon icon={discordCollapsed ? ArrowRight01Icon : ArrowDown01Icon} class="h-3.5 w-3.5 text-muted-foreground" />
-				<span>Discord RPC Customization</span>
-			</div>
-			<span class="text-[10px] text-muted-foreground/80 hover:text-primary">
-				{discordCollapsed ? 'Expand' : 'Collapse'}
-			</span>
-		</button>
-
-		{#if !discordCollapsed}
-			<!-- Details & State Templates -->
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-				<div>
-					<label for="discord-details-input" class="mb-1 block font-medium text-muted-foreground">Top line (Details)</label>
-					<Input
-						id="discord-details-input"
-						type="text"
-						value={discordDetails}
-						oninput={(e) => setDiscordDetails(e.currentTarget.value)}
-						placeholder={'{title}'}
-						class="h-8 text-xs font-mono"
-					/>
-					<div class="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-						<span>Tokens:</span>
-						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{title}')}>{"{title}"}</button>
-						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{artist}')}>{"{artist}"}</button>
-						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordDetails((discordDetails ? discordDetails + ' ' : '') + '{album}')}>{"{album}"}</button>
-					</div>
-				</div>
-				<div>
-					<label for="discord-state-input" class="mb-1 block font-medium text-muted-foreground">Bottom line (State)</label>
-					<Input
-						id="discord-state-input"
-						type="text"
-						value={discordState}
-						oninput={(e) => setDiscordState(e.currentTarget.value)}
-						placeholder={'{artist}'}
-						class="h-8 text-xs font-mono"
-					/>
-					<div class="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-						<span>Tokens:</span>
-						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{title}')}>{"{title}"}</button>
-						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{artist}')}>{"{artist}"}</button>
-						<button type="button" class="hover:text-primary underline cursor-pointer" onclick={() => setDiscordState((discordState ? discordState + ' ' : '') + '{album}')}>{"{album}"}</button>
-					</div>
-				</div>
-			</div>
-
-			<!-- Toggles -->
-			<div class="space-y-2 rounded-lg border border-border/60 bg-card/75 dark:bg-card/60 backdrop-blur-sm p-3 text-xs">
-				<div class="flex items-center justify-between">
-					<div>
-						<div class="font-medium text-foreground">Show track time</div>
-						<div class="text-[11px] text-muted-foreground">Display elapsed time and progress bar in Discord</div>
-					</div>
-					<Switch checked={discordShowTime} onCheckedChange={setDiscordShowTime} />
-				</div>
-				<div class="flex items-center justify-between border-t border-border/40 pt-2">
-					<div>
-						<div class="font-medium text-foreground">Show presence when paused</div>
-						<div class="text-[11px] text-muted-foreground">Keep profile status active with (Paused) badge</div>
-					</div>
-					<Switch checked={discordShowPause} onCheckedChange={setDiscordShowPause} />
-				</div>
-				<div class="flex items-center justify-between border-t border-border/40 pt-2">
-					<div>
-						<div class="font-medium text-foreground">Show button on Discord</div>
-						<div class="text-[11px] text-muted-foreground">Adds clickable link button to your Discord presence</div>
-					</div>
-					<Switch checked={discordShowButton} onCheckedChange={setDiscordShowButton} />
-				</div>
-				{#if discordShowButton}
-					<div class="border-t border-border/40 pt-2">
-						<label for="discord-btn-label" class="mb-1 block font-medium text-muted-foreground">Button label</label>
-						<Input
-							id="discord-btn-label"
-							type="text"
-							value={discordButtonLabel}
-							oninput={(e) => setDiscordButtonLabel(e.currentTarget.value)}
-							placeholder="Listen on Nocturne"
-							class="h-8 text-xs"
-						/>
-					</div>
-				{/if}
-				<div>
-					<label for="discord-app-id" class="mb-1 block font-medium text-muted-foreground">Custom Application ID (optional)</label>
-					<Input
-						id="discord-app-id"
-						type="text"
-						value={discordAppId}
-						oninput={(e) => setDiscordAppId(e.currentTarget.value)}
-						placeholder="Default: Nocturne Music"
-						class="h-8 text-xs font-mono"
-					/>
-				</div>
-			</div>
-		{/if}
-	</div>
-{/snippet}
 {#snippet crossfadeSlider()}
 	<div class="flex items-center gap-3 w-48">
 		<Slider

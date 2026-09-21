@@ -126,7 +126,9 @@
 	const onVolumeCommit = (e: Event) => commitVolume(Number((e.target as HTMLInputElement).value));
 
 	const isControl = (t: EventTarget | null) =>
-		!!(t as HTMLElement | null)?.closest?.('button, a, input, [role="button"]');
+		!!(t as HTMLElement | null)?.closest?.(
+			'button, a, input, [role="button"], [role="slider"], .group\\/waveform, [data-no-bar-click]'
+		);
 
 	// Dragging a slider past its end and releasing outside it retargets the click at the bar (the
 	// click lands on the common ancestor of press and release), which used to toggle the view.
@@ -354,7 +356,7 @@
 		<div class="flex w-full max-w-md items-center gap-2 text-xs text-muted-foreground">
 			<span class="tabular-nums">{fmt(shownPosition)}</span>
 			{#if prefs.waveformSeekbar}
-				<div class="flex-1">
+				<div class="flex-1" data-no-bar-click onclick={(e) => e.stopPropagation()} onpointerdown={(e) => e.stopPropagation()}>
 					<WaveformSeekbar
 						position={shownPosition}
 						duration={playback.duration}

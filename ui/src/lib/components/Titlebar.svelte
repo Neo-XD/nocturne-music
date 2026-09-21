@@ -22,19 +22,20 @@
 		UserGroup02Icon,
 		Link04Icon,
 		Home01Icon,
+		Refresh03Icon,
 		Settings01Icon,
 		Sun01Icon,
 		Moon02Icon
 	} from '@hugeicons/core-free-icons';
 	import { page } from '$app/state';
-	import { toggleMode } from 'mode-watcher';
+	import { smoothToggleMode } from '$lib/theme.svelte';
 	import LastFmIcon from './LastFmIcon.svelte';
 	import DiscordIcon from './DiscordIcon.svelte';
 	import AccountMenu from './AccountMenu.svelte';
 	import TopSearchBar from './TopSearchBar.svelte';
 	import logo from '$lib/assets/icon.png';
 	import * as api from '$lib/api';
-	import { np, prefs, openMiniPlayer, toast, ui } from '$lib/player.svelte';
+	import { np, prefs, openMiniPlayer, toast, ui, refreshView } from '$lib/player.svelte';
 	import { theme } from '$lib/theme.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
@@ -181,6 +182,14 @@
 				aria-label="Forward"
 			>
 				<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2.5} class="h-4.5 w-4.5" />
+			</button>
+			<button
+				class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground cursor-pointer"
+				onclick={refreshView}
+				title="Refresh (F5)"
+				aria-label="Refresh"
+			>
+				<HugeiconsIcon icon={Refresh03Icon} strokeWidth={2.2} class="h-4 w-4" />
 			</button>
 		{#if !prefs.homeInSidebar}
 			<a
@@ -340,7 +349,7 @@
 		{#if prefs.visibleIcons.titlebar.mode !== false}
 			<button
 				class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground cursor-pointer"
-				onclick={toggleMode}
+				onclick={(e) => smoothToggleMode(e)}
 				title="Toggle theme mode"
 				aria-label="Toggle theme mode"
 			>

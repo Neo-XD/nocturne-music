@@ -22,7 +22,8 @@
 		CdIcon,
 		MusicNote01Icon,
 		PlayListIcon,
-		UserMultiple02Icon
+		UserMultiple02Icon,
+		PlayIcon
 	} from '@hugeicons/core-free-icons';
 	import MediaCard from './MediaCard.svelte';
 	import CommunityCard from './CommunityCard.svelte';
@@ -159,7 +160,19 @@
 	style="contain-intrinsic-size: auto {HEIGHT[mode]};"
 >
 	{#if title || onMore}
-		<SectionHeading title={title ?? ''} icon={ICONS[mode]} {onMore} {headingClass} />
+		<SectionHeading title={title ?? ''} icon={ICONS[mode]} {onMore} {headingClass}>
+			{#if mode === 'song' && songs.length > 0}
+				<button
+					class="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/60 bg-accent/20 hover:bg-accent/40 px-2.5 py-1 text-xs font-medium text-foreground transition-colors"
+					onclick={() => play(0)}
+					title="Play all"
+					aria-label="Play all"
+				>
+					<HugeiconsIcon icon={PlayIcon} class="h-3 w-3 fill-current text-primary" />
+					<span>Play all</span>
+				</button>
+			{/if}
+		</SectionHeading>
 	{/if}
 	<!-- Measure on pointer enter, because a shelf skipped by content-visibility has no layout at
 	     mount: scrollWidth reads 0 and the arrows never appear. They only show on hover, so measuring

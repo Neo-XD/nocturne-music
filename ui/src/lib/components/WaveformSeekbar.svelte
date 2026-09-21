@@ -76,6 +76,7 @@
 	}
 
 	function handlePointerDown(e: PointerEvent) {
+		e.stopPropagation();
 		if (!containerEl || duration <= 0) return;
 		isDragging = true;
 		containerEl.setPointerCapture(e.pointerId);
@@ -83,6 +84,7 @@
 	}
 
 	function handlePointerMove(e: PointerEvent) {
+		e.stopPropagation();
 		if (!containerEl) return;
 		const rect = containerEl.getBoundingClientRect();
 		const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -95,6 +97,7 @@
 	}
 
 	function handlePointerUp(e: PointerEvent) {
+		e.stopPropagation();
 		if (!isDragging || !containerEl || duration <= 0) return;
 		isDragging = false;
 		try {
@@ -112,6 +115,7 @@
 	bind:this={containerEl}
 	class="group/waveform relative flex w-full cursor-pointer select-none items-center py-1 transition-all {className}"
 	style="height: {height + 8}px;"
+	onclick={(e) => e.stopPropagation()}
 	onpointerdown={handlePointerDown}
 	onpointermove={handlePointerMove}
 	onpointerup={handlePointerUp}

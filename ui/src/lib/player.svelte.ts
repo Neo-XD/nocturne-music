@@ -1138,12 +1138,18 @@ export function ratingOf(song: SongItem): Rating {
 
 export const isLiked = (song: SongItem): boolean => ratingOf(song) === 'like';
 
-/** Like/unlike whatever is playing. Thin wrapper so the player bar and the mini player share one
+/** Like/dislike whatever is playing. Thin wrapper so the player bar and the mini player share one
  *  implementation (and one optimistic path) with every list row. */
-export function toggleNowPlayingLike(): Promise<void> {
+export function toggleNowPlayingRating(want: 'like' | 'dislike' = 'like'): Promise<void> {
 	const n = playback.now;
 	if (!n) return Promise.resolve();
-	return toggleRating({ video_id: n.videoId, title: n.title, artists: n.artists }, 'like');
+	return toggleRating({ video_id: n.videoId, title: n.title, artists: n.artists }, want);
+}
+export const toggleNowPlayingLike = () => toggleNowPlayingRating('like');
+
+export function nowPlayingRating(): 'like' | 'dislike' | 'indifferent' {
+	const n = playback.now;
+	return n ? ratingOf({ video_id: n.videoId, title: n.title, artists: n.artists }) : 'indifferent';
 }
 
 // --- Volume ------------------------------------------------------------------------------------
@@ -1355,6 +1361,7 @@ export async function startRadio(
 
 // Transient UI state for write actions.
 export const ui = $state({
+	epoch: 0,
 	addSongs: null as SongItem[] | null, // add-to-playlist picker target(s), full items for optimistic appends
 	share: null as BrowseItem | null, // the share modal's target
 	toast: null as Toast | null,
@@ -1373,6 +1380,11 @@ export const ui = $state({
 	sidebarForceExpanded: false,
 	sidebarWidth: browser ? Math.min(420, Math.max(180, parseInt(localStorage.getItem('sidebar_width') || '240', 10) || 240)) : 240
 });
+
+export function refreshView() {
+	clearCached();
+	ui.epoch++;
+}
 
 export function setSidebarWidth(width: number) {
 	const clamped = Math.min(420, Math.max(180, Math.round(width)));

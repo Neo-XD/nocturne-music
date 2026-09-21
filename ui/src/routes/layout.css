@@ -1009,6 +1009,10 @@ html.art-tint.dark {
 	* {
 		@apply border-border outline-ring/50;
 	}
+	button:not(:disabled),
+	[role='button'] {
+		cursor: pointer;
+	}
 	body {
 		/* Transparent, not bg-background: the window itself is transparent so the root container
 		   can paint rounded corners (see +layout.svelte). */
@@ -1256,5 +1260,38 @@ input[type='range'].range:active::-webkit-slider-thumb {
 .info-sidebar *::-webkit-scrollbar:horizontal {
 	display: none !important;
 	height: 0 !important;
+}
+
+/* --- Ultra-Smooth Dark <-> Light Theme Transitions --- */
+::view-transition-old(root),
+::view-transition-new(root) {
+	animation: none;
+	mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+	z-index: 1;
+}
+::view-transition-new(root) {
+	z-index: 9999;
+}
+
+/* Fallback & smooth variable interpolation across surfaces */
+html.theme-transition,
+html.theme-transition body,
+html.theme-transition .app-titlebar,
+html.theme-transition nav,
+html.theme-transition main,
+html.theme-transition header,
+html.theme-transition aside,
+html.theme-transition [data-tauri-drag-region],
+html.theme-transition .app-floating-panel,
+html.theme-transition .bg-card,
+html.theme-transition .bg-background,
+html.theme-transition .bg-sidebar,
+html.theme-transition .bg-muted {
+	transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+	            border-color 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+	            color 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+	            box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 

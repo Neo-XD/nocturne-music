@@ -298,9 +298,13 @@ struct QueueState {
     /// Human name of what seeded the queue (playlist/album title, "<song> Radio") — the queue
     /// panel's "Next from: …" header. Pure display metadata.
     source_name: Option<String>,
+    /// The playlist this queue was started from, exactly as the page passed it.
+    source_id: Option<String>,
     /// This queue is a radio: YouTube generated every upcoming track, so "Add to queue" replaces
     /// them rather than queueing behind an endless feed the user never asked to finish.
     radio: bool,
+    /// A radio hydration or autoplay fetch in flight for this queue.
+    hydrating: Option<u64>,
     /// The queue index we've already appended to mpv for gapless lookahead (if any).
     lookahead_loaded: Option<usize>,
     /// Which client served the currently-loaded track (for the WEB_REMIX-403 feedback). context/06.
@@ -1111,14 +1115,16 @@ impl AppState {
         let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let video_id = seed.video_id.clone();
 
+        let local = crate::local::is_local_song(&video_id);
         {
             let mut q = self.queue.lock().await;
             // Unplayed manual adds survive a context switch (Spotify semantics): they follow the
             // new track, ahead of its radio (hydration appends behind them).
             let mut carried = upcoming_queued(&q.items, q.current);
             // A local file has no radio behind it (see below), so don't promise one in the header.
-            q.source_name = (!crate::local::is_local_song(&seed.video_id))
-                .then(|| format!("{} Radio", seed.title));
+            q.source_name = (!local).then(|| format!("{} Radio", seed.title));
+            q.source_id = None;
+            q.hydrating = (!local).then_some(gen);
             q.items = vec![seed];
             q.items.append(&mut carried);
             q.current = 0;
@@ -1132,13 +1138,14 @@ impl AppState {
 
         let _ = self.player.set_skip_fade_in(true);
         if !self.start_current(gen).await {
+            self.end_hydration(gen).await;
             return;
         }
 
         // A local file isn't a videoId YouTube has ever heard of: asking for its radio is a
         // guaranteed-useless request, and offline (where local music earns its keep) it's a
         // guaranteed-failing one.
-        if crate::local::is_local_song(&video_id) {
+        if local {
             self.prime_lookahead(gen).await;
             return;
         }
@@ -1180,6 +1187,7 @@ impl AppState {
             Err(e) => tracing::warn!(error = %e, "next() radio hydration failed"),
         }
 
+        self.end_hydration(gen).await;
         self.prime_lookahead(gen).await;
     }
 
@@ -1233,8 +1241,10 @@ impl AppState {
             q.items = items;
             q.current = start;
             q.lookahead_loaded = None;
-            q.radio_seed = radio_seed_for(source_id);
+            q.radio_seed = radio_seed_for(source_id.clone());
             q.source_name = source_name;
+            q.source_id = source_id;
+            q.hydrating = None;
             q.radio = false; // a chosen playlist/album; `start_radio` sets it back on for its own
             if keep_shuffled {
                 // Snapshot the real playlist order (for un-shuffle), then play the clicked track
@@ -2152,7 +2162,14 @@ impl AppState {
     /// Update active Discord RPC configuration dynamically.
     pub fn reload_discord_config(&self) {
         if let Some(d) = &self.discord {
-            d.update_config(crate::discord::load_discord_config(&self.db));
+            d.set_config(crate::discord::load_discord_config(&self.db));
+        }
+    }
+
+    /// Set Discord RPC configuration from JSON blob.
+    pub fn set_discord_config(&self, json: &str) {
+        if let Some(d) = &self.discord {
+            d.set_config(crate::discord::RpcConfig::parse(Some(json)));
         }
     }
 
@@ -2226,6 +2243,7 @@ impl AppState {
                 "shuffle": q.shuffle_orig.is_some(),
                 "repeat": q.repeat,
                 "sourceName": &q.source_name,
+                "sourceId": &q.source_id,
                 // The playing row, so `start_current`'s duration/artists backfill still reaches
                 // the panel without shipping the other 4,999 rows to carry it.
                 "current": q.items.get(q.current),
@@ -2238,6 +2256,7 @@ impl AppState {
                 "shuffle": q.shuffle_orig.is_some(),
                 "repeat": q.repeat,
                 "sourceName": &q.source_name,
+                "sourceId": &q.source_id,
             })
         };
         let _ = self.app.emit(if unchanged { "queue-index" } else { "queue-changed" }, payload);
@@ -2285,6 +2304,7 @@ impl AppState {
             "shuffle": q.shuffle_orig.is_some(),
             "repeat": q.repeat,
             "sourceName": &q.source_name,
+            "sourceId": &q.source_id,
         })
     }
 
@@ -2391,6 +2411,17 @@ impl AppState {
     /// tracks were appended. Guards: setting on, repeat Off, not a guest, tail near (last two
     /// tracks), generation unchanged across the network call. Continuation matches where the queue
     /// came from: playlist/album radio (`radio_seed`) or song radio seeded from the last track.
+    async fn end_hydration(&self, gen: u64) {
+        let mut q = self.queue.lock().await;
+        if q.hydrating == Some(gen) {
+            q.hydrating = None;
+        }
+    }
+
+    /// Extend the queue with radio continuation when it's nearly out (autoplay). Returns how many
+    /// tracks were appended. Guards: setting on, repeat Off, not a guest, tail near (last two
+    /// tracks), generation unchanged across the network call. Continuation matches where the queue
+    /// came from: playlist/album radio (`radio_seed`) or song radio seeded from the last track.
     /// Dedupes against the entire current queue; caps at `AUTOPLAY_BATCH` per hop. When the radio
     /// returns nothing new, playback later stops exactly as pre-autoplay (no retry loop).
     async fn extend_queue_radio(self: &std::sync::Arc<Self>, gen: u64) -> usize {
@@ -2402,6 +2433,9 @@ impl AppState {
             let q = self.queue.lock().await;
             if q.repeat != RepeatMode::Off {
                 return 0; // the queue never exhausts under repeat
+            }
+            if q.hydrating == Some(gen) {
+                return 0; // hydration in flight, don't race duplicate radio calls
             }
             if q.items.len().saturating_sub(q.current) > 2 {
                 return 0; // tail not near yet
@@ -2432,7 +2466,11 @@ impl AppState {
         }
         let added = {
             let mut q = self.queue.lock().await;
-            merge_radio(&mut q.items, fresh, existing, AUTOPLAY_BATCH)
+            let current_existing: HashSet<String> =
+                q.items.iter().map(|i| i.video_id.clone()).collect();
+            let mut combined_existing = existing;
+            combined_existing.extend(current_existing);
+            merge_radio(&mut q.items, fresh, combined_existing, AUTOPLAY_BATCH)
         };
         if added > 0 {
             tracing::info!(added, seed = %seed, "autoplay extended the queue");
@@ -2482,6 +2520,7 @@ impl AppState {
                     "shuffleOrig": &q.shuffle_orig,
                     "radioSeed": &q.radio_seed,
                     "sourceName": &q.source_name,
+                    "sourceId": &q.source_id,
                     "radio": q.radio,
                 })
                 .to_string()
@@ -2525,6 +2564,8 @@ impl AppState {
             saved.get("radioSeed").and_then(|v| v.as_str()).map(str::to_owned);
         let source_name: Option<String> =
             saved.get("sourceName").and_then(|v| v.as_str()).map(str::to_owned);
+        let source_id: Option<String> =
+            saved.get("sourceId").and_then(|v| v.as_str()).map(str::to_owned);
         let radio = saved.get("radio").and_then(|v| v.as_bool()).unwrap_or(false);
         // `queue_index` is rewritten on every persist while `queue_json` is only rewritten when
         // the rows change, so on an advance it is the fresher of the two. But the two are separate
@@ -2567,6 +2608,7 @@ impl AppState {
             q.shuffle_orig = shuffle_orig;
             q.radio_seed = radio_seed;
             q.source_name = source_name;
+            q.source_id = source_id;
             q.radio = radio;
         }
         if repeat == RepeatMode::One {

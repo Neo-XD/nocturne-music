@@ -19,7 +19,7 @@
 
 	const q = $derived(page.url.searchParams.get('q') ?? '');
 	const cat = $derived(page.url.searchParams.get('cat') ?? 'songs');
-	const label = $derived({ songs: 'Songs', albums: 'Albums', artists: 'Artists', playlists: 'Playlists' }[cat] ?? 'Results');
+	const label = $derived({ songs: 'Songs', videos: 'Videos', albums: 'Albums', artists: 'Artists', playlists: 'Playlists' }[cat] ?? 'Results');
 
 	async function load(query: string, category: string) {
 		const key = `searchmore:${category}:${query}`;
@@ -38,6 +38,8 @@
 			let fresh: MoreResult;
 			if (category === 'songs') {
 				fresh = { songs: await api.search(query), cards: [] };
+			} else if (category === 'videos') {
+				fresh = { songs: await api.searchVideos(query), cards: [] };
 			} else {
 				fresh = {
 					songs: [],
@@ -66,7 +68,7 @@
 	<p class="mb-6 text-sm text-muted-foreground">Results for “{q}”</p>
 
 	{#if loading}
-		{#if cat === 'songs'}
+		{#if cat === 'songs' || cat === 'videos'}
 			{#each Array(10) as _, i (i)}
 				<TrackRowSkeleton />
 			{/each}
@@ -79,7 +81,7 @@
 		{/if}
 	{:else if error}
 		<ErrorState message={error} onRetry={() => load(q, cat)} />
-	{:else if cat === 'songs'}
+	{:else if cat === 'songs' || cat === 'videos'}
 		<div class="content-in">
 			{#each songs as song (song.video_id)}
 				<TrackRow

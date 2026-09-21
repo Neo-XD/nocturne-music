@@ -19,6 +19,7 @@ use crate::transport::{Error, InnerTube};
 
 /// Search filter params (opaque base64). context/08.
 pub const FILTER_SONG: &str = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
+pub const FILTER_VIDEO: &str = "EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D";
 pub const FILTER_ALBUM: &str = "EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D";
 pub const FILTER_ARTIST: &str = "EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D";
 pub const FILTER_COMMUNITY_PLAYLIST: &str = "EgeKAQQoAEABagoQAxAEEAoQCRAF";
@@ -110,6 +111,21 @@ impl InnerTube {
         let mut r = metadata::parse_search(&value);
         self.drop_video_songs(&mut r.items);
         Ok(r)
+    }
+
+    /// Search video uploads only (`FILTER_VIDEO`): the covers, live sets and remixes that never
+    /// got an official release, which `FILTER_SONG` cannot return by definition (#209, #266).
+    /// context/08.
+    pub async fn search_videos(
+        &self,
+        metadata_client: &YouTubeClient,
+        query: &str,
+    ) -> Result<SearchResult, Error> {
+        if self.hide_videos() {
+            return Ok(SearchResult { items: Vec::new() });
+        }
+        let value = self.search_raw(metadata_client, query, Some(FILTER_VIDEO)).await?;
+        Ok(metadata::parse_search(&value))
     }
 
     /// Unfiltered search → categorized sections (top / songs / albums / artists / playlists).
@@ -289,7 +305,17 @@ impl InnerTube {
         browse_id: &str,
     ) -> Result<Vec<BrowseItem>, Error> {
         let value = self.browse(client, Some(browse_id), None).await?;
+        let mut seen = std::collections::HashSet::new();
+        let mut dropped = 0usize;
+        let mut keep = |items: &mut Vec<BrowseItem>| {
+            items.retain(|i: &BrowseItem| {
+                let fresh = seen.insert(i.id.clone());
+                dropped += usize::from(!fresh);
+                fresh
+            })
+        };
         let mut items = browse::parse_library(&value);
+        keep(&mut items);
         let mut token = browse::continuation_token(&value);
         // ponytail: page cap, so a token that never resolves can't spin forever. Raise it if
         // anyone turns up with a library past ~500 entries.
@@ -302,12 +328,20 @@ impl InnerTube {
             }) else {
                 break;
             };
-            let page = browse::parse_library(&value);
+            let mut page = browse::parse_library(&value);
             if page.is_empty() {
-                break; // a spurious token (some grids carry one that resolves to nothing)
+                break; // a spurious token: some grids carry one that resolves to nothing
             }
+            keep(&mut page);
             items.extend(page);
             token = browse::continuation_token(&value).filter(|next| *next != t);
+        }
+        if dropped > 0 {
+            tracing::warn!(
+                browse_id,
+                dropped,
+                "library grid repeated cards; kept the first of each"
+            );
         }
         Ok(items)
     }
@@ -588,16 +622,33 @@ impl InnerTube {
         video_id: &str,
         set_video_id: &str,
     ) -> Result<(), Error> {
-        self.edit_playlist(
+        self.playlist_remove_many(
             client,
             playlist_id,
-            serde_json::json!({
-                "action": "ACTION_REMOVE_VIDEO",
-                "setVideoId": set_video_id,
-                "removedVideoId": video_id,
-            }),
+            &[(video_id.to_owned(), set_video_id.to_owned())],
         )
         .await
+    }
+
+    /// Remove several videos in one `edit_playlist` request: the endpoint takes an array of
+    /// actions, so a bulk removal is one round trip rather than one per track.
+    pub async fn playlist_remove_many(
+        &self,
+        client: &YouTubeClient,
+        playlist_id: &str,
+        tracks: &[(String, String)],
+    ) -> Result<(), Error> {
+        let actions = tracks
+            .iter()
+            .map(|(video_id, set_video_id)| {
+                serde_json::json!({
+                    "action": "ACTION_REMOVE_VIDEO",
+                    "setVideoId": set_video_id,
+                    "removedVideoId": video_id,
+                })
+            })
+            .collect();
+        self.edit_playlist_actions(client, playlist_id, actions).await
     }
 
     /// Store a sort order on a playlist you own, so every other client on the account shows the

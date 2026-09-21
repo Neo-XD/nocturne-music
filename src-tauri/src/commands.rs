@@ -21,6 +21,13 @@ pub async fn search(state: St<'_>, query: String) -> Result<Vec<SongItem>, Strin
     Ok(result.items)
 }
 
+#[tauri::command]
+pub async fn search_videos(state: St<'_>, query: String) -> Result<Vec<SongItem>, String> {
+    let client = metadata_client(&state)?;
+    let result = state.it.search_videos(client, &query).await.map_err(|e| e.to_string())?;
+    Ok(result.items)
+}
+
 /// Unfiltered search → categorized sections for the search page.
 #[tauri::command]
 pub async fn search_all(state: St<'_>, query: String) -> Result<SearchResults, String> {
@@ -237,13 +244,14 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 39] = [
+const UI_SETTINGS: [&str; 40] = [
     "volume",
     "proxy",
     "quality",
     "enable_history",
     "disabled_stream_clients",
     "discord_rpc",
+    "discord_rpc_config",
     "close_to_tray",
     "autostart",
     "autoplay",
@@ -347,7 +355,9 @@ pub async fn set_setting(
     if key == "discord_rpc" {
         state.set_discord_enabled(value == "true");
     }
-    if key.starts_with("discord_rpc") {
+    if key == "discord_rpc_config" {
+        state.set_discord_config(&value);
+    } else if key.starts_with("discord_rpc") {
         state.reload_discord_config();
     }
     if key == "crossfade_seconds" {
@@ -1085,6 +1095,25 @@ pub async fn remove_from_playlist(
     Ok(())
 }
 
+/// Remove several tracks from one playlist in a single request (the bulk bar's Remove).
+#[tauri::command]
+pub async fn remove_many_from_playlist(
+    state: St<'_>,
+    playlist_id: String,
+    tracks: Vec<(String, String)>,
+) -> Result<(), String> {
+    let client = editable_playlist(&state, &playlist_id)?;
+    state
+        .it
+        .playlist_remove_many(client, &playlist_id, &tracks)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (video_id, _) in &tracks {
+        state.db.remove_playlist_track(&playlist_id, video_id);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn create_playlist(
     app: tauri::AppHandle,
@@ -1463,6 +1492,32 @@ pub async fn lt_request_sync(state: St<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/// Trigger or simulate an incoming Listen Together join request popup.
+#[tauri::command]
+pub async fn trigger_lt_join_request(
+    app: tauri::AppHandle,
+    username: Option<String>,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let name = username.unwrap_or_else(|| "Friend".to_string());
+    let user_id = format!(
+        "user_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
+    app.emit(
+        "incoming-lt-request",
+        serde_json::json!({
+            "username": name,
+            "userId": user_id,
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // --- lyrics ---------------------------------------------------------------------------------
 
 /// Lyrics for a track (cached). The UI passes the metadata it already has from `now-playing`;
@@ -1503,6 +1558,31 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     if let Some(cached) = CACHE.get() {
         return Ok(cached.clone());
     }
+
+    let v085_note = ReleaseNote {
+        version: "0.8.5".to_string(),
+        date: "2026-09-21".to_string(),
+        body: r#"### Nocturne Music v0.8.5
+
+#### New Features
+- **Dedicated Discord RPC Settings Tab & Live Preview**: Moved Discord Rich Presence into its own dedicated tab on the settings sidebar with responsive textbox template editing (`{title}`, `{artist}`, `{album}`), quick insertion chips, live token evaluation, authentic Nocturne app icon/branding, and an interactive real-time visual card preview.
+- **Title Bar Refresh**: Dedicated quick refresh button (`Refresh03Icon`) in the window titlebar beside the navigation controls with global `F5` keyboard shortcut support to immediately reload views and caches without interrupting playback.
+- **Play All on Song Shelves**: Added a one-click "Play all" action directly on song shelves across Home and Browse feeds to queue and play the entire shelf seamlessly.
+- **MiniPlayer Dislike Rating**: Added a dedicated Dislike button (`ThumbsDownIcon`) alongside the Like button (`ThumbsUpIcon`) in the MiniPlayer with immediate rating updates.
+- **Search Videos Integration**: Dedicated video search endpoint (`search_videos`) and category display for browsing music videos directly within Search and Search More views.
+
+#### Improvements
+- **Queue Hydration & Duplicate Radio Prevention**: Robust queue generation tracking (`hydrating`) prevents duplicate tracks and race conditions when fast-skipping or autoplaying radio feeds.
+- **Sticky Context Tracking**: Carries and restores playlist `source_id` across queue snapshot, emission, and persistent session restore for accurate playlist-continuation autoplay.
+- **Pointer Cursor Restoration**: Restored native pointer cursor across buttons and interactive elements under Tailwind v4.
+- **Bulk Playlist Track Removal**: Backend command (`remove_many_from_playlist`) and API methods for efficient batch track removals.
+- **Familiar Artists Navigation**: Ensured Familiar Artists reliably navigate to artist channel pages using persistent `browseId` resolution.
+
+#### Bug Fixes
+- **Library Duplicate Key Crashes**: Added deduplication when paging through library card grids to prevent Svelte 5 duplicate key runtime crashes.
+- **Autoplay Race Conditions**: Fixed duplicate tracks appearing at the queue tail when fast-skipping while background radio hydration was in flight.
+- **Discord IPC Rate-Limiting & Branding**: Hardened Discord IPC connection loop, resolved official registered Nocturne application ID (`1543224160166092828`), and removed clutter from General settings."#.to_string(),
+    };
 
     let v084_note = ReleaseNote {
         version: "0.8.4".to_string(),
@@ -1747,14 +1827,16 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v084_note, v083_note, v082_note, v081_note, v080_note, v072_note, v071_note, v07d_note,
-        v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note, v06_note,
+        v085_note, v084_note, v083_note, v082_note, v081_note, v080_note, v072_note, v071_note,
+        v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note,
+        v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "0.8.5".to_string(),
             "0.8.4".to_string(),
             "0.8.3".to_string(),
             "0.8.2".to_string(),

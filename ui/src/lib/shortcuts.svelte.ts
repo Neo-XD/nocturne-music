@@ -1,7 +1,7 @@
 // App-wide keyboard shortcuts and custom keybindings system.
 import { browser } from '$app/environment';
 import * as api from './api';
-import { cycleRepeat, np, nudgeVolume, playback, toggleMute, ui, toast } from './player.svelte';
+import { cycleRepeat, np, nudgeVolume, playback, toggleMute, ui, toast, refreshView } from './player.svelte';
 
 export type ShortcutAction =
 	| 'search'
@@ -267,6 +267,12 @@ export function initShortcuts() {
 	initKeybindings();
 
 	const onKey = (e: KeyboardEvent) => {
+		if (e.key === 'F5') {
+			e.preventDefault();
+			refreshView();
+			return;
+		}
+
 		const typingNow = isTyping(e.target);
 
 		// 1. Check search shortcut (default Ctrl+Space)

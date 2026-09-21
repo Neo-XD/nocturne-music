@@ -318,6 +318,7 @@ export interface ArtistPage {
 
 // --- commands (context/11) -----------------------------------------------------------------
 export const search = (query: string) => invoke<SongItem[]>('search', { query });
+export const searchVideos = (query: string) => invoke<SongItem[]>('search_videos', { query });
 /** Unfiltered search → categorized sections. */
 export const searchAll = (query: string) => invoke<SearchResults>('search_all', { query });
 /** Filtered "Show more" card search for one category (albums / artists / playlists). */
@@ -538,6 +539,8 @@ export const addToPlaylist = (playlistId: string, videoId: string) =>
 	invoke<boolean>('add_to_playlist', { playlistId, videoId });
 export const removeFromPlaylist = (playlistId: string, videoId: string, setVideoId: string) =>
 	invoke<void>('remove_from_playlist', { playlistId, videoId, setVideoId });
+export const removeManyFromPlaylist = (playlistId: string, tracks: [string, string][]) =>
+	invoke<void>('remove_many_from_playlist', { playlistId, tracks });
 export const createPlaylist = (
 	title: string,
 	description?: string,
@@ -772,6 +775,8 @@ export const ltTransferHost = (userId: string) => invoke<void>('lt_transfer_host
 export const ltApproveSuggestion = (id: string) => invoke<void>('lt_approve_suggestion', { id });
 export const ltRejectSuggestion = (id: string) => invoke<void>('lt_reject_suggestion', { id });
 export const ltRequestSync = () => invoke<void>('lt_request_sync');
+export const triggerLtJoinRequest = (username?: string) =>
+	invoke<void>('trigger_lt_join_request', { username });
 
 export const onLtState = (cb: (s: LtState) => void): Promise<UnlistenFn> =>
 	listen<LtState>('lt-state', (e) => cb(e.payload));

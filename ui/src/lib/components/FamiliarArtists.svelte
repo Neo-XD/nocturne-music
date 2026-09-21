@@ -54,7 +54,8 @@
 		}))
 	]);
 
-	let artists = $state<ArtistPage[]>([]);
+	type FamiliarArtist = ArtistPage & { browseId: string };
+	let artists = $state<FamiliarArtist[]>([]);
 	let loading = $state(true);
 	/** Subscribe state per channel, optimistic — seeded from each artist page as it lands. */
 	let subs = $state<Record<string, boolean>>({});
@@ -65,14 +66,14 @@
 	const listed = $derived(artists.slice(0, LISTED));
 	const cluster = $derived(artists.slice(0, SLOTS.length));
 
-	async function fetchArtist(id: string): Promise<ArtistPage | null> {
+	async function fetchArtist(id: string): Promise<FamiliarArtist | null> {
 		const key = `artist:${id}`;
 		const hit = getCached<ArtistPage>(key);
-		if (hit) return hit;
+		if (hit) return { ...hit, browseId: id };
 		try {
 			const page = await api.getArtist(id);
 			putCached(key, page);
-			return page;
+			return { ...page, browseId: id };
 		} catch {
 			return null; // one dead channel doesn't cost the section
 		}
@@ -83,7 +84,7 @@
 			loading = false;
 			return;
 		}
-		const pages = (await Promise.all(ids.map(fetchArtist))).filter((p): p is ArtistPage => !!p);
+		const pages = (await Promise.all(ids.map(fetchArtist))).filter((p): p is FamiliarArtist => !!p);
 		// Set once, in play-count order: filling the list artist by artist would reflow the feed
 		// under the reader as each request lands.
 		artists = pages;
@@ -91,15 +92,15 @@
 		loading = false;
 	});
 
-	const asItem = (a: ArtistPage): BrowseItem => ({
+	const asItem = (a: FamiliarArtist): BrowseItem => ({
 		kind: 'artist',
-		id: a.channelId,
+		id: a.browseId || a.channelId,
 		title: a.name ?? 'Artist',
 		subtitle: a.subscribers,
 		thumbnail: a.thumbnail
 	});
 
-	const open = (a: ArtistPage) => goto(`/artist/${encodeURIComponent(a.channelId)}`);
+	const open = (a: FamiliarArtist) => goto(`/artist/${encodeURIComponent(a.browseId || a.channelId)}`);
 
 	function playCountFor(a: ArtistPage): number {
 		return personal.artists[a.channelId]?.count ?? (a.name ? personal.artists[a.name]?.count : 0) ?? 0;

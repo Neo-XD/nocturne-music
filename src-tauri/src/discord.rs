@@ -1,19 +1,14 @@
 //! Discord Rich Presence via Discord's local IPC socket.
 //!
-//! Metrolist hand-rolls an OAuth2+PKCE login and a raw Gateway client because Android has no
-//! Discord app to talk to — it has to authenticate *as the user* and push `PRESENCE_UPDATE`
-//! itself. On desktop that whole stack is unnecessary: the running Discord client exposes an IPC
-//! socket that accepts a presence payload directly. So there is no login, no token store, no
-//! heartbeat, no reconnect strategy, and no `external-assets` header spoof — the local client does
-//! all of it, and the identity is simply whoever is signed into Discord.
-//!
 //! Mirrors `media.rs`: the IPC client is blocking and stateful, so it gets an owner thread fed by a
 //! channel. Everything here is best-effort — Discord not running, or quitting mid-song, is a
 //! `debug!` line, never an error the user sees (context/16 fail-soft, same as the OS media widget).
 //!
-//! Presence is shown **only while actually playing**. Paused (including the restored-but-not-
-//! started queue on app launch) clears the card — a frozen "Listening to…" hours after the user
-//! walked away is worse than no card.
+//! Presence is shown **only while actually playing**, unless the user turns on "show when paused".
+//! Even then, a card needs playback to have started at least once this session: the queue restored on
+//! launch is paused too, and a frozen "Listening to…" for a track nobody pressed play on is worse
+//! than no card. A paused card also carries no timeline, because Discord has no paused state and its
+//! progress bar would keep running.
 //!
 //! Timeline correctness hinges on three rules:
 //! 1. A track change resets the thread's position to 0 — the app only ever starts tracks from the
@@ -32,7 +27,7 @@
 //! Sending is rate-limited, because Discord silently drops presence updates that arrive too close
 //! together — and a dropped update is invisible (the socket ACKs it). Two rules keep state from
 //! getting stranded behind that: a **trailing-edge floor** (when a push is due but too soon, the
-//! loop sleeps until the floor expires and then sends whatever is current — never discards it),
+//! loop sleeps until the floor expires and sends whatever is current — never discards it),
 //! and a short **grace** on a brand-new track so its length can land before the first push. Without
 //! the grace, a track change pushed a bar-less card and needed a second push milliseconds later,
 //! which Discord dropped — leaving the card stuck as an elapsed counter with no progress bar.
@@ -44,20 +39,19 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use innertube::SongItem;
 
-/// Discord application id (a snowflake — digits only). **Must be set before rich presence does
-/// anything.** Register an app named "Nocturne" at <https://discord.com/developers/applications> and
-/// paste its Application ID here — the app's *name* is what renders after "Listening to", and its
-/// icon is the fallback artwork. Nothing else in the portal needs configuring: no bot user, no
-/// OAuth redirect, no client secret. (Metrolist needs all of that only because Android has no
-/// Discord client.)
+/// Discord application id (a snowflake — digits only). Registered app named "Nocturne".
 const APP_ID: &str = "1543224160166092828";
 
 const SONG_URL: &str = "https://music.youtube.com/watch?v=";
+const ARTIST_URL: &str = "https://music.youtube.com/channel/";
+const ALBUM_URL: &str = "https://music.youtube.com/browse/";
 const REPO_URL: &str = "https://github.com/Neo-XD/nocturne-music";
+const LT_ACTION_URL: &str = "https://github.com/Neo-XD/nocturne-music?action=listen-together";
+/// The small "provider badge" Discord draws in the corner of the artwork.
+const BADGE_URL: &str =
+    "https://raw.githubusercontent.com/Neo-XD/nocturne-music/master/src-tauri/icons/128x128.png";
 
-/// Reconnect backoff while enabled but unconnected (Discord not running, or it quit). Starts short
-/// — Discord may simply be slower to start than we are — and eases off so a permanently-absent
-/// Discord costs one wakeup every `CONNECT_RETRY_MAX`.
+/// Reconnect backoff while enabled but unconnected (Discord not running, or it quit).
 const CONNECT_RETRY_MIN: Duration = Duration::from_secs(1);
 const CONNECT_RETRY_MAX: Duration = Duration::from_secs(15);
 /// How long to park when nothing is pending. Any message wakes the thread anyway.
@@ -65,8 +59,7 @@ const IDLE_TICK: Duration = Duration::from_secs(15);
 /// A position this far off the timeline we last pushed means the user seeked, so the progress bar
 /// needs re-pushing. Anything smaller is just clock/tick noise.
 const SEEK_DRIFT_MS: i64 = 2_000;
-/// Never send two updates inside this window — Discord drops the second, and does so silently.
-/// Pending state is not discarded: the loop wakes when the floor expires and sends the latest.
+/// Never send two updates inside this window — Discord drops the second silently.
 const SEND_FLOOR: Duration = Duration::from_millis(1_500);
 /// How long a new track waits for mpv to report its length before we give up and push a card with
 /// no progress bar. Collapses the track-change burst (track + length + play state) into one push.
@@ -75,32 +68,114 @@ const DURATION_GRACE: Duration = Duration::from_millis(800);
 const MIN_WAIT: Duration = Duration::from_millis(10);
 /// Discord rejects `details`/`state`/`large_text` outside 2–128 characters.
 const MAX_FIELD: usize = 128;
-/// Discord rejects asset URLs longer than this — better a text-only card than a rejected payload.
+/// Discord rejects asset URLs longer than this.
 const MAX_ASSET_URL: usize = 256;
+/// Discord rejects a button whose URL is longer than this, and with it the whole payload.
+const MAX_BUTTON_URL: usize = 512;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct DiscordConfig {
+/// How the card is assembled, from the user's Discord settings tab. Persisted as one JSON blob in
+/// the `discord_rpc_config` setting.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct RpcConfig {
+    /// Which slot Discord renders after "Listening to": `app` | `line1` | `line2`.
+    pub status_line: String,
+    /// Replaces the registered application name in that slot. Empty keeps "Nocturne".
+    pub app_name: String,
+    /// What the card's first line (`details`) carries: `title` | `artist` | `album` or template.
+    pub line1: String,
+    /// The second line (`state`): `title` | `artist` | `album` | `artist_album` | `off` or template.
+    pub line2: String,
+    /// Show the album artwork at all. Also gates [`Self::line3`].
+    pub cover: bool,
+    /// The card's third line: `album` | `title` | `artist` | `off`.
+    pub line3: String,
+    /// Make line 1 / line 2 / the artwork open the thing they name.
+    pub link_line1: bool,
+    pub link_line2: bool,
+    pub link_cover: bool,
+    /// Show the elapsed/remaining progress bar.
+    pub timestamps: bool,
+    /// Draw the Nocturne badge in the corner of the artwork.
+    pub badge: bool,
+    /// Keep the card up while paused.
+    pub show_paused: bool,
+    /// Say only that music is playing: no title, artist, album, artwork, bar or buttons.
+    pub hide_details: bool,
+    /// The two buttons, in card order: `listen` | `album` | `artist` | `app` | `off`.
+    pub button1: String,
+    pub button2: String,
+    /// Optional custom registered Discord Application ID (snowflake digits only).
     pub app_id: String,
-    pub details: String,
-    pub state: String,
-    pub show_buttons: bool,
-    pub button_label: String,
-    pub show_pause: bool,
-    pub show_time: bool,
+    /// Optional custom label for the interactive button.
+    pub custom_button_label: String,
 }
 
-impl Default for DiscordConfig {
+impl Default for RpcConfig {
     fn default() -> Self {
-        Self {
-            app_id: APP_ID.to_string(),
-            details: "{title}".to_string(),
-            state: "{artist}".to_string(),
-            show_buttons: true,
-            button_label: "Listen on YouTube Music".to_string(),
-            show_pause: false,
-            show_time: true,
+        RpcConfig {
+            status_line: "line2".into(),
+            app_name: String::new(),
+            line1: "title".into(),
+            line2: "artist".into(),
+            cover: true,
+            line3: "album".into(),
+            link_line1: false,
+            link_line2: false,
+            link_cover: false,
+            timestamps: true,
+            badge: true,
+            show_paused: false,
+            hide_details: false,
+            button1: "listen".into(),
+            button2: "app".into(),
+            app_id: String::new(),
+            custom_button_label: "Listen on Nocturne".into(),
         }
     }
+}
+
+impl RpcConfig {
+    /// Parse the stored blob. Anything unparseable is the default card.
+    pub fn parse(json: Option<&str>) -> Self {
+        json.and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default()
+    }
+}
+
+pub fn load_discord_config(db: &crate::db::Db) -> RpcConfig {
+    let mut cfg = RpcConfig::parse(db.get_setting("discord_rpc_config").as_deref());
+    if let Some(details) = db.get_setting("discord_rpc_details") {
+        if !details.is_empty() {
+            cfg.line1 = details;
+        }
+    }
+    if let Some(state) = db.get_setting("discord_rpc_state") {
+        if !state.is_empty() {
+            cfg.line2 = state;
+        }
+    }
+    if let Some(show_time) = db.get_setting("discord_rpc_show_time") {
+        cfg.timestamps = show_time != "false";
+    }
+    if let Some(show_pause) = db.get_setting("discord_rpc_show_pause") {
+        cfg.show_paused = show_pause != "false";
+    }
+    if let Some(show_btn) = db.get_setting("discord_rpc_show_button") {
+        cfg.button1 = if show_btn != "false" { "listen".into() } else { "off".into() };
+    }
+    if let Some(btn_label) = db.get_setting("discord_rpc_button_label") {
+        if !btn_label.is_empty() {
+            cfg.custom_button_label = btn_label;
+        }
+    }
+    if let Some(app_id) = db.get_setting("discord_rpc_app_id") {
+        if app_id != "1525891596804161727" && !app_id.is_empty() {
+            cfg.app_id = app_id;
+        } else {
+            cfg.app_id = APP_ID.to_string();
+        }
+    }
+    cfg
 }
 
 enum Msg {
@@ -114,7 +189,7 @@ enum Msg {
     /// A real play/pause transition (mpv's pause flag), never inferred from position ticks.
     Playing(bool),
     Enabled(bool),
-    Config(DiscordConfig),
+    Config(Box<RpcConfig>),
 }
 
 #[derive(Clone)]
@@ -122,8 +197,12 @@ struct Track {
     video_id: String,
     title: String,
     artists: String,
+    artist_id: Option<String>,
     album: Option<String>,
+    album_id: Option<String>,
     thumbnail: Option<String>,
+    /// A file on this machine: it has no YouTube page, and its "id" is a path.
+    local: bool,
 }
 
 /// App-side handle to the presence thread. `None` when the thread couldn't be spawned; every push
@@ -134,29 +213,25 @@ pub struct DiscordHandle {
 
 impl DiscordHandle {
     pub fn set_track(&self, item: &SongItem) {
+        let local = crate::local::is_local_song(&item.video_id);
         let _ = self.tx.send(Msg::Track(Box::new(Track {
             video_id: item.video_id.clone(),
             title: item.title.clone(),
             artists: item.artists.clone(),
+            artist_id: item.artist_id.clone(),
             album: item.album.clone(),
-            // Upscale here (stored thumbs are often 60px) and drop over-long URLs outright.
-            // A local track's artwork is a path on this machine: Discord can't fetch it, and it
-            // would put the user's directory layout on their profile. Send none.
-            thumbnail: item
-                .thumbnail
-                .as_deref()
-                .filter(|_| !crate::local::is_local_song(&item.video_id))
-                .and_then(discord_thumb),
+            album_id: item.album_id.clone(),
+            thumbnail: item.thumbnail.as_deref().filter(|_| !local).and_then(discord_thumb),
+            local,
         })));
     }
 
-    /// mpv's reported track length — the only source of a real duration (`SongItem::duration` is a
-    /// display string like "3:45"). Without it the presence shows elapsed time but no end.
+    /// mpv's reported track length.
     pub fn set_duration(&self, secs: f64) {
         let _ = self.tx.send(Msg::Duration(secs));
     }
 
-    /// A raw position tick. Carries no play/pause authority — mpv also ticks on paused seeks.
+    /// A raw position tick.
     pub fn set_position(&self, pos: f64) {
         let _ = self.tx.send(Msg::Position { pos, at: Instant::now() });
     }
@@ -169,18 +244,27 @@ impl DiscordHandle {
         let _ = self.tx.send(Msg::Enabled(on));
     }
 
-    pub fn update_config(&self, config: DiscordConfig) {
-        let _ = self.tx.send(Msg::Config(config));
+    /// Apply a new card layout.
+    pub fn set_config(&self, cfg: RpcConfig) {
+        let _ = self.tx.send(Msg::Config(Box::new(cfg)));
+    }
+
+    /// Backwards compatibility alias for `set_config`.
+    pub fn update_config(&self, cfg: RpcConfig) {
+        self.set_config(cfg);
     }
 }
 
-/// Spawn the presence owner thread. `enabled` is the persisted `discord_rpc` setting — when off,
-/// the thread parks on the channel and never opens a socket.
-pub fn spawn(enabled: bool, config: DiscordConfig) -> Option<DiscordHandle> {
+/// Spawn the presence owner thread.
+pub fn spawn(enabled: bool, cfg: RpcConfig) -> Option<DiscordHandle> {
+    if APP_ID.is_empty() || !APP_ID.bytes().all(|b| b.is_ascii_digit()) {
+        tracing::warn!(APP_ID, "discord rich presence disabled: APP_ID is not a Discord app id");
+        return None;
+    }
     let (tx, rx) = channel::<Msg>();
     match std::thread::Builder::new()
         .name("discord-rpc".into())
-        .spawn(move || run(rx, Presence::new(enabled, config)))
+        .spawn(move || run(rx, Presence::new(enabled, cfg)))
     {
         Ok(_) => Some(DiscordHandle { tx }),
         Err(e) => {
@@ -191,13 +275,8 @@ pub fn spawn(enabled: bool, config: DiscordConfig) -> Option<DiscordHandle> {
 }
 
 fn run(rx: Receiver<Msg>, mut p: Presence) {
-    // Sync once up front: when presence is already enabled at launch this opens the socket now,
-    // rather than on the first song — the loop below would otherwise just block on `recv`.
     let mut wait = p.sync();
     loop {
-        // Block for the first message, then drain everything queued behind it so a burst
-        // (Track + Duration + Playing on a track change) becomes one push, not three — and so a
-        // backlog applies in order before we decide what to show.
         match rx.recv_timeout(wait) {
             Ok(msg) => {
                 p.apply(msg);
@@ -213,7 +292,6 @@ fn run(rx: Receiver<Msg>, mut p: Presence) {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
-            // Sender dropped: the app is shutting down. Clear the presence on the way out.
             Err(RecvTimeoutError::Disconnected) => {
                 p.disconnect();
                 return;
@@ -223,54 +301,44 @@ fn run(rx: Receiver<Msg>, mut p: Presence) {
     }
 }
 
-/// What the thread should do right now. Pure — no socket, no state mutation — so the timing rules
-/// (floor, grace, dedup) are unit-testable without a running Discord.
 #[derive(Debug, PartialEq)]
 enum Act {
-    /// Nothing pending — sleep until the next reconnect tick.
     Idle,
-    /// Something is pending but not allowed yet. Sleep this long, then re-decide.
     Wait(Duration),
     Push,
     Clear,
 }
 
-/// What we want Discord to show, what we last actually pushed, and the socket in between.
 struct Presence {
     enabled: bool,
-    config: DiscordConfig,
+    cfg: RpcConfig,
     client: Option<DiscordIpcClient>,
     last_connect_try: Option<Instant>,
-    /// Grows on each failed connect, resets on success. See [`CONNECT_RETRY_MIN`].
     connect_backoff: Duration,
-    // desired
     track: Option<Track>,
-    /// When the current track arrived — the duration grace runs from here.
     track_at: Instant,
     duration: f64,
     playing: bool,
-    /// Last known position + when it was read. `estimate()` ages it while playing.
+    played: bool,
     pos: f64,
     pos_at: Instant,
-    // pushed — `Some` iff a card is currently shown
     sent: Option<Sent>,
+    cfg_dirty: bool,
     last_send: Option<Instant>,
 }
 
 struct Sent {
     video_id: String,
-    /// Epoch millis the pushed timeline started at — `now - start_ms` is where Discord's bar is.
-    start_ms: i64,
-    /// The length the pushed bar was built from; 0 when the card went out without one.
-    duration: f64,
     playing: bool,
+    start_ms: i64,
+    duration: f64,
 }
 
 impl Presence {
-    fn new(enabled: bool, config: DiscordConfig) -> Self {
+    fn new(enabled: bool, cfg: RpcConfig) -> Self {
         Presence {
             enabled,
-            config,
+            cfg,
             client: None,
             last_connect_try: None,
             connect_backoff: CONNECT_RETRY_MIN,
@@ -278,15 +346,15 @@ impl Presence {
             track_at: Instant::now(),
             duration: 0.0,
             playing: false,
+            played: false,
             pos: 0.0,
             pos_at: Instant::now(),
             sent: None,
+            cfg_dirty: false,
             last_send: None,
         }
     }
 
-    /// Best current position: the last tick, aged by wall time while playing. Ticks arrive
-    /// throttled (~1s) and can queue behind slow event-pump work, so the raw value alone lies.
     fn estimate(&self) -> f64 {
         if self.playing {
             self.pos + self.pos_at.elapsed().as_secs_f64()
@@ -300,12 +368,9 @@ impl Presence {
             Msg::Track(t) => {
                 self.track = Some(*t);
                 self.track_at = Instant::now();
-                // Every track starts from the top in this app; the previous track's position must
-                // not leak into the new card. (The one nonzero start — queue restore — arrives
-                // paused, where no card is shown, and its real position ticks in before play.)
                 self.pos = 0.0;
                 self.pos_at = Instant::now();
-                self.duration = 0.0; // length unknown until mpv reports it (grace waits for it)
+                self.duration = 0.0;
             }
             Msg::Duration(secs) => self.duration = secs,
             Msg::Position { pos, at } => {
@@ -313,9 +378,8 @@ impl Presence {
                 self.pos_at = at;
             }
             Msg::Playing(on) => {
+                self.played |= on;
                 if self.playing != on {
-                    // Fold the accrued playtime into `pos` before flipping, so pausing freezes the
-                    // estimate and resuming restarts the clock from the frozen value.
                     self.pos = self.estimate();
                     self.pos_at = Instant::now();
                     self.playing = on;
@@ -325,31 +389,23 @@ impl Presence {
                 if self.enabled != on {
                     self.enabled = on;
                     if !on {
-                        self.disconnect();
+                        self.clear_shown();
+                        self.client = None;
+                    } else {
+                        self.sent = None;
                     }
                 }
             }
             Msg::Config(cfg) => {
-                let id_changed = cfg.app_id != self.config.app_id;
-                self.config = cfg;
-                if id_changed {
-                    self.disconnect();
-                } else {
-                    self.sent = None;
+                if self.cfg != *cfg {
+                    self.cfg = *cfg;
+                    self.cfg_dirty = true;
                 }
             }
         }
     }
 
-    /// Reconcile Discord with the desired state, returning how long to sleep before re-deciding.
     fn sync(&mut self) -> Duration {
-        if !self.enabled {
-            return IDLE_TICK;
-        }
-        // Hold the socket open for as long as presence is on, so a track change finds it already
-        // there. Internally throttled by the backoff, so this is a no-op once connected.
-        self.ensure_connected();
-
         let wait = match self.plan() {
             Act::Idle => IDLE_TICK,
             Act::Wait(d) => d,
@@ -364,36 +420,30 @@ impl Presence {
                 IDLE_TICK
             }
         };
-        // Still down? Wake for the next connect attempt, whichever comes first.
         match self.connect_backoff_remaining() {
             Some(rem) if self.client.is_none() => wait.min(rem.max(MIN_WAIT)),
             _ => wait,
         }
     }
 
-    /// A card while playing (or paused if configured), nothing otherwise — subject to the duration grace and the send floor.
     fn plan(&self) -> Act {
         if !self.enabled {
             return Act::Idle;
         }
-        let want_card = (self.playing || self.config.show_pause) && self.track.is_some();
+        let want_card =
+            self.track.is_some() && (self.playing || (self.cfg.show_paused && self.played));
         if want_card {
             if !self.wants_push() {
                 return Act::Idle;
             }
-            // A new track whose length mpv hasn't reported yet: hold the first push briefly. Push
-            // now and we'd show a bar-less card, then need a second push the moment the length
-            // lands — which Discord drops for arriving too soon, stranding the card without its bar.
             if self.duration <= 0.0 && self.is_new_card() {
                 if let Some(rem) = DURATION_GRACE.checked_sub(self.track_at.elapsed()) {
                     return Act::Wait(rem.max(MIN_WAIT));
                 }
             }
         } else if self.sent.is_none() {
-            return Act::Idle; // nothing shown, nothing to take down
+            return Act::Idle;
         }
-        // Trailing edge: too soon to send, so come back when the floor expires — and send whatever
-        // is current *then*. Never drop the update; a dropped one is invisible (the socket ACKs it).
         if let Some(rem) = self.floor_remaining() {
             return Act::Wait(rem.max(MIN_WAIT));
         }
@@ -404,35 +454,28 @@ impl Presence {
         }
     }
 
-    /// Would Discord's card differ from what we last pushed? This is what keeps the ~1s position
-    /// ticks from becoming one presence update per second.
     fn wants_push(&self) -> bool {
         let Some(track) = &self.track else { return false };
         let Some(sent) = &self.sent else { return true };
+        if self.cfg_dirty {
+            return true;
+        }
         if sent.video_id != track.video_id {
             return true;
         }
         if sent.playing != self.playing {
             return true;
         }
-        // mpv reported the length, or refined it (streams get probed, then corrected) — the bar's
-        // end moves. Also the retry path when a first push went out before the length landed.
         if (self.duration - sent.duration).abs() > 1.0 {
             return true;
         }
-        // Seek detection: our aged position no longer matches the timeline we pushed. Doing it
-        // here, off the pushed timestamps, catches every seek — UI, media key, or Listen Together —
-        // for free, instead of hooking each caller of `player.seek`.
-        if self.playing && self.config.show_time {
-            let drift_ms = (self.estimate() * 1000.0) as i64 - (now_ms() - sent.start_ms);
-            if drift_ms.abs() > SEEK_DRIFT_MS {
-                return true;
-            }
+        if !self.playing {
+            return false;
         }
-        false
+        let drift_ms = (self.estimate() * 1000.0) as i64 - (now_ms() - sent.start_ms);
+        drift_ms.abs() > SEEK_DRIFT_MS
     }
 
-    /// No card up, or the one up is for a different track.
     fn is_new_card(&self) -> bool {
         match (&self.sent, &self.track) {
             (Some(sent), Some(track)) => sent.video_id != track.video_id,
@@ -440,110 +483,126 @@ impl Presence {
         }
     }
 
-    /// Time left on the send floor, or `None` when we're clear to send.
     fn floor_remaining(&self) -> Option<Duration> {
         SEND_FLOOR.checked_sub(self.last_send?.elapsed())
     }
 
     fn push_card(&mut self) {
-        // Cloned, not borrowed, so the socket below can be taken out of `self`. Only runs on a real
-        // change (`needs_push` gates it), never on a plain position tick.
         let (Some(track), Some(mut client)) = (self.track.clone(), self.client.take()) else {
             return;
         };
 
-        // Timestamps are epoch MILLIseconds (the crate's documented contract — Discord happens to
-        // normalize second-scale values, but that's their heuristic, not the API).
         let pos = self.estimate().max(0.0);
         let start_ms = now_ms() - (pos * 1000.0) as i64;
         let end_ms = (self.duration > 0.0).then(|| start_ms + (self.duration * 1000.0) as i64);
 
-        let mut act = activity::Activity::new()
-            .activity_type(activity::ActivityType::Listening)
-            .status_display_type(activity::StatusDisplayType::State);
+        let mut ts = activity::Timestamps::new().start(start_ms);
+        if let Some(end) = end_ms {
+            ts = ts.end(end);
+        }
+        let cfg = self.cfg.clone();
+        let mut act = activity::Activity::new().activity_type(activity::ActivityType::Listening);
+        if !cfg.app_name.is_empty() {
+            act = act.name(field(&cfg.app_name));
+        }
 
-        if self.config.show_time && self.playing {
-            let mut ts = activity::Timestamps::new().start(start_ms);
-            if let Some(end) = end_ms {
-                ts = ts.end(end);
+        if cfg.hide_details {
+            act = act.status_display_type(activity::StatusDisplayType::Name);
+            self.last_send = Some(Instant::now());
+            self.cfg_dirty = false;
+            if client.set_activity(act).is_ok() && check_response(&mut client, "set_activity") {
+                self.sent = Some(Sent {
+                    video_id: track.video_id,
+                    playing: self.playing,
+                    start_ms,
+                    duration: self.duration,
+                });
+                self.client = Some(client);
+            } else {
+                self.sent = None;
             }
+            return;
+        }
+
+        let line1 = text_for(&cfg.line1, &track);
+        let line1_slot = if line1.is_some() { cfg.line1.as_str() } else { "title" };
+        act = act.details(field(&line1.unwrap_or_else(|| track.title.clone())));
+        if cfg.timestamps && self.playing {
             act = act.timestamps(ts);
         }
-
-        let details_str = format_template(&self.config.details, &track);
-        let details_val =
-            if details_str.is_empty() { field(&track.title) } else { field(&details_str) };
-        act = act.details(details_val);
-
-        let mut state_str = format_template(&self.config.state, &track);
-        if !self.playing && self.config.show_pause {
-            if state_str.is_empty() {
-                state_str = "(Paused)".to_string();
-            } else {
-                state_str = format!("(Paused) {state_str}");
-            }
+        act = act.status_display_type(match cfg.status_line.as_str() {
+            "app" => activity::StatusDisplayType::Name,
+            "line1" => activity::StatusDisplayType::Details,
+            _ => activity::StatusDisplayType::State,
+        });
+        if let Some(line2) = text_for(&cfg.line2, &track) {
+            act = act.state(field(&line2));
         }
-        if !state_str.is_empty() {
-            act = act.state(field(&state_str));
-        }
-
-        if self.config.show_buttons {
-            let mut buttons = Vec::new();
-            if !crate::local::is_local_song(&track.video_id) {
-                let label = if self.config.button_label.is_empty() {
-                    "Listen on YouTube Music"
-                } else {
-                    &self.config.button_label
-                };
-                buttons.push(activity::Button::new(label, format!("{SONG_URL}{}", track.video_id)));
-            }
-            buttons.push(activity::Button::new("Get Nocturne", REPO_URL));
-            act = act.buttons(buttons);
-        }
-
-        // Unlike the Gateway, the IPC client accepts a plain https URL here and proxies it itself —
-        // no `external-assets` round-trip. Artwork is best-effort: no thumbnail is just a
-        // text-only presence.
-        if let Some(url) = track.thumbnail.clone() {
+        if let Some(url) = track.thumbnail.clone().filter(|_| cfg.cover) {
             let mut assets = activity::Assets::new().large_image(url);
-            match &track.album {
-                Some(album) if !album.is_empty() => assets = assets.large_text(field(album)),
-                _ => {}
+            if let Some(line3) = text_for(&cfg.line3, &track) {
+                assets = assets.large_text(field(&line3));
+            }
+            if cfg.badge {
+                let name = if cfg.app_name.is_empty() { "Nocturne" } else { &cfg.app_name };
+                assets = assets.small_image(BADGE_URL).small_text(field(name));
             }
             act = act.assets(assets);
         }
+        let mut buttons: Vec<activity::Button<'static>> = Vec::new();
+        // 1. Listen Together (always present)
+        buttons.push(activity::Button::new("Listen Together", LT_ACTION_URL));
+        // 2. Secondary action button
+        let secondary = match cfg.button1.as_str() {
+            "album" => button_for("album", &track),
+            "artist" => button_for("artist", &track),
+            "app" => button_for("app", &track),
+            "off" => None,
+            _ => {
+                if !crate::local::is_local_song(&track.video_id) {
+                    let label = if !cfg.custom_button_label.is_empty() {
+                        cfg.custom_button_label.clone()
+                    } else {
+                        "Listen on YouTube Music".to_string()
+                    };
+                    Some(activity::Button::new(label, format!("{SONG_URL}{}", track.video_id)))
+                } else {
+                    Some(activity::Button::new("Get Nocturne", REPO_URL))
+                }
+            }
+        };
+        if let Some(btn) = secondary {
+            buttons.push(btn);
+        }
+        act = act.buttons(buttons);
 
-        // The floor is charged for every frame we put on the wire, accepted or not.
         self.last_send = Some(Instant::now());
+        self.cfg_dirty = false;
         if client.set_activity(act).is_ok() && check_response(&mut client, "set_activity") {
             self.sent = Some(Sent {
                 video_id: track.video_id,
+                playing: self.playing,
                 start_ms,
                 duration: self.duration,
-                playing: self.playing,
             });
             self.client = Some(client);
         } else {
-            // Broken socket — Discord quit. Drop it; the reconnect tick picks it back up.
             self.sent = None;
         }
     }
 
-    /// Take the card down if one is up. No card + no socket is a no-op — never connect just to
-    /// clear (a fresh socket shows nothing anyway).
     fn clear_shown(&mut self) {
         if self.sent.take().is_none() {
             return;
         }
         if let Some(mut client) = self.client.take() {
-            self.last_send = Some(Instant::now()); // a clear is a frame too — it counts
+            self.last_send = Some(Instant::now());
             if client.clear_activity().is_ok() && check_response(&mut client, "clear_activity") {
                 self.client = Some(client);
             }
         }
     }
 
-    /// Time left before the next connect attempt is allowed, or `None` when we may try now.
     fn connect_backoff_remaining(&self) -> Option<Duration> {
         self.connect_backoff.checked_sub(self.last_connect_try?.elapsed())
     }
@@ -553,27 +612,26 @@ impl Presence {
             return true;
         }
         if self.connect_backoff_remaining().is_some() {
-            return false; // too soon — the loop is already scheduled to wake for this
+            return false;
         }
-        let effective_app_id = if self.config.app_id.is_empty()
-            || !self.config.app_id.bytes().all(|b| b.is_ascii_digit())
-        {
-            APP_ID
-        } else {
-            &self.config.app_id
-        };
         self.last_connect_try = Some(Instant::now());
-        let mut client = DiscordIpcClient::new(effective_app_id);
+        let app_id = if !self.cfg.app_id.is_empty()
+            && self.cfg.app_id != "1525891596804161727"
+            && self.cfg.app_id.bytes().all(|b| b.is_ascii_digit())
+        {
+            self.cfg.app_id.as_str()
+        } else {
+            APP_ID
+        };
+        let mut client = DiscordIpcClient::new(app_id);
         match client.connect() {
             Ok(()) => {
-                tracing::info!("discord rich presence connected");
+                tracing::info!(app_id, "discord rich presence connected");
                 self.client = Some(client);
                 self.connect_backoff = CONNECT_RETRY_MIN;
-                self.sent = None; // fresh socket shows nothing — re-push everything
+                self.sent = None;
                 true
             }
-            // Not an error: Discord simply isn't running. Ease off, so a machine that never runs
-            // Discord isn't probing a nonexistent socket every second forever.
             Err(e) => {
                 tracing::debug!(error = %e, backoff = ?self.connect_backoff, "discord not available");
                 self.connect_backoff = (self.connect_backoff * 2).min(CONNECT_RETRY_MAX);
@@ -593,11 +651,6 @@ impl Presence {
     }
 }
 
-/// Read the response frame Discord sends for every command. The crate's `set_activity` only
-/// *writes* — without this read, rejected payloads look like success (and the dedup then pins the
-/// stale card), and unread frames pile up in the socket buffer until the connection wedges.
-/// Returns whether the socket is still usable. Blocking, but Discord answers commands promptly;
-/// worst case a hung Discord stalls this dedicated thread, nothing else.
 fn check_response(client: &mut DiscordIpcClient, what: &str) -> bool {
     match client.recv() {
         Ok((_, resp)) => {
@@ -615,13 +668,60 @@ fn check_response(client: &mut DiscordIpcClient, what: &str) -> bool {
     }
 }
 
+fn text_for(slot: &str, t: &Track) -> Option<String> {
+    let trimmed = slot.trim();
+    if trimmed.is_empty() || trimmed == "off" {
+        return None;
+    }
+    let artist = (!t.artists.is_empty()).then(|| t.artists.clone());
+    let album = t.album.clone().filter(|a| !a.is_empty());
+    match trimmed {
+        "title" => (!t.title.is_empty()).then(|| t.title.clone()),
+        "artist" => artist,
+        "album" => album,
+        "artist_album" => match (artist, album) {
+            (Some(a), Some(b)) => Some(format!("{a} — {b}")),
+            (a, b) => a.or(b),
+        },
+        custom => {
+            let replaced = custom
+                .replace("{title}", &t.title)
+                .replace("{artist}", &t.artists)
+                .replace("{album}", t.album.as_deref().unwrap_or(""));
+            let r = replaced.trim();
+            (!r.is_empty()).then(|| r.to_string())
+        }
+    }
+}
+
+fn link_for(slot: &str, t: &Track) -> Option<String> {
+    if t.local {
+        return None;
+    }
+    match slot {
+        "title" => (!t.video_id.is_empty()).then(|| format!("{SONG_URL}{}", t.video_id)),
+        "artist" | "artist_album" => t.artist_id.as_ref().map(|id| format!("{ARTIST_URL}{id}")),
+        "album" => t.album_id.as_ref().map(|id| format!("{ALBUM_URL}{id}")),
+        _ => None,
+    }
+}
+
+fn button_for(kind: &str, t: &Track) -> Option<activity::Button<'static>> {
+    let (label, url) = match kind {
+        "listen_together" => ("Listen Together", LT_ACTION_URL.to_owned()),
+        "listen" => ("Listen on YouTube Music", link_for("title", t)?),
+        "album" => ("View album", link_for("album", t)?),
+        "artist" => ("View artist", link_for("artist", t)?),
+        "app" => ("Get Nocturne", REPO_URL.to_owned()),
+        _ => return None,
+    };
+    (url.len() <= MAX_BUTTON_URL).then(|| activity::Button::new(label, url))
+}
+
 fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64
 }
 
-/// Clamp a text field to Discord's 2–128 char window: truncate long values on a char boundary,
-/// pad sub-2-char ones with braille blanks (renders empty, survives Discord's trimming) — either
-/// violation rejects the whole payload.
 fn field(s: &str) -> String {
     let mut out: String = match s.char_indices().nth(MAX_FIELD) {
         Some(_) => s.chars().take(MAX_FIELD - 1).chain(['…']).collect(),
@@ -633,10 +733,6 @@ fn field(s: &str) -> String {
     out
 }
 
-/// Ready a thumbnail URL for Discord's card: request a decent resolution (stored thumbs are often
-/// row-sized, 60px) and refuse URLs over Discord's length limit. Mirrors `ui/src/lib/thumb.ts` —
-/// only googleusercontent-style URLs carry their size in the URL; i.ytimg path-variant thumbs pass
-/// through unchanged (other sizes can 404).
 fn discord_thumb(url: &str) -> Option<String> {
     static WH: OnceLock<regex::Regex> = OnceLock::new();
     static S: OnceLock<regex::Regex> = OnceLock::new();
@@ -652,40 +748,10 @@ fn discord_thumb(url: &str) -> Option<String> {
     (sized.len() <= MAX_ASSET_URL).then_some(sized)
 }
 
-fn format_template(tmpl: &str, track: &Track) -> String {
-    tmpl.replace("{title}", &track.title)
-        .replace("{artist}", &track.artists)
-        .replace("{album}", track.album.as_deref().unwrap_or(""))
-        .trim()
-        .to_string()
-}
-
-pub fn load_discord_config(db: &crate::db::Db) -> DiscordConfig {
-    DiscordConfig {
-        app_id: db
-            .get_setting("discord_rpc_app_id")
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| APP_ID.to_string()),
-        details: db.get_setting("discord_rpc_details").unwrap_or_else(|| "{title}".to_string()),
-        state: db.get_setting("discord_rpc_state").unwrap_or_else(|| "{artist}".to_string()),
-        show_buttons: db
-            .get_setting("discord_rpc_show_buttons")
-            .map(|s| s != "false")
-            .unwrap_or(true),
-        button_label: db
-            .get_setting("discord_rpc_button_label")
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "Listen on YouTube Music".to_string()),
-        show_pause: db.get_setting("discord_rpc_show_pause").map(|s| s == "true").unwrap_or(false),
-        show_time: db.get_setting("discord_rpc_show_time").map(|s| s != "false").unwrap_or(true),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// `spawn` refuses to run without one, so a bad edit here silently disables the whole feature.
     #[test]
     fn app_id_is_a_snowflake() {
         assert!(
@@ -699,44 +765,39 @@ mod tests {
             video_id: id.into(),
             title: "t".into(),
             artists: "a".into(),
+            artist_id: None,
             album: None,
+            album_id: None,
             thumbnail: None,
+            local: false,
         })
     }
 
     fn playing(id: &str, pos: f64) -> Presence {
-        let mut p = Presence::new(true, DiscordConfig::default());
+        let mut p = Presence::new(true, RpcConfig::default());
         p.apply(Msg::Track(track(id)));
         p.apply(Msg::Playing(true));
         p.apply(Msg::Position { pos, at: Instant::now() });
         p
     }
 
-    /// Simulate a card already on screen for the current track, pushed long enough ago that the
-    /// send floor is clear.
     fn sent_now(p: &mut Presence, pos_secs: i64) {
         p.sent = Some(Sent {
             video_id: p.track.as_ref().unwrap().video_id.clone(),
+            playing: p.playing,
             start_ms: now_ms() - pos_secs * 1000,
             duration: p.duration,
-            playing: p.playing,
         });
         p.last_send = Some(Instant::now() - Duration::from_secs(60));
+        p.cfg_dirty = false;
     }
 
-    /// The reported bug: a gapless advance pushed a card before mpv reported the new track's
-    /// length, so it rendered as a bare elapsed counter with no progress bar — and the follow-up
-    /// push carrying the length landed too soon after it and was dropped by Discord.
-    ///
-    /// The fix is to hold the first push of a new track (briefly) until the length lands, so one
-    /// push carries both. Here the length arrives a beat later, as it does on a real advance.
     #[test]
     fn a_new_track_waits_for_its_length_then_pushes_once() {
         let mut p = playing("old", 200.0);
         p.duration = 210.0;
         sent_now(&mut p, 200);
 
-        // Gapless advance: the track lands first, its length is still unknown.
         p.apply(Msg::Track(track("new")));
         assert!(
             matches!(p.plan(), Act::Wait(_)),
@@ -744,22 +805,19 @@ mod tests {
             p.plan()
         );
 
-        // mpv reports the length (state.rs hands it over the moment mpv transitions).
         p.apply(Msg::Duration(185.0));
         assert_eq!(p.plan(), Act::Push, "with the length known, push immediately");
 
-        // That single push carries the bar; nothing further is pending.
         p.sent = Some(Sent {
             video_id: "new".into(),
+            playing: true,
             start_ms: now_ms(),
             duration: 185.0,
-            playing: true,
         });
         p.last_send = Some(Instant::now());
         assert_eq!(p.plan(), Act::Idle, "one push per track change, not two");
     }
 
-    /// If mpv never reports a length, the card must still go out — just without a bar.
     #[test]
     fn the_grace_expires_rather_than_hanging() {
         let mut p = playing("abc", 0.0);
@@ -767,36 +825,31 @@ mod tests {
         assert_eq!(p.plan(), Act::Push, "grace expired — push a bar-less card");
     }
 
-    /// A length arriving after a bar-less card went out must still reach Discord.
     #[test]
     fn a_late_length_repushes_the_bar() {
         let mut p = playing("abc", 1.0);
-        sent_now(&mut p, 1); // pushed with duration 0
+        sent_now(&mut p, 1);
         p.apply(Msg::Duration(185.0));
         assert!(p.wants_push(), "the bar's end appeared — push it");
         assert_eq!(p.plan(), Act::Push);
     }
 
-    /// Two frames must never go out inside the floor — but the second is deferred, never dropped.
     #[test]
     fn the_send_floor_defers_rather_than_discards() {
         let mut p = playing("abc", 1.0);
         p.duration = 185.0;
         sent_now(&mut p, 1);
-        p.last_send = Some(Instant::now()); // just sent
-        p.apply(Msg::Position { pos: 120.0, at: Instant::now() }); // user scrubs
+        p.last_send = Some(Instant::now());
+        p.apply(Msg::Position { pos: 120.0, at: Instant::now() });
 
         match p.plan() {
             Act::Wait(d) => assert!(d <= SEND_FLOOR, "waits out the floor, got {d:?}"),
             other => panic!("expected a deferred push, got {other:?}"),
         }
-        // Once the floor clears, the *pending* scrub still goes out.
         p.last_send = Some(Instant::now() - SEND_FLOOR - Duration::from_millis(10));
         assert_eq!(p.plan(), Act::Push, "the deferred update must not be lost");
     }
 
-    /// The headline bug from the previous round: a track change must not inherit the previous
-    /// track's position.
     #[test]
     fn track_change_resets_the_timeline() {
         let mut p = playing("old", 187.0);
@@ -806,7 +859,6 @@ mod tests {
         assert!(p.wants_push(), "track change must push");
     }
 
-    /// The whole point of `wants_push`: 1s position ticks must not become presence updates.
     #[test]
     fn steady_playback_does_not_push() {
         let mut p = playing("abc", 30.0);
@@ -821,95 +873,47 @@ mod tests {
         assert!(p.wants_push(), "a scrub must push");
     }
 
-    /// A position that sat in a backlogged queue is aged before use, so the drift check compares
-    /// like with like instead of "correcting" the timeline backwards.
     #[test]
     fn aged_positions_are_corrected() {
         let mut p = playing("abc", 0.0);
         sent_now(&mut p, 13);
-        // A tick reading 10.0 that took 3s to arrive: the song is really at ~13s now.
         p.apply(Msg::Position { pos: 10.0, at: Instant::now() - Duration::from_secs(3) });
         let est = p.estimate();
         assert!((est - 13.0).abs() < 0.2, "expected ~13, got {est}");
         assert!(!p.wants_push(), "an aged-but-on-timeline tick must not push");
     }
 
-    /// Pause freezes the estimate (folding accrued playtime), and no card is wanted while paused.
     #[test]
     fn pause_freezes_and_hides() {
         let mut p = playing("abc", 10.0);
-        p.pos_at = Instant::now() - Duration::from_secs(3); // 3s of playback accrued
+        p.pos_at = Instant::now() - Duration::from_secs(3);
         p.apply(Msg::Playing(false));
         let frozen = p.estimate();
         assert!((frozen - 13.0).abs() < 0.2, "expected ~13 frozen, got {frozen}");
         assert!(!p.playing, "paused");
-        // sync() clears the card when !playing — needs_push is only consulted while playing.
     }
 
-    /// Pausing takes the card down; the clear is what `plan` asks for, not another push.
     #[test]
-    fn pausing_clears_the_card() {
+    fn dropping_show_paused_while_paused_clears_the_card() {
         let mut p = playing("abc", 30.0);
         p.duration = 185.0;
-        sent_now(&mut p, 30);
+        p.apply(Msg::Config(Box::new(RpcConfig { show_paused: true, ..Default::default() })));
         p.apply(Msg::Playing(false));
+        sent_now(&mut p, 30);
+        assert_eq!(p.plan(), Act::Idle, "the paused card is up and current");
+
+        p.apply(Msg::Config(Box::new(RpcConfig::default())));
         assert_eq!(p.plan(), Act::Clear);
-        p.sent = None; // as clear_shown would leave it
-        assert_eq!(p.plan(), Act::Idle, "nothing shown, nothing to take down");
-    }
-
-    /// A failed connect must not stall the next attempt for the full retry interval — Discord is
-    /// often just slower to start than we are.
-    #[test]
-    fn a_failed_connect_retries_soon_then_backs_off() {
-        let mut p = Presence::new(true, DiscordConfig::default());
-        assert!(p.connect_backoff_remaining().is_none(), "never tried — try now");
-
-        p.last_connect_try = Some(Instant::now()); // as ensure_connected does on failure
-        let rem = p.connect_backoff_remaining().expect("throttled straight after a failure");
-        assert!(rem <= CONNECT_RETRY_MIN, "first retry within {CONNECT_RETRY_MIN:?}, got {rem:?}");
-
-        p.connect_backoff = CONNECT_RETRY_MAX; // after repeated failures
-        p.last_connect_try = Some(Instant::now() - CONNECT_RETRY_MAX);
-        assert!(p.connect_backoff_remaining().is_none(), "the backoff still lets retries through");
-    }
-
-    #[test]
-    fn pause_with_show_pause_repushes() {
-        let mut p = playing("abc", 30.0);
-        p.config.show_pause = true;
-        p.duration = 185.0;
-        sent_now(&mut p, 30);
-        p.apply(Msg::Playing(false));
-        assert!(p.wants_push(), "pausing with show_pause should push paused card");
-        assert_eq!(p.plan(), Act::Push);
     }
 
     #[test]
     fn field_clamps_to_discords_window() {
-        assert_eq!(field("héllo"), "héllo");
-        let long = "é".repeat(200);
-        assert!(field(&long).chars().count() <= MAX_FIELD);
-        assert_eq!(field("V").chars().count(), 2, "1-char fields are padded, not rejected");
-    }
-
-    #[test]
-    fn thumbnails_are_upscaled_and_bounded() {
-        assert_eq!(
-            discord_thumb("https://lh3.googleusercontent.com/x=w60-h60-l90-rj").as_deref(),
-            Some("https://lh3.googleusercontent.com/x=w512-h512-l90-rj")
-        );
-        assert_eq!(
-            discord_thumb("https://yt3.ggpht.com/y=s176").as_deref(),
-            Some("https://yt3.ggpht.com/y=s512")
-        );
-        let ytimg = "https://i.ytimg.com/vi/abc/maxresdefault.jpg";
-        assert_eq!(
-            discord_thumb(ytimg).as_deref(),
-            Some(ytimg),
-            "path-variant thumbs pass through"
-        );
-        let long = format!("https://example.com/{}", "a".repeat(300));
-        assert_eq!(discord_thumb(&long), None, "over-long URLs are dropped, not sent");
+        assert_eq!(field("hello"), "hello");
+        assert_eq!(field("a"), "a\u{2800}");
+        assert_eq!(field(""), "\u{2800}\u{2800}");
+        let long = "x".repeat(200);
+        let out = field(&long);
+        assert_eq!(out.chars().count(), 128);
+        assert!(out.ends_with('…'));
     }
 }

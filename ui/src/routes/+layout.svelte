@@ -29,6 +29,7 @@
 	import ShareDialog from '$lib/components/ShareDialog.svelte';
 	import ChannelPicker from '$lib/components/ChannelPicker.svelte';
 	import ListenTogether from '$lib/components/ListenTogether.svelte';
+	import ListenTogetherRequestDialog from '$lib/components/ListenTogetherRequestDialog.svelte';
 	import LinkDialog from '$lib/components/LinkDialog.svelte';
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
@@ -267,8 +268,8 @@
 			<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from anywhere in
 			     the feed, so aiming at the top edge scrolls this container while the drag is in flight. -->
 			<main class="min-w-0 flex-1 overflow-y-auto" {@attach dragScroll}>
-				<!-- Remount the current page on sign-in/out so it refetches with the new account. -->
-				{#key auth.epoch}
+				<!-- Remount the current page on sign-in/out or manual refresh so it refetches. -->
+				{#key `${auth.epoch}:${ui.epoch}`}
 					{@render children()}
 				{/key}
 			</main>
@@ -334,6 +335,7 @@
 	<SettingsDialog />
 	<ChannelPicker />
 	<ListenTogether />
+	<ListenTogetherRequestDialog />
 	<LinkDialog />
 	{#if lyricSelector.request}
 		{@const request = lyricSelector.request}

@@ -25,7 +25,7 @@
 	import { openAddToPlaylist, playSong } from '$lib/player.svelte';
 	import { asSong } from '$lib/browse';
 
-	type Cached = { res: SearchResults; songs: SongItem[] };
+	type Cached = { res: SearchResults; songs: SongItem[]; videos?: SongItem[] };
 
 	let query = $state(lastQuery);
 	let res = $state<SearchResults | null>(null);
@@ -33,6 +33,7 @@
 	// response gives a song row either its artist or its length, never both, so those rows land
 	// duration-less. The filtered endpoint returns "Artist • Album • 3:58" on every row.
 	let songs = $state<SongItem[]>([]);
+	let videos = $state<SongItem[]>([]);
 	let searched = $state('');
 	let searching = $state(false);
 	let error = $state<string | null>(null);
@@ -45,6 +46,7 @@
 		lastQuery = '';
 		res = null;
 		songs = [];
+		videos = [];
 		searched = '';
 		latest = '';
 		error = null;
@@ -64,6 +66,7 @@
 		if (hit) {
 			res = hit.res;
 			songs = hit.songs;
+			videos = hit.videos ?? [];
 			searched = q;
 			searching = false;
 		} else {
@@ -73,15 +76,17 @@
 		try {
 			// In parallel, and the filtered one may fail on its own: the shelf falls back to the
 			// unfiltered rows rather than the whole search erroring out.
-			const [fresh, freshSongs] = await Promise.all([
+			const [fresh, freshSongs, freshVideos] = await Promise.all([
 				api.searchAll(q),
-				api.search(q).catch(() => [] as SongItem[])
+				api.search(q).catch(() => [] as SongItem[]),
+				api.searchVideos(q).catch(() => [] as SongItem[])
 			]);
 			if (latest !== q) return; // a newer search superseded this one
 			res = fresh;
 			songs = freshSongs;
+			videos = freshVideos;
 			searched = q;
-			putCached(key, { res: fresh, songs: freshSongs });
+			putCached(key, { res: fresh, songs: freshSongs, videos: freshVideos });
 		} catch (e) {
 			if (latest !== q) return;
 			if (!hit) error = String(e);
@@ -90,7 +95,7 @@
 		}
 	}
 
-	function showMore(cat: 'songs' | 'albums' | 'artists' | 'playlists') {
+	function showMore(cat: 'songs' | 'videos' | 'albums' | 'artists' | 'playlists') {
 		goto(`/search-more?${new URLSearchParams({ q: searched, cat }).toString()}`);
 	}
 
@@ -116,16 +121,17 @@
 
 	const songRows = $derived(songs.length ? songs : (res?.songs ?? []).map(asSong));
 
-	// Sections are horizontal card rows, except Songs which is a vertical list. `top` has no "show more".
+	// Sections are horizontal card rows, except Songs/Videos which are vertical lists. `top` has no "show more".
 	const sections = $derived(
 		res
 			? [
-					{ key: 'top', label: 'Top results', items: res.top, max: 4, more: false, list: false },
-					{ key: 'songs', label: 'Songs', items: res.songs, max: 6, more: true, list: true },
-					{ key: 'albums', label: 'Albums', items: res.albums, max: 5, more: true, list: false },
-					{ key: 'artists', label: 'Artists', items: res.artists, max: 3, more: true, list: false },
-					{ key: 'playlists', label: 'Playlists', items: res.playlists, max: 5, more: true, list: false }
-				].filter((s) => (s.list ? songRows.length : s.items.length))
+					{ key: 'top', label: 'Top results', items: res.top, max: 4, more: false, list: false, isVideo: false },
+					{ key: 'songs', label: 'Songs', items: res.songs, max: 6, more: true, list: true, isVideo: false },
+					{ key: 'videos', label: 'Videos', items: [], max: 6, more: true, list: true, isVideo: true },
+					{ key: 'albums', label: 'Albums', items: res.albums, max: 5, more: true, list: false, isVideo: false },
+					{ key: 'artists', label: 'Artists', items: res.artists, max: 3, more: true, list: false, isVideo: false },
+					{ key: 'playlists', label: 'Playlists', items: res.playlists, max: 5, more: true, list: false, isVideo: false }
+				].filter((s) => (s.isVideo ? videos.length : s.list ? songRows.length : s.items.length))
 			: []
 	);
 
@@ -198,13 +204,22 @@
 							{#if sec.more}
 								<button
 									class="cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
-									onclick={() => showMore(sec.key as 'songs' | 'albums' | 'artists' | 'playlists')}
+									onclick={() => showMore(sec.key as 'songs' | 'videos' | 'albums' | 'artists' | 'playlists')}
 								>
 									Show more
 								</button>
 							{/if}
 						</div>
-						{#if sec.list}
+						{#if sec.isVideo}
+							{#each videos.slice(0, sec.max) as video (video.video_id)}
+								<TrackRow
+									song={video}
+									showPlayCount
+									onplay={() => playSong(video)}
+									onAdd={() => openAddToPlaylist(video)}
+								/>
+							{/each}
+						{:else if sec.list}
 							{#each songRows.slice(0, sec.max) as song (song.video_id)}
 								<TrackRow
 									{song}

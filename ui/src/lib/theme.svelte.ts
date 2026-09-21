@@ -14,6 +14,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { hexToHsv, isLight, nearestHue } from './color';
 import { artworkAccent, warmAccent } from './artcolor';
 import { allowFontFile, getDesktopEnvironment } from './api';
+import { toggleMode as baseToggleMode } from 'mode-watcher';
 
 export type ThemeId = 'monochrome' | 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze' | 'glassy' | 'native';
 
@@ -574,4 +575,72 @@ export function initTheme(): void {
 	// Async (each file needs its URL granted first), so the app paints in the fallback font for a
 	// frame or two before a loaded font swaps in.
 	if (custom.fontFiles.length) registerFontFiles();
+}
+
+/**
+ * Smooth transition between light and dark mode.
+ * Uses the View Transitions API for an ultra-smooth circular reveal animation when available,
+ * and falls back to a CSS class-based crossfade.
+ */
+export function smoothToggleMode(event?: MouseEvent): void {
+	if (typeof document === 'undefined') {
+		baseToggleMode();
+		return;
+	}
+
+	const doc = document as unknown as {
+		startViewTransition?: (updateCallback: () => Promise<void> | void) => {
+			ready: Promise<void>;
+			finished: Promise<void>;
+		};
+	};
+
+	const prefersReducedMotion =
+		typeof window !== 'undefined' &&
+		window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+	if (typeof doc.startViewTransition !== 'function' || prefersReducedMotion || appearance.reduceMotion) {
+		const root = document.documentElement;
+		root.classList.add('theme-transition');
+		baseToggleMode();
+		setTimeout(() => {
+			root.classList.remove('theme-transition');
+		}, 450);
+		return;
+	}
+
+	const x = event?.clientX ?? (typeof window !== 'undefined' ? window.innerWidth / 2 : 0);
+	const y = event?.clientY ?? (typeof window !== 'undefined' ? window.innerHeight / 2 : 0);
+	const endRadius = Math.hypot(
+		Math.max(x, (typeof window !== 'undefined' ? window.innerWidth : 800) - x),
+		Math.max(y, (typeof window !== 'undefined' ? window.innerHeight : 600) - y)
+	);
+
+	const root = document.documentElement;
+	root.classList.add('theme-transition');
+
+	const transition = doc.startViewTransition(() => {
+		baseToggleMode();
+	});
+
+	transition.ready.then(() => {
+		const clipPath = [
+			`circle(0px at ${x}px ${y}px)`,
+			`circle(${endRadius}px at ${x}px ${y}px)`
+		];
+		root.animate(
+			{
+				clipPath
+			},
+			{
+				duration: 400,
+				easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+				pseudoElement: '::view-transition-new(root)'
+			}
+		);
+	});
+
+	transition.finished.finally(() => {
+		root.classList.remove('theme-transition');
+	});
 }

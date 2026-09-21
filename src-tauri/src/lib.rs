@@ -176,8 +176,17 @@ pub fn run() {
         // Must be the first plugin registered (its documented requirement). A second launch —
         // e.g. clicking the app icon while we're hidden in the tray — re-shows this instance
         // instead of spawning a second one (which would fight over SQLite and mpv).
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             tray::show_main(app);
+            for arg in &args {
+                if arg.contains("listen-together") || arg.contains("join-lt") {
+                    let _ = app.emit("incoming-lt-request", serde_json::json!({
+                        "username": "Discord Friend",
+                        "userId": null
+                    }));
+                    break;
+                }
+            }
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -498,6 +507,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::search,
+            commands::search_videos,
             commands::search_all,
             commands::search_cards,
             commands::play,
@@ -565,6 +575,7 @@ pub fn run() {
             commands::set_album_saved,
             commands::add_to_playlist,
             commands::remove_from_playlist,
+            commands::remove_many_from_playlist,
             commands::create_playlist,
             commands::edit_playlist_details,
             commands::set_playlist_cover,
@@ -584,6 +595,7 @@ pub fn run() {
             commands::lt_approve_suggestion,
             commands::lt_reject_suggestion,
             commands::lt_request_sync,
+            commands::trigger_lt_join_request,
             commands::get_lyrics,
             commands::lastfm_connect,
             commands::lastfm_disconnect,

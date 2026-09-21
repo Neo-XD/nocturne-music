@@ -16,7 +16,8 @@
 		ShuffleIcon,
 		RepeatIcon,
 		RepeatOne01Icon,
-		FavouriteIcon,
+		ThumbsUpIcon,
+		ThumbsDownIcon,
 		MusicNote01Icon,
 		MaximizeScreenIcon,
 		VolumeHighIcon,
@@ -30,7 +31,7 @@
 		cycleRepeat,
 		dragVolume,
 		toggleMute,
-		toggleNowPlayingLike,
+		toggleNowPlayingRating,
 		wheelVolume
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
@@ -72,11 +73,14 @@
 	let volDragging = $state(false);
 	const volOpen = $derived(volHover || volDragging);
 
-	// Pop the heart once when favouriting (not when un-favouriting), same as the player bar.
+	// Pop the icon once when liking (not when un-liking), same as the player bar.
 	let justLiked = $state(false);
 	function toggleLike() {
 		if (playback.rating !== 'like') justLiked = true;
-		toggleNowPlayingLike();
+		toggleNowPlayingRating('like');
+	}
+	function toggleDislike() {
+		toggleNowPlayingRating('dislike');
 	}
 
 	// Seek: hold the dragged value locally so incoming position ticks can't yank the thumb out
@@ -198,6 +202,7 @@
 					class={artBtn}
 					onclick={toggleLike}
 					aria-label={playback.rating === 'like' ? 'Remove from liked songs' : 'Add to liked songs'}
+					title={playback.rating === 'like' ? 'Remove from liked songs' : 'Like'}
 				>
 					<span
 						class="flex"
@@ -206,8 +211,21 @@
 					>
 						<!-- fill-current + text-primary is the same "liked" treatment the player bar uses. -->
 						<HugeiconsIcon
-							icon={FavouriteIcon}
+							icon={ThumbsUpIcon}
 							class="h-4 w-4 {playback.rating === 'like' ? 'fill-current text-primary' : ''}"
+						/>
+					</span>
+				</button>
+				<button
+					class={artBtn}
+					onclick={toggleDislike}
+					aria-label={playback.rating === 'dislike' ? 'Remove dislike' : 'Dislike'}
+					title={playback.rating === 'dislike' ? 'Remove dislike' : 'Dislike'}
+				>
+					<span class="flex">
+						<HugeiconsIcon
+							icon={ThumbsDownIcon}
+							class="h-4 w-4 {playback.rating === 'dislike' ? 'fill-current text-primary' : ''}"
 						/>
 					</span>
 				</button>
