@@ -682,27 +682,40 @@
 	</div>
 
 	<!-- Bottom Dock / Toolbar -->
-	{#if lyrics && !loading && !compact}
+	{#if lyrics && !loading && (!compact || lyrics.source === 'Unison')}
 		<div class="flex items-center justify-between border-t border-border/40 px-4 py-2 text-xs text-muted-foreground">
 			<div class="flex items-center gap-2.5">
-				<span>{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}</span>
-				<button
-					onclick={openSelector}
-					class="hover:text-foreground inline-flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded hover:bg-foreground/5 text-[11px]"
-					title="Change lyrics / search other sources"
-				>
-					<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-						/>
-					</svg>
-					Change source
-				</button>
+				{#if lyrics.source === 'Unison'}
+					<a
+						href="https://unison.boidu.dev"
+						target="_blank"
+						rel="external noreferrer"
+						class="hover:text-foreground underline underline-offset-2"
+					>Lyrics from Unison</a>
+				{:else}
+					<span>{lyrics.source.startsWith('Source:') ? lyrics.source : `Lyrics from ${lyrics.source}`}</span>
+				{/if}
+				{#if !compact}
+					<button
+						onclick={openSelector}
+						class="hover:text-foreground inline-flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded hover:bg-foreground/5 text-[11px]"
+						title="Change lyrics / search other sources"
+					>
+						<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+							/>
+						</svg>
+						Change source
+					</button>
+				{/if}
 			</div>
-			<LyricsSyncDock />
+			{#if !compact}
+				<LyricsSyncDock />
+			{/if}
 		</div>
 	{/if}
 </div>
