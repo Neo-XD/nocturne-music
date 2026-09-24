@@ -7,6 +7,7 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
 import { toast } from './player.svelte';
 import { canSelfUpdate, getSettings, openExternal, installAppUpdate } from './api';
+import { friendlyNetError } from './neterr';
 
 const RELEASES_URL = 'https://github.com/Neo-XD/nocturne-music/releases/latest';
 
@@ -86,7 +87,8 @@ export async function checkForUpdatesInteractive(): Promise<{ message: string; e
 			return { message: `Update available: v${updateState.available!.version}`, error: false };
 		return { message: 'You are running the latest version', error: false };
 	} catch (e) {
-		return { message: 'You are running the latest version', error: false };
+		const detail = friendlyNetError(String(e), 'No internet connection or server unreachable');
+		return { message: `Update check failed: ${detail}`, error: true };
 	} finally {
 		updateState.checking = false;
 	}

@@ -62,6 +62,7 @@
 	} from '$lib/player.svelte';
 	import DiscordSettings from '$lib/components/DiscordSettings.svelte';
 	import DiscordIcon from '$lib/components/DiscordIcon.svelte';
+	import GlobalHotkeysSettings from '$lib/components/GlobalHotkeysSettings.svelte';
 	import {
 		formatKey,
 		keybindings,
@@ -106,7 +107,7 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'hotkeys' | 'data' | 'about';
 	const TABS: { id: TabId; label: string; hint: string; icon?: typeof Settings02Icon; customIcon?: any }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
@@ -116,6 +117,7 @@
 		{ id: 'performance', label: 'Performance', hint: 'Graphics, animation speed and resource optimizations.', icon: FlashIcon },
 		{ id: 'lyrics', label: 'Lyrics', hint: 'Provider priority, sources and synchronization.', icon: Mic01Icon },
 		{ id: 'keybindings', label: 'Keybindings', hint: 'Keyboard shortcuts and custom key mappings.', icon: KeyboardIcon },
+		{ id: 'hotkeys', label: 'Global Hotkeys', hint: 'Control playback when minimized or running in background.', icon: KeyboardIcon },
 		{ id: 'data', label: 'Data & storage', hint: 'Network and cached files.', icon: Database02Icon },
 		{ id: 'about', label: 'About', hint: 'Version, updates and what changed.', icon: InformationCircleIcon }
 	];
@@ -800,6 +802,12 @@
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const crossfadeSecs = $derived(parseInt(settings.crossfade_seconds || '0', 10) || 0);
+	const normalizeOn = $derived(settings.normalize_volume !== 'false');
+
+	async function setNormalize(on: boolean) {
+		settings.normalize_volume = on ? 'true' : 'false';
+		await api.setSetting('normalize_volume', settings.normalize_volume);
+	}
 
 	async function setCrossfade(secs: number) {
 		settings.crossfade_seconds = secs.toString();
@@ -1943,6 +1951,12 @@
 									tall: true
 								})}
 								{@render row({
+									title: 'Volume normalization',
+									desc: 'Match loudness across tracks using replay gain / YouTube loudness data. Turn off for untouched audio masters.',
+									control: normalizeSwitch,
+									tall: true
+								})}
+								{@render row({
 									title: 'Audio quality',
 									badge: 'Network & CPU',
 									badgeVariant: 'info',
@@ -2614,6 +2628,8 @@
 								</section>
 							{/if}
 						{/each}
+					{:else if tab === 'hotkeys'}
+						<GlobalHotkeysSettings />
 					{:else if tab === 'data'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Network</h3>
@@ -3215,6 +3231,7 @@
 {#snippet traySwitch()}<Switch checked={trayOn} onCheckedChange={setTray} />{/snippet}
 {#snippet autostartSwitch()}<Switch checked={autostartOn} onCheckedChange={setAutostart} />{/snippet}
 {#snippet autoplaySwitch()}<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />{/snippet}
+{#snippet normalizeSwitch()}<Switch checked={normalizeOn} onCheckedChange={setNormalize} />{/snippet}
 {#snippet showAudioQualitySwitch()}<Switch checked={prefs.showAudioQuality} onCheckedChange={setShowAudioQuality} />{/snippet}
 {#snippet seekbarStyleSelector()}
 	<div class="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">

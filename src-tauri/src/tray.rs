@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::state::AppState;
 
-pub use imp::{init, set_playing};
+pub use imp::{init, set_icon, set_playing};
 
 /// Bring the main window back from close-to-tray, minimize, or the mini player. Every "come back"
 /// path — tray menu, tray click, second launch, the widget's restore button — goes through here so
@@ -150,6 +150,18 @@ mod imp {
             handle.update(|t| t.playing = playing).await;
         });
     }
+
+    pub fn set_icon(_app: &AppHandle, icon: &tauri::image::Image<'_>) {
+        let Some(handle) = HANDLE.get() else { return };
+        let mut data = icon.rgba().to_vec();
+        for px in data.chunks_exact_mut(4) {
+            px.rotate_right(1);
+        }
+        let pixmap = vec![Icon { width: icon.width() as i32, height: icon.height() as i32, data }];
+        tauri::async_runtime::spawn(async move {
+            handle.update(|t| t.icon = pixmap).await;
+        });
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -208,6 +220,12 @@ mod imp {
     pub fn set_playing(app: &AppHandle, playing: bool) {
         if let Some(t) = app.try_state::<TrayState>() {
             let _ = t.play_pause.set_text(if playing { "Pause" } else { "Play" });
+        }
+    }
+
+    pub fn set_icon(app: &AppHandle, icon: &tauri::image::Image<'_>) {
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_icon(Some(icon.clone().to_owned()));
         }
     }
 }

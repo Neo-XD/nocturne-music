@@ -160,6 +160,9 @@ pub async fn seek(state: St<'_>, position: f64) -> Result<(), String> {
 #[tauri::command]
 pub async fn set_volume(state: St<'_>, volume: i64) -> Result<(), String> {
     state.player.set_volume(volume).map_err(|e| e.to_string())?;
+    if volume > 0 {
+        crate::hotkeys::LAST_NONZERO_VOLUME.store(volume, std::sync::atomic::Ordering::Relaxed);
+    }
     // There is one volume and there can be two windows (the mini player). Without this the one
     // that didn't move the slider keeps showing the old level and lies about what you're hearing.
     let _ = state.app.emit("volume", volume);
@@ -1559,6 +1562,20 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v086_note = ReleaseNote {
+        version: "0.8.6".to_string(),
+        date: "2026-09-24".to_string(),
+        body: r#"### Nocturne Music v0.8.6
+
+#### Upstream Features & Fixes (v0.8.1 & v0.8.2)
+- **Gapless Transition & Playback Stability**: Fixed lookahead prefetching, latency compensation, and exact WebM padding using lavf.
+- **Audio Device Management**: Clean mpv playback pausing on audio device disconnection and queue state preservation without skipping.
+- **Upstream Network & Stream Resiliency**: Restored `TVHTML5_SIMPLY` fallback leg for signed-out streaming, stream validation with tail range check, and graceful error messages instead of raw network dumps.
+- **Podcast Episodes & Music Video Segregation**: Preserved podcast episodes on show pages and properly categorized tracks under music video filtering.
+- **Volume Normalization & Limiter**: Full-scale limiter headroom and volume normalization support.
+- **Update Fetching Fix**: Hardened Tauri updater and release notes lookup with fallback mechanism and informative diagnostics."#.to_string(),
+    };
+
     let v085_note = ReleaseNote {
         version: "0.8.5".to_string(),
         date: "2026-09-21".to_string(),
@@ -1827,7 +1844,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v085_note, v084_note, v083_note, v082_note, v081_note, v080_note, v072_note, v071_note,
+        v086_note, v085_note, v084_note, v083_note, v082_note, v081_note, v080_note, v072_note, v071_note,
         v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note,
         v06_note,
     ];
@@ -1836,6 +1853,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "0.8.6".to_string(),
             "0.8.5".to_string(),
             "0.8.4".to_string(),
             "0.8.3".to_string(),
@@ -3270,6 +3288,109 @@ pub async fn set_equalizer(
         state.db.set_setting("equalizer_bands", &bands_json);
     }
     state.player.set_equalizer(enabled, preamp_db, bands).map_err(|e| e.to_string())
+}
+
+// --- App icon -------------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn app_icon_path(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    let Some(p) = crate::appicon::custom_path(&app) else { return Ok(None) };
+    let scope = app.asset_protocol_scope();
+    scope.allow_file(&p).map_err(|e| e.to_string())?;
+    if let Ok(real) = p.canonicalize() {
+        let _ = scope.allow_file(real);
+    }
+    Ok(Some(p.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+pub async fn set_app_icon(app: tauri::AppHandle, path: Option<String>) -> Result<(), String> {
+    let dest = crate::appicon::path(&app).ok_or("no app data directory")?;
+    match path {
+        Some(src) => {
+            let len =
+                std::fs::metadata(&src).map_err(|e| format!("couldn't read that PNG: {e}"))?.len();
+            if len > 16 * 1024 * 1024 {
+                return Err("that file is too big; use a PNG under 16 MB".into());
+            }
+            let mut head = [0u8; 24];
+            {
+                use std::io::Read;
+                std::fs::File::open(&src)
+                    .and_then(|mut f| f.read_exact(&mut head))
+                    .map_err(|e| format!("couldn't read that PNG: {e}"))?;
+            }
+            if head[..8] != *b"\x89PNG\r\n\x1a\n" {
+                return Err("that file isn't a PNG".into());
+            }
+            let width = u32::from_be_bytes([head[16], head[17], head[18], head[19]]);
+            let height = u32::from_be_bytes([head[20], head[21], head[22], head[23]]);
+            if width > 1024 || height > 1024 {
+                return Err(format!(
+                    "that image is {width}x{height}; use one no larger than 1024x1024"
+                ));
+            }
+            tauri::image::Image::from_path(&src)
+                .map_err(|e| format!("couldn't read that PNG: {e}"))?;
+            if let Some(dir) = dest.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| format!("couldn't save the icon: {e}"))?;
+            }
+            let tmp = dest.with_extension("png.tmp");
+            std::fs::copy(&src, &tmp).and_then(|_| std::fs::rename(&tmp, &dest)).map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                format!("couldn't save the icon: {e}")
+            })?;
+        }
+        None => match std::fs::remove_file(&dest) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("couldn't remove the icon: {e}")),
+        },
+    }
+    crate::appicon::apply(&app);
+    Ok(())
+}
+
+// --- Global Hotkeys -------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_global_hotkeys(
+    hotkeys: tauri::State<'_, std::sync::Arc<crate::hotkeys::HotkeysManager>>,
+) -> Result<crate::hotkeys::HotkeysConfig, String> {
+    Ok(hotkeys.get_config())
+}
+
+#[tauri::command]
+pub fn global_hotkeys_on_wayland() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+#[tauri::command]
+pub async fn set_global_hotkeys(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    hotkeys: tauri::State<'_, std::sync::Arc<crate::hotkeys::HotkeysManager>>,
+    config: crate::hotkeys::HotkeysConfig,
+) -> Result<crate::hotkeys::HotkeyRegisterResult, String> {
+    let result = hotkeys.apply_config(&app, config);
+    crate::hotkeys::save_config(&state.db, &result.config);
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn reset_global_hotkeys(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    hotkeys: tauri::State<'_, std::sync::Arc<crate::hotkeys::HotkeysManager>>,
+) -> Result<crate::hotkeys::HotkeyRegisterResult, String> {
+    let default_config = crate::hotkeys::HotkeysConfig {
+        enabled: hotkeys.get_config().enabled,
+        ..Default::default()
+    };
+    let result = hotkeys.apply_config(&app, default_config);
+    crate::hotkeys::save_config(&state.db, &result.config);
+    Ok(result)
 }
 
 #[cfg(test)]

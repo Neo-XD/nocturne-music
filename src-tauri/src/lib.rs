@@ -1,10 +1,12 @@
 //! Nocturne Music Tauri app. Wires transport + player + db + orchestrator behind the command boundary.
 
+pub mod appicon;
 pub mod cache;
 mod cipher;
 mod commands;
 mod db;
 mod discord;
+pub mod hotkeys;
 pub mod download;
 mod http;
 pub mod installer;
@@ -213,6 +215,15 @@ pub fn run() {
                 .with_filter(|label| label == "main")
                 .build(),
         )
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if let Some(mgr) = app.try_state::<Arc<hotkeys::HotkeysManager>>() {
+                        mgr.handle_event(app, shortcut, event.state());
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -370,6 +381,20 @@ pub fn run() {
             // System tray: playback controls + show/quit while running in the background.
             if let Err(e) = tray::init(&handle) {
                 tracing::warn!(error = %e, "tray init failed (continuing without tray)");
+            }
+
+            // System-wide global hotkeys for playback control
+            let hotkeys_cfg = hotkeys::load_config(&app_state.db);
+            let hotkeys_mgr = Arc::new(hotkeys::HotkeysManager::new(hotkeys_cfg.clone()));
+            app.manage(hotkeys_mgr.clone());
+            let reg_res = hotkeys_mgr.apply_config(&handle, hotkeys_cfg);
+            if !reg_res.success {
+                tracing::warn!(errors = ?reg_res.errors, "some global hotkeys could not be registered on startup");
+            }
+
+            // Custom app icon (#173)
+            if appicon::custom_path(&handle).is_some() {
+                appicon::apply(&handle);
             }
 
             // Bridge: apply Listen Together sync commands (guest playback / host seed) to AppState.
@@ -633,6 +658,12 @@ pub fn run() {
             commands::spotify_set_sync_mode,
             recognition::recognize_song_signature,
             recognition::capture_pc_audio,
+            commands::get_global_hotkeys,
+            commands::global_hotkeys_on_wayland,
+            commands::set_global_hotkeys,
+            commands::reset_global_hotkeys,
+            commands::set_app_icon,
+            commands::app_icon_path,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is

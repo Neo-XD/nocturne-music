@@ -45,6 +45,29 @@ offline. If you touch a lyrics provider, run the ignored ones: a provider whose
 endpoint has changed returns "no lyrics" rather than an error, so it looks
 exactly like a track that simply has none.
 
+Live YouTube extraction checks are behind a feature flag instead, since they hit
+the network:
+
+```bash
+cargo test -p innertube --features integration-tests -- --nocapture
+```
+
+Run these after changing the client list, the cipher, or anything in the resolve
+path. A failure usually means YouTube changed something rather than that your
+patch is wrong; `.github/workflows/stream-health.yml` runs them nightly and says
+what each one means.
+
+On macOS the test binaries link libmpv just like the app does, so they need the
+same `LIBRARY_PATH` as the build or they fail to link with
+`ld: library 'mpv' not found`:
+
+```bash
+export LIBRARY_PATH="$(brew --prefix)/lib:$LIBRARY_PATH"
+```
+
+See [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md) for the rest of the macOS
+setup.
+
 ## Pull requests
 
 - **Open from a branch, not your fork's `master`.** It keeps your default branch
@@ -52,6 +75,29 @@ exactly like a track that simply has none.
 - One concern per PR where you can manage it.
 - Say what you tested. "Played five tracks, checked light and dark" is worth
   more than a description of the code.
+
+## Translations
+
+Translations live in `ui/src/lib/locales/` as nested JSON, one file per language,
+with `en.json` as the source of truth.
+
+**Use [Weblate](https://hosted.weblate.org/projects/limusic/) rather than editing
+the JSON by hand.** It shows you the English original beside each string, flags
+translations that went stale when the English changed, and opens the pull request
+for you. Hand-edited JSON tends to drift out of sync with `en.json` within a
+release or two.
+
+Two things to know:
+
+- Placeholders like `{count}` and `{playlist}` are substituted at runtime. Keep
+  them spelled exactly as they are in the English string; you can move them
+  around the sentence freely.
+- A missing key is not a bug. Anything a catalog does not have falls back to
+  English at runtime, so a partial translation is safe to ship.
+
+Adding a new language: Weblate creates the JSON file, then import it in
+`ui/src/lib/locales/index.ts` and add the locale to `LocaleId`, `LOCALES` and
+`translations` there so the picker offers it.
 
 ## House conventions
 

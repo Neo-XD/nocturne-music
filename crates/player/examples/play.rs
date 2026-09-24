@@ -1,5 +1,8 @@
 //! Audible gapless check: `cargo run -p player --example play -- <fileA> <fileB>`
 //! Defaults to the Phase-0 spike tones. Plays A then B gaplessly and prints events.
+//!
+//! Also the quickest way to see mpv's own log, which the app forwards into `tracing`:
+//! `LIMUSIC_MPV_LOG=v RUST_LOG=info cargo run -p player --example play`
 
 use std::collections::HashMap;
 
@@ -7,6 +10,11 @@ use player::{Player, PlayerEvent};
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .init();
     let a = std::env::args().nth(1).unwrap_or_else(|| "spikes/tone_a.opus".into());
     let b = std::env::args().nth(2).unwrap_or_else(|| "spikes/tone_b.opus".into());
 

@@ -3,6 +3,8 @@ import { browser } from '$app/environment';
 import * as api from './api';
 import { cycleRepeat, np, nudgeVolume, playback, toggleMute, ui, toast, refreshView } from './player.svelte';
 
+export const IS_MAC = browser && typeof navigator !== 'undefined' && navigator.platform.startsWith('Mac');
+
 export type ShortcutAction =
 	| 'search'
 	| 'playPause'

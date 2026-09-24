@@ -1,0 +1,72 @@
+name: Stream health
+
+# Asks live YouTube, once a night, whether this app can still resolve and stream a track.
+#
+# WHY THIS EXISTS: every playback breakage this project has had came from YouTube changing
+# something, and every one of them was discovered by a user opening an issue. Two ANDROID_VR
+# clients stopped streaming, the rustypipe safety net was capped at one mebibyte (issue #292), and
+# the cipher registries go stale within hours of a player rotation. None of that is visible from
+# the source, so nothing in `checks.yml` can catch it. This job asks the only authority there is.
+#
+# A RED RUN HERE IS USUALLY NOT A CODE REGRESSION. It means YouTube moved. Each assertion in
+# `crates/innertube/tests/live_smoke.rs` says in its failure message which part of the chain went.
+#
+# NEVER BLOCKS A MERGE. There is no `pull_request` or `push` trigger on purpose: a third party's
+# availability must not be able to stop work landing.
+#
+# ANONYMOUS ON PURPOSE. No `LIMUSIC_COOKIE` and no account secret, ever. The cookie-gated tests in
+# the suite are `#[ignore]`d and self-skip without one. This repo is public and a nightly job
+# holding a YouTube session cookie is a risk with no matching benefit.
+#
+# `ubuntu-latest` is deliberate here, unlike the release workflows: nothing is shipped from this
+# job, so there is no glibc floor to protect, and `innertube` is pure Rust with no libmpv or
+# WebKitGTK to install.
+
+on:
+  schedule:
+    # 04:00 UTC. Off the peak of YouTube's own deploy window and early enough that a red run is
+    # waiting when the day starts.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stream-health
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # `cargo test` compiles dependency build scripts, which run as this job. Without this
+      # `actions/checkout` leaves GITHUB_TOKEN in `.git/config` for them to read. Nothing
+      # here pushes, so the credential has no reason to stay.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      # `-p innertube` only: the app crate links libmpv and WebKitGTK, and none of these tests
+      # need it.
+      #
+      # `rustypipe_url_streams_to_the_end` is skipped: googlevideo serves only the first MiB of a
+      # rustypipe URL (issue #292), so it fails every night, and a job that is always red gets
+      # ignored. Run it by hand to see whether the cap has lifted; drop the skip when it passes,
+      # or delete the test if the rustypipe fallback goes.
+      - name: Live extraction suite
+        run: >-
+          cargo test -p innertube --features integration-tests --
+          --nocapture --skip rustypipe_url_streams_to_the_end
+
+      - name: What a failure here means
+        if: failure()
+        run: |
+          echo "::notice::A red run usually means YouTube changed something, not that a commit broke."
+          echo "::notice::direct_clients red: a direct client (VISIONOS) stopped serving whole tracks."
+          echo "::notice::cipher_registries red: YouTube rotated player.js and the registries are behind."

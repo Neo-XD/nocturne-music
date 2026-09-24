@@ -5,5 +5,24 @@
     "macOS": {
       "minimumSystemVersion": "14.0"
     }
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Limusic",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 620,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": false,
+        "decorations": true,
+        "transparent": false,
+        "dragDropEnabled": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ]
   }
 }

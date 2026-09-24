@@ -245,8 +245,46 @@ jobs:
             -s "$BREW_PREFIX/lib" < /dev/null
           echo "bundled $(ls "$APP/Contents/Frameworks" | wc -l | tr -d ' ') libraries"
 
+      # dylibbundler rewrites EVERY LC_RPATH it finds to the same -p prefix, and Homebrew's libmpv
+      # ships two of them (the Xcode Swift toolchain and /usr/lib/swift). Both become
+      # "@executable_path/../Frameworks/", and dyld refuses to load a Mach-O that lists one rpath
+      # twice: `Library not loaded: ... Reason: duplicate LC_RPATH`. The app then dies the instant
+      # it launches, on every machine including this runner, while `otool -L` stays perfectly clean,
+      # which is exactly why the Homebrew guard below cannot see it.
+      - name: Drop the duplicate rpaths dylibbundler leaves behind
+        run: |
+          set -euo pipefail
+          APP=target/release/bundle/macos/limusic.app
+          find "$APP" -type f -print0 | while IFS= read -r -d '' f; do
+            # `otool -l` on a non-Mach-O file just prints nothing useful, so no file-type test is
+            # needed; the awk below yields no rpaths and the inner loop does nothing.
+            #
+            # [[:space:]], not \s, for the same BSD-grep/awk reason as the guard further down.
+            # Strip the `path ` prefix and the ` (offset N)` suffix rather than taking $2, so an
+            # rpath containing a space is not silently truncated to its first word.
+            #
+            # `otool -l` prints the load commands of every slice, so on a universal binary one
+            # legitimate rpath per architecture would count as a duplicate and -delete_rpath would
+            # then strip it from all of them. Thin arm64 only here; count per `-arch` if the Intel
+            # leg in the header ever becomes a fat build instead of a second job.
+            otool -l "$f" 2>/dev/null \
+              | awk '/LC_RPATH/{g=1} g&&/^[[:space:]]*path /{sub(/^[[:space:]]*path /, ""); sub(/ \(offset [0-9]+\)$/, ""); print; g=0}' \
+              | sort | uniq -c | while read -r n rp; do
+                  [ "$n" -gt 1 ] || continue
+                  # -delete_rpath removes ONE matching entry per call, so repeat it n-1 times and
+                  # leave the last copy in place.
+                  echo "${f#$APP/}: dropping $((n - 1)) duplicate rpath(s) $rp"
+                  i=1
+                  while [ "$i" -lt "$n" ]; do
+                    install_name_tool -delete_rpath "$rp" "$f"
+                    i=$((i + 1))
+                  done
+                done
+          done
+          echo "rpath tables deduplicated"
+
       # Ad-hoc signature. Not an Apple Developer identity (see the header), but arm64 macOS will not
-      # execute a Mach-O with no valid signature at all, and every install-name rewrite above
+      # execute a Mach-O with no valid signature at all, and every install-name and rpath rewrite
       # invalidated the one the linker put there. This is the difference between an app that opens
       # and one that dies with "Killed: 9".
       - name: Re-sign the bundle
@@ -254,6 +292,36 @@ jobs:
           set -euo pipefail
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
+
+      # Regression guard for the dedupe step above, placed after the re-sign so it inspects the
+      # bundle in exactly the state that gets archived. A duplicate LC_RPATH is invisible to
+      # `otool -L` and to `codesign --verify`, so without this check the first symptom is the
+      # shipped .dmg refusing to start on every user's Mac.
+      - name: Check no Mach-O lists a duplicate rpath
+        run: |
+          set -euo pipefail
+          APP=target/release/bundle/macos/limusic.app
+          # No `|| true` here, unlike the Homebrew guard: that one needs it because grep exits 1 on
+          # every clean file, whereas uniq -d exits 0, so a non-zero pipeline here means otool
+          # could not read the file. errexit does not reach inside a command substitution (and
+          # macOS ships bash 3.2, which has no inherit_errexit to change that), so turn the failure
+          # into a line of output instead. A guard that reports success over files it never managed
+          # to inspect is worse than no guard.
+          DUPES="$(find "$APP" -type f -print0 | while IFS= read -r -d '' f; do
+            otool -l "$f" 2>/dev/null \
+              | awk '/LC_RPATH/{g=1} g&&/^[[:space:]]*path /{sub(/^[[:space:]]*path /, ""); sub(/ \(offset [0-9]+\)$/, ""); print; g=0}' \
+              | sort | uniq -d | sed "s|^|${f#$APP/} <- |" \
+              || echo "${f#$APP/} <- COULD NOT INSPECT, otool failed"
+          done)"
+          if [ -n "$DUPES" ]; then
+            echo "::error::the rpath check did not come back clean:"
+            echo "$DUPES"
+            echo "An rpath on the right is one a Mach-O lists twice, which dyld refuses to load;"
+            echo "the dedupe step above should have removed it. COULD NOT INSPECT means the bundle"
+            echo "was never fully checked."
+            exit 1
+          fi
+          echo "every rpath table is free of duplicates"
 
       # The regression test for this workflow, and the only one available without a Mac in hand:
       # nothing in the bundle may still point at Homebrew. A single missed dependency is an app that
@@ -369,8 +437,9 @@ jobs:
             local i
             for ((i = 1; i <= n; i++)); do
               "$@" && return 0
-              echo "::warning::attempt $i/$n failed: $*"
-              sleep $((i * 4))
+              # stderr, not stdout: `x="$(retry 3 gh api …)"` would otherwise capture this line.
+              echo "::warning::attempt $i/$n failed: $*" >&2
+              sleep $((i * 10))
             done
             return 1
           }
@@ -383,8 +452,63 @@ jobs:
               return 0
             fi
           }
+          # `gh release upload` has neither a timeout nor stall detection. When GitHub's asset
+          # origin (uploads.github.com) degrades, gh sits there with no output and no bytes moving,
+          # so the job hangs instead of failing and `retry` never gets its turn: v0.7.3 lost two
+          # Linux runs that way on an AppImage that had gone up in 18 seconds the day before, and
+          # the release sat half-published. It is not a size threshold. A probe that afternoon
+          # wedged on a 10 MiB blob while a 420 byte .sig went straight through.
+          #
+          # curl can tell a stalled upload from a slow one, which is the whole point: --speed-limit
+          # with --speed-time gives up once throughput has been under 32 KB/s for a minute, while an
+          # upload that is merely slow (the Linux one that eventually landed averaged 610 KB/s) runs
+          # to completion however long it takes. --max-time is the outer bound, for bytes that
+          # trickle just above the stall limit forever.
+          #
+          # Files go up one at a time, the signed artifact before its .sig, so a failure part-way
+          # cannot leave a .sig on the release beside a missing binary.
+          upload() { # upload <file…>
+            local f name id code state
+            for f in "$@"; do
+              # The API rewrites an asset name it does not like (a space becomes a dot) and stores
+              # it under the rewritten one, so sending the basename verbatim would leave the lookup
+              # below searching for a name that is not there and the re-upload answering 422.
+              # Sanitising first means what we send is what gets stored, and it is already URL-safe.
+              name="$(basename "$f")"; name="${name//[!A-Za-z0-9._-]/.}"
+              # What --clobber used to do. A killed upload also leaves the asset in the "starter"
+              # state, where it is listed with the right size, 404s on download, and blocks the name.
+              id="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate \
+                    --jq ".[] | select(.name == \"$name\") | .id" | head -1)"
+              if [ -n "$id" ]; then
+                gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id" --silent || return 1
+              fi
+              code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+                --request POST --upload-file "$f" \
+                --speed-limit 32768 --speed-time 60 --max-time 900 \
+                --header "Authorization: Bearer $GH_TOKEN" \
+                --header "Content-Type: application/octet-stream" \
+                "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$name")" \
+                || { echo "::warning::$name: the upload stalled or the connection failed" >&2; return 1; }
+              if [ "$code" != 201 ]; then
+                echo "::warning::$name: the asset endpoint answered HTTP $code" >&2; return 1
+              fi
+              # 201 is not quite proof, and this is the failure that would not announce itself:
+              # latest.json pointing at a "starter" asset is a release that looks complete here and
+              # 404s for every updater. Returning 1 sends `retry` round again, which deletes it.
+              state="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate \
+                       --jq ".[] | select(.name == \"$name\") | .state" | head -1)"
+              if [ "$state" != uploaded ]; then
+                echo "::warning::$name: asset is in state '${state:-missing}', not 'uploaded'" >&2; return 1
+              fi
+              echo "uploaded $name"
+            done
+          }
 
-          retry 3 gh release upload "$TAG" "$DMG" "$TAR" "$TAR.sig" --clobber --repo "$GITHUB_REPOSITORY"
+          # The asset endpoint is addressed by release id; every other call here takes the tag.
+          RELEASE_ID="$(retry 3 gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)"
+          [ -n "$RELEASE_ID" ] || { echo "::error::no release found for $TAG"; exit 1; }
+
+          retry 5 upload "$DMG" "$TAR" "$TAR.sig"
 
           # latest.json has three writers now and no compare-and-swap, so: merge, upload, read back,
           # re-merge if one of the other jobs clobbered us in between. Whoever loses a round merges
@@ -399,7 +523,7 @@ jobs:
             jq --arg sig "$(cat "$TAR.sig")" --arg url "$URL" \
               '.platforms["darwin-aarch64"] = { signature: $sig, url: $url }' \
               manifest/latest.json > latest.json
-            retry 3 gh release upload "$TAG" latest.json --clobber --repo "$GITHUB_REPOSITORY"
+            retry 3 upload latest.json
 
             sleep $((3 + RANDOM % 5))
             retry 3 fetch_manifest check
