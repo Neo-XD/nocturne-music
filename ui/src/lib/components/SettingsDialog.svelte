@@ -717,6 +717,12 @@
 			badge: 'Enhanced'
 		},
 		{
+			id: 'unison',
+			name: 'Unison',
+			description: "Unison's curated TTML/LRC database with rich, line-synced, and plain lyrics.",
+			badge: 'Rich Sync'
+		},
+		{
 			id: 'paxsenix',
 			name: 'Paxsenix',
 			description: 'Aggregated synchronized and romanized lyrics provider covering broad streaming catalogues.',
@@ -727,7 +733,16 @@
 	let lyricsProviders = $state<LyricsProviderInfo[]>([]);
 
 	function initLyricsProviders(saved?: string) {
-		const defaultIds = ['betterlyrics', 'lrclib', 'ytm', 'qq', 'kugou', 'youlyplus', 'paxsenix'];
+		const defaultIds = [
+			'betterlyrics',
+			'lrclib',
+			'ytm',
+			'qq',
+			'kugou',
+			'youlyplus',
+			'unison',
+			'paxsenix'
+		];
 		let enabledIds: string[] = defaultIds;
 		let savedOrder: string[] = [];
 		if (saved && saved.trim()) {
@@ -2386,6 +2401,16 @@
 													{/if}
 												</div>
 												<p class="text-[11px] text-muted-foreground truncate">{p.description}</p>
+												{#if p.id === 'unison'}
+													<p class="mt-1 text-[10px] text-muted-foreground">
+														Lyrics from Unison (<a
+															href="https://unison.boidu.dev"
+															target="_blank"
+															rel="external noreferrer"
+															class="hover:text-foreground underline underline-offset-2"
+														>https://unison.boidu.dev</a>)
+													</p>
+												{/if}
 											</div>
 										</div>
 

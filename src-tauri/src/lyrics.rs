@@ -28,6 +28,11 @@ const MISS_TTL_SECS: i64 = 24 * 3600;
 const LYRICS_CACHE_VERSION: u32 = 2;
 
 const LRCLIB_ROOT: &str = "https://lrclib.net/api";
+const UNISON_ENDPOINT: &str = "https://unison.betterlyrics.org/lyrics";
+const UNISON_SOURCE: &str = "Unison";
+const UNISON_SEARCH_LIMIT: usize = 10;
+const UNISON_CANDIDATE_LIMIT: usize = 3;
+const MANUAL_PROVIDER_CANDIDATE_LIMIT: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LyricWord {
@@ -166,6 +171,13 @@ fn deserialize_cached_lyrics(json: &str) -> Option<Lyrics> {
     (cached.version == LYRICS_CACHE_VERSION).then_some(cached.lyrics)
 }
 
+/// The official Better Lyrics client marks Unison results as non-cacheable. Mirror that policy for
+/// persistent positive lyrics caching.
+/// Negative cache entries remain governed by the normal whole-chain policy.
+fn positive_lyrics_cache_allowed(lyrics: &Lyrics) -> bool {
+    lyrics.source != UNISON_SOURCE
+}
+
 pub struct LyricsRequest {
     pub video_id: String,
     pub title: String,
@@ -186,8 +198,8 @@ fn forced_provider() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-pub const DEFAULT_PROVIDERS: [&str; 7] =
-    ["betterlyrics", "youlyplus", "paxsenix", "lrclib", "ytm", "qq", "kugou"];
+pub const DEFAULT_PROVIDERS: [&str; 8] =
+    ["betterlyrics", "youlyplus", "unison", "paxsenix", "lrclib", "ytm", "qq", "kugou"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomLyricProvider {
@@ -250,8 +262,15 @@ pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> 
     }
     let (lyrics, cacheable) = fetch(state, req).await;
     if cacheable && forced.is_none() {
-        let json = lyrics.as_ref().and_then(serialize_cached_lyrics);
-        state.db.put_lyrics(&video_id, json.as_deref(), now);
+        match lyrics.as_ref() {
+            Some(lyrics) if positive_lyrics_cache_allowed(lyrics) => {
+                if let Some(json) = serialize_cached_lyrics(lyrics) {
+                    state.db.put_lyrics(&video_id, Some(&json), now);
+                }
+            }
+            Some(_) => {}
+            None => state.db.put_lyrics(&video_id, None, now),
+        }
     }
     lyrics
 }
@@ -291,6 +310,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         let hit = match only.as_str() {
             "betterlyrics" | "boidu" => betterlyrics_get(req).await,
             "youlyplus" | "lyricsplus" => youlyplus_get(req).await,
+            "unison" => unison_get(req).await,
             "paxsenix" => paxsenix_get(req).await,
             "qq" => qqmusic_get(req).await,
             "kugou" => kugou_get(req).await,
@@ -317,6 +337,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     // Cache of already-fetched candidate responses so no provider is hit twice.
     let mut fetched_betterlyrics: Option<Option<Lyrics>> = None;
     let mut fetched_youlyplus: Option<Option<Lyrics>> = None;
+    let mut fetched_unison: Option<Option<Lyrics>> = None;
     let mut fetched_paxsenix: Option<Option<Lyrics>> = None;
     let mut fetched_customs: std::collections::HashMap<String, Option<Lyrics>> =
         std::collections::HashMap::new();
@@ -347,6 +368,20 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 if let Some(Some(l)) = &fetched_youlyplus {
                     if has_genuine_word_timings(l) {
                         return (Some(l.clone()), req.duration.is_some());
+                    }
+                }
+            }
+            "unison" => {
+                if fetched_unison.is_none() {
+                    let hit = unison_get(req).await;
+                    if hit.is_ok() {
+                        definitive = true;
+                    }
+                    fetched_unison = Some(hit.ok().flatten());
+                }
+                if let Some(Some(l)) = &fetched_unison {
+                    if has_genuine_word_timings(l) {
+                        return (Some(l.clone()), false);
                     }
                 }
             }
@@ -431,6 +466,20 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 if let Some(Some(l)) = &fetched_youlyplus {
                     if is_line_synced(l) {
                         return (Some(l.clone()), req.duration.is_some());
+                    }
+                }
+            }
+            "unison" => {
+                if fetched_unison.is_none() {
+                    let hit = unison_get(req).await;
+                    if hit.is_ok() {
+                        definitive = true;
+                    }
+                    fetched_unison = Some(hit.ok().flatten());
+                }
+                if let Some(Some(l)) = &fetched_unison {
+                    if is_line_synced(l) {
+                        return (Some(l.clone()), false);
                     }
                 }
             }
@@ -571,6 +620,11 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
             "youlyplus" | "lyricsplus" => {
                 if let Some(Some(l)) = fetched_youlyplus.take() {
                     return (Some(l), req.duration.is_some());
+                }
+            }
+            "unison" => {
+                if let Some(Some(l)) = fetched_unison.take() {
+                    return (Some(l), false);
                 }
             }
             "paxsenix" => {
@@ -736,6 +790,32 @@ async fn lrclib_search(req: &LyricsRequest) -> Result<Option<LrclibTrack>, reqwe
         }
     }
     Ok(best_synced.map(|(_, t)| t).or(best_plain))
+}
+
+/// Manual discovery keeps LRCLIB's full canonical search rows instead of collapsing them to the
+/// single automatic fallback. The API accepts structured title/artist search, while artist-only
+/// discovery must use its broad `q` parameter.
+async fn lrclib_manual_search(req: &LyricsRequest) -> Result<Vec<LrclibTrack>, reqwest::Error> {
+    let title = req.title.trim();
+    let artist = req.artists.trim();
+    let mut query = Vec::new();
+    if !title.is_empty() {
+        query.push(("track_name", title.to_owned()));
+        if !artist.is_empty() {
+            query.push(("artist_name", artist.to_owned()));
+        }
+    } else if !artist.is_empty() {
+        query.push(("q", artist.to_owned()));
+    } else {
+        return Ok(Vec::new());
+    }
+    get(format!("{LRCLIB_ROOT}/search"))
+        .query(&query)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
 }
 
 /// Best `Lyrics` an LRCLIB track yields: instrumental > synced > plain > nothing.
@@ -953,6 +1033,453 @@ fn clean_lyrics_artist(artist: &str) -> String {
 
 // --- Additional Providers (Better Lyrics & Asian Catalogues) ------------------------------
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnisonQuery {
+    video_id: Option<String>,
+    song: String,
+    artist: String,
+    duration: Option<i64>,
+    album: Option<String>,
+}
+
+impl UnisonQuery {
+    fn from_request(req: &LyricsRequest) -> Self {
+        Self {
+            video_id: (!req.video_id.is_empty()).then(|| req.video_id.clone()),
+            song: req.title.clone(),
+            artist: req.artists.clone(),
+            duration: req
+                .duration
+                .filter(|duration| *duration > 0.0)
+                .map(|duration| duration.round() as i64),
+            album: req.album.clone().filter(|album| !album.trim().is_empty()),
+        }
+    }
+
+    fn params(&self) -> Vec<(&'static str, String)> {
+        let mut params = Vec::new();
+        if let Some(video_id) = &self.video_id {
+            params.push(("v", video_id.clone()));
+        }
+        params.push(("song", self.song.clone()));
+        params.push(("artist", self.artist.clone()));
+        if let Some(duration) = self.duration {
+            params.push(("duration", duration.to_string()));
+        }
+        if let Some(album) = &self.album {
+            params.push(("album", album.clone()));
+        }
+        params
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UnisonSearchQuery {
+    Metadata { song: String, artist: String, limit: usize },
+    Broad { query: String, limit: usize },
+}
+
+impl UnisonSearchQuery {
+    fn from_request(req: &LyricsRequest) -> Option<Self> {
+        let song = req.title.trim();
+        let artist = req.artists.trim();
+        match (song.is_empty(), artist.is_empty()) {
+            (false, false) => Some(Self::Metadata {
+                song: song.to_owned(),
+                artist: artist.to_owned(),
+                limit: UNISON_SEARCH_LIMIT,
+            }),
+            (false, true) => {
+                Some(Self::Broad { query: song.to_owned(), limit: UNISON_SEARCH_LIMIT })
+            }
+            (true, false) => {
+                Some(Self::Broad { query: artist.to_owned(), limit: UNISON_SEARCH_LIMIT })
+            }
+            (true, true) => None,
+        }
+    }
+
+    fn params(&self) -> Vec<(&'static str, String)> {
+        match self {
+            Self::Metadata { song, artist, limit } => vec![
+                ("song", song.clone()),
+                ("artist", artist.clone()),
+                ("limit", limit.to_string()),
+            ],
+            Self::Broad { query, limit } => {
+                vec![("q", query.clone()), ("limit", limit.to_string())]
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct UnisonResponse {
+    success: bool,
+    data: Option<UnisonData>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnisonData {
+    lyrics: String,
+    format: String,
+    sync_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UnisonSearchResponse {
+    success: bool,
+    #[serde(default)]
+    data: Vec<UnisonSearchItem>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnisonSearchItem {
+    id: i64,
+    song: String,
+    artist: String,
+    #[serde(default)]
+    album: Option<String>,
+    #[serde(default)]
+    duration: Option<f64>,
+    format: String,
+    sync_type: String,
+    #[serde(default)]
+    match_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MetadataRank {
+    tier: u8,
+    score: f64,
+}
+
+#[derive(Debug)]
+struct MetadataFieldMatch {
+    requested: bool,
+    meaningful: bool,
+    exact: bool,
+    contains_all: bool,
+    matched_tokens: usize,
+    token_count: usize,
+    coverage: f64,
+    similarity: f64,
+}
+
+fn normalize_search_text(text: &str) -> String {
+    let mut normalized = String::new();
+    let mut pending_space = false;
+    for character in text.trim().chars().flat_map(char::to_lowercase) {
+        if character.is_alphanumeric() {
+            if pending_space && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            normalized.push(character);
+            pending_space = false;
+        } else {
+            pending_space = true;
+        }
+    }
+    normalized
+}
+
+fn is_common_search_token(token: &str) -> bool {
+    matches!(
+        token,
+        "a" | "an"
+            | "and"
+            | "the"
+            | "of"
+            | "to"
+            | "in"
+            | "on"
+            | "for"
+            | "with"
+            | "feat"
+            | "featuring"
+            | "ft"
+            | "version"
+            | "remix"
+    )
+}
+
+fn bigram_similarity(left: &str, right: &str) -> f64 {
+    let left: Vec<char> = left.chars().filter(|character| !character.is_whitespace()).collect();
+    let right: Vec<char> = right.chars().filter(|character| !character.is_whitespace()).collect();
+    if left == right {
+        return 1.0;
+    }
+    if left.len() < 2 || right.len() < 2 {
+        return 0.0;
+    }
+
+    let mut right_bigrams: Vec<(char, char)> =
+        right.windows(2).map(|pair| (pair[0], pair[1])).collect();
+    let mut matches = 0usize;
+    for pair in left.windows(2).map(|pair| (pair[0], pair[1])) {
+        if let Some(index) = right_bigrams.iter().position(|candidate| *candidate == pair) {
+            matches += 1;
+            right_bigrams.swap_remove(index);
+        }
+    }
+    (2 * matches) as f64 / (left.len() + right.len() - 2) as f64
+}
+
+fn compare_metadata_field(query: &str, candidate: Option<&str>) -> MetadataFieldMatch {
+    let query = normalize_search_text(query);
+    let candidate = normalize_search_text(candidate.unwrap_or_default());
+    if query.is_empty() {
+        return MetadataFieldMatch {
+            requested: false,
+            meaningful: false,
+            exact: true,
+            contains_all: true,
+            matched_tokens: 0,
+            token_count: 0,
+            coverage: 1.0,
+            similarity: 1.0,
+        };
+    }
+
+    let query_tokens: Vec<&str> =
+        query.split_whitespace().filter(|token| !is_common_search_token(token)).collect();
+    let candidate_tokens: Vec<&str> = candidate.split_whitespace().collect();
+    let matched_tokens = query_tokens
+        .iter()
+        .filter(|query_token| {
+            candidate_tokens.iter().any(|candidate_token| {
+                query_token == &candidate_token
+                    || (query_token.chars().count() >= 4
+                        && candidate_token.chars().count() >= 4
+                        && bigram_similarity(query_token, candidate_token) >= 0.65)
+            })
+        })
+        .count();
+    let token_count = query_tokens.len();
+    let coverage = if token_count == 0 { 0.0 } else { matched_tokens as f64 / token_count as f64 };
+
+    MetadataFieldMatch {
+        requested: true,
+        meaningful: token_count > 0,
+        exact: query == candidate,
+        contains_all: token_count > 0 && matched_tokens == token_count,
+        matched_tokens,
+        token_count,
+        coverage,
+        similarity: bigram_similarity(&query, &candidate),
+    }
+}
+
+fn rank_provider_metadata(
+    req: &LyricsRequest,
+    title: Option<&str>,
+    artist: Option<&str>,
+) -> Option<MetadataRank> {
+    let title = compare_metadata_field(&req.title, title);
+    let artist = compare_metadata_field(&req.artists, artist);
+    let fields = [&title, &artist];
+    let requested: Vec<_> = fields.into_iter().filter(|field| field.requested).collect();
+    if requested.is_empty() || requested.iter().all(|field| !field.meaningful) {
+        return None;
+    }
+    if requested.iter().any(|field| !field.meaningful) {
+        return None;
+    }
+
+    let substantial = |field: &&MetadataFieldMatch| {
+        field.matched_tokens >= 2 || (field.token_count == 1 && field.coverage == 1.0)
+    };
+    let tier = if requested.iter().all(|field| field.exact) {
+        4
+    } else if requested.iter().all(|field| field.contains_all && substantial(field)) {
+        3
+    } else if requested.iter().all(|field| field.coverage >= 0.6 && substantial(field)) {
+        2
+    } else if requested.iter().all(|field| field.similarity >= 0.45) {
+        1
+    } else {
+        return None;
+    };
+    let field_count = requested.len() as f64;
+    let score = tier as f64 * 100.0
+        + requested.iter().map(|field| field.coverage).sum::<f64>() * 20.0 / field_count
+        + requested.iter().map(|field| field.similarity).sum::<f64>() * 10.0 / field_count;
+    Some(MetadataRank { tier, score })
+}
+
+fn rank_unison_search_item(req: &LyricsRequest, item: &UnisonSearchItem) -> Option<MetadataRank> {
+    let mut rank = rank_provider_metadata(req, Some(&item.song), Some(&item.artist))?;
+    if let (Some(query_album), Some(candidate_album)) = (&req.album, &item.album) {
+        let album = compare_metadata_field(query_album, Some(candidate_album));
+        rank.score += if album.exact {
+            4.0
+        } else if album.contains_all {
+            2.0
+        } else {
+            0.0
+        };
+    }
+    if let (Some(query_duration), Some(candidate_duration)) = (req.duration, item.duration) {
+        let difference = (query_duration - candidate_duration).abs();
+        rank.score += if difference <= 2.0 {
+            5.0
+        } else if difference <= 5.0 {
+            3.0
+        } else if difference <= 10.0 {
+            1.0
+        } else {
+            0.0
+        };
+    }
+    rank.score += item.match_score.unwrap_or_default().clamp(0.0, 1.0);
+    Some(rank)
+}
+
+fn rank_unison_search_results(
+    req: &LyricsRequest,
+    items: Vec<UnisonSearchItem>,
+) -> Vec<UnisonSearchItem> {
+    let mut ranked: Vec<(MetadataRank, UnisonSearchItem)> = items
+        .into_iter()
+        .filter_map(|item| rank_unison_search_item(req, &item).map(|rank| (rank, item)))
+        .collect();
+    ranked.sort_by(|(left_rank, left), (right_rank, right)| {
+        right_rank
+            .tier
+            .cmp(&left_rank.tier)
+            .then_with(|| right_rank.score.total_cmp(&left_rank.score))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut seen = std::collections::HashSet::new();
+    ranked
+        .into_iter()
+        .filter_map(|(_, item)| {
+            let key = format!(
+                "{}\u{1f}|{}\u{1f}|{}\u{1f}|{}\u{1f}|{}",
+                normalize_search_text(&item.song),
+                normalize_search_text(&item.artist),
+                normalize_search_text(item.album.as_deref().unwrap_or_default()),
+                item.format.to_ascii_lowercase(),
+                item.sync_type.to_ascii_lowercase()
+            );
+            seen.insert(key).then_some(item)
+        })
+        .take(UNISON_CANDIDATE_LIMIT)
+        .collect()
+}
+
+fn unison_response_to_lyrics(response: UnisonResponse) -> Option<Lyrics> {
+    if !response.success {
+        return None;
+    }
+    let data = response.data?;
+    if data.lyrics.trim().is_empty()
+        || !matches!(
+            data.sync_type.to_ascii_lowercase().as_str(),
+            "richsync" | "linesync" | "plain"
+        )
+    {
+        return None;
+    }
+
+    match data.format.to_ascii_lowercase().as_str() {
+        "ttml" | "lrc" => from_parsed(UNISON_SOURCE, parse_lrc_or_ttml(&data.lyrics)),
+        "plain" => plain_from_text(Some(&data.lyrics), UNISON_SOURCE),
+        _ => None,
+    }
+}
+
+/// Unison's public endpoint returns one best result for the exact metadata request. There are no
+/// retries here: the surrounding provider chain supplies the fallback behavior.
+async fn unison_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    let response = crate::http::client()
+        .get(UNISON_ENDPOINT)
+        .query(&UnisonQuery::from_request(req).params())
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let payload: UnisonResponse = response.error_for_status()?.json().await?;
+    Ok(unison_response_to_lyrics(payload))
+}
+
+async fn unison_get_by_id(id: i64) -> Result<Option<Lyrics>, reqwest::Error> {
+    let response = crate::http::client()
+        .get(format!("{UNISON_ENDPOINT}/{id}"))
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let payload: UnisonResponse = response.error_for_status()?.json().await?;
+    Ok(unison_response_to_lyrics(payload))
+}
+
+fn unison_manual_candidate(item: UnisonSearchItem, lyrics: Lyrics) -> LyricCandidate {
+    let has_words = has_genuine_word_timings(&lyrics);
+    LyricCandidate {
+        id: format!("unison-{}", item.id),
+        source: UNISON_SOURCE.into(),
+        title: Some(item.song),
+        artist: Some(item.artist),
+        album: item.album,
+        duration: item.duration,
+        synced: lyrics.synced,
+        has_words,
+        lyrics,
+    }
+}
+
+/// Manual Find Lyrics uses Unison's fuzzy metadata search rather than the automatic video-ID
+/// lookup. Search results contain metadata only, so resolve just the top bounded IDs afterward.
+async fn unison_search_candidates(
+    req: &LyricsRequest,
+) -> Result<Vec<LyricCandidate>, reqwest::Error> {
+    let Some(query) = UnisonSearchQuery::from_request(req) else {
+        return Ok(Vec::new());
+    };
+    let response = crate::http::client()
+        .get(format!("{UNISON_ENDPOINT}/search"))
+        .query(&query.params())
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(Vec::new());
+    }
+    let payload: UnisonSearchResponse = response.error_for_status()?.json().await?;
+    if !payload.success {
+        return Ok(Vec::new());
+    }
+
+    let ranked = rank_unison_search_results(req, payload.data);
+    let mut requests = FuturesUnordered::new();
+    for (index, item) in ranked.into_iter().enumerate() {
+        requests.push(async move {
+            let lyrics = unison_get_by_id(item.id).await;
+            (index, item, lyrics)
+        });
+    }
+
+    let mut candidates = Vec::new();
+    while let Some((index, item, lyrics)) = requests.next().await {
+        if let Some(lyrics) = lyrics? {
+            candidates.push((index, unison_manual_candidate(item, lyrics)));
+        }
+    }
+    candidates.sort_by_key(|(index, _)| *index);
+    Ok(candidates.into_iter().map(|(_, candidate)| candidate).collect())
+}
+
 /// Better Lyrics provider (Better Lyrics API / Boidu) - syllable-by-syllable & word-level sync
 async fn betterlyrics_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
     let clean_title = clean_lyrics_title(&req.title);
@@ -1082,6 +1609,75 @@ impl YoulyPlusQuery {
         }
         params
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct YoulyPlusCatalogResponse {
+    #[serde(default)]
+    results: Vec<YoulyPlusCatalogItem>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct YoulyPlusCatalogItem {
+    title: String,
+    artist: String,
+    #[serde(default)]
+    album: Option<String>,
+    #[serde(default)]
+    duration_ms: Option<f64>,
+    #[serde(default)]
+    duration: Option<f64>,
+    #[serde(default)]
+    isrc: Option<String>,
+}
+
+impl YoulyPlusCatalogItem {
+    fn duration_seconds(&self) -> Option<f64> {
+        self.duration_ms
+            .filter(|duration| *duration > 0.0)
+            .map(|duration| duration / 1000.0)
+            .or_else(|| self.duration.filter(|duration| *duration > 0.0))
+    }
+}
+
+async fn fetch_youlyplus_catalog(
+    server: &'static str,
+    query: &str,
+) -> Option<Vec<YoulyPlusCatalogItem>> {
+    let response = crate::http::client()
+        .get(format!("{server}/v1/songlist/search"))
+        .query(&[("q", query)])
+        .header("User-Agent", "Nocturne/0.8.3")
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let payload: YoulyPlusCatalogResponse = response.json().await.ok()?;
+    (!payload.results.is_empty()).then_some(payload.results)
+}
+
+async fn search_youlyplus_catalog(req: &LyricsRequest) -> Vec<YoulyPlusCatalogItem> {
+    let query = format!("{} {}", req.title.trim(), req.artists.trim()).trim().to_owned();
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    // A few mirrors expose the documented catalogue route. Stop at the first useful response;
+    // lyrics resolution itself retains the existing all-mirror quality race.
+    let mut requests = FuturesUnordered::new();
+    for server in YOULYPLUS_SERVERS.into_iter().take(3) {
+        requests.push(fetch_youlyplus_catalog(server, &query));
+    }
+    while let Some(result) = requests.next().await {
+        if let Some(items) = result {
+            return items;
+        }
+    }
+    Vec::new()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1249,6 +1845,23 @@ async fn fetch_youlyplus_query(query: &YoulyPlusQuery) -> Option<Lyrics> {
     best
 }
 
+async fn fetch_youlyplus_manual_query(query: &YoulyPlusQuery) -> Option<Lyrics> {
+    let mut requests = FuturesUnordered::new();
+    for server in YOULYPLUS_SERVERS.into_iter().take(3) {
+        requests.push(fetch_youlyplus_mirror(server, query));
+    }
+    let mut best = None;
+    while let Some(result) = requests.next().await {
+        if let Some(lyrics) = result {
+            if lyrics_quality(&lyrics) == LyricsQuality::WordSynced {
+                return Some(lyrics);
+            }
+            best = prefer_richer_lyrics(best, lyrics);
+        }
+    }
+    best
+}
+
 /// YouLyPlus KPoe API client. Mirrors race concurrently and the richest usable response wins.
 async fn youlyplus_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
     let duration =
@@ -1279,15 +1892,15 @@ async fn youlyplus_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::E
 }
 
 /// Paxsenix provider (Apple Music TTML / Syllable-level word timings)
-async fn paxsenix_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+async fn itunes_song_search(req: &LyricsRequest, limit: usize) -> Vec<serde_json::Value> {
     let clean_title = clean_lyrics_title(&req.title);
     let clean_artist = clean_lyrics_artist(&req.artists);
     let term = format!("{clean_title} {clean_artist}");
     let search_url = format!(
-        "https://itunes.apple.com/search?term={}&entity=song&limit=5",
-        urlencoding::encode(&term)
+        "https://itunes.apple.com/search?term={}&entity=song&limit={limit}",
+        urlencoding::encode(term.trim())
     );
-    let resp_opt: Option<serde_json::Value> = match crate::http::client()
+    let response: Option<serde_json::Value> = match crate::http::client()
         .get(&search_url)
         .header("User-Agent", "Mozilla/5.0")
         .timeout(Duration::from_secs(6))
@@ -1298,76 +1911,100 @@ async fn paxsenix_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Er
         _ => None,
     };
 
-    let Some(resp) = resp_opt else {
-        return Ok(None);
-    };
+    response
+        .and_then(|response| response.get("results").and_then(|value| value.as_array()).cloned())
+        .unwrap_or_default()
+}
 
-    let results =
-        resp.get("results").and_then(|r| r.as_array()).map(|v| v.as_slice()).unwrap_or_default();
-    let hit = best_by_duration(req.duration, results, |s| {
-        s.get("trackTimeMillis").and_then(|m| m.as_f64()).map(|ms| ms / 1000.0)
-    });
+fn json_id(value: Option<&serde_json::Value>) -> Option<String> {
+    value.and_then(|value| {
+        value
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| value.as_i64().map(|number| number.to_string()))
+            .or_else(|| value.as_u64().map(|number| number.to_string()))
+    })
+}
 
-    let Some(track_id) = hit.and_then(|h| h.get("trackId")).and_then(|id| {
-        if let Some(n) = id.as_i64() {
-            Some(n.to_string())
-        } else {
-            id.as_str().map(str::to_string)
-        }
-    }) else {
-        return Ok(None);
-    };
-
+async fn paxsenix_lyrics_for_track(track_id: &str) -> Option<Lyrics> {
     let lyrics_url = format!("https://lyrics.paxsenix.org/apple-music/lyrics?id={track_id}");
-    let lyr_resp: Option<serde_json::Value> = match crate::http::client()
+    let lyrics: serde_json::Value = crate::http::client()
         .get(&lyrics_url)
         .header("User-Agent", "Nocturne/0.7.3")
         .timeout(Duration::from_secs(6))
         .send()
         .await
-    {
-        Ok(r) => r.json().await.ok(),
-        _ => None,
-    };
+        .ok()?
+        .json()
+        .await
+        .ok()?;
 
-    let Some(l_obj) = lyr_resp else {
-        return Ok(None);
-    };
-
-    if let Some(ttml) =
-        l_obj.get("ttmlContent").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty())
+    if let Some(ttml) = lyrics
+        .get("ttmlContent")
+        .and_then(|value| value.as_str())
+        .filter(|text| !text.trim().is_empty())
     {
         if let Some(hit) = from_parsed("Paxsenix", parse_lrc_or_ttml(ttml)) {
-            return Ok(Some(hit));
+            return Some(hit);
         }
     }
-
-    if let Some(elrc) = l_obj
+    if let Some(elrc) = lyrics
         .get("elrcMultiPerson")
-        .or_else(|| l_obj.get("elrc"))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.trim().is_empty())
+        .or_else(|| lyrics.get("elrc"))
+        .and_then(|value| value.as_str())
+        .filter(|text| !text.trim().is_empty())
     {
         if let Some(hit) = from_parsed("Paxsenix", parse_lrc_or_ttml(elrc)) {
-            return Ok(Some(hit));
+            return Some(hit);
         }
     }
-
-    if let Some(plain) =
-        l_obj.get("plain").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty())
-    {
-        if let Some(hit) = from_parsed("Paxsenix", parse_lrc_or_ttml(plain)) {
-            return Ok(Some(hit));
-        }
-    }
-
-    Ok(None)
+    lyrics
+        .get("plain")
+        .and_then(|value| value.as_str())
+        .filter(|text| !text.trim().is_empty())
+        .and_then(|text| from_parsed("Paxsenix", parse_lrc_or_ttml(text)))
 }
 
-pub async fn custom_provider_get(
+async fn paxsenix_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    let results = itunes_song_search(req, 5).await;
+    let hit = best_by_duration(req.duration, &results, |song| {
+        song.get("trackTimeMillis").and_then(|value| value.as_f64()).map(|ms| ms / 1000.0)
+    });
+    let Some(track_id) = hit.and_then(|hit| json_id(hit.get("trackId"))) else {
+        return Ok(None);
+    };
+    Ok(paxsenix_lyrics_for_track(&track_id).await)
+}
+
+struct CustomProviderHit {
+    lyrics: Lyrics,
+    metadata: CandidateMetadata,
+}
+
+fn custom_json_metadata(value: &serde_json::Value) -> CandidateMetadata {
+    let value = value.get("data").filter(|data| data.is_object()).unwrap_or(value);
+    let text = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| value.get(*key).and_then(|value| value.as_str()))
+            .map(str::to_owned)
+    };
+    let duration = value
+        .get("duration")
+        .or_else(|| value.get("durationSeconds"))
+        .and_then(|value| value.as_f64())
+        .or_else(|| value.get("durationMs").and_then(|value| value.as_f64()).map(|ms| ms / 1000.0));
+    CandidateMetadata::canonical(
+        text(&["trackName", "title", "song"]),
+        text(&["artistName", "artist"]),
+        text(&["albumName", "album"]),
+        duration,
+    )
+}
+
+async fn custom_provider_hit(
     provider: &CustomLyricProvider,
     req: &LyricsRequest,
-) -> Result<Option<Lyrics>, reqwest::Error> {
+) -> Result<Option<CustomProviderHit>, reqwest::Error> {
     let clean_title = clean_lyrics_title(&req.title);
     let clean_artist = clean_lyrics_artist(&req.artists);
     let dur_str = req.duration.map(|d| format!("{}", d.round() as i64)).unwrap_or_default();
@@ -1413,27 +2050,44 @@ pub async fn custom_provider_get(
                     .or_else(|| v.get("lrc"))
                     .and_then(|x| x.as_str());
                 if let Some(lrc) = lrc_str {
-                    return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(lrc)));
+                    return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(lrc)).map(|lyrics| {
+                        CustomProviderHit { lyrics, metadata: custom_json_metadata(&v) }
+                    }));
                 }
-                return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(&resp)));
+                return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(&resp)).map(|lyrics| {
+                    CustomProviderHit { lyrics, metadata: custom_json_metadata(&v) }
+                }));
             }
         }
         "ttml" | "xml" => {
-            return Ok(from_parsed(&provider.name, parse_ttml_aaml(&resp)));
+            return Ok(from_parsed(&provider.name, parse_ttml_aaml(&resp)).map(|lyrics| {
+                CustomProviderHit { lyrics, metadata: CandidateMetadata::default() }
+            }));
         }
         _ => {
-            return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(&resp)));
+            return Ok(from_parsed(&provider.name, parse_lrc_or_ttml(&resp)).map(|lyrics| {
+                CustomProviderHit { lyrics, metadata: CandidateMetadata::default() }
+            }));
         }
     }
     Ok(None)
+}
+
+pub async fn custom_provider_get(
+    provider: &CustomLyricProvider,
+    req: &LyricsRequest,
+) -> Result<Option<Lyrics>, reqwest::Error> {
+    Ok(custom_provider_hit(provider, req).await?.map(|hit| hit.lyrics))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LyricCandidate {
     pub id: String,
     pub source: String,
-    pub title: String,
-    pub artist: String,
+    /// Canonical title supplied by the provider. `None` means the provider did not return it.
+    pub title: Option<String>,
+    /// Canonical artist supplied by the provider. `None` means the provider did not return it.
+    pub artist: Option<String>,
     pub album: Option<String>,
     /// Track duration in seconds.
     pub duration: Option<f64>,
@@ -1442,10 +2096,584 @@ pub struct LyricCandidate {
     pub lyrics: Lyrics,
 }
 
+#[derive(Debug, Clone, Default)]
+struct CandidateMetadata {
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: Option<f64>,
+}
+
+impl CandidateMetadata {
+    fn canonical(
+        title: Option<String>,
+        artist: Option<String>,
+        album: Option<String>,
+        duration: Option<f64>,
+    ) -> Self {
+        let present = |value: Option<String>| value.filter(|value| !value.trim().is_empty());
+        Self {
+            title: present(title),
+            artist: present(artist),
+            album: present(album),
+            duration: duration.filter(|duration| duration.is_finite() && *duration > 0.0),
+        }
+    }
+}
+
+fn rank_candidate_metadata(
+    req: &LyricsRequest,
+    metadata: &CandidateMetadata,
+) -> Option<MetadataRank> {
+    let mut rank =
+        rank_provider_metadata(req, metadata.title.as_deref(), metadata.artist.as_deref())?;
+    if let (Some(query_album), Some(candidate_album)) = (&req.album, &metadata.album) {
+        let album = compare_metadata_field(query_album, Some(candidate_album));
+        rank.score += if album.exact {
+            4.0
+        } else if album.contains_all {
+            2.0
+        } else {
+            0.0
+        };
+    }
+    Some(rank)
+}
+
+fn select_relevant_metadata<T>(
+    req: &LyricsRequest,
+    items: Vec<T>,
+    limit: usize,
+    metadata: impl Fn(&T) -> CandidateMetadata,
+) -> Vec<(T, CandidateMetadata)> {
+    let mut ranked: Vec<_> = items
+        .into_iter()
+        .filter_map(|item| {
+            let metadata = metadata(&item);
+            rank_candidate_metadata(req, &metadata).map(|rank| {
+                let distance = match (req.duration, metadata.duration) {
+                    (Some(query), Some(candidate)) if query > 0.0 => (query - candidate).abs(),
+                    (Some(query), None) if query > 0.0 => f64::INFINITY,
+                    _ => 0.0,
+                };
+                (rank, distance, item, metadata)
+            })
+        })
+        .collect();
+    ranked.sort_by(|(left, left_distance, _, _), (right, right_distance, _, _)| {
+        right
+            .tier
+            .cmp(&left.tier)
+            .then_with(|| right.score.total_cmp(&left.score))
+            .then_with(|| left_distance.total_cmp(right_distance))
+    });
+
+    let mut seen = std::collections::HashSet::new();
+    ranked
+        .into_iter()
+        .filter_map(|(_, _, item, metadata)| {
+            let key = format!(
+                "{}\u{1f}|{}\u{1f}|{}\u{1f}|{:?}",
+                normalize_search_text(metadata.title.as_deref().unwrap_or_default()),
+                normalize_search_text(metadata.artist.as_deref().unwrap_or_default()),
+                normalize_search_text(metadata.album.as_deref().unwrap_or_default()),
+                metadata.duration
+            );
+            seen.insert(key).then_some((item, metadata))
+        })
+        .take(limit)
+        .collect()
+}
+
+#[derive(Debug)]
+struct RankedCandidate {
+    candidate: LyricCandidate,
+    metadata_rank: MetadataRank,
+    duration_distance: f64,
+    quality: LyricsQuality,
+    provider_priority: usize,
+    provider_key: String,
+}
+
+fn rank_candidate(
+    req: &LyricsRequest,
+    id: String,
+    source: String,
+    provider_key: String,
+    provider_priority: usize,
+    metadata: CandidateMetadata,
+    lyrics: Lyrics,
+) -> Option<RankedCandidate> {
+    let has_metadata = metadata.title.is_some() || metadata.artist.is_some();
+    let metadata_rank = if has_metadata {
+        rank_candidate_metadata(req, &metadata)?
+    } else {
+        MetadataRank { tier: 0, score: 0.0 }
+    };
+    let duration_distance = match (req.duration, metadata.duration) {
+        (Some(query), Some(candidate)) if query > 0.0 => (query - candidate).abs(),
+        (Some(query), None) if query > 0.0 => f64::INFINITY,
+        _ => 0.0,
+    };
+    let quality = lyrics_quality(&lyrics);
+    let has_words = quality == LyricsQuality::WordSynced;
+    Some(RankedCandidate {
+        candidate: LyricCandidate {
+            id,
+            source,
+            title: metadata.title,
+            artist: metadata.artist,
+            album: metadata.album,
+            duration: metadata.duration,
+            synced: lyrics.synced,
+            has_words,
+            lyrics,
+        },
+        metadata_rank,
+        duration_distance,
+        quality,
+        provider_priority,
+        provider_key,
+    })
+}
+
+fn finish_ranked_candidates(mut candidates: Vec<RankedCandidate>) -> Vec<LyricCandidate> {
+    candidates.sort_by(|left, right| {
+        right
+            .metadata_rank
+            .tier
+            .cmp(&left.metadata_rank.tier)
+            .then_with(|| right.metadata_rank.score.total_cmp(&left.metadata_rank.score))
+            .then_with(|| left.duration_distance.total_cmp(&right.duration_distance))
+            .then_with(|| right.quality.cmp(&left.quality))
+            .then_with(|| left.provider_priority.cmp(&right.provider_priority))
+            .then_with(|| left.candidate.id.cmp(&right.candidate.id))
+    });
+
+    let mut seen = std::collections::HashSet::new();
+    candidates
+        .into_iter()
+        .filter_map(|ranked| {
+            let candidate = ranked.candidate;
+            let key = format!(
+                "{}\u{1f}|{}\u{1f}|{}\u{1f}|{}\u{1f}|{:?}",
+                ranked.provider_key,
+                normalize_search_text(candidate.title.as_deref().unwrap_or_default()),
+                normalize_search_text(candidate.artist.as_deref().unwrap_or_default()),
+                normalize_search_text(candidate.album.as_deref().unwrap_or_default()),
+                candidate.duration
+            );
+            seen.insert(key).then_some(candidate)
+        })
+        .collect()
+}
+
+fn lrclib_metadata(track: &LrclibTrack) -> CandidateMetadata {
+    CandidateMetadata::canonical(
+        track.track_name.clone(),
+        track.artist_name.clone(),
+        track.album_name.clone(),
+        track.duration,
+    )
+}
+
+fn itunes_metadata(item: &serde_json::Value) -> CandidateMetadata {
+    CandidateMetadata::canonical(
+        item.get("trackName").and_then(|value| value.as_str()).map(str::to_owned),
+        item.get("artistName").and_then(|value| value.as_str()).map(str::to_owned),
+        item.get("collectionName").and_then(|value| value.as_str()).map(str::to_owned),
+        item.get("trackTimeMillis").and_then(|value| value.as_f64()).map(|ms| ms / 1000.0),
+    )
+}
+
+fn qqmusic_metadata(item: &serde_json::Value) -> CandidateMetadata {
+    let artist = item.get("singer").and_then(|value| value.as_array()).map(|singers| {
+        singers
+            .iter()
+            .filter_map(|singer| singer.get("name").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    });
+    CandidateMetadata::canonical(
+        item.get("songname").and_then(|value| value.as_str()).map(str::to_owned),
+        artist,
+        item.get("albumname").and_then(|value| value.as_str()).map(str::to_owned),
+        item.get("interval").and_then(|value| value.as_f64()),
+    )
+}
+
+fn kugou_metadata(item: &serde_json::Value) -> CandidateMetadata {
+    CandidateMetadata::canonical(
+        item.get("SongName").and_then(|value| value.as_str()).map(str::to_owned),
+        item.get("SingerName").and_then(|value| value.as_str()).map(str::to_owned),
+        item.get("AlbumName").and_then(|value| value.as_str()).map(str::to_owned),
+        item.get("Duration").and_then(|value| value.as_f64()),
+    )
+}
+
+fn youlyplus_metadata(item: &YoulyPlusCatalogItem) -> CandidateMetadata {
+    CandidateMetadata::canonical(
+        Some(item.title.clone()),
+        Some(item.artist.clone()),
+        item.album.clone(),
+        item.duration_seconds(),
+    )
+}
+
+fn youtube_music_metadata(item: &innertube::SongItem) -> CandidateMetadata {
+    CandidateMetadata::canonical(
+        Some(item.title.clone()),
+        Some(item.artists.clone()),
+        item.album.clone(),
+        item.duration.as_deref().and_then(duration_str_secs),
+    )
+}
+
+async fn youtube_music_manual_lyrics(state: &AppState, video_id: &str) -> Option<Lyrics> {
+    let metadata_client = state.clients.get(innertube::METADATA_CLIENT)?;
+    let next = state.it.next(metadata_client, Some(video_id), None).await.ok()?;
+    let browse_id = next.lyrics_browse_id?;
+    if let Some(client) = state.clients.get(innertube::LYRICS_TIMED_CLIENT) {
+        if let Ok(lines) = state.it.lyrics_timed(client, &browse_id).await {
+            if !lines.is_empty() {
+                return Some(Lyrics {
+                    source: "YouTube Music".into(),
+                    synced: true,
+                    instrumental: false,
+                    lines: lines
+                        .into_iter()
+                        .map(|line| LyricLine::simple(Some(line.time_ms), line.text))
+                        .collect(),
+                });
+            }
+        }
+    }
+    let plain = state.it.lyrics_plain(metadata_client, &browse_id).await.ok()??;
+    plain_from_text(Some(&plain.text), "YouTube Music")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LyricsUpdatedEvent {
     pub video_id: String,
     pub lyrics: Lyrics,
+}
+
+fn manual_search_request(
+    title: String,
+    artist: String,
+    album: Option<String>,
+    duration: Option<f64>,
+) -> LyricsRequest {
+    LyricsRequest { video_id: String::new(), title, artists: artist, album, duration }
+}
+
+#[derive(Debug, Clone)]
+enum ManualSearchProvider {
+    BetterLyrics,
+    YouLyPlus,
+    Unison,
+    Paxsenix,
+    Lrclib,
+    YouTubeMusic,
+    Qq,
+    Kugou,
+    Custom(CustomLyricProvider),
+}
+
+impl ManualSearchProvider {
+    #[cfg(test)]
+    fn key(&self) -> &str {
+        match self {
+            Self::BetterLyrics => "betterlyrics",
+            Self::YouLyPlus => "youlyplus",
+            Self::Unison => "unison",
+            Self::Paxsenix => "paxsenix",
+            Self::Lrclib => "lrclib",
+            Self::YouTubeMusic => "ytm",
+            Self::Qq => "qq",
+            Self::Kugou => "kugou",
+            Self::Custom(provider) => &provider.id,
+        }
+    }
+}
+
+fn manual_search_providers(
+    provider_order: &[String],
+    custom_providers: Vec<CustomLyricProvider>,
+) -> Vec<(ManualSearchProvider, usize)> {
+    let mut providers = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut customs: Vec<_> =
+        custom_providers.into_iter().filter(|provider| provider.enabled).collect();
+
+    for (priority, configured) in provider_order.iter().enumerate() {
+        let key = configured.trim().to_ascii_lowercase();
+        if key.is_empty() || !seen.insert(key.clone()) {
+            continue;
+        }
+        let provider = match key.as_str() {
+            "betterlyrics" => Some(ManualSearchProvider::BetterLyrics),
+            "youlyplus" => Some(ManualSearchProvider::YouLyPlus),
+            "unison" => Some(ManualSearchProvider::Unison),
+            "paxsenix" => Some(ManualSearchProvider::Paxsenix),
+            "lrclib" => Some(ManualSearchProvider::Lrclib),
+            "ytm" => Some(ManualSearchProvider::YouTubeMusic),
+            "qq" => Some(ManualSearchProvider::Qq),
+            "kugou" => Some(ManualSearchProvider::Kugou),
+            _ => customs
+                .iter()
+                .position(|provider| provider.id.eq_ignore_ascii_case(&key))
+                .map(|index| ManualSearchProvider::Custom(customs.remove(index))),
+        };
+        if let Some(provider) = provider {
+            providers.push((provider, priority));
+        }
+    }
+
+    let custom_priority = provider_order.len();
+    for (offset, provider) in customs.into_iter().enumerate() {
+        providers.push((ManualSearchProvider::Custom(provider), custom_priority + offset));
+    }
+    providers
+}
+
+async fn search_manual_provider(
+    state: &AppState,
+    req: &LyricsRequest,
+    provider: ManualSearchProvider,
+    provider_priority: usize,
+) -> Vec<RankedCandidate> {
+    let mut candidates = Vec::new();
+
+    match provider {
+        ManualSearchProvider::BetterLyrics => {
+            if !req.title.trim().is_empty() && !req.artists.trim().is_empty() {
+                if let Ok(Some(lyrics)) = betterlyrics_get(req).await {
+                    if let Some(candidate) = rank_candidate(
+                        req,
+                        "betterlyrics-exact".into(),
+                        "Better Lyrics".into(),
+                        "betterlyrics".into(),
+                        provider_priority,
+                        CandidateMetadata::default(),
+                        lyrics,
+                    ) {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+        }
+        ManualSearchProvider::YouLyPlus => {
+            let youly_items = search_youlyplus_catalog(req).await;
+            let mut added_catalogue = false;
+            for (index, (item, metadata)) in
+                select_relevant_metadata(req, youly_items, 2, youlyplus_metadata)
+                    .into_iter()
+                    .enumerate()
+            {
+                let query = YoulyPlusQuery {
+                    title: item.title.clone(),
+                    artist: item.artist.clone(),
+                    duration: item.duration_seconds().map(|duration| duration.round() as i64),
+                    album: item.album.clone(),
+                    video_id: None,
+                };
+                if let Some(lyrics) = fetch_youlyplus_manual_query(&query).await {
+                    let suffix = item.isrc.clone().unwrap_or_else(|| index.to_string());
+                    if let Some(candidate) = rank_candidate(
+                        req,
+                        format!("youlyplus-{suffix}"),
+                        "YouLyPlus".into(),
+                        "youlyplus".into(),
+                        provider_priority,
+                        metadata,
+                        lyrics,
+                    ) {
+                        candidates.push(candidate);
+                        added_catalogue = true;
+                    }
+                }
+            }
+            if !added_catalogue && !req.title.trim().is_empty() && !req.artists.trim().is_empty() {
+                if let Ok(Some(lyrics)) = youlyplus_get(req).await {
+                    if let Some(candidate) = rank_candidate(
+                        req,
+                        "youlyplus-exact".into(),
+                        "YouLyPlus".into(),
+                        "youlyplus".into(),
+                        provider_priority,
+                        CandidateMetadata::default(),
+                        lyrics,
+                    ) {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+        }
+        ManualSearchProvider::Unison => {
+            if let Ok(hits) = unison_search_candidates(req).await {
+                for hit in hits {
+                    let metadata = CandidateMetadata::canonical(
+                        hit.title,
+                        hit.artist,
+                        hit.album,
+                        hit.duration,
+                    );
+                    if let Some(candidate) = rank_candidate(
+                        req,
+                        hit.id,
+                        hit.source,
+                        "unison".into(),
+                        provider_priority,
+                        metadata,
+                        hit.lyrics,
+                    ) {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+        }
+        ManualSearchProvider::Paxsenix => {
+            for (item, metadata) in
+                select_relevant_metadata(req, itunes_song_search(req, 10).await, 2, itunes_metadata)
+            {
+                let Some(track_id) = json_id(item.get("trackId")) else {
+                    continue;
+                };
+                let Some(lyrics) = paxsenix_lyrics_for_track(&track_id).await else {
+                    continue;
+                };
+                if let Some(candidate) = rank_candidate(
+                    req,
+                    format!("paxsenix-{track_id}"),
+                    "Paxsenix".into(),
+                    "paxsenix".into(),
+                    provider_priority,
+                    metadata,
+                    lyrics,
+                ) {
+                    candidates.push(candidate);
+                }
+            }
+        }
+        ManualSearchProvider::Lrclib => {
+            if let Ok(items) = lrclib_manual_search(req).await {
+                for (item, metadata) in select_relevant_metadata(
+                    req,
+                    items,
+                    MANUAL_PROVIDER_CANDIDATE_LIMIT,
+                    lrclib_metadata,
+                ) {
+                    let id = item.id.unwrap_or_default();
+                    if let Some(lyrics) = lrclib_to_lyrics(&item) {
+                        if let Some(candidate) = rank_candidate(
+                            req,
+                            format!("lrclib-{id}"),
+                            "LRCLIB".into(),
+                            "lrclib".into(),
+                            provider_priority,
+                            metadata,
+                            lyrics,
+                        ) {
+                            candidates.push(candidate);
+                        }
+                    }
+                }
+            }
+        }
+        ManualSearchProvider::Qq => {
+            for (item, metadata) in
+                select_relevant_metadata(req, qqmusic_search(req).await, 2, qqmusic_metadata)
+            {
+                let Some(mid) = item.get("songmid").and_then(|value| value.as_str()) else {
+                    continue;
+                };
+                let Some(lyrics) = qqmusic_lyrics_for_mid(mid).await else {
+                    continue;
+                };
+                if let Some(candidate) = rank_candidate(
+                    req,
+                    format!("qq-{mid}"),
+                    "QQ Music".into(),
+                    "qq".into(),
+                    provider_priority,
+                    metadata,
+                    lyrics,
+                ) {
+                    candidates.push(candidate);
+                }
+            }
+        }
+        ManualSearchProvider::Kugou => {
+            for (item, metadata) in
+                select_relevant_metadata(req, kugou_search(req).await, 2, kugou_metadata)
+            {
+                let Some(hash) = item.get("FileHash").and_then(|value| value.as_str()) else {
+                    continue;
+                };
+                let Some(lyrics) = kugou_lyrics_for_hash(hash).await else {
+                    continue;
+                };
+                if let Some(candidate) = rank_candidate(
+                    req,
+                    format!("kugou-{hash}"),
+                    "Kugou".into(),
+                    "kugou".into(),
+                    provider_priority,
+                    metadata,
+                    lyrics,
+                ) {
+                    candidates.push(candidate);
+                }
+            }
+        }
+        ManualSearchProvider::YouTubeMusic => {
+            if let Some(client) = state.clients.get(innertube::METADATA_CLIENT) {
+                let query =
+                    format!("{} {}", req.title.trim(), req.artists.trim()).trim().to_owned();
+                if let Ok(search) = state.it.search_songs(client, &query).await {
+                    for (item, metadata) in
+                        select_relevant_metadata(req, search.items, 2, youtube_music_metadata)
+                    {
+                        let Some(lyrics) = youtube_music_manual_lyrics(state, &item.video_id).await
+                        else {
+                            continue;
+                        };
+                        if let Some(candidate) = rank_candidate(
+                            req,
+                            format!("ytm-{}", item.video_id),
+                            "YouTube Music".into(),
+                            "ytm".into(),
+                            provider_priority,
+                            metadata,
+                            lyrics,
+                        ) {
+                            candidates.push(candidate);
+                        }
+                    }
+                }
+            }
+        }
+        ManualSearchProvider::Custom(provider) => {
+            if !req.title.trim().is_empty() && !req.artists.trim().is_empty() {
+                if let Ok(Some(hit)) = custom_provider_hit(&provider, req).await {
+                    if let Some(candidate) = rank_candidate(
+                        req,
+                        format!("custom-{}", provider.id),
+                        provider.name,
+                        provider.id,
+                        provider_priority,
+                        hit.metadata,
+                        hit.lyrics,
+                    ) {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    candidates
 }
 
 pub async fn search_all_lyrics(
@@ -1456,160 +2684,50 @@ pub async fn search_all_lyrics(
     duration: Option<f64>,
     video_id: Option<String>,
 ) -> Vec<LyricCandidate> {
+    // The current player's video ID identifies what is already playing, not what the edited
+    // discovery form asks for. Manual providers resolve their own canonical result IDs below.
+    let _current_video_id = video_id;
+    let req = manual_search_request(title, artist, album, duration);
+    if req.title.trim().is_empty() && req.artists.trim().is_empty() {
+        return Vec::new();
+    }
+
+    // The saved provider order is also the enabled-provider list. Build tasks only for those
+    // providers, then poll every provider concurrently so one slow catalogue cannot serialize the
+    // entire discovery request.
+    let provider_order = resolve_providers(&state.db);
+    let providers = manual_search_providers(&provider_order, get_custom_providers(&state.db));
+    let mut searches = FuturesUnordered::new();
+    for (provider, priority) in providers {
+        searches.push(search_manual_provider(state, &req, provider, priority));
+    }
+
     let mut candidates = Vec::new();
-    let req = LyricsRequest {
-        video_id: video_id.unwrap_or_default(),
-        title: title.clone(),
-        artists: artist.clone(),
-        album,
-        duration,
+    while let Some(mut provider_candidates) = searches.next().await {
+        candidates.append(&mut provider_candidates);
+    }
+    finish_ranked_candidates(candidates)
+}
+
+fn persist_selected_lyrics(db: &crate::db::Db, video_id: &str, lyrics: &Lyrics) -> bool {
+    if !positive_lyrics_cache_allowed(lyrics) {
+        return false;
+    }
+    let Some(json) = serialize_cached_lyrics(lyrics) else {
+        return false;
     };
-
-    // 1. BetterLyrics
-    if let Ok(Some(l)) = betterlyrics_get(&req).await {
-        let has_words = has_genuine_word_timings(&l);
-        candidates.push(LyricCandidate {
-            id: format!("betterlyrics-{}", candidates.len()),
-            source: "Better Lyrics".into(),
-            title: title.clone(),
-            artist: artist.clone(),
-            album: req.album.clone(),
-            duration,
-            synced: l.synced,
-            has_words,
-            lyrics: l,
-        });
-    }
-
-    // 1b. YouLyPlus
-    if let Ok(Some(l)) = youlyplus_get(&req).await {
-        let has_words = has_genuine_word_timings(&l);
-        candidates.push(LyricCandidate {
-            id: format!("youlyplus-{}", candidates.len()),
-            source: "YouLyPlus".into(),
-            title: title.clone(),
-            artist: artist.clone(),
-            album: req.album.clone(),
-            duration,
-            synced: l.synced,
-            has_words,
-            lyrics: l,
-        });
-    }
-
-    // 1c. Paxsenix
-    if let Ok(Some(l)) = paxsenix_get(&req).await {
-        let has_words = has_genuine_word_timings(&l);
-        candidates.push(LyricCandidate {
-            id: format!("paxsenix-{}", candidates.len()),
-            source: "Paxsenix".into(),
-            title: title.clone(),
-            artist: artist.clone(),
-            album: req.album.clone(),
-            duration,
-            synced: l.synced,
-            has_words,
-            lyrics: l,
-        });
-    }
-
-    // 2. LRCLIB exact match
-    if let Ok(Some(hit)) = lrclib_get(&req).await {
-        if let Some(l) = lrclib_to_lyrics(&hit) {
-            candidates.push(LyricCandidate {
-                id: format!("lrclib-{}", hit.id.unwrap_or(0)),
-                source: "LRCLIB".into(),
-                title: hit.track_name.unwrap_or_else(|| title.clone()),
-                artist: hit.artist_name.unwrap_or_else(|| artist.clone()),
-                album: hit.album_name.or_else(|| req.album.clone()),
-                duration: hit.duration.or(req.duration),
-                synced: l.synced,
-                has_words: false,
-                lyrics: l,
-            });
-        }
-    }
-
-    // 3. LRCLIB search (up to 5 results)
-    if let Ok(Some(hit)) = lrclib_search(&req).await {
-        if let Some(l) = lrclib_to_lyrics(&hit) {
-            if !candidates.iter().any(|c| c.source == "LRCLIB") {
-                candidates.push(LyricCandidate {
-                    id: format!("lrclib-search-{}", hit.id.unwrap_or(0)),
-                    source: "LRCLIB (Search)".into(),
-                    title: hit.track_name.unwrap_or_else(|| title.clone()),
-                    artist: hit.artist_name.unwrap_or_else(|| artist.clone()),
-                    album: hit.album_name.or_else(|| req.album.clone()),
-                    duration: hit.duration.or(req.duration),
-                    synced: l.synced,
-                    has_words: false,
-                    lyrics: l,
-                });
-            }
-        }
-    }
-
-    // 4. QQ Music
-    if let Ok(Some(l)) = qqmusic_get(&req).await {
-        let has_words = has_genuine_word_timings(&l);
-        candidates.push(LyricCandidate {
-            id: format!("qq-{}", candidates.len()),
-            source: "QQ Music".into(),
-            title: title.clone(),
-            artist: artist.clone(),
-            album: req.album.clone(),
-            duration,
-            synced: l.synced,
-            has_words,
-            lyrics: l,
-        });
-    }
-
-    // 5. Kugou
-    if let Ok(Some(l)) = kugou_get(&req).await {
-        let has_words = has_genuine_word_timings(&l);
-        candidates.push(LyricCandidate {
-            id: format!("kugou-{}", candidates.len()),
-            source: "Kugou".into(),
-            title: title.clone(),
-            artist: artist.clone(),
-            album: req.album.clone(),
-            duration,
-            synced: l.synced,
-            has_words,
-            lyrics: l,
-        });
-    }
-
-    // 6. Custom providers
-    for c in get_custom_providers(&state.db) {
-        if c.enabled {
-            if let Ok(Some(l)) = custom_provider_get(&c, &req).await {
-                let has_words = has_genuine_word_timings(&l);
-                candidates.push(LyricCandidate {
-                    id: format!("custom-{}-{}", c.id, candidates.len()),
-                    source: c.name,
-                    title: title.clone(),
-                    artist: artist.clone(),
-                    album: req.album.clone(),
-                    duration,
-                    synced: l.synced,
-                    has_words,
-                    lyrics: l,
-                });
-            }
-        }
-    }
-
-    candidates
+    db.put_lyrics(video_id, Some(&json), now_secs());
+    true
 }
 
 pub fn apply_selected_lyrics(state: &AppState, video_id: String, lyrics: Lyrics) {
-    if let Some(json) = serialize_cached_lyrics(&lyrics) {
-        state.db.put_lyrics(&video_id, Some(&json), now_secs());
-        let payload = LyricsUpdatedEvent { video_id, lyrics };
-        let _ = state.app.emit("lyrics-updated", &payload);
+    if positive_lyrics_cache_allowed(&lyrics)
+        && !persist_selected_lyrics(&state.db, &video_id, &lyrics)
+    {
+        return;
     }
+    let payload = LyricsUpdatedEvent { video_id, lyrics };
+    let _ = state.app.emit("lyrics-updated", &payload);
 }
 
 /// How far a search hit's length may sit from the track we're actually playing. Same tolerance the
@@ -1645,7 +2763,7 @@ fn best_by_duration<T>(
 }
 
 /// QQ Music provider
-async fn qqmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+async fn qqmusic_search(req: &LyricsRequest) -> Vec<serde_json::Value> {
     let query = format!("{} {}", req.title, req.artists);
     let search_url = format!(
         "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w={}&format=json",
@@ -1661,54 +2779,53 @@ async fn qqmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Err
     {
         Ok(r) => match r.json().await {
             Ok(j) => j,
-            Err(_) => return Ok(None),
+            Err(_) => return Vec::new(),
         },
-        Err(_) => return Ok(None),
+        Err(_) => return Vec::new(),
     };
+    resp.pointer("/data/song/list").and_then(|v| v.as_array()).cloned().unwrap_or_default()
+}
 
-    let songs = resp
-        .pointer("/data/song/list")
-        .and_then(|v| v.as_array())
-        .map(|v| v.as_slice())
-        .unwrap_or_default();
-    // QQ reports track length in whole seconds, as `interval`.
-    let hit = best_by_duration(req.duration, songs, |s| s.get("interval")?.as_f64());
-    let Some(mid) = hit.and_then(|s| s.get("songmid")).and_then(|v| v.as_str()) else {
-        return Ok(None);
-    };
-
+async fn qqmusic_lyrics_for_mid(mid: &str) -> Option<Lyrics> {
     let lyric_url = format!(
         "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={mid}&format=json&nobase64=1"
     );
-    let l_resp: serde_json::Value = match crate::http::client()
+    let response: serde_json::Value = crate::http::client()
         .get(&lyric_url)
         .header("User-Agent", LRCLIB_UA)
         .header("Referer", "https://y.qq.com/")
         .timeout(Duration::from_secs(8))
         .send()
         .await
-    {
-        Ok(r) => match r.json().await {
-            Ok(j) => j,
-            Err(_) => return Ok(None),
-        },
-        Err(_) => return Ok(None),
-    };
+        .ok()?
+        .json()
+        .await
+        .ok()?;
 
-    let mut lyric_raw = l_resp.get("lyric").and_then(|v| v.as_str()).unwrap_or("");
+    let mut lyric_raw = response.get("lyric").and_then(|value| value.as_str()).unwrap_or("");
     let decoded;
     if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, lyric_raw)
     {
-        if let Ok(s) = String::from_utf8(bytes) {
-            decoded = s;
+        if let Ok(text) = String::from_utf8(bytes) {
+            decoded = text;
             lyric_raw = &decoded;
         }
     }
-    Ok(from_parsed("QQ Music", parse_lrc_or_ttml(lyric_raw)))
+    from_parsed("QQ Music", parse_lrc_or_ttml(lyric_raw))
+}
+
+async fn qqmusic_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    let songs = qqmusic_search(req).await;
+    // QQ reports track length in whole seconds, as `interval`.
+    let hit = best_by_duration(req.duration, &songs, |song| song.get("interval")?.as_f64());
+    let Some(mid) = hit.and_then(|s| s.get("songmid")).and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+    Ok(qqmusic_lyrics_for_mid(mid).await)
 }
 
 /// Kugou provider
-async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+async fn kugou_search(req: &LyricsRequest) -> Vec<serde_json::Value> {
     let query = format!("{} {}", req.title, req.artists);
     let search_url = format!(
         "https://songsearch.kugou.com/song_search_v2?keyword={}&page=1&pagesize=5",
@@ -1718,62 +2835,52 @@ async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error
         match crate::http::client().get(&search_url).timeout(Duration::from_secs(8)).send().await {
             Ok(r) => match r.json().await {
                 Ok(j) => j,
-                Err(_) => return Ok(None),
+                Err(_) => return Vec::new(),
             },
-            Err(_) => return Ok(None),
+            Err(_) => return Vec::new(),
         };
+    resp.pointer("/data/lists").and_then(|v| v.as_array()).cloned().unwrap_or_default()
+}
 
-    let songs = resp
-        .pointer("/data/lists")
-        .and_then(|v| v.as_array())
-        .map(|v| v.as_slice())
-        .unwrap_or_default();
+async fn kugou_lyrics_for_hash(hash: &str) -> Option<Lyrics> {
+    let krc_url = format!("https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash={hash}");
+    let search: serde_json::Value = crate::http::client()
+        .get(&krc_url)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let id = search.pointer("/candidates/0/id").and_then(|value| value.as_str())?;
+    let access_key = search.pointer("/candidates/0/accesskey").and_then(|value| value.as_str())?;
+    let download_url = format!(
+        "https://lyrics.kugou.com/download?ver=1&client=pc&id={id}&accesskey={access_key}&fmt=lrc"
+    );
+    let download: serde_json::Value = crate::http::client()
+        .get(&download_url)
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let content = download.get("content").and_then(|value| value.as_str()).unwrap_or("");
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, content).ok()?;
+    let text = String::from_utf8(bytes).ok()?;
+    from_parsed("Kugou", parse_lrc_or_ttml(&text))
+}
+
+async fn kugou_get(req: &LyricsRequest) -> Result<Option<Lyrics>, reqwest::Error> {
+    let songs = kugou_search(req).await;
     // Kugou reports track length in whole seconds, as `Duration`.
-    let hit = best_by_duration(req.duration, songs, |s| s.get("Duration")?.as_f64());
+    let hit = best_by_duration(req.duration, &songs, |song| song.get("Duration")?.as_f64());
     let Some(h) = hit.and_then(|s| s.get("FileHash")).and_then(|v| v.as_str()) else {
         return Ok(None);
     };
-
-    // `hash=`, not `h=`: the latter is not a parameter this endpoint knows, so it answered
-    // "paramter_error: empty hash and keyword" for every track and the provider never returned
-    // anything at all.
-    let krc_url = format!("https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash={h}");
-    let krc_resp: serde_json::Value =
-        match crate::http::client().get(&krc_url).timeout(Duration::from_secs(8)).send().await {
-            Ok(r) => match r.json().await {
-                Ok(j) => j,
-                Err(_) => return Ok(None),
-            },
-            Err(_) => return Ok(None),
-        };
-
-    let id = krc_resp.pointer("/candidates/0/id").and_then(|v| v.as_str());
-    let accesskey = krc_resp.pointer("/candidates/0/accesskey").and_then(|v| v.as_str());
-    let (Some(id_str), Some(key_str)) = (id, accesskey) else {
-        return Ok(None);
-    };
-
-    let dl_url = format!(
-        "https://lyrics.kugou.com/download?ver=1&client=pc&id={id_str}&accesskey={key_str}&fmt=lrc"
-    );
-    let dl_resp: serde_json::Value =
-        match crate::http::client().get(&dl_url).timeout(Duration::from_secs(8)).send().await {
-            Ok(r) => match r.json().await {
-                Ok(j) => j,
-                Err(_) => return Ok(None),
-            },
-            Err(_) => return Ok(None),
-        };
-
-    let b64_content = dl_resp.get("content").and_then(|v| v.as_str()).unwrap_or("");
-    if let Ok(bytes) =
-        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64_content)
-    {
-        if let Ok(lrc_str) = String::from_utf8(bytes) {
-            return Ok(from_parsed("Kugou", parse_lrc_or_ttml(&lrc_str)));
-        }
-    }
-    Ok(None)
+    Ok(kugou_lyrics_for_hash(h).await)
 }
 
 // --- TTML / AAML / eLRC Parsing & LRCMux ----------------------------------------------------
@@ -2148,8 +3255,8 @@ mod tests {
         let candidate = LyricCandidate {
             id: "test-candidate".into(),
             source: "Test Provider".into(),
-            title: "Test Title".into(),
-            artist: "Test Artist".into(),
+            title: Some("Test Title".into()),
+            artist: Some("Test Artist".into()),
             album: Some("Test Album".into()),
             duration: Some(123.5),
             synced: true,
@@ -2164,6 +3271,8 @@ mod tests {
 
         let value = serde_json::to_value(candidate).unwrap();
         assert_eq!(value.get("source").and_then(|v| v.as_str()), Some("Test Provider"));
+        assert_eq!(value.get("title").and_then(|v| v.as_str()), Some("Test Title"));
+        assert_eq!(value.get("artist").and_then(|v| v.as_str()), Some("Test Artist"));
         assert_eq!(value.get("duration").and_then(|v| v.as_f64()), Some(123.5));
         assert!(value.get("provider").is_none());
         assert!(value.get("duration_seconds").is_none());
@@ -2229,6 +3338,404 @@ mod tests {
         assert!(!l.synced);
         assert_eq!(l.lines.len(), 4);
         assert_eq!(l.lines[2].text, "");
+    }
+
+    fn unison_body(format: &str, sync_type: &str, lyrics: &str) -> String {
+        serde_json::json!({
+            "success": true,
+            "data": {
+                "lyrics": lyrics,
+                "format": format,
+                "syncType": sync_type
+            }
+        })
+        .to_string()
+    }
+
+    fn unison_search_item(id: i64, song: &str, artist: &str) -> UnisonSearchItem {
+        UnisonSearchItem {
+            id,
+            song: song.into(),
+            artist: artist.into(),
+            album: Some("Provider Album".into()),
+            duration: Some(123.0),
+            format: "lrc".into(),
+            sync_type: "linesync".into(),
+            match_score: Some(0.8),
+        }
+    }
+
+    fn unison_manual_request(title: &str, artist: &str) -> LyricsRequest {
+        LyricsRequest {
+            video_id: "automatic-video-id-must-not-be-searched".into(),
+            title: title.into(),
+            artists: artist.into(),
+            album: Some("Provider Album".into()),
+            duration: Some(123.0),
+        }
+    }
+
+    fn decode_unison_response(body: &str) -> Result<Option<Lyrics>, serde_json::Error> {
+        serde_json::from_str(body).map(unison_response_to_lyrics)
+    }
+
+    #[test]
+    fn unison_accepts_ttml_through_the_existing_parser() {
+        let ttml = r#"<tt><body><div><p begin="00:10.000" end="00:11.000"><span begin="00:10.000" end="00:10.500">Hello </span><span begin="00:10.500" end="00:11.000">world</span></p></div></body></tt>"#;
+        let lyrics =
+            decode_unison_response(&unison_body("ttml", "richsync", ttml)).unwrap().unwrap();
+
+        assert_eq!(lyrics.source, UNISON_SOURCE);
+        assert!(lyrics.synced);
+        assert_eq!(lyrics.lines[0].text, "Hello world");
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn unison_lrc_preserves_real_word_and_line_quality() {
+        let rich = decode_unison_response(&unison_body(
+            "lrc",
+            "richsync",
+            "[00:10.00]<00:10.00>Hello <00:10.50>world\n[00:11.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(has_genuine_word_timings(&rich));
+
+        let line = decode_unison_response(&unison_body(
+            "lrc",
+            "linesync",
+            "[00:10.00]Hello world\n[00:11.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(line.synced);
+        assert!(!has_genuine_word_timings(&line));
+    }
+
+    #[test]
+    fn unison_plain_stays_plain() {
+        let lyrics =
+            decode_unison_response(&unison_body("plain", "plain", "Hello world\nSecond line"))
+                .unwrap()
+                .unwrap();
+        assert!(!lyrics.synced);
+        assert!(!has_genuine_word_timings(&lyrics));
+        assert!(lyrics.lines.iter().all(|line| line.time_ms.is_none()));
+    }
+
+    #[test]
+    fn unison_distinguishes_malformed_json_from_valid_no_result() {
+        assert!(decode_unison_response("not json").is_err());
+        assert!(decode_unison_response(r#"{"success":false}"#).unwrap().is_none());
+        assert!(decode_unison_response(r#"{"success":true}"#).unwrap().is_none());
+        assert!(decode_unison_response(&unison_body("lrc", "linesync", "   ")).unwrap().is_none());
+        assert!(decode_unison_response(&unison_body("unknown", "linesync", "lyrics"))
+            .unwrap()
+            .is_none());
+        assert!(decode_unison_response(&unison_body("plain", "unknown", "lyrics"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn unison_query_uses_the_public_metadata_contract() {
+        let query = UnisonQuery::from_request(&LyricsRequest {
+            video_id: "video-id".into(),
+            title: "Song title".into(),
+            artists: "Artist name".into(),
+            album: Some("Album name".into()),
+            duration: Some(123.6),
+        });
+
+        assert_eq!(
+            query.params(),
+            vec![
+                ("v", "video-id".into()),
+                ("song", "Song title".into()),
+                ("artist", "Artist name".into()),
+                ("duration", "124".into()),
+                ("album", "Album name".into()),
+            ]
+        );
+
+        let without_optional = UnisonQuery::from_request(&LyricsRequest {
+            video_id: String::new(),
+            title: "Song".into(),
+            artists: "Artist".into(),
+            album: None,
+            duration: None,
+        });
+        assert_eq!(
+            without_optional.params(),
+            vec![("song", "Song".into()), ("artist", "Artist".into())]
+        );
+    }
+
+    #[test]
+    fn unison_manual_search_query_uses_fuzzy_text_without_video_id() {
+        let req = unison_manual_request("With Glory", "Wuthering Waves");
+        let query = UnisonSearchQuery::from_request(&req).unwrap();
+
+        assert_eq!(
+            query.params(),
+            vec![
+                ("song", "With Glory".into()),
+                ("artist", "Wuthering Waves".into()),
+                ("limit", UNISON_SEARCH_LIMIT.to_string())
+            ]
+        );
+        assert!(query.params().iter().all(|(key, _)| *key != "v"));
+
+        let automatic = UnisonQuery::from_request(&req);
+        assert!(automatic.params().iter().any(|(key, value)| {
+            *key == "v" && value == "automatic-video-id-must-not-be-searched"
+        }));
+
+        let title_only = unison_manual_request("Voyaging", "");
+        assert_eq!(
+            UnisonSearchQuery::from_request(&title_only).unwrap().params(),
+            vec![("q", "Voyaging".into()), ("limit", UNISON_SEARCH_LIMIT.to_string())]
+        );
+        let artist_only = unison_manual_request("", "Wuthering Waves");
+        assert_eq!(
+            UnisonSearchQuery::from_request(&artist_only).unwrap().params(),
+            vec![("q", "Wuthering Waves".into()), ("limit", UNISON_SEARCH_LIMIT.to_string())]
+        );
+    }
+
+    #[test]
+    fn manual_discovery_drops_the_current_video_hint_but_automatic_queries_keep_it() {
+        let manual =
+            manual_search_request("Edited title".into(), "Edited artist".into(), None, None);
+        assert!(manual.video_id.is_empty());
+
+        let automatic = YoulyPlusQuery {
+            title: "Playing title".into(),
+            artist: "Playing artist".into(),
+            duration: None,
+            album: None,
+            video_id: Some("playing-video-id".into()),
+        };
+        assert!(automatic
+            .params()
+            .iter()
+            .any(|(key, value)| *key == "id" && value == "playing-video-id"));
+    }
+
+    #[test]
+    fn manual_metadata_matching_supports_discovery_without_overmatching() {
+        let reported_partial = unison_manual_request("Voyage", "Wuthering Waves");
+        let rank = rank_provider_metadata(
+            &reported_partial,
+            Some("Voyaging Star's Farewell"),
+            Some("Wuthering Waves, jixwang & VISION SOUND"),
+        )
+        .unwrap();
+        assert_eq!(rank.tier, 3);
+
+        let partial = unison_manual_request("Voyaging", "Wuthering Waves");
+        let rank = rank_provider_metadata(
+            &partial,
+            Some("Voyaging Star's Farewell"),
+            Some("Wuthering Waves, jixwang & VISION SOUND"),
+        )
+        .unwrap();
+        assert_eq!(rank.tier, 3);
+
+        let case_and_punctuation =
+            unison_manual_request("VOYAGING STARS FAREWELL!", "wuthering waves / jixwang");
+        assert!(rank_provider_metadata(
+            &case_and_punctuation,
+            Some("Voyaging Star's Farewell"),
+            Some("Wuthering Waves, jixwang & VISION SOUND"),
+        )
+        .is_some());
+
+        let common_only = unison_manual_request("with", "");
+        assert!(rank_provider_metadata(&common_only, Some("With You Tonight"), None).is_none());
+
+        let unrelated = unison_manual_request("Voyaging", "Wuthering Waves");
+        assert!(rank_provider_metadata(&unrelated, Some("Midnight Drive"), Some("Ocean Avenue"),)
+            .is_none());
+    }
+
+    #[test]
+    fn exact_metadata_outranks_partial_metadata_before_lyrics_quality() {
+        let req = unison_manual_request("Voyaging Star's Farewell", "Wuthering Waves");
+        let exact_rank =
+            rank_provider_metadata(&req, Some("Voyaging Star's Farewell"), Some("Wuthering Waves"))
+                .unwrap();
+        let partial_rank = rank_provider_metadata(
+            &req,
+            Some("Voyaging Star's Farewell (Live)"),
+            Some("Wuthering Waves, jixwang"),
+        )
+        .unwrap();
+        assert!(exact_rank.tier > partial_rank.tier);
+
+        let line = from_parsed("Exact Provider", parse_lrc("[00:01.00]Exact line")).unwrap();
+        let word = decode_unison_response(&unison_body(
+            "lrc",
+            "richsync",
+            "[00:01.00]<00:01.00>Wrong <00:01.50>version\n[00:02.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+        let exact = rank_candidate(
+            &req,
+            "exact-line".into(),
+            "Exact Provider".into(),
+            "exact".into(),
+            9,
+            CandidateMetadata::canonical(
+                Some("Voyaging Star's Farewell".into()),
+                Some("Wuthering Waves".into()),
+                None,
+                Some(123.0),
+            ),
+            line,
+        )
+        .unwrap();
+        let partial = rank_candidate(
+            &req,
+            "partial-word".into(),
+            "Word Provider".into(),
+            "word".into(),
+            0,
+            CandidateMetadata::canonical(
+                Some("Voyaging Star's Farewell (Live)".into()),
+                Some("Wuthering Waves, jixwang".into()),
+                None,
+                Some(123.0),
+            ),
+            word,
+        )
+        .unwrap();
+        let ranked = finish_ranked_candidates(vec![partial, exact]);
+        assert_eq!(ranked[0].id, "exact-line");
+        assert!(!ranked[0].has_words);
+        assert!(ranked[1].has_words);
+    }
+
+    #[test]
+    fn metadata_less_candidate_never_serializes_query_as_provider_metadata() {
+        let req = unison_manual_request("Secret Query Title", "Secret Query Artist");
+        let lyrics = plain_from_text(Some("Lyrics only"), "Exact-only Provider").unwrap();
+        let candidate = rank_candidate(
+            &req,
+            "metadata-less".into(),
+            "Exact-only Provider".into(),
+            "exact-only".into(),
+            0,
+            CandidateMetadata::default(),
+            lyrics,
+        )
+        .unwrap()
+        .candidate;
+
+        assert_eq!(candidate.title, None);
+        assert_eq!(candidate.artist, None);
+        let serialized = serde_json::to_string(&candidate).unwrap();
+        assert!(!serialized.contains("Secret Query Title"));
+        assert!(!serialized.contains("Secret Query Artist"));
+    }
+
+    #[test]
+    fn custom_json_metadata_uses_only_fields_returned_by_the_provider() {
+        let metadata = custom_json_metadata(&serde_json::json!({
+            "trackName": "Provider Title",
+            "artistName": "Provider Artist",
+            "albumName": "Provider Album",
+            "duration": 234.5,
+            "syncedLyrics": "[00:01.00]Line"
+        }));
+        assert_eq!(metadata.title.as_deref(), Some("Provider Title"));
+        assert_eq!(metadata.artist.as_deref(), Some("Provider Artist"));
+        assert_eq!(metadata.album.as_deref(), Some("Provider Album"));
+        assert_eq!(metadata.duration, Some(234.5));
+
+        let absent = custom_json_metadata(&serde_json::json!({
+            "syncedLyrics": "[00:01.00]Line"
+        }));
+        assert_eq!(absent.title, None);
+        assert_eq!(absent.artist, None);
+    }
+
+    #[test]
+    fn unison_manual_ranking_prefers_exact_normalized_metadata() {
+        let req = unison_manual_request("With Glory I Shall Fall", "Wuthering Waves");
+        let exact = unison_search_item(1, "With Glory I Shall Fall", "Wuthering Waves");
+        let richer_artist = unison_search_item(
+            2,
+            "With Glory I Shall Fall",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+
+        let ranked = rank_unison_search_results(&req, vec![richer_artist, exact]);
+        assert_eq!(ranked.iter().map(|item| item.id).collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    #[test]
+    fn unison_manual_ranking_accepts_partial_title_and_richer_artist() {
+        let req = unison_manual_request("With Glory", "Wuthering Waves");
+        let richer = unison_search_item(
+            1,
+            "With Glory I Shall Fall",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+
+        let rank = rank_unison_search_item(&req, &richer).unwrap();
+        assert_eq!(rank.tier, 3);
+        assert_eq!(rank_unison_search_results(&req, vec![richer]).len(), 1);
+    }
+
+    #[test]
+    fn unison_manual_ranking_is_case_and_punctuation_insensitive() {
+        let req = unison_manual_request("WITH GLORY!", "wuthering-waves");
+        let candidate = unison_search_item(
+            1,
+            "With Glory I Shall Fall",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+
+        assert!(rank_unison_search_item(&req, &candidate).is_some());
+    }
+
+    #[test]
+    fn unison_manual_ranking_rejects_an_unrelated_common_token_match() {
+        let req = unison_manual_request("With Glory", "Wuthering Waves");
+        let unrelated = unison_search_item(1, "With You Tonight", "Ocean Avenue");
+
+        assert!(rank_unison_search_item(&req, &unrelated).is_none());
+        assert!(rank_unison_search_results(&req, vec![unrelated]).is_empty());
+    }
+
+    #[test]
+    fn unison_manual_ranking_deduplicates_identical_results() {
+        let req = unison_manual_request("With Glory", "Wuthering Waves");
+        let first = unison_search_item(1, "With Glory I Shall Fall", "Wuthering Waves");
+        let duplicate = unison_search_item(2, "With Glory I Shall Fall", "Wuthering Waves");
+
+        let ranked = rank_unison_search_results(&req, vec![duplicate, first]);
+        assert_eq!(ranked.iter().map(|item| item.id).collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn unison_manual_candidate_preserves_provider_metadata() {
+        let item = unison_search_item(
+            42,
+            "With Glory I Shall Fall",
+            "Wuthering Waves, jixwang & VISION SOUND",
+        );
+        let lyrics = plain_from_text(Some("Provider lyrics"), UNISON_SOURCE).unwrap();
+        let candidate = unison_manual_candidate(item, lyrics);
+
+        assert_eq!(candidate.id, "unison-42");
+        assert_eq!(candidate.title.as_deref(), Some("With Glory I Shall Fall"));
+        assert_eq!(candidate.artist.as_deref(), Some("Wuthering Waves, jixwang & VISION SOUND"));
+        assert_eq!(candidate.album.as_deref(), Some("Provider Album"));
+        assert_eq!(candidate.duration, Some(123.0));
     }
 
     #[test]
@@ -2556,7 +4063,7 @@ mod tests {
         // Default when unset
         assert_eq!(
             resolve_providers(&db),
-            vec!["betterlyrics", "youlyplus", "paxsenix", "lrclib", "ytm", "qq", "kugou"]
+            vec!["betterlyrics", "youlyplus", "unison", "paxsenix", "lrclib", "ytm", "qq", "kugou"]
         );
 
         // Comma separated list
@@ -2566,6 +4073,32 @@ mod tests {
         // JSON list
         db.set_setting("lyrics_providers", "[\"ytm\", \"qq\"]");
         assert_eq!(resolve_providers(&db), vec!["ytm", "qq"]);
+    }
+
+    #[test]
+    fn manual_discovery_builds_tasks_only_for_enabled_providers() {
+        let custom_enabled = CustomLyricProvider {
+            id: "custom-enabled".into(),
+            name: "Enabled custom".into(),
+            url: "https://example.test/{title}".into(),
+            format: "lrc".into(),
+            enabled: true,
+        };
+        let custom_disabled = CustomLyricProvider {
+            id: "custom-disabled".into(),
+            name: "Disabled custom".into(),
+            url: "https://example.test/{title}".into(),
+            format: "lrc".into(),
+            enabled: false,
+        };
+        let configured = vec!["lrclib".into(), "unison".into()];
+
+        let providers = manual_search_providers(&configured, vec![custom_enabled, custom_disabled]);
+        let keys: Vec<_> = providers.iter().map(|(provider, _)| provider.key()).collect();
+
+        assert_eq!(keys, vec!["lrclib", "unison", "custom-enabled"]);
+        assert!(!keys.contains(&"qq"));
+        assert!(!keys.contains(&"custom-disabled"));
     }
 
     #[test]
@@ -2606,6 +4139,63 @@ mod tests {
         let mut future = value;
         future["version"] = serde_json::json!(LYRICS_CACHE_VERSION + 1);
         assert!(deserialize_cached_lyrics(&future.to_string()).is_none());
+    }
+
+    #[test]
+    fn unison_positive_cache_policy_does_not_change_other_providers() {
+        let unison = Lyrics {
+            source: UNISON_SOURCE.into(),
+            synced: false,
+            instrumental: false,
+            lines: vec![LyricLine::simple(None, "Unison lyric".into())],
+        };
+        let existing = Lyrics { source: "LRCLIB".into(), ..unison.clone() };
+
+        assert!(!positive_lyrics_cache_allowed(&unison));
+        assert!(positive_lyrics_cache_allowed(&existing));
+    }
+
+    #[test]
+    fn manual_unison_apply_skips_persistence_while_existing_providers_persist() {
+        let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let unison = Lyrics {
+            source: UNISON_SOURCE.into(),
+            synced: false,
+            instrumental: false,
+            lines: vec![LyricLine::simple(None, "Unison lyric".into())],
+        };
+        let existing = Lyrics { source: "LRCLIB".into(), ..unison.clone() };
+
+        assert!(!persist_selected_lyrics(&db, "unison-track", &unison));
+        assert!(db.get_lyrics("unison-track", now_secs(), MISS_TTL_SECS).is_none());
+
+        assert!(persist_selected_lyrics(&db, "existing-track", &existing));
+        let stored = db
+            .get_lyrics("existing-track", now_secs(), MISS_TTL_SECS)
+            .and_then(|entry| entry)
+            .and_then(|json| deserialize_cached_lyrics(&json));
+        assert_eq!(stored.map(|lyrics| lyrics.source), Some("LRCLIB".into()));
+    }
+
+    #[test]
+    fn unison_candidate_word_badge_uses_canonical_timing_quality() {
+        let genuine = decode_unison_response(&unison_body(
+            "lrc",
+            "richsync",
+            "[00:10.00]<00:10.00>Hello <00:10.50>world\n[00:11.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+        let line_only = decode_unison_response(&unison_body(
+            "lrc",
+            "linesync",
+            "[00:10.00]Hello world\n[00:11.00]Next line",
+        ))
+        .unwrap()
+        .unwrap();
+
+        assert!(has_genuine_word_timings(&genuine));
+        assert!(!has_genuine_word_timings(&line_only));
     }
 
     #[test]
