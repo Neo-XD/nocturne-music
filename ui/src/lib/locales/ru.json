@@ -80,7 +80,7 @@
 		"history": "История",
 		"add_account": "Добавить аккаунт",
 		"remove_account": "Удалить аккаунт",
-		"remove_account_title": "Удалить из Limusic?",
+		"remove_account_title": "Удалить из Nocturne?",
 		"remove_account_desc": "{name} удаляется только из этого списка. Сам аккаунт Google не затронут, и вы можете зайти снова, когда захотите.",
 		"saved_accounts_hint": "Выберите сохраненный аккаунт, чтобы переключиться на него."
 	},
@@ -246,20 +246,20 @@
 			"language_hint": "Выберите язык отображения интерфейса.",
 			"shortcuts_hint": "Открыть горячие клавиши с {key}",
 			"autostart": "Запуск с системой",
-			"autostart_hint": "Автоматически запускать Limusic, при загрузке системы.",
+			"autostart_hint": "Автоматически запускать Nocturne, при загрузке системы.",
 			"close_to_tray": "Свернуть в трей",
-			"close_to_tray_hint": "Оставить Limusic на заднем плане, когда окно закрыто.",
+			"close_to_tray_hint": "Оставить Nocturne на заднем плане, когда окно закрыто.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Показать песню, играющую сейчас в вашем профиле Discord.",
 			"update_banner": "Уведомления",
-			"update_banner_hint": "Показать баннер, когда доступна новая версия Limusic.",
+			"update_banner_hint": "Показать баннер, когда доступна новая версия Nocturne.",
 			"proxy": "HTTP/HTTPS Прокси",
 			"proxy_hint": "Маршрутизация всех сетевых запросов через пользовательский прокси-сервер.",
 			"proxy_placeholder": "http://host:port (blank = no)",
 			"stream_clients": "Поток клиентов",
 			"stream_clients_hint": "Отключите клиент, чтобы пропустить его при разрешении потоков. Настройка переопределяется переменной окружения {var}.",
 			"system_titlebar": "Использовать системный заголовок окна",
-			"system_titlebar_hint": "Позвольте рабочему столу отрисовывать рамку окна и кнопки на ней. Limusic размещает собственную панель инструментов под ней."
+			"system_titlebar_hint": "Позвольте рабочему столу отрисовывать рамку окна и кнопки на ней. Nocturne размещает собственную панель инструментов под ней."
 		},
 		"themes": {
 			"interface_font": "Шрифт интерфейса",
@@ -347,7 +347,7 @@
 			"report_issue_hint": "",
 			"report_issue_button": "",
 			"kofi": "Поддержи меня",
-			"kofi_hint": "Limusic — бесплатный сервис, и таким он и останется. Если захотите поддержать проект, можно воспользоваться Ko-fi.",
+			"kofi_hint": "Nocturne — бесплатный сервис, и таким он и останется. Если захотите поддержать проект, можно воспользоваться Ko-fi.",
 			"kofi_button": "Открыть Ko-fi"
 		}
 	},
@@ -457,7 +457,7 @@
 		"discord_tooltip_off": "Показывает что у вас играет в Discord",
 		"lastfm_scrobbling_as": "",
 		"lastfm_disconnected": "Last.fm отключён",
-		"lastfm_approve_in_browser": "Разрешите Limusic в своем браузере",
+		"lastfm_approve_in_browser": "Разрешите Nocturne в своем браузере",
 		"lastfm_connecting": "Подключаемся к Last.fm — нажмите что-бы остановить",
 		"lastfm_scrobble_to": "",
 		"disconnect": "Отключить"
@@ -585,3 +585,4 @@
 		"signed_out": "Зарегистрируйтесь, чтобы увидеть историю прослушивания YouTube Music."
 	}
 }
+

@@ -82,7 +82,7 @@
 		"history": "Riwayat",
 		"add_account": "Tambah akun",
 		"remove_account": "Hapus akun",
-		"remove_account_title": "Hapus dari Limusic?",
+		"remove_account_title": "Hapus dari Nocturne?",
 		"remove_account_desc": "{name} hanya dihapus dari list ini. Akun Google-nya sendiri tidak terpengaruhi, dan kamu bisa masuk dengan itu kapanpun kamu mau.",
 		"saved_accounts_hint": "Pilih Akun tersimpan untuk pindah ke akun tersebut.",
 		"no_channels": "YouTube tidak mengembalikan saluran yang dapat dipilih."
@@ -265,20 +265,20 @@
 			"language_hint": "Pilih bahasa tampilan antarmuka.",
 			"shortcuts_hint": "Buka pintasan papan ketik dengan {key}",
 			"autostart": "Jalankan saat komputer menyala",
-			"autostart_hint": "Mulai Limusic secara otomatis saat sistem Anda booting.",
+			"autostart_hint": "Mulai Nocturne secara otomatis saat sistem Anda booting.",
 			"close_to_tray": "Tutup ke baki sistem (system tray)",
-			"close_to_tray_hint": "Biarkan Limusic tetap berjalan di latar belakang saat menutup jendela.",
+			"close_to_tray_hint": "Biarkan Nocturne tetap berjalan di latar belakang saat menutup jendela.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Tampilkan lagu yang sedang diputar di profil Discord Anda.",
 			"update_banner": "Notifikasi pembaruan",
-			"update_banner_hint": "Tampilkan banner saat versi baru Limusic tersedia.",
+			"update_banner_hint": "Tampilkan banner saat versi baru Nocturne tersedia.",
 			"proxy": "Proksi HTTP/HTTPS",
 			"proxy_hint": "Arahkan semua permintaan jaringan melalui server proksi kustom.",
 			"proxy_placeholder": "http://host:port (kosong = tidak ada)",
 			"stream_clients": "Klien streaming",
 			"stream_clients_hint": "Matikan klien untuk melewatinya saat memuat stream. Diabaikan jika variabel lingkungan {var} diatur.",
 			"system_titlebar": "Gunakan bilah judul sistem",
-			"system_titlebar_hint": "Biarkan desktop Anda menampilkan bingkai jendela beserta tombol-tombolnya. Limusic tetap menggunakan bilah alatnya sendiri di bawahnya."
+			"system_titlebar_hint": "Biarkan desktop Anda menampilkan bingkai jendela beserta tombol-tombolnya. Nocturne tetap menggunakan bilah alatnya sendiri di bawahnya."
 		},
 		"themes": {
 			"interface_font": "Font antarmuka",
@@ -375,7 +375,7 @@
 			"update_check_failed": "Cek update gagal: {error}",
 			"update_packaged": "Versi ini dipasang menggunakan manajer paket, perbarui dengan cara yang sama.",
 			"kofi": "Belikan saya kopi",
-			"kofi_hint": "Limusic gratis dan akan selalu gratis. Tersedia Ko-fi jika Anda ingin memberikan dukungan.",
+			"kofi_hint": "Nocturne gratis dan akan selalu gratis. Tersedia Ko-fi jika Anda ingin memberikan dukungan.",
 			"kofi_button": "Buka Ko-fi"
 		}
 	},
@@ -485,7 +485,7 @@
 		"discord_tooltip_off": "Tampilkan apa yang Anda putar di Discord",
 		"lastfm_scrobbling_as": "Scrobbling sebagai {user}",
 		"lastfm_disconnected": "Last.fm terputus",
-		"lastfm_approve_in_browser": "Setujui Limusic di peramban Anda",
+		"lastfm_approve_in_browser": "Setujui Nocturne di peramban Anda",
 		"lastfm_connecting": "Menghubungkan ke Last.fm — klik untuk membatalkan",
 		"lastfm_scrobble_to": "Scrobble ke Last.fm",
 		"disconnect": "Putuskan"
@@ -646,3 +646,4 @@
 		"playlist_partial": "Menambahkan {added} ke {playlist}; {duplicates} sudah ada di sana; {remaining} belum dikonfirmasi. {error}"
 	}
 }
+

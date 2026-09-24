@@ -525,7 +525,7 @@ impl Presence {
         }
 
         let line1 = text_for(&cfg.line1, &track);
-        let line1_slot = if line1.is_some() { cfg.line1.as_str() } else { "title" };
+        let _line1_slot = if line1.is_some() { cfg.line1.as_str() } else { "title" };
         act = act.details(field(&line1.unwrap_or_else(|| track.title.clone())));
         if cfg.timestamps && self.playing {
             act = act.timestamps(ts);

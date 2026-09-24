@@ -84,7 +84,7 @@
 		"history": "Historique",
 		"add_account": "Ajouter un compte",
 		"remove_account": "Supprimer un compte",
-		"remove_account_title": "Supprimer de Limusic ?",
+		"remove_account_title": "Supprimer de Nocturne ?",
 		"remove_account_desc": "{name} est simplement supprimé de cette liste. Le compte Google lui-même n'est pas affecté, et vous pouvez vous reconnecter avec ce compte quand vous le souhaitez.",
 		"saved_accounts_hint": "Sélectionnez un compte enregistré pour y basculer.",
 		"no_channels": "YouTube n'a renvoyé aucune chaîne sélectionnable."
@@ -275,20 +275,20 @@
 			"language_hint": "Sélectionnez la langue d'affichage de l'interface.",
 			"shortcuts_hint": "Ouvrez les raccourcis clavier avec {key}",
 			"autostart": "Lancement au démarrage",
-			"autostart_hint": "Démarrage automatique de Limusic quand votre système démarre.",
+			"autostart_hint": "Démarrage automatique de Nocturne quand votre système démarre.",
 			"close_to_tray": "Réduire dans la barre système",
-			"close_to_tray_hint": "Gardez Limusic en arrière-plan lorsque vous fermez la fenêtre.",
+			"close_to_tray_hint": "Gardez Nocturne en arrière-plan lorsque vous fermez la fenêtre.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Afficher la chanson en cours sur votre profil Discord.",
 			"update_banner": "Notifications de mise à jour",
-			"update_banner_hint": "Afficher une bannière quand une nouvelle version de Limusic est disponible.",
+			"update_banner_hint": "Afficher une bannière quand une nouvelle version de Nocturne est disponible.",
 			"proxy": "HTTP/HTTPS Proxy",
 			"proxy_hint": "Router toutes les requêtes réseau via un serveur proxy personnalisé.",
 			"proxy_placeholder": "http://host:port (Vide = rien)",
 			"stream_clients": "Clients de streaming",
 			"stream_clients_hint": "Désactivez un client pour l’ignorer lors de la résolution des flux. Ce paramètre peut être remplacé par la variable d’environnement {var}.",
 			"system_titlebar": "Utiliser la barre de titre du système",
-			"system_titlebar_hint": "Laissez votre bureau afficher le cadre de la fenêtre et ses boutons. Limusic affiche sa propre barre d'outils en dessous."
+			"system_titlebar_hint": "Laissez votre bureau afficher le cadre de la fenêtre et ses boutons. Nocturne affiche sa propre barre d'outils en dessous."
 		},
 		"themes": {
 			"interface_font": "Interface police",
@@ -396,7 +396,7 @@
 			"update_check_failed": "Échec de la vérification des mises à jour : {error}",
 			"update_packaged": "Cette version a été installée à l'aide d'un gestionnaire de paquets, mettez-la à jour de la même manière.",
 			"kofi": "Offre-moi un café",
-			"kofi_hint": "Limusic est gratuit et le restera. Ko-fi est là si vous souhaitez apporter votre contribution.",
+			"kofi_hint": "Nocturne est gratuit et le restera. Ko-fi est là si vous souhaitez apporter votre contribution.",
 			"kofi_button": "Ouvrir Ko-fi"
 		},
 		"discord": {
@@ -413,8 +413,8 @@
 			"status_line1": "Ligne 1",
 			"status_line2": "Ligne 2",
 			"app_name": "Nom de l'application",
-			"app_name_hint": "Remplace \"Limusic\" partout où le nom de l'application apparaît. Laissez ce champ vide pour le conserver.",
-			"app_name_placeholder": "Limusic",
+			"app_name_hint": "Remplace \"Nocturne\" partout où le nom de l'application apparaît. Laissez ce champ vide pour le conserver.",
+			"app_name_placeholder": "Nocturne",
 			"line1": "Ligne 1",
 			"line1_hint": "La ligne en gras, juste en dessous de l'en-tête.",
 			"line2": "Ligne 2",
@@ -427,7 +427,7 @@
 			"cover": "Pochette d'album",
 			"cover_hint": "Afficher la pochette à côté du titre.",
 			"badge": "Badge du service",
-			"badge_hint": "Ajoutez une petite icône Limusic à la pochette, comme le font les fiches de Spotify et d'Apple Music.",
+			"badge_hint": "Ajoutez une petite icône Nocturne à la pochette, comme le font les fiches de Spotify et d'Apple Music.",
 			"line3": "Ligne 3",
 			"line3_hint": "La dernière ligne. Discord l'utilise également comme texte d'infobulle de l'illustration, il faut donc que la pochette d'album soit affichée.",
 			"timestamps": "Barre de progression",
@@ -442,7 +442,7 @@
 			"button_listen": "Écouter sur YouTube Music",
 			"button_album": "Voir l'album",
 			"button_artist": "Voir l'artiste",
-			"button_app": "Télécharger Limusic",
+			"button_app": "Télécharger Nocturne",
 			"button_off": "Aucun",
 			"preview": "Aperçu",
 			"preview_live": "En cours de lecture",
@@ -561,7 +561,7 @@
 		"discord_tooltip_off": "Afficher ce que vous écoutez sur Discord",
 		"lastfm_scrobbling_as": "Scrobbling en tant que {user}",
 		"lastfm_disconnected": "Last.fm déconnecté",
-		"lastfm_approve_in_browser": "Autorisez Limusic dans votre navigateur",
+		"lastfm_approve_in_browser": "Autorisez Nocturne dans votre navigateur",
 		"lastfm_connecting": "Connexion à Last.fm — cliquez pour annuler",
 		"lastfm_scrobble_to": "Scrobbler sur Last.fm",
 		"disconnect": "Déconnecter"
@@ -726,3 +726,4 @@
 		"remove_confirm": "Retirer {count} ?"
 	}
 }
+

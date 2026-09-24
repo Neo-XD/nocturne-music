@@ -84,7 +84,7 @@
 		"history": "Geçmiş",
 		"add_account": "Hesap ekle",
 		"remove_account": "Hesap sil",
-		"remove_account_title": "Limusic'ten sil?",
+		"remove_account_title": "Nocturne'ten sil?",
 		"remove_account_desc": "{name} yalnızca bu listeden kaldırıldı. Google hesabınız bu eylemden etkilenmedi ve istediğiniz zaman onunla giriş yapabilirsiniz.",
 		"saved_accounts_hint": "Geçmek için kaydedilmiş bir hesabı seçin.",
 		"no_channels": "YouTube seçilebilir bir kanal döndürmedi."
@@ -275,20 +275,20 @@
 			"language_hint": "Arayüzün görüntüleneceği dili seçin.",
 			"shortcuts_hint": "Klavye kısayollarını {key} ile açın",
 			"autostart": "Başlangıçta çalıştır",
-			"autostart_hint": "Sistem açıldığında Limusic uygulamasını otomatik başlatın.",
+			"autostart_hint": "Sistem açıldığında Nocturne uygulamasını otomatik başlatın.",
 			"close_to_tray": "Sistem tepsisine küçült",
 			"close_to_tray_hint": "Pencere kapatıldığında arka planda çalışmaya devam etsin.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Çalan şarkıyı Discord profilinizde gösterin.",
 			"update_banner": "Güncelleme bildirimleri",
-			"update_banner_hint": "Yeni bir Limusic sürümü çıktığında bildirim çubuğu gösterilsin.",
+			"update_banner_hint": "Yeni bir Nocturne sürümü çıktığında bildirim çubuğu gösterilsin.",
 			"proxy": "HTTP/HTTPS Proxy",
 			"proxy_hint": "Ağ isteklerini özel bir vekil sunucu üzerinden yönlendirin.",
 			"proxy_placeholder": "örn. http://127.0.0.1:7890",
 			"stream_clients": "Akış istemcileri",
 			"stream_clients_hint": "Bir istemciyi kapatarak akış çözümlemesinde atlanmasını sağlayın. {var} ortam değişkeni bu ayarı geçersiz kılar.",
 			"system_titlebar": "Sistem başlık çubuğunu kullanın",
-			"system_titlebar_hint": "Masaüstünüz pencere çerçevesini ve butonları çizsin. Limusic kendi araç çubuğunu onun altında saklar."
+			"system_titlebar_hint": "Masaüstünüz pencere çerçevesini ve butonları çizsin. Nocturne kendi araç çubuğunu onun altında saklar."
 		},
 		"themes": {
 			"interface_font": "Arayüz yazı tipi",
@@ -396,7 +396,7 @@
 			"report_issue_button": "Bildir",
 			"update_check_failed": "Güncelleme denetimi başarısız oldu: {error}",
 			"kofi": "Bana bir kahve ısmarla",
-			"kofi_hint": "Limusic ücretsiz ve ücretsiz kalacak. Bağışta bulunmak isteyenler Ko-fi'den yapabilirler.",
+			"kofi_hint": "Nocturne ücretsiz ve ücretsiz kalacak. Bağışta bulunmak isteyenler Ko-fi'den yapabilirler.",
 			"kofi_button": "Ko-fi'yi aç"
 		},
 		"discord": {
@@ -413,8 +413,8 @@
 			"status_line1": "1. satır",
 			"status_line2": "2. satır",
 			"app_name": "Uygulama adı",
-			"app_name_hint": "Uygulama adının göründüğü her yerde \"Limusic\" yerine bunu kullanır. Değiştirmemek için boş bırakın.",
-			"app_name_placeholder": "Limusic",
+			"app_name_hint": "Uygulama adının göründüğü her yerde \"Nocturne\" yerine bunu kullanır. Değiştirmemek için boş bırakın.",
+			"app_name_placeholder": "Nocturne",
 			"line1": "1. satır",
 			"line1_hint": "Kalın yazılı satır, başlığın hemen altında.",
 			"line2": "2. satır",
@@ -427,7 +427,7 @@
 			"cover": "Albüm kapağı",
 			"cover_hint": "Parçanın yanında albüm kapağını gösterir.",
 			"badge": "Sağlayıcı rozeti",
-			"badge_hint": "Kapak resmini, Spotify ve Apple Music kartlarında olduğu gibi küçük bir Limusic simgesiyle işaretler.",
+			"badge_hint": "Kapak resmini, Spotify ve Apple Music kartlarında olduğu gibi küçük bir Nocturne simgesiyle işaretler.",
 			"line3": "3. satır",
 			"line3_hint": "Son satır. Discord bunu kapak resminin üzerine gelindiğinde gösterilen ipucu metni olarak da kullanır, bu yüzden albüm kapağının açık olması gerekir.",
 			"timestamps": "İlerleme çubuğu",
@@ -442,7 +442,7 @@
 			"button_listen": "YouTube Music'te dinleyin",
 			"button_album": "Albümü görüntüle",
 			"button_artist": "Sanatçıyı görüntüle",
-			"button_app": "Limusic'i edin",
+			"button_app": "Nocturne'i edin",
 			"button_off": "Hiçbiri",
 			"preview": "Önizle",
 			"preview_live": "Şimdi çalıyor",
@@ -561,7 +561,7 @@
 		"discord_tooltip_off": "Çaldığınız parçayı Discord'da gösterin",
 		"lastfm_scrobbling_as": "{user} olarak Scrobble ediliyor",
 		"lastfm_disconnected": "Last.fm bağlantısı kesildi",
-		"lastfm_approve_in_browser": "Tarayıcınızda Limusic'e izin verin",
+		"lastfm_approve_in_browser": "Tarayıcınızda Nocturne'e izin verin",
 		"lastfm_connecting": "Last.fm'e bağlanılıyor — iptal etmek için tıklayın",
 		"lastfm_scrobble_to": "Last.fm'e scrobble et",
 		"disconnect": "Bağlantıyı kes"
@@ -726,3 +726,4 @@
 		"remove_confirm": "{count} kaldır?"
 	}
 }
+

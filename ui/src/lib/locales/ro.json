@@ -80,7 +80,7 @@
 		"history": "Istoric",
 		"add_account": "Adaugă cont",
 		"remove_account": "Elimină cont",
-		"remove_account_title": "Scoate din Limusic?",
+		"remove_account_title": "Scoate din Nocturne?",
 		"remove_account_desc": "{name} a fost scos din lista. Contul de Google nu este afectat, și te poți conecta din nou oriunde dorești.",
 		"saved_accounts_hint": "Alege un cont salvat pentru ca să îl schimbi."
 	},
@@ -255,20 +255,20 @@
 			"language_hint": "Selectează limba interfaței de afișaj.",
 			"shortcuts_hint": "Deschide tastatura de scurtături cu {key}",
 			"autostart": "Deschide la pornirea de sistem",
-			"autostart_hint": "Pornește automat Limusic când se pornește sistemul.",
+			"autostart_hint": "Pornește automat Nocturne când se pornește sistemul.",
 			"close_to_tray": "Închide bara de sistem",
-			"close_to_tray_hint": "Ține Limusic pornit în fundal când fereastra este închisă.",
+			"close_to_tray_hint": "Ține Nocturne pornit în fundal când fereastra este închisă.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Arată melodia ascultată in timp real pe profilul tău Discord.",
 			"update_banner": "Notificări de actualizare",
-			"update_banner_hint": "Arată un banner când o nouă versiune de Limusic este disponibilă.",
+			"update_banner_hint": "Arată un banner când o nouă versiune de Nocturne este disponibilă.",
 			"proxy": "HTTP/HTTPS Proxy",
 			"proxy_hint": "Trece toate cererile de rețea printr-un server proxy personalizat.",
 			"proxy_placeholder": "http://host:port (blank = none)",
 			"stream_clients": "Client de streaming",
 			"stream_clients_hint": "Dezactivează un client pentru a-l omite la procesarea fluxurilor. Este suprascris de variabila de mediu {var}.",
 			"system_titlebar": "Folosește bara de titlu a sistemului",
-			"system_titlebar_hint": "Lăsă desktopul să păstreze cadrul ferestrei și butoanele acesteia. Limusic își păstrează propria bară de instrumente dedesubt."
+			"system_titlebar_hint": "Lăsă desktopul să păstreze cadrul ferestrei și butoanele acesteia. Nocturne își păstrează propria bară de instrumente dedesubt."
 		},
 		"themes": {
 			"interface_font": "Font de interfață",
@@ -365,7 +365,7 @@
 			"report_issue_hint": "Deschide GitHub în browser, cu versiunea și sistemul deja adaugăt în raport.",
 			"report_issue_button": "Raportează",
 			"kofi": "Cumpără-mi o cafea",
-			"kofi_hint": "Limusic este gratis și v-a rămâne gratis. Ko-fi este acolo dacă îți dorești să contribui.",
+			"kofi_hint": "Nocturne este gratis și v-a rămâne gratis. Ko-fi este acolo dacă îți dorești să contribui.",
 			"kofi_button": "Deschide Ko-fi"
 		}
 	},
@@ -475,7 +475,7 @@
 		"discord_tooltip_off": "Arată ce asculți pe Discord",
 		"lastfm_scrobbling_as": "Scroblează ca {user}",
 		"lastfm_disconnected": "Last.fm deconectat",
-		"lastfm_approve_in_browser": "Aprobă Limusic în browser-ul tău",
+		"lastfm_approve_in_browser": "Aprobă Nocturne în browser-ul tău",
 		"lastfm_connecting": "Se conectează la Last.fm — apasă pentru a anula",
 		"lastfm_scrobble_to": "Scroblează în Last.fm",
 		"disconnect": "Deconectare"
@@ -594,3 +594,4 @@
 		"unblocked_artist": "{name} a fost deblocat"
 	}
 }
+

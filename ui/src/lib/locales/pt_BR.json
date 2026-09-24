@@ -84,7 +84,7 @@
 		"history": "Histórico",
 		"add_account": "Adicionar conta",
 		"remove_account": "Remover conta",
-		"remove_account_title": "Remover do Limusic?",
+		"remove_account_title": "Remover do Nocturne?",
 		"remove_account_desc": "{name} é removida apenas desta lista. A conta do Google em si não é afetada, e você pode fazer login com ela novamente quando quiser.",
 		"saved_accounts_hint": "Selecione uma conta salva para alternar.",
 		"no_channels": "O YouTube não retornou nenhum canal selecionável."
@@ -275,20 +275,20 @@
 			"language_hint": "Selecione o idioma de exibição da interface.",
 			"shortcuts_hint": "Abra os atalhos de teclado com {key}",
 			"autostart": "Iniciar com o sistema",
-			"autostart_hint": "Iniciar o Limusic automaticamente quando o sistema ligar.",
+			"autostart_hint": "Iniciar o Nocturne automaticamente quando o sistema ligar.",
 			"close_to_tray": "Fechar na bandeja",
-			"close_to_tray_hint": "Manter o Limusic em execução em segundo plano ao fechar a janela.",
+			"close_to_tray_hint": "Manter o Nocturne em execução em segundo plano ao fechar a janela.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Mostrar a música atual no seu perfil do Discord.",
 			"update_banner": "Notificações de atualização",
-			"update_banner_hint": "Mostrar um aviso quando uma nova versão do Limusic estiver disponível.",
+			"update_banner_hint": "Mostrar um aviso quando uma nova versão do Nocturne estiver disponível.",
 			"proxy": "Proxy HTTP/HTTPS",
 			"proxy_hint": "Encaminhar todas as requisições de rede por um servidor proxy personalizado.",
 			"proxy_placeholder": "http://host:porta (vazio = nenhum)",
 			"stream_clients": "Clientes de streaming",
 			"stream_clients_hint": "Desative um cliente para ignorá-lo ao resolver streams. Sobrescrito pela variável de ambiente {var}.",
 			"system_titlebar": "Usar barra de título do sistema",
-			"system_titlebar_hint": "Deixe sua área de trabalho desenhar a moldura e os botões da janela. O Limusic mantém sua própria barra de ferramentas abaixo dela."
+			"system_titlebar_hint": "Deixe sua área de trabalho desenhar a moldura e os botões da janela. O Nocturne mantém sua própria barra de ferramentas abaixo dela."
 		},
 		"themes": {
 			"interface_font": "Fonte da interface",
@@ -396,7 +396,7 @@
 			"update_check_failed": "Falha ao verificar atualização: {error}",
 			"update_packaged": "Esta versão foi instalada por um gerenciador de pacotes. Atualize-a da mesma forma.",
 			"kofi": "Me pague um café",
-			"kofi_hint": "O Limusic é gratuito e continuará assim. O Ko-fi está à disposição caso você queira dar uma força.",
+			"kofi_hint": "O Nocturne é gratuito e continuará assim. O Ko-fi está à disposição caso você queira dar uma força.",
 			"kofi_button": "Abrir Ko-fi"
 		},
 		"discord": {
@@ -413,8 +413,8 @@
 			"status_line1": "Linha 1",
 			"status_line2": "Linha 2",
 			"app_name": "Nome da aplicação",
-			"app_name_hint": "Substitui \"Limusic\" onde quer que o nome do app apareça. Deixe em branco para mantê-lo.",
-			"app_name_placeholder": "Limusic",
+			"app_name_hint": "Substitui \"Nocturne\" onde quer que o nome do app apareça. Deixe em branco para mantê-lo.",
+			"app_name_placeholder": "Nocturne",
 			"line1": "Linha 1",
 			"line1_hint": "A linha em negrito, logo abaixo do cabeçalho.",
 			"line2": "Linha 2",
@@ -427,7 +427,7 @@
 			"cover": "Capa do álbum",
 			"cover_hint": "Mostra a capa ao lado da música.",
 			"badge": "Selo do provedor",
-			"badge_hint": "Marca a capa com um pequeno ícone do Limusic, como fazem os painéis do Spotify e do Apple Music.",
+			"badge_hint": "Marca a capa com um pequeno ícone do Nocturne, como fazem os painéis do Spotify e do Apple Music.",
 			"line3": "Linha 3",
 			"line3_hint": "A última linha. O Discord também a usa como texto ao passar o mouse sobre a capa, então a capa do álbum precisa estar ativada.",
 			"timestamps": "Barra de progresso",
@@ -442,7 +442,7 @@
 			"button_listen": "Ouvir no YouTube Music",
 			"button_album": "Visualizar álbum",
 			"button_artist": "Visualizar artista",
-			"button_app": "Obter Limusic",
+			"button_app": "Obter Nocturne",
 			"button_off": "Nada",
 			"preview": "Prévia",
 			"preview_live": "Está tocando",
@@ -561,7 +561,7 @@
 		"discord_tooltip_off": "Mostrar o que você toca no Discord",
 		"lastfm_scrobbling_as": "Scrobblando como {user}",
 		"lastfm_disconnected": "Last.fm desconectado",
-		"lastfm_approve_in_browser": "Aprove o Limusic no navegador",
+		"lastfm_approve_in_browser": "Aprove o Nocturne no navegador",
 		"lastfm_connecting": "Conectando ao Last.fm — clique para cancelar",
 		"lastfm_scrobble_to": "Fazer scrobble no Last.fm",
 		"disconnect": "Desconectar"
@@ -726,3 +726,4 @@
 		"remove_confirm": "Remover {count}?"
 	}
 }
+

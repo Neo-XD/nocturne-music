@@ -107,7 +107,7 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'hotkeys' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
 	const TABS: { id: TabId; label: string; hint: string; icon?: typeof Settings02Icon; customIcon?: any }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
@@ -116,8 +116,7 @@
 		{ id: 'sync', label: 'Nocturne Sync', hint: 'Pair and control playback across PC and mobile devices.', icon: Wifi01Icon },
 		{ id: 'performance', label: 'Performance', hint: 'Graphics, animation speed and resource optimizations.', icon: FlashIcon },
 		{ id: 'lyrics', label: 'Lyrics', hint: 'Provider priority, sources and synchronization.', icon: Mic01Icon },
-		{ id: 'keybindings', label: 'Keybindings', hint: 'Keyboard shortcuts and custom key mappings.', icon: KeyboardIcon },
-		{ id: 'hotkeys', label: 'Global Hotkeys', hint: 'Control playback when minimized or running in background.', icon: KeyboardIcon },
+		{ id: 'keybindings', label: 'Keybindings', hint: 'In-app shortcuts and system-wide global hotkeys.', icon: KeyboardIcon },
 		{ id: 'data', label: 'Data & storage', hint: 'Network and cached files.', icon: Database02Icon },
 		{ id: 'about', label: 'About', hint: 'Version, updates and what changed.', icon: InformationCircleIcon }
 	];
@@ -2556,7 +2555,7 @@
 						<div class="mb-5 flex items-center justify-between px-1">
 							<div>
 								<h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-									Keyboard Shortcuts & Keybindings
+									In-App Keybindings
 								</h3>
 								<p class="text-xs text-muted-foreground mt-0.5">
 									Click any keybind badge to record a new key combination.
@@ -2653,8 +2652,18 @@
 								</section>
 							{/if}
 						{/each}
-					{:else if tab === 'hotkeys'}
-						<GlobalHotkeysSettings />
+
+						<div class="mt-8 pt-6 border-t border-border/60">
+							<div class="mb-4 px-1">
+								<h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									System-Wide Global Hotkeys
+								</h3>
+								<p class="text-xs text-muted-foreground mt-0.5">
+									Control playback when Nocturne is minimized or running in the background.
+								</p>
+							</div>
+							<GlobalHotkeysSettings />
+						</div>
 					{:else if tab === 'data'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Network</h3>

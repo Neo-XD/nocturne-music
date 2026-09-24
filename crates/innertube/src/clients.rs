@@ -92,8 +92,7 @@ pub const MAIN_CLIENT: &str = "WEB_REMIX";
 /// behavior already documented for rustypipe URLs in `state.rs`, and it reaches the user as
 /// "YouTube rejected the stream link". Metrolist's ANDROID_VR 1.65 build takes the slot instead
 /// (its URLs answer an open-ended Range with 206), matching Metrolist's own default chain.
-pub const STREAM_FALLBACK_ORDER: [&str; 3] =
-    ["VISIONOS", "ANDROID_VR_1_43_32", "ANDROID_VR_1_65_10"];
+pub const STREAM_FALLBACK_ORDER: [&str; 2] = ["VISIONOS", "TVHTML5_SIMPLY"];
 
 /// The fallback order for one of the user's own uploads (issue #71). YouTube only streams a
 /// privately-owned track to an authenticated client, so every anonymous client in
@@ -140,6 +139,15 @@ mod tests {
         assert_eq!(c.get("VISIONOS").unwrap().client_id, "101");
         assert_eq!(c.get("ANDROID_VR_1_43_32").unwrap().client_id, "28");
         assert_eq!(c.get("ANDROID_VR_1_65_10").unwrap().client_id, "28");
+    }
+
+    #[test]
+    fn tvhtml5_simply_asks_for_what_it_needs() {
+        let c = Clients::bundled().0.remove("TVHTML5_SIMPLY").expect("TVHTML5_SIMPLY");
+        assert_eq!(c.client_id, "75");
+        assert!(c.use_signature_timestamp, "no STS means UNPLAYABLE on every video");
+        assert!(c.use_web_po_tokens, "no PoToken means UNPLAYABLE on every video");
+        assert!(!c.login_supported, "it is the anonymous leg: sending the cookie is not its job");
     }
 
     /// IOS only serves bounded-Range requests, which mpv never makes — it must never be a

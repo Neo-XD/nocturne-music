@@ -80,7 +80,7 @@
 		"history": "Cronologia",
 		"add_account": "Aggiungi account",
 		"remove_account": "Rimuovi account",
-		"remove_account_title": "Rimuovi da Limusic?",
+		"remove_account_title": "Rimuovi da Nocturne?",
 		"remove_account_desc": "{name} verrà rimosso solo da questo elenco. L'account Google non subirà modifiche e potrai accedere di nuovo con lo stesso account in qualsiasi momento.",
 		"saved_accounts_hint": "Seleziona un account salvato per cambiare account."
 	},
@@ -245,13 +245,13 @@
 			"language_hint": "Seleziona la lingua di visualizzazione dell'interfaccia.",
 			"shortcuts_hint": "Apri le scorciatoie da tastiera con {key}",
 			"autostart": "Avvia all'avvio",
-			"autostart_hint": "Avvia automaticamente Limusic all'avvio del sistema.",
+			"autostart_hint": "Avvia automaticamente Nocturne all'avvio del sistema.",
 			"close_to_tray": "Chiudi nel tray di sistema",
-			"close_to_tray_hint": "Mantieni Limusic in esecuzione in background quando chiudi la finestra.",
+			"close_to_tray_hint": "Mantieni Nocturne in esecuzione in background quando chiudi la finestra.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Mostra il brano attualmente in riproduzione sul tuo profilo Discord.",
 			"update_banner": "Notifiche degli aggiornamenti",
-			"update_banner_hint": "Mostra un banner quando è disponibile una nuova versione di Limusic.",
+			"update_banner_hint": "Mostra un banner quando è disponibile una nuova versione di Nocturne.",
 			"proxy": "",
 			"proxy_hint": "",
 			"proxy_placeholder": "",
@@ -570,3 +570,4 @@
 		"signed_out": "Accedi per vedere la cronologia di YouTube Music."
 	}
 }
+

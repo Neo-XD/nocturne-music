@@ -306,15 +306,15 @@
 			"language_hint": "選擇介面顯示語言。",
 			"shortcuts_hint": "{key} 查看鍵盤快速鍵",
 			"autostart": "開機啟動",
-			"autostart_hint": "開機自動開啟 Limusic。",
+			"autostart_hint": "開機自動開啟 Nocturne。",
 			"close_to_tray": "縮小至系統匣",
-			"close_to_tray_hint": "當視窗關閉時繼續執行 Limusic。",
+			"close_to_tray_hint": "當視窗關閉時繼續執行 Nocturne。",
 			"system_titlebar": "使用系統標題列",
 			"system_titlebar_hint": "使用系統原生的標題列。",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "在 Discord 個人頁面顯示現正播放的歌曲。",
 			"update_banner": "更新通知",
-			"update_banner_hint": "當 Limusic 有更新時顯示橫幅。",
+			"update_banner_hint": "當 Nocturne 有更新時顯示橫幅。",
 			"proxy": "HTTP/HTTPS Proxy",
 			"proxy_hint": "使用自定義 Proxy Server 轉發所有網路請求。",
 			"proxy_placeholder": "在此輸入 Proxy 位址，範例：http://host:port",
@@ -427,7 +427,7 @@
 			"report_issue_hint": "在您的瀏覽器中開啟 GitHub，並自動填充版本和系統信息。",
 			"report_issue_button": "回報",
 			"kofi": "請我喝杯咖啡",
-			"kofi_hint": "Limusic 始終免費，如果您願意，可以通過 Ko-fi 平臺進行斗內。",
+			"kofi_hint": "Nocturne 始終免費，如果您願意，可以通過 Ko-fi 平臺進行斗內。",
 			"kofi_button": "前往斗內"
 		},
 		"discord": {
@@ -444,8 +444,8 @@
 			"status_line1": "第一行",
 			"status_line2": "第二行",
 			"app_name": "應用程式名稱",
-			"app_name_hint": "將 “Limusic” 替換為應用程式名稱。如果需要保留原名稱，則留空。",
-			"app_name_placeholder": "Limusic",
+			"app_name_hint": "將 “Nocturne” 替換為應用程式名稱。如果需要保留原名稱，則留空。",
+			"app_name_placeholder": "Nocturne",
 			"line1": "第一行",
 			"line1_hint": "醒目的標題下的那條粗體文字。",
 			"line2": "第二行",
@@ -457,8 +457,8 @@
 			"content_off": "隱藏",
 			"cover": "專輯封面",
 			"cover_hint": "將封面顯示在曲目旁邊。",
-			"badge": "Limusic 標誌",
-			"badge_hint": "在作品上添加一個小的 “Limusic” 圖標，類似於 Spotify 和 Apple Music。",
+			"badge": "Nocturne 標誌",
+			"badge_hint": "在作品上添加一個小的 “Nocturne” 圖標，類似於 Spotify 和 Apple Music。",
 			"line3": "第三行",
 			"line3_hint": "最後一行。Discord 也使用這張作為懸停時的文本，因此需要包含專輯封面。",
 			"timestamps": "進度條",
@@ -473,7 +473,7 @@
 			"button_listen": "透過 YouTube Music 收聽",
 			"button_album": "查看專輯",
 			"button_artist": "查看演出者",
-			"button_app": "取得 Limusic",
+			"button_app": "取得 Nocturne",
 			"button_off": "無",
 			"preview": "預覽",
 			"preview_live": "現正播放",
@@ -592,7 +592,7 @@
 		"discord_tooltip_off": "在 Discord 上分享您正在聽的歌曲",
 		"lastfm_scrobbling_as": "以 {user} 的身份紀錄",
 		"lastfm_disconnected": "Last.fm 已中斷連接",
-		"lastfm_approve_in_browser": "在瀏覽器授權 Limusic",
+		"lastfm_approve_in_browser": "在瀏覽器授權 Nocturne",
 		"lastfm_connecting": "連接到 Last.fm — 點擊以取消",
 		"lastfm_scrobble_to": "紀錄至 Last.fm",
 		"disconnect": "解除連接"
@@ -726,3 +726,4 @@
 		"could_not_add": "無法新增 — 請嘗試打開它"
 	}
 }
+

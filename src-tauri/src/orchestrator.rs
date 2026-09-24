@@ -77,7 +77,8 @@ pub enum ResolveError {
 }
 
 /// Client keys that need the `n`-transform applied to their stream URLs. context/06.
-const NEEDS_N_TRANSFORM: [&str; 4] = ["WEB", "WEB_REMIX", "WEB_CREATOR", "TVHTML5"];
+const NEEDS_N_TRANSFORM: [&str; 5] =
+    ["WEB", "WEB_REMIX", "WEB_CREATOR", "TVHTML5", "TVHTML5_SIMPLY"];
 
 // WEB_REMIX is validated with a HEAD like every other client — see `validate_head`.
 

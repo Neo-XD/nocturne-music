@@ -91,7 +91,7 @@
 	"errors": {
 		"unreachable": "Can't reach YouTube Music. Check your connection.",
 		"offline_title": "No connection",
-		"offline_body": "Limusic can't reach YouTube Music. Check your internet connection, then try again.",
+		"offline_body": "Nocturne can't reach YouTube Music. Check your internet connection, then try again.",
 		"generic_title": "Something went wrong"
 	},
 	"nav": {
@@ -111,7 +111,7 @@
 		"sign_in_hint": "Sign in with your Google account to reach your YouTube Music library and playlists.",
 		"add_account": "Add account",
 		"remove_account": "Remove account",
-		"remove_account_title": "Remove from Limusic?",
+		"remove_account_title": "Remove from Nocturne?",
 		"remove_account_desc": "{name} is only removed from this list. The Google account itself is not affected, and you can sign in with it again whenever you like.",
 		"saved_accounts_hint": "Pick a saved account to switch to it.",
 		"history": "History",
@@ -314,15 +314,15 @@
 			"language_hint": "Select the interface display language.",
 			"shortcuts_hint": "Open the keyboard shortcuts with {key}",
 			"autostart": "Launch on startup",
-			"autostart_hint": "Automatically start Limusic when your system boots.",
+			"autostart_hint": "Automatically start Nocturne when your system boots.",
 			"close_to_tray": "Close to system tray",
-			"close_to_tray_hint": "Keep Limusic running in the background when closing the window.",
+			"close_to_tray_hint": "Keep Nocturne running in the background when closing the window.",
 			"system_titlebar": "Use system title bar",
-			"system_titlebar_hint": "Let your desktop draw the window frame and its buttons. Limusic keeps its own toolbar below it.",
+			"system_titlebar_hint": "Let your desktop draw the window frame and its buttons. Nocturne keeps its own toolbar below it.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Show the currently playing song on your Discord profile.",
 			"update_banner": "Update notifications",
-			"update_banner_hint": "Show a banner when a new version of Limusic is available.",
+			"update_banner_hint": "Show a banner when a new version of Nocturne is available.",
 			"proxy": "HTTP/HTTPS Proxy",
 			"proxy_hint": "Route all network requests through a custom proxy server.",
 			"proxy_placeholder": "http://host:port (blank = none)",
@@ -411,7 +411,7 @@
 		},
 		"hotkeys": {
 			"title": "Global Hotkeys",
-			"description": "Control playback with customizable keyboard shortcuts even when Limusic is minimized or running in the background.",
+			"description": "Control playback with customizable keyboard shortcuts even when Nocturne is minimized or running in the background.",
 			"enable": "Enable global hotkeys",
 			"enable_hint": "Global hotkeys are disabled. Turn them on to listen for shortcuts system-wide.",
 			"off": "Off",
@@ -446,7 +446,7 @@
 			"action_toggle_repeat": "Toggle repeat",
 			"action_toggle_repeat_hint": "Cycle repeat mode: off, all, one.",
 			"action_show_app": "Show application",
-			"action_show_app_hint": "Bring the Limusic window to the foreground."
+			"action_show_app_hint": "Bring the Nocturne window to the foreground."
 		},
 		"data": {
 			"clear_cache": "Clear image and stream cache",
@@ -476,7 +476,7 @@
 			"report_issue_hint": "Opens GitHub in your browser, with the version and system filled in.",
 			"report_issue_button": "Report",
 			"kofi": "Buy me a coffee",
-			"kofi_hint": "Limusic is free and stays free. Ko-fi is there if you feel like chipping in.",
+			"kofi_hint": "Nocturne is free and stays free. Ko-fi is there if you feel like chipping in.",
 			"kofi_button": "Open Ko-fi"
 		},
 		"discord": {
@@ -493,8 +493,8 @@
 			"status_line1": "Line 1",
 			"status_line2": "Line 2",
 			"app_name": "App name",
-			"app_name_hint": "Replaces \"Limusic\" wherever the app name appears. Leave empty to keep it.",
-			"app_name_placeholder": "Limusic",
+			"app_name_hint": "Replaces \"Nocturne\" wherever the app name appears. Leave empty to keep it.",
+			"app_name_placeholder": "Nocturne",
 			"line1": "Line 1",
 			"line1_hint": "The bold line, right under the header.",
 			"line2": "Line 2",
@@ -507,7 +507,7 @@
 			"cover": "Album art",
 			"cover_hint": "Show the artwork next to the track.",
 			"badge": "Provider badge",
-			"badge_hint": "Mark the artwork with a small Limusic icon, the way Spotify and Apple Music cards do.",
+			"badge_hint": "Mark the artwork with a small Nocturne icon, the way Spotify and Apple Music cards do.",
 			"line3": "Line 3",
 			"line3_hint": "The last line. Discord also uses it as the artwork’s hover text, so it needs the album art on.",
 			"timestamps": "Progress bar",
@@ -522,7 +522,7 @@
 			"button_listen": "Listen on YouTube Music",
 			"button_album": "View album",
 			"button_artist": "View artist",
-			"button_app": "Get Limusic",
+			"button_app": "Get Nocturne",
 			"button_off": "None",
 			"preview": "Preview",
 			"preview_live": "Now playing",
@@ -641,7 +641,7 @@
 		"discord_tooltip_off": "Show what you play on Discord",
 		"lastfm_scrobbling_as": "Scrobbling as {user}",
 		"lastfm_disconnected": "Last.fm disconnected",
-		"lastfm_approve_in_browser": "Approve Limusic in your browser",
+		"lastfm_approve_in_browser": "Approve Nocturne in your browser",
 		"lastfm_connecting": "Connecting to Last.fm — click to cancel",
 		"lastfm_scrobble_to": "Scrobble to Last.fm",
 		"disconnect": "Disconnect"
@@ -775,3 +775,4 @@
 		"switched_to": "Switched to {name}"
 	}
 }
+

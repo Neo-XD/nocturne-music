@@ -49,7 +49,7 @@ const SECRET_ENV_KEYS: &[&str] = &["LIMUSIC_PROXY", "LIMUSIC_COOKIE", "LIMUSIC_V
 pub fn report(app: &AppHandle, db: &Db) -> String {
     let mut out = String::new();
     out.push_str(
-        "# Limusic diagnostics. Paste this into your bug report.\n\
+        "# Nocturne diagnostics. Paste this into your bug report.\n\
          # Cookies, tokens, signed URLs, file paths and IP addresses have been removed.\n\n",
     );
     header(&mut out, app, db);
@@ -75,7 +75,7 @@ pub fn summary(app: &AppHandle, db: &Db) -> String {
 fn header(out: &mut String, app: &AppHandle, db: &Db) {
     let _ = writeln!(
         out,
-        "Limusic {} ({} {}, {})",
+        "Nocturne {} ({} {}, {})",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -178,14 +178,24 @@ fn install_kind(app: &AppHandle) -> &'static str {
 
 /// The log to include: this run, preceded by the previous one when this run has barely started.
 fn log_text(dir: &Path, budget: usize) -> String {
-    let current = dir.join("limusic.log");
-    let previous = dir.join("limusic.log.1");
+    let nocturne_curr = dir.join("nocturne.log");
+    let current = if nocturne_curr.exists() {
+        nocturne_curr
+    } else {
+        dir.join("limusic.log")
+    };
+    let nocturne_prev = dir.join("nocturne.log.1");
+    let previous = if nocturne_prev.exists() {
+        nocturne_prev
+    } else {
+        dir.join("limusic.log.1")
+    };
     let mut text = String::new();
     if std::fs::metadata(&current).map(|m| m.len()).unwrap_or(0) < FRESH_LOG_BYTES {
         if let Some(t) = tail(&previous, budget / 2) {
-            text.push_str("=== previous run (limusic.log.1) ===\n");
+            text.push_str("=== previous run ===\n");
             text.push_str(&t);
-            text.push_str("\n=== this run (limusic.log) ===\n");
+            text.push_str("\n=== this run ===\n");
         }
     }
     let left = budget.saturating_sub(text.len());

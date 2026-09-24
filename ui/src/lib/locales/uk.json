@@ -79,7 +79,7 @@
 		"sign_in_hint": "Ввійти з Google акаунтом для доступу до вашої YouTube бібліотеки та списків відтворення.",
 		"add_account": "Додати акаунт",
 		"remove_account": "Видалити акаунт",
-		"remove_account_title": "Видалити з Limusic?",
+		"remove_account_title": "Видалити з Nocturne?",
 		"remove_account_desc": "{name} видаляється тільки з цього списку. Це не стосується Google акаунту, ви можете ввійти знову, коли побажаєте.",
 		"saved_accounts_hint": "Виберіть збережений акаунт щоб переключитися на нього.",
 		"history": "Історія"
@@ -255,15 +255,15 @@
 			"language_hint": "Виберіть мову відображення інтерфейсу.",
 			"shortcuts_hint": "Відкрийте комбінації клавіш натиснувши {key}",
 			"autostart": "Запуск з системою",
-			"autostart_hint": "Автоматично запускати Limusic під час завантаження системи.",
+			"autostart_hint": "Автоматично запускати Nocturne під час завантаження системи.",
 			"close_to_tray": "Згорнути в трей",
-			"close_to_tray_hint": "Залишити Limusic працювати у фоновому режимі після закриття вікна.",
+			"close_to_tray_hint": "Залишити Nocturne працювати у фоновому режимі після закриття вікна.",
 			"system_titlebar": "Використовувати заголовок вікна",
-			"system_titlebar_hint": "Дозволити системі відображати рамку вікна та кнопки керування. Limusic залишить власну панель інструментів під нею.",
+			"system_titlebar_hint": "Дозволити системі відображати рамку вікна та кнопки керування. Nocturne залишить власну панель інструментів під нею.",
 			"discord_rpc": "Discord Rich Presence",
 			"discord_rpc_hint": "Показувати пісню, яка зараз відтворюється, у вашому профілі Discord.",
 			"update_banner": "Сповіщення про оновлення",
-			"update_banner_hint": "Показувати банер, коли доступна нова версія Limusic.",
+			"update_banner_hint": "Показувати банер, коли доступна нова версія Nocturne.",
 			"proxy": "HTTP/HTTPS Проксі",
 			"proxy_hint": "Маршрутизація всіх мережевих запитів через користувацький проксі-сервер.",
 			"proxy_placeholder": "http://host:port (порожньо = немає)",
@@ -365,7 +365,7 @@
 			"report_issue_hint": "Відкриває GitHub у браузері з уже заповненими даними про версію та систему.",
 			"report_issue_button": "Повідомити",
 			"kofi": "Купити мені каву",
-			"kofi_hint": "Limusic — безкоштовний сервіс і залишатиметься таким. Якщо хочете зробити свій внесок, є Ko-Fi.",
+			"kofi_hint": "Nocturne — безкоштовний сервіс і залишатиметься таким. Якщо хочете зробити свій внесок, є Ko-Fi.",
 			"kofi_button": "Відкрити Ko-fi"
 		}
 	},
@@ -475,7 +475,7 @@
 		"discord_tooltip_off": "Показує що відтворюється в Discord",
 		"lastfm_scrobbling_as": "Скроблінг як {user}",
 		"lastfm_disconnected": "Last.fm відключено",
-		"lastfm_approve_in_browser": "Дозвольте Limusic у вашому браузері",
+		"lastfm_approve_in_browser": "Дозвольте Nocturne у вашому браузері",
 		"lastfm_connecting": "Підключення до Last.fm — натисніть, щоб скасувати",
 		"lastfm_scrobble_to": "Скроблити на Last.fm",
 		"disconnect": "Відключити"
@@ -594,3 +594,4 @@
 		"unblocked_artist": "Розблоковано {name}"
 	}
 }
+
