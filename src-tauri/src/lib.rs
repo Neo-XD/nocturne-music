@@ -1,6 +1,7 @@
 //! Nocturne Music Tauri app. Wires transport + player + db + orchestrator behind the command boundary.
 
 pub mod appicon;
+mod audioproxy;
 pub mod cache;
 mod cipher;
 mod commands;
@@ -167,13 +168,6 @@ pub fn run() {
         }
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,app_lib=debug,nocturne_app=debug".into()),
-        )
-        .init();
-
     tauri::Builder::default()
         // Must be the first plugin registered (its documented requirement). A second launch —
         // e.g. clicking the app icon while we're hidden in the tray — re-shows this instance
@@ -230,6 +224,7 @@ pub fn run() {
             // App data dir for the SQLite file and mpv's on-disk audio cache.
             let data_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir());
             std::fs::create_dir_all(&data_dir).ok();
+            init_logging(&data_dir);
             let cache_dir = data_dir.join("audio-cache");
             std::fs::create_dir_all(&cache_dir).ok();
 
@@ -246,6 +241,7 @@ pub fn run() {
             // (cookie/dataSyncId/visitorData) from settings; fetch visitorData anonymously
             // (context/04 §A) only if we've never stored one.
             let proxy = db.get_setting("proxy");
+            http::set_proxy(proxy.as_deref());
             let cookie = db.get_setting("session_cookie").filter(|s| !s.is_empty());
             let data_sync_id = state::persisted_data_sync_id(&db);
             let visitor_data = db.get_setting("visitor_data").filter(|s| !s.is_empty());
@@ -373,6 +369,11 @@ pub fn run() {
             // never sees a googlevideo URL (context/11). videoproxy.rs explains why a socket and
             // not a custom scheme.
             videoproxy::start(app_state.clone());
+
+            // mpv's audio goes through a second loopback socket so the open-ended range ffmpeg
+            // sends becomes bounded ranges upstream, which is the difference between 32 KB/s and
+            // several MB/s on the same URL. audioproxy.rs has the measurements.
+            audioproxy::start();
 
             // Local music artwork reaches the webview over the asset protocol, whose configured
             // scope is empty — the folders it may read are the ones the user picked (local.rs).
@@ -866,6 +867,27 @@ fn spawn_event_pump(
             }
         }
     });
+}
+
+fn init_logging(dir: &std::path::Path) {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::Layer;
+
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "info,app_lib=debug,nocturne_app=debug".into())
+    };
+    let path = dir.join("nocturne.log");
+    let _ = std::fs::rename(&path, dir.join("nocturne.log.1"));
+    let file = std::fs::File::create(&path).ok().map(std::sync::Mutex::new);
+    let file_layer = file.map(|f| {
+        tracing_subscriber::fmt::layer().with_ansi(false).with_writer(f).with_filter(filter())
+    });
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter()))
+        .with(file_layer)
+        .init();
 }
 
 #[cfg(test)]

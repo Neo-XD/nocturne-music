@@ -115,18 +115,16 @@ impl Player {
         // pre-init phase returns PROPERTY_NOT_FOUND on this mpv build).
         let mpv = Mpv::new()?;
         mpv.set_property("vid", "no")?; // audio only
+        mpv.set_property("ytdl", "no")?;
         mpv.set_property("gapless-audio", "yes")?;
+        mpv.set_property("demuxer", "lavf")?;
+        mpv.set_property("prefetch-playlist", "yes")?;
         mpv.set_property("cache", "yes")?;
         mpv.set_property("cache-on-disk", "yes")?;
         mpv.set_property("demuxer-cache-dir", cache_dir)?;
-        // The demuxer runs at mpv's browser-sized defaults otherwise: 150 MiB forward and 50 MiB
-        // back, per open file, and the gapless lookahead keeps two open across every transition.
-        // This is audio only (`vid=no` above), so a whole 5-minute Opus track is about 4 MB and
-        // huge ceilings waste memory. 12 MiB forward is ~3 tracks of read-ahead; 4 MiB back is
-        // an entire track of backward-seek without a refetch.
-        mpv.set_property("demuxer-max-bytes", 12 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-max-back-bytes", 4 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-readahead-secs", 60.0_f64)?;
+        mpv.set_property("demuxer-max-bytes", 32 * 1024 * 1024_i64)?;
+        mpv.set_property("demuxer-max-back-bytes", 32 * 1024 * 1024_i64)?;
+        mpv.set_property("demuxer-readahead-secs", 120.0_f64)?;
         let mpv = Arc::new(mpv);
 
         let (tx, rx) = unbounded_channel();
@@ -181,6 +179,12 @@ impl Player {
     /// Clear the mpv playlist (e.g. when the user jumps to a new track).
     pub fn clear_playlist(&self) -> Result<(), Error> {
         self.mpv.command("playlist-clear", &[])?;
+        Ok(())
+    }
+
+    /// Stop playback outright and empty the playlist: mpv goes idle and stays there.
+    pub fn stop(&self) -> Result<(), Error> {
+        self.mpv.command("stop", &[])?;
         Ok(())
     }
 

@@ -15,6 +15,8 @@ pub struct StreamCandidate {
     pub url: String,
     pub itag: u32,
     pub mime: String,
+    /// Full file size in bytes, for the bounded range probing.
+    pub size: u64,
     pub bitrate: u32,
     pub expires_in_seconds: u32,
     /// rustypipe's loudness (inverse ReplayGain — see AudioStream docs). Feeds context/14 gain.
@@ -56,6 +58,7 @@ pub async fn resolve(video_id: &str, prefer_high: bool) -> Result<StreamCandidat
         url: best.url.clone(),
         itag: best.itag,
         mime: best.mime.clone(),
+        size: best.size,
         bitrate: best.bitrate,
         expires_in_seconds: player.expires_in_seconds,
         loudness_db: best.loudness_db,

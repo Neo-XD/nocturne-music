@@ -19,7 +19,7 @@
 //! other local process can drive it, and upstream headers (User-Agent, and the cookie an upload
 //! needs) attached here rather than by mpv.
 //!
-//! Set `LIMUSIC_NO_AUDIO_PROXY=1` to fall back to handing mpv the googlevideo URL directly.
+//! Set `NOCTURNE_NO_AUDIO_PROXY=1` (or `LIMUSIC_NO_AUDIO_PROXY=1`) to fall back to handing mpv the googlevideo URL directly.
 
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
@@ -155,6 +155,7 @@ pub fn start() {
 /// may not honour ranges, #294).
 pub fn register(url: &str, headers: &HashMap<String, String>) -> Option<String> {
     if !crate::orchestrator::is_googlevideo(url)
+        || std::env::var_os("NOCTURNE_NO_AUDIO_PROXY").is_some()
         || std::env::var_os("LIMUSIC_NO_AUDIO_PROXY").is_some()
     {
         return None;

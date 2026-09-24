@@ -503,7 +503,7 @@ impl Orchestrator {
 
             let headers =
                 stream_headers(client.map(|c| c.user_agent.clone()), self.it.cookie(), is_upload);
-            if self.validate_head(&url, &headers).await {
+            if self.validate_stream(&url, &headers, content_length(format)).await {
                 let elapsed_ms = client_t0.elapsed().as_secs_f64() * 1000.0;
                 self.ranker.record_success(&key, elapsed_ms).await;
                 let ping = main_ping.clone().or_else(|| playback_ping(&resp, &key));
@@ -596,6 +596,10 @@ impl Orchestrator {
         }
         tracing::info!(video_id, "all InnerTube clients exhausted → rustypipe fallback");
         match rustypipe_fallback::resolve(video_id, prefer_high).await {
+            Ok(c) if !self.validate_stream(&c.url, &HashMap::new(), Some(c.size)).await => {
+                tracing::warn!(video_id, "rustypipe URL serves only its first MiB, not playable");
+                Err(ResolveError::AllClientsFailed(video_id.to_owned()))
+            }
             Ok(c) => Ok(PlaybackData {
                 video_id: video_id.to_owned(),
                 stream_url: c.url,
@@ -660,14 +664,32 @@ impl Orchestrator {
         self.cipher.deobfuscate_stream_url(cipher, video_id).await
     }
 
-    /// HEAD validation (context/06 §validateStatus). Success = 2xx. False on any error.
+    /// Will googlevideo serve this URL, all the way to the end? (context/06 §validateStatus.)
     ///
-    /// `headers` is what mpv will send for this stream, so the probe is the same request the
-    /// player will make. It used to always attach the cookie while `build` attached it only for
-    /// uploads, which let an ordinary track pass validation and then 403 on the real open.
-    async fn validate_head(&self, url: &str, headers: &HashMap<String, String>) -> bool {
-        // The 3.5s budget avoids stalling playback if a dead stream host hangs.
-        let mut req = crate::http::client().head(url).timeout(Duration::from_millis(3500));
+    /// Probe shape, not just probe headers. mpv never opens a googlevideo URL directly any more:
+    /// `state::mpv_stream_url` hands it a loopback URL and `audioproxy` fetches bounded ranges
+    /// upstream, so a bounded range is the request this has to predict.
+    ///
+    /// And the range is the last 256 bytes, because that is the one question that separates a
+    /// capped URL from a healthy one. Since 2026 googlevideo answers only the first mebibyte of
+    /// some URLs (rustypipe's, ANDROID_VR's): measured 2026-09-22, a range ending inside that
+    /// window returns 206 and every range ending past it returns 403, on every video tried and at
+    /// any chunk size. HEAD and an opening range both pass, and mpv was handed a stream that
+    /// delivered no bytes and blamed the audio format (issue #292).
+    async fn validate_stream(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+        content_length: Option<u64>,
+    ) -> bool {
+        let req = match content_length.filter(|n| *n > 0).filter(|_| is_googlevideo(url)) {
+            Some(len) => crate::http::client()
+                .get(url)
+                .header("Range", format!("bytes={}-{}", len.saturating_sub(256), len - 1))
+                .header("Accept-Encoding", "identity"),
+            None => crate::http::client().head(url),
+        };
+        let mut req = req.timeout(Duration::from_secs(10));
         for (k, v) in headers {
             req = req.header(k, v);
         }
@@ -693,7 +715,7 @@ impl Orchestrator {
     }
 
     /// [`stream_headers`] for a client registry key.
-    fn headers_for(&self, client: &str, is_upload: bool) -> HashMap<String, String> {
+    pub(crate) fn headers_for(&self, client: &str, is_upload: bool) -> HashMap<String, String> {
         stream_headers(
             self.clients.get(client).map(|c| c.user_agent.clone()),
             self.it.cookie(),
@@ -754,6 +776,21 @@ pub fn format_quality_label(mime: &str, bitrate: i64) -> String {
     } else {
         codec.to_string()
     }
+}
+
+/// True for a URL served by YouTube's own stream CDN. Everything else (an RSS-feed podcast's
+/// enclosure, #294) gets no n-transform, no PoToken and no chunking proxy.
+pub fn is_googlevideo(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.ends_with(".googlevideo.com")))
+        .unwrap_or(false)
+}
+
+/// A format's byte length, when it reported one. `"0"` (an RSS-feed enclosure, #294) reads as
+/// absent, because a zero-length file has no tail to probe.
+fn content_length(f: &Format) -> Option<u64> {
+    f.content_length.as_deref()?.parse::<u64>().ok().filter(|n| *n > 0)
 }
 
 /// The headers mpv (and the validating HEAD) must send for one stream.

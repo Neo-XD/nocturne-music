@@ -1031,12 +1031,16 @@ impl AppState {
         let now = now_secs();
         if let Some(c) = self.db.get_stream(video_id, now + 60) {
             tracing::debug!(video_id, "stream url cache hit");
+            let headers = match c.ping_client.as_deref() {
+                Some(k) => self.orchestrator.headers_for(k, false),
+                None => self.orchestrator.headers_for("VISIONOS", false),
+            };
             // Cached URL carries no fresh metadata; the UI already has it from the queue item.
             return Ok(PlaybackData {
                 video_id: video_id.to_owned(),
                 stream_url: c.url,
                 itag: c.itag,
-                headers: Default::default(),
+                headers,
                 expires_in_seconds: c.expires_at - now,
                 loudness_db: c.loudness_db,
                 // Cached alongside the URL: a hit skips `/player`, so without it a replay never
@@ -1775,8 +1779,9 @@ impl AppState {
         if self.generation.load(Ordering::SeqCst) != gen {
             return false; // user moved on
         }
+        let stream_url = mpv_stream_url(&data);
         if let Err(e) =
-            self.player.load(&data.stream_url, &data.headers, loudness_gain(data.loudness_db))
+            self.player.load(&stream_url, &data.headers, loudness_gain(data.loudness_db))
         {
             self.emit_error(&item.video_id, &e.to_string());
             return false;
@@ -1936,7 +1941,8 @@ impl AppState {
         }
         // Headers are global in mpv; the direct-URL clients need none beyond UA, which the
         // current track already set. Just append the URL.
-        if let Err(e) = self.player.enqueue(&data.stream_url) {
+        let stream_url = mpv_stream_url(&data);
+        if let Err(e) = self.player.enqueue(&stream_url) {
             tracing::warn!(error = %e, "enqueue lookahead failed");
             return;
         }
@@ -2773,8 +2779,9 @@ impl AppState {
         if self.generation.load(Ordering::SeqCst) != gen {
             return; // superseded by a newer sync
         }
+        let stream_url = mpv_stream_url(&data);
         if let Err(e) =
-            self.player.load(&data.stream_url, &data.headers, loudness_gain(data.loudness_db))
+            self.player.load(&stream_url, &data.headers, loudness_gain(data.loudness_db))
         {
             self.emit_error(&track.id, &e.to_string());
             return;
@@ -3688,6 +3695,33 @@ fn backfill_metadata(
 pub fn saved_volume(db: &Db) -> i64 {
     let v = db.get_setting("volume").and_then(|s| s.parse().ok());
     v.filter(|v| (0..=100).contains(v)).unwrap_or(100)
+}
+
+/// Turn a resolved playback stream URL into the URL mpv should load.
+///
+/// Routes googlevideo URLs through [`crate::audioproxy`], falling back on the direct URL if the
+/// proxy is disabled, failed to bind, or the user configured an outbound HTTP proxy. Local files
+/// and non-http schemes pass straight through.
+///
+/// ffmpeg opens a stream with an open-ended `Range: bytes=X-`, which googlevideo throttles to ~2×
+/// realtime; the proxy re-issues it as bounded ranges, which are served at full speed, so both the
+/// first play and every seek start sooner. audioproxy.rs has the numbers and the kill-switch.
+fn mpv_stream_url(data: &PlaybackData) -> String {
+    // A user proxy reaches mpv as `http-proxy` (#241), and ffmpeg would send the loopback request
+    // through it, and it cannot reach our 127.0.0.1, so audio would go silent. Hand mpv the
+    // googlevideo URL instead and let the user's proxy carry it: no chunked proxy, but working
+    // playback. Nothing else is lost, because the proxy's own upstream fetch already goes through
+    // `http::client()`, which is proxied.
+    if crate::http::has_proxy() {
+        return data.stream_url.clone();
+    }
+    let http = data.stream_url.starts_with("http://") || data.stream_url.starts_with("https://");
+    if http {
+        if let Some(url) = crate::audioproxy::register(&data.stream_url, &data.headers) {
+            return url;
+        }
+    }
+    data.stream_url.clone()
 }
 
 /// Per-track loudness gain (dB) from YouTube's `loudnessDb` (context/03, context/14). Attenuate
