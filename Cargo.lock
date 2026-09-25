@@ -3590,7 +3590,7 @@ dependencies = [
  "lofty",
  "md-5",
  "player",
- "quick-xml",
+ "quick-xml 0.39.4",
  "rand 0.8.6",
  "regex",
  "reqwest 0.12.28",
