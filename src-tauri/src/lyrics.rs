@@ -930,6 +930,136 @@ fn from_parsed(source: &str, lines: Vec<LyricLine>) -> Option<Lyrics> {
     })
 }
 
+// Kara.moe's per-song API returns parsed ASS Dialogue lines, not raw ASS text.
+#[derive(Debug, Deserialize)]
+struct KaraokeMugenParsedSong {
+    lyrics: Vec<KaraokeMugenParsedLine>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KaraokeMugenParsedLine {
+    start: f64,
+    end: f64,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    full_text: Option<Vec<serde_json::Value>>,
+    #[serde(default, alias = "type")]
+    event_type: Option<String>,
+    #[serde(default)]
+    comment: bool,
+    #[serde(default)]
+    instrumental: bool,
+}
+
+fn karaoke_mugen_seconds_to_ms(seconds: f64) -> Option<u64> {
+    // A bad API value must not saturate a lyric timestamp or make a huge interval.
+    (seconds.is_finite() && (0.0..=86_400.0).contains(&seconds))
+        .then_some((seconds * 1000.0).round() as u64)
+}
+
+fn karaoke_mugen_segment_words(
+    parts: &[serde_json::Value],
+    line_start_ms: u64,
+    line_end_ms: u64,
+) -> Option<Vec<LyricWord>> {
+    let mut cursor = line_start_ms;
+    let mut words = Vec::new();
+    for part in parts {
+        let text = part.get("text")?.as_str()?;
+        if part
+            .get("drawing")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|drawing| !drawing.is_empty())
+        {
+            return None;
+        }
+        let Some(tags) = part.get("tags").and_then(serde_json::Value::as_array) else {
+            if text.is_empty() {
+                continue;
+            }
+            return None;
+        };
+        let mut duration_cs = None;
+        for tag in tags {
+            let tag = tag.as_object()?;
+            if tag.contains_key("kt") {
+                return None; // Absolute ASS offsets need different timing semantics.
+            }
+            for key in ["k", "K", "kf", "ko"] {
+                if let Some(value) = tag.get(key) {
+                    if duration_cs.replace(value.as_u64()?).is_some() {
+                        return None;
+                    }
+                }
+            }
+        }
+        let Some(duration_cs) = duration_cs else {
+            if text.is_empty() {
+                continue; // A style-only segment has no lyric or elapsed time.
+            }
+            return None;
+        };
+        let end_ms = cursor.checked_add(duration_cs.checked_mul(10)?)?;
+        if end_ms > line_end_ms {
+            return None;
+        }
+        if !text.is_empty() {
+            if end_ms == cursor && !text.trim().is_empty() {
+                return None;
+            }
+            words.push(LyricWord { text: text.to_owned(), start_ms: cursor, end_ms });
+        }
+        cursor = end_ms;
+    }
+    (!words.is_empty()).then_some(words)
+}
+
+fn convert_karaoke_mugen_lyrics(song: KaraokeMugenParsedSong) -> Option<Lyrics> {
+    let mut lines = Vec::new();
+    for line in song.lyrics {
+        if line.comment
+            || line
+                .event_type
+                .as_deref()
+                .is_some_and(|event_type| !event_type.eq_ignore_ascii_case("dialogue"))
+        {
+            continue;
+        }
+        let segmented_text = line.full_text.as_ref().and_then(|parts| {
+            parts
+                .iter()
+                .map(|part| part.get("text")?.as_str())
+                .collect::<Option<Vec<_>>>()
+                .map(|parts| parts.concat())
+        });
+        let use_segments = segmented_text.as_ref().is_some_and(|text| !text.trim().is_empty());
+        let text = if use_segments { segmented_text } else { line.text.clone() }?;
+        if text.trim().is_empty() {
+            continue;
+        }
+        let start_ms = karaoke_mugen_seconds_to_ms(line.start);
+        let end_ms = start_ms
+            .and_then(|start| karaoke_mugen_seconds_to_ms(line.end).filter(|end| *end > start));
+        let words = if use_segments && !line.instrumental {
+            line.full_text
+                .as_deref()
+                .and_then(|parts| karaoke_mugen_segment_words(parts, start_ms?, end_ms?))
+        } else {
+            None
+        };
+        lines.push(LyricLine {
+            time_ms: start_ms,
+            end_time_ms: end_ms,
+            text,
+            words,
+            translation: None,
+        });
+    }
+    from_parsed("Karaoke Mugen / kara.moe", lines)
+}
+
 // --- LRC parsing ----------------------------------------------------------------------------
 
 /// Parse LRC text (`[mm:ss.xx] line`) into sorted lines. Handles multiple timestamps per line
@@ -3976,6 +4106,207 @@ fn ttml_seconds_to_ms(seconds: f64) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn karaoke_mugen_fixture(lines: serde_json::Value) -> Lyrics {
+        // The live GET has an array of parsed lines; legacy `subfile` is not required.
+        let song: KaraokeMugenParsedSong = serde_json::from_value(serde_json::json!({
+            "kid": "synthetic-kid", "lyrics_infos": [{"filename": "synthetic.ass"}],
+            "lyrics": lines
+        }))
+        .unwrap();
+        convert_karaoke_mugen_lyrics(song).unwrap()
+    }
+
+    #[test]
+    fn karaoke_mugen_parsed_k_syllables_preserve_text_and_centiseconds() {
+        // Small synthetic counterpart of the observed array/fullText/{k} GET shape.
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 10.0, "end": 10.9, "text": "Bright stars shine!",
+            "fullText": [
+                {"text": "Bright ", "tags": [{"k": 40}], "drawing": []},
+                {"text": "stars", "tags": [{"k": 30}], "drawing": []},
+                {"text": " shine!", "tags": [{"k": 20}], "drawing": []}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!((line.time_ms, line.end_time_ms), (Some(10_000), Some(10_900)));
+        assert_eq!(line.text, "Bright stars shine!"); // `text` and `fullText` are not doubled.
+        let words = line.words.as_ref().unwrap();
+        assert_eq!(words.len(), 3);
+        assert_eq!((words[0].start_ms, words[0].end_ms), (10_000, 10_400));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (10_400, 10_700));
+        assert_eq!((words[2].start_ms, words[2].end_ms), (10_700, 10_900));
+        assert_eq!(words.iter().map(|word| word.text.as_str()).collect::<String>(), line.text);
+        assert!(lyrics.synced);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_parsed_kf_upper_k_and_ko_keep_unicode_and_punctuation() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 12.25, "end": 13.25, "text": "unused fallback",
+            "fullText": [
+                {"text": "日", "tags": [{"kf": 20}]},
+                {"text": "本 ", "tags": [{"K": 30}]},
+                {"text": "語！", "tags": [{"ko": 25}]},
+                {"text": "안녕", "tags": [{"k": 25}]}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "日本 語！안녕");
+        assert_eq!((line.time_ms, line.end_time_ms), (Some(12_250), Some(13_250)));
+        let words = line.words.as_ref().unwrap();
+        assert_eq!(
+            words.iter().map(|word| (word.start_ms, word.end_ms)).collect::<Vec<_>>(),
+            vec![(12_250, 12_450), (12_450, 12_750), (12_750, 13_000), (13_000, 13_250)]
+        );
+        assert_eq!(words.iter().map(|word| word.text.as_str()).collect::<String>(), line.text);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_whitespace_segments_preserve_display_text_without_quality_credit() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 1.0, "end": 1.7, "text": "A B",
+            "fullText": [
+                {"text": "", "tags": [{"k": 10}]},
+                {"text": "", "tags": [{"c": "red"}]},
+                {"text": "A", "tags": [{"k": 20}]},
+                {"text": " ", "tags": [{"k": 0}]},
+                {"text": "B", "tags": [{"kf": 40}]}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "A B");
+        let words = line.words.as_ref().unwrap();
+        assert_eq!(words.len(), 3);
+        assert_eq!(words.iter().map(|word| word.text.as_str()).collect::<String>(), "A B");
+        assert_eq!((words[0].start_ms, words[0].end_ms), (1_100, 1_300));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (1_300, 1_300));
+        assert_eq!((words[2].start_ms, words[2].end_ms), (1_300, 1_700));
+        let quality = provider_word_quality(&lyrics);
+        assert_eq!(quality.valid_tokens, 2);
+        assert_eq!(quality.timed_text_chars, 2);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_whitespace_does_not_promote_a_single_timed_token() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 1.0, "end": 1.4, "text": "A ",
+            "fullText": [
+                {"text": "A", "tags": [{"k": 20}]},
+                {"text": " ", "tags": [{"k": 20}]}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "A ");
+        assert_eq!(
+            line.words.as_ref().unwrap().iter().map(|word| word.text.as_str()).collect::<String>(),
+            "A "
+        );
+        assert_eq!(provider_word_quality(&lyrics).valid_tokens, 1);
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_mixed_timed_and_untimed_text_falls_back_as_a_whole_line() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 2.0, "end": 3.0, "text": "A and B",
+            "fullText": [
+                {"text": "A", "tags": [{"k": 20}]},
+                {"text": " and ", "tags": []},
+                {"text": "B", "tags": [{"k": 20}]}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "A and B");
+        assert_eq!((line.time_ms, line.end_time_ms), (Some(2_000), Some(3_000)));
+        assert!(line.words.is_none());
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_unreliable_segments_fall_back_to_line_sync() {
+        let bad_parts = [
+            serde_json::json!([{"text":"A","tags":[{"k":0}]}]),
+            serde_json::json!([{"text":"A","tags":[{"k":-2}]}]),
+            serde_json::json!([{"text":"A","tags":[{"k":"bad"}]}]),
+            serde_json::json!([{"text":"A","tags":[{"unknown":40}]}]),
+            serde_json::json!([{"text":"A","tags":[]}]),
+            serde_json::json!([{"text":"A"}]),
+            serde_json::json!([{"text":"A","tags":[{"k":101}]}]),
+            serde_json::json!([{"text":"A","tags":[{"kt":10},{"k":20}]}]),
+            serde_json::json!([{"text":"A","tags":[{"k":20}],"drawing":["shape"]}]),
+            serde_json::json!([{"tags":[{"k":20}]}]),
+        ];
+        for (index, full_text) in bad_parts.into_iter().enumerate() {
+            let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+                "start": 2.0, "end": 3.0, "text": "Fallback line", "fullText": full_text
+            }]));
+            let line = &lyrics.lines[0];
+            assert_eq!(line.text, if index == 9 { "Fallback line" } else { "A" });
+            assert_eq!((line.time_ms, line.end_time_ms), (Some(2_000), Some(3_000)));
+            assert!(line.words.is_none());
+            assert!(!has_genuine_word_timings(&lyrics));
+        }
+    }
+
+    #[test]
+    fn karaoke_mugen_line_only_overlap_comments_and_markers() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([
+            {"start": 3.0, "end": 5.0, "text": "First line"},
+            {"start": 4.0, "end": 6.0, "text": "Second line", "fullText": []},
+            {"start": 4.0, "end": 5.0, "text": "hidden", "comment": true},
+            {"start": 4.0, "end": 5.0, "text": "hidden", "eventType": "Comment"},
+            {"start": 6.0, "end": 7.0, "text": "[Instrumental]", "instrumental": true, "fullText": [
+                {"text": "[Instru", "tags": [{"k": 50}]},
+                {"text": "mental]", "tags": [{"k": 50}]}
+            ]}
+        ]));
+        assert_eq!(lyrics.lines.len(), 3);
+        assert_eq!(
+            (lyrics.lines[0].time_ms, lyrics.lines[0].end_time_ms),
+            (Some(3_000), Some(5_000))
+        );
+        assert_eq!(
+            (lyrics.lines[1].time_ms, lyrics.lines[1].end_time_ms),
+            (Some(4_000), Some(6_000))
+        );
+        assert!(lyrics.lines.iter().all(|line| line.words.is_none()));
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_literal_instrumental_text_keeps_structured_timing() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 1.0, "end": 2.0, "text": "instrumental",
+            "fullText": [
+                {"text": "instru", "tags": [{"k": 50}]},
+                {"text": "mental", "tags": [{"k": 50}]}
+            ]
+        }]));
+        assert_eq!(lyrics.lines[0].text, "instrumental");
+        assert_eq!(lyrics.lines[0].words.as_ref().unwrap().len(), 2);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_bad_line_bounds_never_make_invalid_words() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([
+            {"start": 8.0, "end": 7.0, "text": "Backwards", "fullText": [
+                {"text": "Back", "tags": [{"k": 40}]}, {"text": "wards", "tags": [{"k": 40}]}
+            ]},
+            {"start": -1.0, "end": 2.0, "text": "Bad start"},
+            {"start": 1000000.0, "end": 1000001.0, "text": "Huge start"}
+        ]));
+        assert_eq!(lyrics.lines[0].time_ms, Some(8_000));
+        assert_eq!(lyrics.lines[0].end_time_ms, None);
+        assert!(lyrics.lines[0].words.is_none());
+        assert!(lyrics.lines[1].time_ms.is_none());
+        assert!(lyrics.lines[2].time_ms.is_none());
+        assert!(lyrics.lines.iter().all(|line| line.words.is_none()));
+    }
 
     #[test]
     fn lyric_candidate_serialization_matches_ui_contract() {
