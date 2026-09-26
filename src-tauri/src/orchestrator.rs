@@ -370,7 +370,9 @@ impl Orchestrator {
         // degrade gracefully. Computed whenever ANY client in the chain asks for it, not just MAIN.
         let wants_pot = !is_upload
             && (self.clients.get(MAIN_CLIENT).is_some_and(|c| c.use_web_po_tokens)
-                || order.iter().any(|k| self.clients.get(k.as_str()).is_some_and(|c| c.use_web_po_tokens)));
+                || order
+                    .iter()
+                    .any(|k| self.clients.get(k.as_str()).is_some_and(|c| c.use_web_po_tokens)));
         let session_pot_owned = match &visitor {
             Some(vd) if wants_pot => self.potoken.get_session_po_token(vd).await,
             _ => None,
