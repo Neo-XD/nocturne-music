@@ -923,6 +923,18 @@ impl AppState {
         }
     }
 
+    pub(crate) fn is_offline_mode(&self) -> bool {
+        self.db.get_setting("offline_mode").as_deref() == Some("true")
+    }
+
+    pub(crate) fn set_offline_mode(&self, enabled: bool) {
+        if enabled {
+            self.db.set_setting("offline_mode", "true");
+        } else {
+            self.db.set_setting("offline_mode", "false");
+        }
+    }
+
     fn persist_visitor_data(&self, visitor_data: Option<&str>) {
         if let Some(visitor_data) = visitor_data {
             self.it.set_visitor_data(Some(visitor_data.to_owned()));
@@ -1026,6 +1038,27 @@ impl AppState {
                 ResolveError::LocalMissing(path.to_owned())
             });
         }
+
+        // If downloaded in Nocturne, play directly from disk (zero network, works offline).
+        if let Some(downloaded) = crate::download::get_downloaded_file(&self.db, video_id) {
+            if std::path::Path::new(&downloaded.path).is_file() {
+                let mut data = crate::local::playback_data(video_id, &downloaded.path)
+                    .map_err(|_| ResolveError::LocalMissing(downloaded.path.clone()))?;
+                data.title = Some(downloaded.title);
+                data.artists = Some(downloaded.artist);
+                data.duration = downloaded.duration;
+                data.thumbnail = downloaded.thumbnail;
+                data.stream_client = "download".to_string();
+                data.audio_quality = Some("Downloaded".to_string());
+                return Ok(data);
+            }
+        }
+
+        // When offline mode is active, reject un-downloaded online tracks immediately
+        if self.is_offline_mode() {
+            return Err(ResolveError::OfflineMode(video_id.to_owned()));
+        }
+
         // Latency cache first (context/11) — honor expiry, never a source of truth.
         // 60s safety margin: a URL that expires mid-load/mid-buffer fails as Raw(-13).
         let now = now_secs();

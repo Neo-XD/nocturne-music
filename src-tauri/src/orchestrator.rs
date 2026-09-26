@@ -85,6 +85,9 @@ pub enum ResolveError {
     /// about this particular track, so the queue must not skip past it or drop it.
     #[error("could not reach YouTube. Check your connection and try again ({0})")]
     Unreachable(String),
+    /// Offline mode is active and this track is not downloaded or local.
+    #[error("Nocturne is in Offline Mode: {0} is not downloaded")]
+    OfflineMode(String),
 }
 
 impl ResolveError {
@@ -92,7 +95,12 @@ impl ResolveError {
     /// forward, or to delete a row, has to know: skipping is right for a track YouTube refused and
     /// wrong for an outage, where it walks the whole queue and deletes what it passes.
     pub fn affects_every_track(&self) -> bool {
-        matches!(self, ResolveError::Unreachable(_) | ResolveError::SignInRequired(_))
+        matches!(
+            self,
+            ResolveError::Unreachable(_)
+                | ResolveError::SignInRequired(_)
+                | ResolveError::OfflineMode(_)
+        )
     }
 }
 

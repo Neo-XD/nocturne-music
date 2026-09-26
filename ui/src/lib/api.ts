@@ -822,8 +822,32 @@ export const downloadSong = (args: {
 	videoId: string;
 	title: string;
 	artist: string;
+	album?: string;
+	duration?: number;
+	thumbnail?: string;
 	customDir?: string;
 }) => invoke<string>('download_song', args);
+
+export interface DownloadedSong {
+	video_id: string;
+	title: string;
+	artist: string;
+	album?: string | null;
+	duration: number;
+	file_path: string;
+	cover_path?: string | null;
+	file_size: number;
+	downloaded_at: number;
+}
+
+export const getDownloadedSongs = () => invoke<DownloadedSong[]>('get_downloaded_songs');
+export const scanDownloadedSongs = () => invoke<DownloadedSong[]>('scan_downloaded_songs');
+export const deleteDownloadedSong = (videoId: string) =>
+	invoke<void>('delete_downloaded_song', { videoId });
+export const getOfflineMode = () => invoke<boolean>('get_offline_mode');
+export const setOfflineMode = (enabled: boolean) => invoke<void>('set_offline_mode', { enabled });
+export const onDownloadedSongsChanged = (cb: () => void): Promise<UnlistenFn> =>
+	listen('downloaded-songs-changed', () => cb());
 
 export interface PlaylistDownloadProgress {
 	playlist_name: string;

@@ -119,10 +119,16 @@ pub fn scan(db: &Db, covers_dir: &Path) -> LocalLibrary {
     let mut found: HashSet<String> = HashSet::new();
     let mut fresh: Vec<LocalTrack> = Vec::new();
 
+    let downloaded_paths: HashSet<String> =
+        db.get_all_downloaded_tracks().into_iter().map(|t| t.path).collect();
+
     let mut seen_dirs: HashSet<PathBuf> = HashSet::new();
     for folder in folders(db) {
         walk(Path::new(&folder), 0, &mut seen_dirs, &mut |file| {
             let path = file.to_string_lossy().to_string();
+            if downloaded_paths.contains(&path) {
+                return; // Keep downloaded songs separate from local files
+            }
             let mtime = mtime_of(file);
             found.insert(path.clone());
             if !reparse && known.get(&path) == Some(&mtime) {
@@ -657,7 +663,10 @@ pub fn allow_covers(app: &tauri::AppHandle, songs: &[SongItem]) {
 pub fn allow_music_paths(app: &tauri::AppHandle, db: &Db) {
     use tauri::Manager;
     let scope = app.asset_protocol_scope();
-    for dir in folders(db).into_iter().chain([covers_dir(app).to_string_lossy().to_string()]) {
+    let dl_dir = crate::download::get_default_download_dir(app).to_string_lossy().to_string();
+    for dir in
+        folders(db).into_iter().chain([covers_dir(app).to_string_lossy().to_string(), dl_dir])
+    {
         let _ = scope.allow_directory(&dir, true);
         if let Ok(real) = Path::new(&dir).canonicalize() {
             let _ = scope.allow_directory(real, true);

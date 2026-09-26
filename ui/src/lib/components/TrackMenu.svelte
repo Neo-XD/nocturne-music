@@ -24,7 +24,8 @@
 		PreferenceVerticalIcon,
 		BookmarkAdd02Icon,
 		BookmarkMinus02Icon,
-		Cancel01Icon
+		Cancel01Icon,
+		Download01Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
@@ -41,7 +42,9 @@
 		startRadio,
 		toggleItemLibrary,
 		toggleRating,
-		toast
+		toast,
+		isSongDownloaded,
+		deleteDownloadedSong
 	} from '$lib/player.svelte';
 	import { openLyricSelector } from '$lib/lyric-selector.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
@@ -96,9 +99,12 @@
 			const destPath = await api.downloadSong({
 				videoId: song.video_id,
 				title: song.title,
-				artist: song.artists
+				artist: song.artists,
+				album: song.album,
+				duration: durationSecs(song.duration),
+				thumbnail: song.thumbnail
 			});
-			toast.success(`Downloaded to ${destPath}`);
+			toast.success(`Downloaded "${song.title}"`);
 		} catch (err) {
 			toast.error(`Download failed: ${err}`);
 		}
@@ -287,15 +293,23 @@
 			>
 				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
 			</button>
-			<button
-				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
-				onclick={(e) => run(e, startDownload)}
-			>
-				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-				</svg>
-				Download song
-			</button>
+			{#if isSongDownloaded(song.video_id)}
+				<button
+					class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+					onclick={(e) => run(e, () => deleteDownloadedSong(song.video_id))}
+				>
+					<HugeiconsIcon icon={Download01Icon} class="h-4 w-4" />
+					Delete downloaded track
+				</button>
+			{:else}
+				<button
+					class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
+					onclick={(e) => run(e, startDownload)}
+				>
+					<HugeiconsIcon icon={Download01Icon} class="h-4 w-4" />
+					Download song
+				</button>
+			{/if}
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) =>

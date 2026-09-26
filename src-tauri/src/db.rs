@@ -93,6 +93,20 @@ impl Db {
                 PRIMARY KEY (playlist_id, video_id)
             ) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS playlist_track_video ON playlist_track(video_id);
+            CREATE TABLE IF NOT EXISTS downloaded_tracks (
+                video_id      TEXT PRIMARY KEY,
+                title         TEXT NOT NULL,
+                artist        TEXT NOT NULL,
+                album         TEXT,
+                duration      TEXT,
+                duration_secs INTEGER NOT NULL DEFAULT 0,
+                thumbnail     TEXT,
+                path          TEXT NOT NULL,
+                file_size     INTEGER NOT NULL DEFAULT 0,
+                downloaded_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS downloaded_tracks_artist ON downloaded_tracks(artist);
+            CREATE INDEX IF NOT EXISTS downloaded_tracks_album ON downloaded_tracks(album);
             "#,
         )?;
         // Migrate pre-Phase-4 DBs that predate the loudness_db column. Errors ("duplicate column")
@@ -552,6 +566,112 @@ impl Db {
         }
         out
     }
+
+    pub fn save_downloaded_track(&self, track: &DownloadedTrack) {
+        let conn = self.0.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT INTO downloaded_tracks(video_id, title, artist, album, duration, duration_secs, thumbnail, path, file_size, downloaded_at)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(video_id) DO UPDATE SET title = excluded.title, artist = excluded.artist,
+                album = excluded.album, duration = excluded.duration, duration_secs = excluded.duration_secs,
+                thumbnail = excluded.thumbnail, path = excluded.path, file_size = excluded.file_size,
+                downloaded_at = excluded.downloaded_at",
+            rusqlite::params![
+                track.video_id,
+                track.title,
+                track.artist,
+                track.album,
+                track.duration,
+                track.duration_secs,
+                track.thumbnail,
+                track.path,
+                track.file_size as i64,
+                track.downloaded_at,
+            ],
+        );
+    }
+
+    pub fn get_downloaded_track(&self, video_id: &str) -> Option<DownloadedTrack> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT video_id, title, artist, album, duration, duration_secs, thumbnail, path, file_size, downloaded_at
+                 FROM downloaded_tracks WHERE video_id = ?1",
+            )
+            .ok()?;
+        stmt.query_row([video_id], |r| {
+            let file_size_i64: i64 = r.get(8)?;
+            Ok(DownloadedTrack {
+                video_id: r.get(0)?,
+                title: r.get(1)?,
+                artist: r.get(2)?,
+                album: r.get(3)?,
+                duration: r.get(4)?,
+                duration_secs: r.get(5)?,
+                thumbnail: r.get(6)?,
+                path: r.get(7)?,
+                file_size: file_size_i64.max(0) as u64,
+                downloaded_at: r.get(9)?,
+            })
+        })
+        .ok()
+    }
+
+    pub fn get_all_downloaded_tracks(&self) -> Vec<DownloadedTrack> {
+        let conn = self.0.lock().unwrap();
+        let sql = "SELECT video_id, title, artist, album, duration, duration_secs, thumbnail, path, file_size, downloaded_at
+                   FROM downloaded_tracks ORDER BY downloaded_at DESC";
+        let mut out = Vec::new();
+        let row = |r: &rusqlite::Row| {
+            let file_size_i64: i64 = r.get(8)?;
+            Ok(DownloadedTrack {
+                video_id: r.get(0)?,
+                title: r.get(1)?,
+                artist: r.get(2)?,
+                album: r.get(3)?,
+                duration: r.get(4)?,
+                duration_secs: r.get(5)?,
+                thumbnail: r.get(6)?,
+                path: r.get(7)?,
+                file_size: file_size_i64.max(0) as u64,
+                downloaded_at: r.get(9)?,
+            })
+        };
+        if let Ok(mut stmt) = conn.prepare(sql) {
+            if let Ok(rows) = stmt.query_map([], row) {
+                out.extend(rows.flatten());
+            }
+        }
+        out
+    }
+
+    pub fn delete_downloaded_track(&self, video_id: &str) -> bool {
+        let conn = self.0.lock().unwrap();
+        conn.execute("DELETE FROM downloaded_tracks WHERE video_id = ?1", [video_id])
+            .map(|n| n > 0)
+            .unwrap_or(false)
+    }
+
+    pub fn prune_missing_downloaded_tracks(&self) -> Vec<String> {
+        let all = self.get_all_downloaded_tracks();
+        let mut missing = Vec::new();
+        for t in all {
+            if !std::path::Path::new(&t.path).is_file() {
+                missing.push(t.video_id);
+            }
+        }
+        if !missing.is_empty() {
+            let mut conn = self.0.lock().unwrap();
+            let Ok(tx) = conn.transaction() else {
+                return missing;
+            };
+            for id in &missing {
+                let _ = tx.execute("DELETE FROM downloaded_tracks WHERE video_id = ?1", [id]);
+            }
+            let _ = tx.commit();
+        }
+        missing
+    }
 }
 
 const LOCAL_TRACK_UPSERT: &str =
@@ -579,6 +699,36 @@ pub struct LocalTrack {
     /// Absolute path to the cover image (extracted or found next to the files).
     pub cover: Option<String>,
     pub mtime: i64,
+}
+
+/// A track downloaded directly within Nocturne, with full metadata preserved.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadedTrack {
+    pub video_id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: Option<String>,
+    pub duration: Option<String>,
+    pub duration_secs: i64,
+    pub thumbnail: Option<String>,
+    pub path: String,
+    pub file_size: u64,
+    pub downloaded_at: i64,
+}
+
+impl DownloadedTrack {
+    pub fn to_song_item(&self) -> innertube::SongItem {
+        innertube::SongItem {
+            video_id: self.video_id.clone(),
+            title: self.title.clone(),
+            artists: self.artist.clone(),
+            album: self.album.clone(),
+            duration: self.duration.clone(),
+            thumbnail: self.thumbnail.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 #[cfg(test)]

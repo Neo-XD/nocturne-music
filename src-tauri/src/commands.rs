@@ -1562,6 +1562,25 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v087_note = ReleaseNote {
+        version: "0.8.7".to_string(),
+        date: "2026-09-26".to_string(),
+        body: r#"### Nocturne Music v0.8.7
+
+#### 🚀 New Features
+- **Offline Mode**: Full-featured offline playback engine and UI toggle. Disables remote network calls and allows seamless listening to downloaded tracks and local library music with zero network latency.
+- **Dedicated Downloaded Music Tab**: A dedicated "Downloaded" tab in the Library alongside "Local" music, giving downloaded songs their own separate management hub with track filtering, sorting, total storage calculation, one-click "Play all", and "Shuffle".
+- **Comprehensive Download Metadata Preservation**: Downloaded tracks now preserve full metadata including high-resolution cover artwork, album name, artist, duration, file size, and audio quality tags with offline asset caching.
+
+#### ⚡ Improvements
+- **Local vs Downloaded Music Segregation**: Local audio file scanning completely excludes downloaded tracks, ensuring your custom local audio directories and Nocturne downloads remain cleanly segregated.
+- **Fast Offline Fallback**: In offline mode or when network drops, playback immediately resolves to downloaded files or fails fast without hanging on network timeouts.
+
+#### 🐛 Bug Fixes
+- **Metadata Loss on Song Download**: Fixed missing artist, album, and thumbnail metadata when saving downloaded songs by persisting complete song records to the local database and caching offline artwork.
+- **Download Duplication in Local Library**: Prevented Nocturne downloads directory from polluting the local files tab during local directory rescans."#.to_string(),
+    };
+
     let v086_note = ReleaseNote {
         version: "0.8.6".to_string(),
         date: "2026-09-24".to_string(),
@@ -1844,15 +1863,16 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v086_note, v085_note, v084_note, v083_note, v082_note, v081_note, v080_note, v072_note,
-        v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note,
-        v061_note, v06_note,
+        v087_note, v086_note, v085_note, v084_note, v083_note, v082_note, v081_note, v080_note,
+        v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note,
+        v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "0.8.7".to_string(),
             "0.8.6".to_string(),
             "0.8.5".to_string(),
             "0.8.4".to_string(),
@@ -3164,6 +3184,9 @@ pub async fn download_song(
     video_id: String,
     title: String,
     artist: String,
+    album: Option<String>,
+    duration: Option<String>,
+    thumbnail: Option<String>,
     custom_dir: Option<String>,
 ) -> Result<String, String> {
     crate::download::download_song_track(
@@ -3172,9 +3195,55 @@ pub async fn download_song(
         video_id,
         title,
         artist,
+        album,
+        duration,
+        thumbnail,
         custom_dir,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn get_downloaded_songs(
+    state: St<'_>,
+) -> Result<Vec<crate::db::DownloadedTrack>, String> {
+    Ok(state.db.get_all_downloaded_tracks())
+}
+
+#[tauri::command]
+pub async fn scan_downloaded_songs(
+    app: tauri::AppHandle,
+    state: St<'_>,
+) -> Result<Vec<crate::db::DownloadedTrack>, String> {
+    let app_handle = app.clone();
+    let db = state.db.clone();
+    let songs = tauri::async_runtime::spawn_blocking(move || {
+        crate::download::scan_downloaded_songs(&app_handle, &db)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(songs)
+}
+
+#[tauri::command]
+pub async fn delete_downloaded_song(
+    app: tauri::AppHandle,
+    state: St<'_>,
+    video_id: String,
+) -> Result<(), String> {
+    crate::download::delete_downloaded_song(&app, &state.db, &video_id)
+}
+
+#[tauri::command]
+pub fn get_offline_mode(state: St<'_>) -> Result<bool, String> {
+    Ok(state.is_offline_mode())
+}
+
+#[tauri::command]
+pub fn set_offline_mode(app: tauri::AppHandle, state: St<'_>, enabled: bool) -> Result<(), String> {
+    state.set_offline_mode(enabled);
+    let _ = app.emit("offline-mode-changed", enabled);
+    Ok(())
 }
 
 #[tauri::command]

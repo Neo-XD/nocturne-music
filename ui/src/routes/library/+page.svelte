@@ -23,6 +23,7 @@
 		FolderOpenIcon,
 		ArrowLeft01Icon,
 		ArrowRight01Icon,
+		Download01Icon,
 		Edit02Icon,
 		Delete02Icon
 	} from '@hugeicons/core-free-icons';
@@ -33,6 +34,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import LibrarySongs from '$lib/components/LibrarySongs.svelte';
 	import LocalMusic from '$lib/components/LocalMusic.svelte';
+	import DownloadedMusic from '$lib/components/DownloadedMusic.svelte';
 	import MediaCard from '$lib/components/MediaCard.svelte';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
 	import FolderCard from '$lib/components/FolderCard.svelte';
@@ -410,6 +412,9 @@
 						<Tabs.Trigger value="uploads" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 							<HugeiconsIcon icon={CloudUploadIcon} class="h-4 w-4" /> Uploads
 						</Tabs.Trigger>
+						<Tabs.Trigger value="downloaded" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
+							<HugeiconsIcon icon={Download01Icon} class="h-4 w-4" /> Downloaded
+						</Tabs.Trigger>
 						<Tabs.Trigger value="local" class="!flex-none w-auto gap-1.5 rounded-[var(--radius,0.45rem)] px-3.5 py-1.5 text-sm font-medium transition-all">
 							<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
 						</Tabs.Trigger>
@@ -457,9 +462,10 @@
 				{/if}
 			{/if}
 		</Tabs.Content>
+		<Tabs.Content value="downloaded">{#if tab === 'downloaded'}<DownloadedMusic />{/if}</Tabs.Content>
 		<Tabs.Content value="local">{#if tab === 'local'}<LocalMusic />{/if}</Tabs.Content>
-		{#if tab === 'local' || tab === 'songs' || tab === 'uploads'}
-			<!-- nothing else: the grid states below have no bearing on these three -->
+		{#if tab === 'local' || tab === 'songs' || tab === 'uploads' || tab === 'downloaded'}
+			<!-- nothing else: the grid states below have no bearing on these four -->
 		{:else if loading}
 			<div class="card-grid">
 				{#each Array(12) as _, i (i)}

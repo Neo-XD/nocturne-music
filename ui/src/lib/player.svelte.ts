@@ -768,6 +768,92 @@ export const scanLocal = () =>
 export const addLocalFolder = (path: string) => runLocal(() => api.addLocalFolder(path));
 export const removeLocalFolder = (path: string) => runLocal(() => api.removeLocalFolder(path));
 
+// --- Downloaded music & Offline mode (Rust db.rs & download.rs) -----------------------------
+export const downloaded = $state({
+	songs: [] as api.DownloadedSong[],
+	loading: false,
+	loaded: false,
+	offlineMode: false,
+	error: null as string | null
+});
+
+export function downloadedToSongItem(d: api.DownloadedSong): SongItem {
+	return {
+		video_id: d.video_id,
+		title: d.title,
+		artists: d.artist,
+		album: d.album || undefined,
+		duration: d.duration
+			? `${Math.floor(d.duration / 60)}:${String(d.duration % 60).padStart(2, '0')}`
+			: undefined,
+		thumbnail: d.cover_path || undefined
+	};
+}
+
+export async function loadDownloadedSongs(force = false) {
+	if (downloaded.loading || (downloaded.loaded && !force)) return;
+	downloaded.loading = true;
+	downloaded.error = null;
+	try {
+		downloaded.songs = await api.getDownloadedSongs();
+		downloaded.loaded = true;
+	} catch (e) {
+		downloaded.error = String(e);
+	} finally {
+		downloaded.loading = false;
+	}
+}
+
+export async function scanDownloadedSongs() {
+	downloaded.loading = true;
+	downloaded.error = null;
+	try {
+		downloaded.songs = await api.scanDownloadedSongs();
+		downloaded.loaded = true;
+		toast.success(`Verified ${downloaded.songs.length} downloaded track${downloaded.songs.length === 1 ? '' : 's'}`);
+	} catch (e) {
+		downloaded.error = String(e);
+		toast.error(String(e));
+	} finally {
+		downloaded.loading = false;
+	}
+}
+
+export async function deleteDownloadedSong(videoId: string) {
+	try {
+		await api.deleteDownloadedSong(videoId);
+		downloaded.songs = downloaded.songs.filter((s) => s.video_id !== videoId);
+		toast.success('Removed download from disk');
+	} catch (e) {
+		toast.error(String(e));
+	}
+}
+
+export function isSongDownloaded(videoId: string): boolean {
+	return downloaded.songs.some((s) => s.video_id === videoId);
+}
+
+export async function toggleOfflineMode() {
+	const next = !downloaded.offlineMode;
+	try {
+		await api.setOfflineMode(next);
+		downloaded.offlineMode = next;
+		if (next) {
+			toast.success('Offline mode enabled: online streams blocked');
+		} else {
+			toast.info('Offline mode disabled');
+		}
+	} catch (e) {
+		toast.error(String(e));
+	}
+}
+
+export async function refreshOfflineMode() {
+	try {
+		downloaded.offlineMode = await api.getOfflineMode();
+	} catch {}
+}
+
 // --- Personalization: the Shortcuts grid, sidebar pins, play recency (see personal.ts) ----------
 // The Shortcuts grid holds what the user puts in it, plus the one tile the app suggests (On
 // Repeat, via `seedOnRepeatPick`). See `personal.ts`.
@@ -1544,6 +1630,9 @@ export function initApp(mini = false): () => void {
 		api.onPlaybackNotice((msg) => toast(msg)), // auto-skipped an unplayable track
 		api.onCoverError((msg) => toast.error(msg)), // playlist artwork YouTube wouldn't take
 		api.onLocalChanged(forgetLocal), // a local file turned out to be gone — drop it everywhere
+		api.onDownloadedSongsChanged(() => {
+			void loadDownloadedSongs(true);
+		}),
 		api.onAuthChanged((a) => {
 			auth.account = a;
 			resetLibraryForAccount();
@@ -1620,6 +1709,8 @@ export function initApp(mini = false): () => void {
 	// Scan the local folders once at startup: it seeds the Library's Local tab and, more to the
 	// point, prunes shortcuts for music that was deleted while the app was closed.
 	scanLocal();
+	void loadDownloadedSongs();
+	void refreshOfflineMode();
 	// Seed the Listen Together state (server URL, any active room after a UI reload).
 	api.ltGetState().then(applyLtState).catch(() => {});
 	void refreshSpotify();

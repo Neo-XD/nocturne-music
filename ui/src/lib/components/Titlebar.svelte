@@ -35,7 +35,7 @@
 	import TopSearchBar from './TopSearchBar.svelte';
 	import logo from '$lib/assets/icon.png';
 	import * as api from '$lib/api';
-	import { np, prefs, openMiniPlayer, toast, ui, refreshView } from '$lib/player.svelte';
+	import { np, prefs, openMiniPlayer, toast, ui, refreshView, downloaded, toggleOfflineMode } from '$lib/player.svelte';
 	import { theme } from '$lib/theme.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
@@ -239,6 +239,21 @@
 				<HugeiconsIcon icon={Link04Icon} class="h-4 w-4" />
 			</button>
 		{/if}
+
+		<!-- Offline mode toggle -->
+		<button
+			class="flex h-full w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground {downloaded.offlineMode ? 'text-amber-500 font-semibold' : ''}"
+			onclick={toggleOfflineMode}
+			title={downloaded.offlineMode ? 'Offline Mode is ON (Playing downloaded & local files only) — Click to turn OFF' : 'Turn ON Offline Mode (block online streams)'}
+			aria-label="Offline Mode"
+		>
+			<span class="relative">
+				<HugeiconsIcon icon={HotspotOfflineIcon} class="h-4 w-4" />
+				{#if downloaded.offlineMode}
+					<span class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500 ring-[1.5px] ring-background"></span>
+				{/if}
+			</span>
+		</button>
 
 		<!-- Opens the same modal as the home hero's button (one dialog, mounted in +layout). -->
 		{#if prefs.visibleIcons.titlebar.listenTogether}

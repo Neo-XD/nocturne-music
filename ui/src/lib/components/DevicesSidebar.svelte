@@ -14,7 +14,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import type { RemoteSyncInfo, AudioDeviceInfo } from '$lib/api';
-	import { prefs } from '$lib/player.svelte';
+	import { prefs, toast, playback } from '$lib/player.svelte';
 
 	let {
 		onClose
@@ -24,9 +24,19 @@
 
 	let syncInfo = $state<RemoteSyncInfo | null>(null);
 	let audioInfo = $state<AudioDeviceInfo | null>(null);
+	let audioDestination = $state<'pc' | 'phone'>('pc');
 	let loading = $state(true);
 	let loadingAudio = $state(true);
 	let pollTimer: any;
+
+	function setAudioDestination(dest: 'pc' | 'phone') {
+		audioDestination = dest;
+		if (dest === 'phone') {
+			toast.info('Audio playback routed to mobile device');
+		} else {
+			toast.info('Audio playback routed to this PC');
+		}
+	}
 
 	async function fetchStatus() {
 		try {
@@ -90,6 +100,40 @@
 
 	<!-- Scrollable content -->
 	<div class="flex-1 space-y-6 overflow-y-auto p-4">
+		<!-- Audio Destination Control: Play Here (PC) vs Play on Phone -->
+		<div class="rounded-xl border border-border/70 bg-card/60 dark:bg-card/40 backdrop-blur-md p-3.5 shadow-xs">
+			<div class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+				<span>Where Audio Plays</span>
+				<span class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+					{audioDestination === 'phone' ? 'Phone' : 'This PC'}
+				</span>
+			</div>
+			<div class="grid grid-cols-2 gap-2">
+				<button
+					type="button"
+					onclick={() => setAudioDestination('pc')}
+					class="flex flex-col items-center justify-center gap-1.5 rounded-xl border p-2.5 text-center transition-all cursor-pointer {audioDestination === 'pc'
+						? 'border-primary/60 bg-primary/15 text-primary shadow-xs ring-1 ring-primary/20'
+						: 'border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground'}"
+				>
+					<SpeakerIcon class="h-5 w-5" />
+					<div class="text-xs font-semibold">This PC</div>
+					<div class="text-[10px] opacity-75">Local speakers</div>
+				</button>
+				<button
+					type="button"
+					onclick={() => setAudioDestination('phone')}
+					class="flex flex-col items-center justify-center gap-1.5 rounded-xl border p-2.5 text-center transition-all cursor-pointer {audioDestination === 'phone'
+						? 'border-primary/60 bg-primary/15 text-primary shadow-xs ring-1 ring-primary/20'
+						: 'border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground'}"
+				>
+					<HugeiconsIcon icon={SmartPhone01Icon} class="h-5 w-5" />
+					<div class="text-xs font-semibold">Phone</div>
+					<div class="text-[10px] opacity-75">{syncInfo?.connected_clients.length ? 'Connected device' : 'Remote sync'}</div>
+				</button>
+			</div>
+		</div>
+
 		<!-- Audio Output Devices Section (Soundcards / Speakers / Headphones) -->
 		<div>
 			<div class="mb-2.5 flex items-center justify-between">
