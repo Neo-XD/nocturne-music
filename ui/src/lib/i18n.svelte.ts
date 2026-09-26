@@ -17,7 +17,7 @@ type NestedKeyOf<ObjectType extends object> = {
 
 export type TranslationKey = NestedKeyOf<Translations>;
 
-const LOCALE_STORAGE_KEY = 'limusic_locale';
+const LOCALE_STORAGE_KEY = 'nocturne_locale';
 
 /**
  * The saved language, else the system one if we have a catalog for it, else English.
@@ -27,7 +27,7 @@ const LOCALE_STORAGE_KEY = 'limusic_locale';
  */
 function getInitialLocale(): LocaleId {
 	if (!browser) return 'en'; // prerender pass: no window, and nothing it renders is kept
-	const saved = localStorage.getItem(LOCALE_STORAGE_KEY);
+	const saved = localStorage.getItem(LOCALE_STORAGE_KEY) || localStorage.getItem('limusic_locale');
 	// hasOwn, not `in`: localStorage is user-writable, and `in` would accept 'constructor'.
 	if (saved && Object.hasOwn(translations, saved)) return saved as LocaleId;
 	const raw = navigator.language?.toLowerCase() ?? '';

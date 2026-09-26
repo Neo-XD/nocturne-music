@@ -1,8 +1,8 @@
 //! The text a user hands over when something breaks: what this machine is, plus the tail of
-//! `limusic.log` with the secrets taken out.
+//! `nocturne.log` with the secrets taken out.
 //!
 //! A report used to cost a round of questions (version, distro, how they installed it) and then
-//! walking someone to `~/.local/share/limusic/limusic.log` by hand. This is that conversation,
+//! walking someone to `~/.local/share/nocturne/nocturne.log` by hand. This is that conversation,
 //! precomputed, behind one button in Settings ▸ About.
 //!
 //! Redaction is the part that is not allowed to be lazy. The blob is written to be pasted into a
@@ -32,8 +32,11 @@ const FRESH_LOG_BYTES: u64 = 4096;
 /// reported as `set` instead of printed.
 const ENV_KEYS: &[&str] = &[
     "RUST_LOG",
+    "NOCTURNE_MPV_LOG",
     "LIMUSIC_MPV_LOG",
+    "NOCTURNE_PROXY",
     "LIMUSIC_PROXY",
+    "NOCTURNE_DISABLED_CLIENTS",
     "LIMUSIC_DISABLED_CLIENTS",
     "WEBKIT_DISABLE_DMABUF_RENDERER",
     "WEBKIT_DMABUF_RENDERER_FORCE_SHM",
@@ -43,7 +46,14 @@ const ENV_KEYS: &[&str] = &[
 ];
 
 /// Env vars printed as `set`, never by value.
-const SECRET_ENV_KEYS: &[&str] = &["LIMUSIC_PROXY", "LIMUSIC_COOKIE", "LIMUSIC_VISITOR_DATA"];
+const SECRET_ENV_KEYS: &[&str] = &[
+    "NOCTURNE_PROXY",
+    "LIMUSIC_PROXY",
+    "NOCTURNE_COOKIE",
+    "LIMUSIC_COOKIE",
+    "NOCTURNE_VISITOR_DATA",
+    "LIMUSIC_VISITOR_DATA",
+];
 
 /// Environment header + redacted log tail, capped at [`MAX_CHARS`].
 pub fn report(app: &AppHandle, db: &Db) -> String {
@@ -310,7 +320,7 @@ mod tests {
 
     #[test]
     fn tail_keeps_the_end_and_never_splits_a_line() {
-        let dir = std::env::temp_dir().join("limusic-diag-test");
+        let dir = std::env::temp_dir().join("nocturne-diag-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("t.log");
         std::fs::write(&path, "first line\nsecond line\nthird line\n").unwrap();

@@ -261,8 +261,8 @@ pub(crate) fn persisted_data_sync_id(db: &Db) -> Option<String> {
 
 fn identity_selection_key(data_sync_id: &str) -> String {
     let mut hasher = DefaultHasher::new();
-    // Salt preserved for deterministic backward compatibility across database migrations.
-    "limusic-account-identity-v1".hash(&mut hasher);
+    // Salt for deterministic identity keys.
+    "nocturne-account-identity-v1".hash(&mut hasher);
     data_sync_id.hash(&mut hasher);
     format!("identity-{:016x}", hasher.finish())
 }

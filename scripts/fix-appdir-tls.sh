@@ -334,7 +334,7 @@ echo "==> bundled gio modules: $MODS"
 #     fallback.
 grep -q 'gnutls-fallback' "$HOOK" || cat >> "$HOOK" <<'EOF'
 
-# Limusic: the gnutls stack is deliberately off the library path (defect 6). Ubuntu's gnutls
+# Nocturne: the gnutls stack is deliberately off the library path (defect 6). Ubuntu's gnutls
 # hardcodes /etc/ssl/certs/ca-certificates.crt as its trust store, so on a host that keeps its CA
 # bundle anywhere else (openSUSE) ours leaves the webview trusting nothing. The host's own gnutls
 # knows where the host's trust store is.

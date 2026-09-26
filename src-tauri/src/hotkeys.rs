@@ -1,8 +1,8 @@
-//! System-wide global hotkeys management for Limusic.
+//! System-wide global hotkeys management for Nocturne.
 //!
 //! Uses `tauri-plugin-global-shortcut` to listen for keyboard events at the OS level
 //! (e.g. Windows `RegisterHotKey`), allowing users to control playback even when
-//! Limusic is minimized to the system tray or running in the background.
+//! Nocturne is minimized to the system tray or running in the background.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};

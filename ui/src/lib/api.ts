@@ -361,7 +361,7 @@ export const setVolume = (volume: number) => invoke<void>('set_volume', { volume
 export const setPlaybackParams = (speed: number, semitones: number) =>
 	invoke<void>('set_playback_params', { speed, semitones });
 export const getQueue = () => invoke<QueueState>('get_queue');
-/** A `limusicvideo://` URL for the track's music video, or null when there isn't one. `maxHeight`
+/** A video stream URL for the track's music video, or null when there isn't one. `maxHeight`
  *  caps the picture at what the box on screen can actually show. The bytes are proxied through
  *  Rust; the webview never sees a googlevideo URL. */
 export const videoStream = (videoId: string, maxHeight: number) =>

@@ -254,7 +254,7 @@ jobs:
       - name: Drop the duplicate rpaths dylibbundler leaves behind
         run: |
           set -euo pipefail
-          APP=target/release/bundle/macos/limusic.app
+          APP="${APP:-$(ls -d target/release/bundle/macos/*.app 2>/dev/null | head -1)}"
           find "$APP" -type f -print0 | while IFS= read -r -d '' f; do
             # `otool -l` on a non-Mach-O file just prints nothing useful, so no file-type test is
             # needed; the awk below yields no rpaths and the inner loop does nothing.
@@ -300,7 +300,7 @@ jobs:
       - name: Check no Mach-O lists a duplicate rpath
         run: |
           set -euo pipefail
-          APP=target/release/bundle/macos/limusic.app
+          APP="${APP:-$(ls -d target/release/bundle/macos/*.app 2>/dev/null | head -1)}"
           # No `|| true` here, unlike the Homebrew guard: that one needs it because grep exits 1 on
           # every clean file, whereas uniq -d exits 0, so a non-zero pipeline here means otool
           # could not read the file. errexit does not reach inside a command substitution (and

@@ -44,7 +44,7 @@ const MAX_BOOTSTRAPS: usize = 8;
 /// Identifier the class check mints against: plain ASCII, so its decoded byte length is its char
 /// length and the integrity-token arithmetic is exact. visitorData is not usable for this — it
 /// carries percent escapes, and reading the class off it came out a byte adrift of the truth.
-const CLASS_PROBE: &str = "limusicprobe";
+const CLASS_PROBE: &str = "nocturneprobe";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -313,9 +313,12 @@ mod live {
     #[tokio::test]
     #[ignore = "hits live YouTube"]
     async fn botguard_mints_an_accepted_token() {
-        let visitor = std::env::var("LIMUSIC_VISITOR_DATA")
-            .expect("set LIMUSIC_VISITOR_DATA to the app's visitor_data setting");
-        let video_id = std::env::var("LIMUSIC_VIDEO_ID").unwrap_or_else(|_| "PtHEr7siapo".into());
+        let visitor = std::env::var("NOCTURNE_VISITOR_DATA")
+            .or_else(|_| std::env::var("LIMUSIC_VISITOR_DATA"))
+            .expect("set NOCTURNE_VISITOR_DATA to the app's visitor_data setting");
+        let video_id = std::env::var("NOCTURNE_VIDEO_ID")
+            .or_else(|_| std::env::var("LIMUSIC_VIDEO_ID"))
+            .unwrap_or_else(|_| "PtHEr7siapo".into());
 
         let t0 = Instant::now();
         let b = Minter::spawn(crate::http::WEB_UA.to_owned(), visitor.clone())
@@ -353,8 +356,9 @@ mod live {
     #[tokio::test]
     #[ignore = "hits live YouTube"]
     async fn session_token_is_reminted_after_invalidation() {
-        let visitor = std::env::var("LIMUSIC_VISITOR_DATA")
-            .expect("set LIMUSIC_VISITOR_DATA to the app's visitor_data setting");
+        let visitor = std::env::var("NOCTURNE_VISITOR_DATA")
+            .or_else(|_| std::env::var("LIMUSIC_VISITOR_DATA"))
+            .expect("set NOCTURNE_VISITOR_DATA to the app's visitor_data setting");
         let db =
             std::sync::Arc::new(crate::db::Db::open(std::path::Path::new(":memory:")).unwrap());
         let g = crate::potoken::PoTokenGenerator::new(db);
