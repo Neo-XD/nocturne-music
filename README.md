@@ -44,6 +44,18 @@ browser runtime, no backend server, no ads in the audio and **Extremely Customiz
 - **Customization via Themes and Fonts** — Customize your music player to your heart's content
 
 ---
+## Part Of the Nocturne Ecosystem.
+Designed to work well with the [Nocturne Mobile](https://github.com/Neo-XD/nocturne-mobile/) app.
+
+Sharing one goal:
+> The Best YouTube Music Experience. Without the bloat of **Electron**.
+
+| Platform | Project                                                    | Rough Description|
+| -------- | ---------------------------------------------------------- |------------------|
+| Desktop  | Nocturne Desktop | The Original Client. Built for Windows, MacOS, and Linux. |
+| Android  | [Nocturne Mobile](https://github.com/Neo-XD/nocturne-mobile) | The Mobile Client. Built for Android and as a companion app to the original. | 
+
+---
 
 <h2 align="center">Download & Install</h2>
 
