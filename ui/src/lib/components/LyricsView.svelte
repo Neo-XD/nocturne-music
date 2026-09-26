@@ -682,7 +682,7 @@
 	</div>
 
 	<!-- Bottom Dock / Toolbar -->
-	{#if lyrics && !loading && (!compact || lyrics.source === 'Unison')}
+	{#if lyrics && !loading && (!compact || lyrics.source === 'Unison' || lyrics.source === 'Karaoke Mugen / kara.moe')}
 		<div class="flex items-center justify-between border-t border-border/40 px-4 py-2 text-xs text-muted-foreground">
 			<div class="flex items-center gap-2.5">
 				{#if lyrics.source === 'Unison'}
