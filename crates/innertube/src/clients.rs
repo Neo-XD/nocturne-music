@@ -88,10 +88,21 @@ pub const MAIN_CLIENT: &str = "WEB_REMIX";
 ///
 /// IOS is deliberately absent. Its googlevideo URLs are served ONLY for bounded-Range requests:
 /// a plain GET, a HEAD, or `Range: bytes=0-` (exactly what mpv opens a stream with) all 403,
-/// while `Range: bytes=0-2047` returns 206. Measured on 21 of 22 sampled videos. That is the same
-/// behavior already documented for rustypipe URLs in `state.rs`, and it reaches the user as
-/// "YouTube rejected the stream link". Metrolist's ANDROID_VR 1.65 build takes the slot instead
-/// (its URLs answer an open-ended Range with 206), matching Metrolist's own default chain.
+/// while `Range: bytes=0-2047` returns 206. Measured on 21 of 22 sampled videos.
+///
+/// **ANDROID_VR 1.65 and 1.43 were removed 2026-09-22** (issue #292, KNOWN-ISSUES KI-11). Their
+/// URLs are now served only for ranges ending inside the first mebibyte: HEAD 403s, the tail of
+/// the file 403s, and so does the video stream. Both therefore lost every candidate to HEAD
+/// validation before reaching the user, at the cost of two `/player` round trips and two HEADs on
+/// every resolve that got this far. The client definitions stay in `clients.json`: if googlevideo
+/// serves them again (or we gain SABR), putting the keys back here is the whole change.
+///
+/// **TVHTML5_SIMPLY added 2026-09-22.** A second identity that still resolves signed out, on a
+/// different numeric client id (75), so a network or region where the bot check refuses the web
+/// identity has somewhere left to go: that is the whole of issue #292's failure, where every leg
+/// of the chain was refused at once and only signing in fixed it. It is a cipher + PoToken client
+/// like WEB_REMIX, so it sits behind VISIONOS, which needs neither and costs one round trip.
+/// Verified 2026-09-22: `/player` OK, deciphered URL 200 on HEAD and 206 on the last 256 bytes.
 pub const STREAM_FALLBACK_ORDER: [&str; 2] = ["VISIONOS", "TVHTML5_SIMPLY"];
 
 /// The fallback order for one of the user's own uploads (issue #71). YouTube only streams a
@@ -141,6 +152,9 @@ mod tests {
         assert_eq!(c.get("ANDROID_VR_1_65_10").unwrap().client_id, "28");
     }
 
+    /// Every flag TVHTML5_SIMPLY needs to answer at all. Without the signature timestamp or the
+    /// PoToken it returns UNPLAYABLE ("The page needs to be reloaded") for every video, which
+    /// looks exactly like a region block in the log. Measured 2026-09-22.
     #[test]
     fn tvhtml5_simply_asks_for_what_it_needs() {
         let c = Clients::bundled().0.remove("TVHTML5_SIMPLY").expect("TVHTML5_SIMPLY");

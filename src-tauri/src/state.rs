@@ -1759,6 +1759,10 @@ impl AppState {
                         return false;
                     }
                 }
+                Err(e) if e.affects_every_track() => {
+                    self.emit_error(&item.video_id, &e.to_string());
+                    return false;
+                }
                 Err(e) => {
                     let mut q = self.queue.lock().await;
                     // Deliberately ignores repeat-all: wrapping the unplayable-skip would spin
@@ -1886,7 +1890,7 @@ impl AppState {
                 }
                 Err(e) => {
                     tracing::warn!(video_id = %next_video, error = %e, "lookahead resolve failed — dropping from queue");
-                    if self.generation.load(Ordering::SeqCst) != gen {
+                    if e.affects_every_track() || self.generation.load(Ordering::SeqCst) != gen {
                         return;
                     }
                     // The queue can shift under a resolve — only remove the slot if it still

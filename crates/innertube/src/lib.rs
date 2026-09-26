@@ -4,6 +4,7 @@
 //! OS. It is unit-testable against JSON fixtures with no network. Cipher/PoToken/WEB_REMIX
 //! streaming are Phase 2 and deliberately absent here.
 
+pub mod blocklist;
 pub mod clients;
 pub mod endpoints;
 pub mod models;

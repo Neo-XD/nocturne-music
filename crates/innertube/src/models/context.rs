@@ -17,6 +17,13 @@ impl Default for Locale {
     }
 }
 
+impl Locale {
+    /// Format an `Accept-Language` header value from this locale, e.g. "en-US,en;q=0.9".
+    pub fn accept_language(&self) -> String {
+        format!("{}-{},{};q=0.9", self.hl, self.gl, self.hl)
+    }
+}
+
 // The three load-bearing JSON flags (context/01) are realized structurally here:
 // - ignoreUnknownKeys → serde ignores unknown fields on Deserialize by default.
 // - explicitNulls = false → `skip_serializing_if = "Option::is_none"` on every Option.

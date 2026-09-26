@@ -8,68 +8,141 @@ use innertube::{
 
 const VIDEO_ID: &str = "xl9cFAOKg_Y"; // the id from the user's failing run
 
-fn test_cookie() -> Option<String> {
-    std::env::var("NOCTURNE_COOKIE")
-        .or_else(|_| std::env::var("LIMUSIC_COOKIE"))
-        .ok()
-        .filter(|s| !s.is_empty())
-}
-
-fn test_visitor() -> Option<String> {
-    std::env::var("NOCTURNE_VISITOR")
-        .or_else(|_| std::env::var("LIMUSIC_VISITOR"))
-        .ok()
-        .filter(|s| !s.is_empty())
-}
-
-/// GET the first KB with the given UA — what mpv effectively does on load.
-async fn probe(url: &str, ua: Option<&str>) -> reqwest::StatusCode {
+/// Can this URL serve the whole track?
+///
+/// Two ranges, because one is not enough. The opening range is what the player reads first; the
+/// tail is the one question that catches a capped URL, and since 2026 googlevideo answers some
+/// URLs only for ranges ending inside the first mebibyte (KNOWN-ISSUES KI-11). A probe of the
+/// first kilobyte alone, which is what this used to be, passes on exactly the streams that
+/// delivered nothing to the user in issue #292.
+///
+/// `Accept-Encoding: identity` on both: a range and a content-encoding do not mix, and this is
+/// also the shape `src-tauri/src/audioproxy.rs` fetches with in the real app.
+async fn probe(
+    url: &str,
+    ua: Option<&str>,
+    size: Option<u64>,
+) -> (reqwest::StatusCode, Option<reqwest::StatusCode>) {
     let client = reqwest::Client::new();
-    let mut req = client.get(url).header("Range", "bytes=0-1023");
-    if let Some(ua) = ua {
-        req = req.header("User-Agent", ua);
-    }
-    req.send().await.expect("probe request").status()
+    let get = |range: String| {
+        let mut req = client.get(url).header("Range", range).header("Accept-Encoding", "identity");
+        if let Some(ua) = ua {
+            req = req.header("User-Agent", ua);
+        }
+        req
+    };
+    let head = get("bytes=0-1023".to_owned()).send().await.expect("opening probe").status();
+    let tail = match size.filter(|n| *n > 1024) {
+        Some(n) => Some(
+            get(format!("bytes={}-{}", n - 256, n - 1)).send().await.expect("tail probe").status(),
+        ),
+        None => None,
+    };
+    (head, tail)
 }
+
+/// What happened to one client on this run. Printed as a matrix so a nightly run says which leg
+/// of the chain moved, not just whether something still worked: the old "any client worked"
+/// check stayed green through every breakage this project has had, because VISIONOS kept
+/// answering while everything else died around it (KNOWN-ISSUES KI-12).
+#[derive(Debug)]
+#[allow(dead_code)] // the payloads are read through `Debug` only
+enum Leg {
+    /// Resolved and served both the opening and the tail.
+    Streams(i32),
+    /// Resolved, but googlevideo will not serve the whole file (the KI-11 cap).
+    Capped(i32),
+    /// Needs the cipher and a minted PoToken, which live in `limusic-app`, not here.
+    NotTestableHere,
+    Failed(String),
+}
+
+/// The clients this test asserts on. A direct-URL client in `STREAM_FALLBACK_ORDER` that stops
+/// streaming a whole track is the event this whole test exists to catch: KI-12 records that only
+/// three identities still play one, and this is the only one of the three testable from this
+/// crate. When it goes red, read KI-12's "The check" section.
+const MUST_STREAM: [&str; 1] = ["VISIONOS"];
 
 #[tokio::test]
 async fn direct_clients_resolve_and_stream() {
     let it = InnerTube::new(Session::default(), None).unwrap();
-    let vd = it.fetch_visitor_data().await.ok();
+    let vd = match it.fetch_visitor_data().await {
+        Ok(v) => {
+            eprintln!("visitorData: {} chars", v.len());
+            Some(v)
+        }
+        Err(e) => {
+            eprintln!("visitorData bootstrap FAILED: {e}");
+            None
+        }
+    };
     let it = InnerTube::new(Session { visitor_data: vd, ..Session::default() }, None).unwrap();
     let clients = Clients::bundled();
 
-    let mut any_ok = false;
+    let mut matrix: Vec<(&str, Leg)> = Vec::new();
     for key in STREAM_FALLBACK_ORDER {
         let client = clients.get(key).unwrap();
+        // A PoToken client cannot be resolved from this crate: it needs a minted token, a
+        // signature timestamp and the cipher, all of which live in the app. This test covers the
+        // direct half of the chain, which is the half that must keep working with those gone.
+        if client.use_web_po_tokens {
+            matrix.push((key, Leg::NotTestableHere));
+            continue;
+        }
         let resp = match it.player(client, VIDEO_ID, None, None, None).await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("{key}: /player failed: {e}");
+                matrix.push((key, Leg::Failed(format!("/player failed: {e}"))));
                 continue;
             }
         };
         if !resp.playability_status.is_ok() {
-            eprintln!("{key}: status {}", resp.playability_status.status);
+            matrix.push((
+                key,
+                Leg::Failed(format!(
+                    "status {} ({})",
+                    resp.playability_status.status,
+                    resp.playability_status.reason.as_deref().unwrap_or("no reason")
+                )),
+            ));
             continue;
         }
         let sd = resp.streaming_data.as_ref().expect("streamingData");
         assert!(sd.expires_in_seconds.is_some(), "{key}: expiry must parse");
         let Some(format) = find_format(sd, AudioQuality::High) else {
-            eprintln!("{key}: no audio format");
+            matrix.push((key, Leg::Failed("no audio format".into())));
             continue;
         };
         let Some(url) = format.direct_url() else {
-            eprintln!("{key}: itag {} cipher-only", format.itag);
+            matrix.push((key, Leg::Failed(format!("itag {} cipher-only", format.itag))));
             continue;
         };
-        let status = probe(url, Some(&client.user_agent)).await;
-        eprintln!("{key}: itag {} -> HTTP {status}", format.itag);
-        if status.is_success() {
-            any_ok = true;
-        }
+        let size = format.content_length.as_deref().and_then(|n| n.parse().ok());
+        let leg = match probe(url, Some(&client.user_agent), size).await {
+            (head, Some(tail)) if head.is_success() && tail.is_success() => {
+                Leg::Streams(format.itag)
+            }
+            (head, Some(_)) if head.is_success() => Leg::Capped(format.itag),
+            (head, None) if head.is_success() => {
+                Leg::Failed(format!("itag {}: no contentLength, tail not checked", format.itag))
+            }
+            (head, tail) => {
+                Leg::Failed(format!("itag {}: HTTP {head}, tail {tail:?}", format.itag))
+            }
+        };
+        matrix.push((key, leg));
     }
-    assert!(any_ok, "no direct client produced a playable (HTTP 2xx) stream URL");
+
+    for (key, leg) in &matrix {
+        eprintln!("{key}: {leg:?}");
+    }
+    for key in MUST_STREAM {
+        assert!(
+            matches!(matrix.iter().find(|(k, _)| *k == key).map(|(_, l)| l), Some(Leg::Streams(_))),
+            "{key} no longer streams a whole track. This is a YouTube-side change, not a code \
+             regression, and it may leave nothing in the chain that plays (issue #292)."
+        );
+    }
 }
 
 /// Live regression for the "load more duplicates tracks" bug: an owned playlist's continuation
@@ -78,11 +151,11 @@ async fn direct_clients_resolve_and_stream() {
 #[tokio::test]
 #[ignore]
 async fn owned_continuation_not_doubled() {
-    let Some(cookie) = test_cookie() else {
-        eprintln!("skipped: set NOCTURNE_COOKIE (+NOCTURNE_VISITOR) to run");
+    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
+        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
         return;
     };
-    let visitor = test_visitor();
+    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
     let it = InnerTube::new(
         Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
         None,
@@ -122,11 +195,11 @@ async fn owned_continuation_not_doubled() {
 #[tokio::test]
 #[ignore]
 async fn library_grids_page_past_the_first_response() {
-    let Some(cookie) = test_cookie() else {
-        eprintln!("skipped: set NOCTURNE_COOKIE (+NOCTURNE_VISITOR) to run");
+    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
+        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
         return;
     };
-    let visitor = test_visitor();
+    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
     let it = InnerTube::new(
         Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
         None,
@@ -164,11 +237,11 @@ async fn library_grids_page_past_the_first_response() {
 #[tokio::test]
 #[ignore]
 async fn playlist_sort_params_still_order_the_server_side_list() {
-    let Some(cookie) = test_cookie() else {
-        eprintln!("skipped: set NOCTURNE_COOKIE (+NOCTURNE_VISITOR) to run");
+    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
+        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
         return;
     };
-    let visitor = test_visitor();
+    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
     let it = InnerTube::new(
         Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
         None,
@@ -300,10 +373,10 @@ async fn every_surface_yields_a_scrobbleable_artist() {
 async fn rustypipe_url_is_fetchable() {
     let c =
         innertube::rustypipe_fallback::resolve(VIDEO_ID, true).await.expect("rustypipe resolve");
-    let bare = probe(&c.url, None).await;
+    let (bare, _) = probe(&c.url, None, None).await;
     eprintln!("rustypipe itag {}: no-UA -> HTTP {bare}", c.itag);
     // mpv sends its own libmpv UA by default; also probe with a browser-ish UA for comparison.
-    let browser = probe(&c.url, Some("Mozilla/5.0 (X11; Linux x86_64)")).await;
+    let (browser, _) = probe(&c.url, Some("Mozilla/5.0 (X11; Linux x86_64)"), None).await;
     eprintln!("rustypipe itag {}: browser-UA -> HTTP {browser}", c.itag);
     assert!(
         bare.is_success() || browser.is_success(),
@@ -345,6 +418,12 @@ async fn radio_seeds_resolve() {
     let album_id =
         song.items.iter().find_map(|i| i.album_id.clone()).expect("a radio row with an album");
     let album = it.album(&client, &album_id).await.expect("album page");
+    // Issue #105: the rows themselves never carry it, so `album()` stamps its own id on them.
+    // Without that, a track played off a release page has no "Go to album" in its menu.
+    assert!(
+        album.items.iter().all(|i| i.album_id.as_deref() == Some(album_id.as_str())),
+        "album rows reached the queue without the album's id"
+    );
     let pl = album.playlist_id.expect("album has no audio playlist");
     let album_radio =
         it.next(&client, None, Some(&format!("RDAMPL{pl}"))).await.expect("album radio /next");
@@ -360,11 +439,11 @@ async fn radio_seeds_resolve() {
 #[tokio::test]
 #[ignore]
 async fn library_songs_browse_returns_tracks() {
-    let Some(cookie) = test_cookie() else {
-        eprintln!("skipped: set NOCTURNE_COOKIE (+NOCTURNE_VISITOR) to run");
+    let Some(cookie) = std::env::var("LIMUSIC_COOKIE").ok().filter(|s| !s.is_empty()) else {
+        eprintln!("skipped: set LIMUSIC_COOKIE (+LIMUSIC_VISITOR) to run");
         return;
     };
-    let visitor = test_visitor();
+    let visitor = std::env::var("LIMUSIC_VISITOR").ok().filter(|s| !s.is_empty());
     let it = InnerTube::new(
         Session { cookie: Some(cookie), visitor_data: visitor, ..Session::default() },
         None,
@@ -395,4 +474,150 @@ async fn library_songs_browse_returns_tracks() {
         eprintln!("continuation: {} more songs", more.items.len());
         assert!(!more.items.is_empty(), "the paging token resolved to nothing");
     }
+}
+
+/// Issues #209 / #266: the Videos shelf. `FILTER_SONG` cannot return a cover, a live set or a fan
+/// remix, so the shelf rides on a second search with `FILTER_VIDEO`, and the only thing that says
+/// that param is still the video filter is YouTube answering it with video rows. Live, so ignored:
+///   cargo test -p innertube --features integration-tests video_search -- --ignored --nocapture
+#[tokio::test]
+#[ignore]
+async fn video_search_returns_video_rows() {
+    let it = InnerTube::new(Session::default(), None).unwrap();
+    let vd = it.fetch_visitor_data().await.ok();
+    let it = InnerTube::new(Session { visitor_data: vd, ..Session::default() }, None).unwrap();
+    let client = Clients::bundled().get(innertube::METADATA_CLIENT).unwrap().clone();
+
+    let videos = it.search_videos(&client, "daft punk").await.expect("video search");
+    let tagged = videos.items.iter().filter(|s| s.is_video).count();
+    eprintln!("video search: {} rows, {} tagged is_video", videos.items.len(), tagged);
+    for s in videos.items.iter().take(3) {
+        eprintln!("  {:?} - {:?} ({:?})", s.title, s.artists, s.duration);
+    }
+    assert!(!videos.items.is_empty(), "FILTER_VIDEO returned nothing — the param moved");
+    // Every row of a video-filtered search is a video. Anything less means `musicVideoType` moved
+    // and the "hide music videos" setting is leaking videos through this shelf.
+    assert_eq!(tagged, videos.items.len(), "a video-filtered row was not tagged is_video");
+
+    // The setting is a refusal to ask, not a filter on the rows: nothing to leak.
+    it.set_hide_videos(true);
+    let hidden = it.search_videos(&client, "daft punk").await.expect("hidden video search");
+    assert!(hidden.items.is_empty(), "hide_videos did not empty the video search");
+}
+
+/// Is the rustypipe safety net still able to carry a whole track?
+///
+/// Measured 2026-09-22: googlevideo serves the first mebibyte of a rustypipe URL and 403s any
+/// range ending past it, at any chunk size, on every video tried. mpv played nothing and blamed
+/// the audio format (issue #292), and `Orchestrator::streams_to_the_end` now rejects such a URL
+/// rather than hand it over. **A failure here means the net is down, not that the code broke**:
+/// the app degrades to "nothing could play this", so what is lost is the last resort.
+#[tokio::test]
+async fn rustypipe_url_streams_to_the_end() {
+    let c =
+        innertube::rustypipe_fallback::resolve(VIDEO_ID, true).await.expect("rustypipe resolve");
+    assert!(c.size > 1024 * 1024, "pick a longer VIDEO_ID: this one fits inside the cap");
+    let resp = reqwest::Client::new()
+        .get(&c.url)
+        .header("Range", format!("bytes={}-{}", c.size - 256, c.size - 1))
+        .header("Accept-Encoding", "identity")
+        .send()
+        .await
+        .expect("range request");
+    eprintln!("rustypipe itag {}: last 256 B -> HTTP {}", c.itag, resp.status());
+    assert!(resp.status().is_success(), "rustypipe URL serves only its first MiB (issue #292)");
+}
+
+/// The two community registries `src-tauri/src/cipher/config.rs` reads. Duplicated here on purpose:
+/// they live in `limusic-app`, which this crate cannot depend on, and a nightly that had to build
+/// libmpv and WebKitGTK to check a JSON file would not be run.
+// ponytail: hand-synced with `cipher::config::REGISTRY_URLS`. If that list ever changes, change
+// this; the cost of being wrong is a false red on a nightly, not a shipped bug.
+const REGISTRY_URLS: [&str; 2] = [
+    "https://raw.githubusercontent.com/ZemerTeam/zemer-cipher/master/library/src/main/assets/player_configs.json",
+    "https://raw.githubusercontent.com/MetrolistGroup/faraday/master/registry/player_configs.json",
+];
+
+/// The player hash in `iframe_api`, the way `cipher::fetcher::extract_hash` finds it. A string
+/// search rather than a regex: `regex` is not a dependency of this crate and a test is not a
+/// reason to add one. The URL's slashes may be backslash-escaped in the JS source.
+fn player_hash(iframe_api_js: &str) -> Option<String> {
+    let at = ["/s/player/", r"\/s\/player\/"]
+        .iter()
+        .find_map(|needle| iframe_api_js.find(needle).map(|i| i + needle.len()))?;
+    let rest = &iframe_api_js[at..];
+    let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))?;
+    (end > 0).then(|| rest[..end].to_owned())
+}
+
+#[test]
+fn player_hash_reads_both_url_shapes() {
+    assert_eq!(
+        player_hash(r#"var u='https:\/\/www.youtube.com\/s\/player\/4918c89a\/www-widgetapi.js';"#)
+            .as_deref(),
+        Some("4918c89a")
+    );
+    assert_eq!(
+        player_hash("https://www.youtube.com/s/player/abcd1234/base.js").as_deref(),
+        Some("abcd1234")
+    );
+    assert_eq!(player_hash("no player here"), None);
+}
+
+/// Do the cipher registries carry a config for the `player.js` YouTube is serving right now?
+///
+/// Every ciphered client (WEB_REMIX, TVHTML5_SIMPLY, WEB_CREATOR) depends on this, and static
+/// extraction of the sig and `n` functions is dead on the 2025+ VM-dispatch players, so the
+/// registries are the only way in (`src-tauri/src/cipher/config.rs:4-7`). A red here means YouTube
+/// has rotated and the registries have not caught up: the app degrades to VISIONOS alone until
+/// they do. **That is a YouTube-side event, not a code regression.**
+#[tokio::test]
+async fn cipher_registries_cover_the_current_player() {
+    let js = reqwest::Client::new()
+        .get("https://www.youtube.com/iframe_api")
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
+             Chrome/131.0.0.0 Safari/537.36",
+        )
+        .send()
+        .await
+        .expect("iframe_api")
+        .text()
+        .await
+        .expect("iframe_api body");
+    let hash = player_hash(&js).expect("player hash in iframe_api");
+    eprintln!("current player hash: {hash}");
+
+    let mut covered_by: Vec<&str> = Vec::new();
+    for url in REGISTRY_URLS {
+        let Ok(resp) = reqwest::Client::new().get(url).send().await else {
+            eprintln!("{url}: unreachable");
+            continue;
+        };
+        let Ok(body) = resp.text().await else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) else {
+            eprintln!("{url}: not JSON");
+            continue;
+        };
+        let players = v.get("players").and_then(|p| p.as_object());
+        let hit = players.is_some_and(|p| {
+            p.contains_key(&hash)
+                || p.values().any(|e| {
+                    e.get("aliases")
+                        .and_then(|a| a.as_array())
+                        .is_some_and(|a| a.iter().any(|x| x.as_str() == Some(hash.as_str())))
+                })
+        });
+        eprintln!("{url}: {}", if hit { "has it" } else { "does not have it" });
+        if hit {
+            covered_by.push(url);
+        }
+    }
+    assert!(
+        !covered_by.is_empty(),
+        "no cipher registry has a config for player {hash}. WEB_REMIX and TVHTML5_SIMPLY cannot \
+         decipher until one publishes it; the app re-checks on its own every 15 minutes, and \
+         VISIONOS alone carries playback meanwhile."
+    );
 }

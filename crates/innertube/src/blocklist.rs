@@ -130,7 +130,6 @@ mod tests {
             subtitle: None,
             thumbnail: None,
             duration: None,
-            album_id: None,
             artist_runs: runs,
             play_count: None,
             is_video: false,

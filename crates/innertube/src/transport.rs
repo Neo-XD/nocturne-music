@@ -7,8 +7,9 @@ use std::time::Duration;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, SET_COOKIE};
 use serde::Serialize;
 use sha1::{Digest, Sha1};
-use tokio::sync::Notify;
+use tokio::sync::{watch, Notify};
 
+use crate::blocklist::BlockList;
 use crate::clients::YouTubeClient;
 use crate::models::context::Locale;
 
@@ -16,6 +17,37 @@ pub const BASE_URL: &str = "https://music.youtube.com/youtubei/v1/";
 pub const ORIGIN: &str = "https://music.youtube.com";
 pub const REFERER: &str = "https://music.youtube.com/";
 pub const SW_JS_DATA_URL: &str = "https://music.youtube.com/sw.js_data";
+
+/// How long a rejected request waits for a heal it has no evidence is running.
+///
+/// Deliberately *not* sized to the healer's worst case, because nothing here can know it: the
+/// app's refresh allows 45s for its webview alone, then reads a cookie jar off the main thread
+/// with no deadline of its own, then signs in over requests that each retry three times against
+/// a 60s client timeout. Any number picked here would be a guess, and reports a false "session
+/// expired" the moment a slow heal outruns it. So a waiter that can see a heal genuinely in
+/// flight ([`InnerTube::begin_heal`]) keeps waiting, and this bounds only the case where nothing
+/// answered at all, including no listener: the crate stays pure, so it cannot require one.
+pub const HEAL_TIMEOUT: Duration = Duration::from_secs(90);
+
+tokio::task_local! {
+    /// Set for the span of the app's own healing and auth work. See [`without_healing`].
+    static NO_HEALING: ();
+}
+
+/// Run `f` with heal-waiting turned off for anything it requests.
+///
+/// Wraps the healer itself (`refresh_session` -> `sign_in` -> `account_menu` -> [`InnerTube::post`]):
+/// a 401 in there has to come straight back, because waiting would park the healing task on the
+/// heal it is itself performing. The auth flows take it for their own reason, that they are
+/// validating a cookie already in hand and want its real answer rather than a rescue.
+///
+/// Task-local rather than a flag on the transport: `InnerTube` is cloned everywhere and shares
+/// its state, so a flag would also silence healing for unrelated requests that merely overlapped
+/// a heal, which is the false "session expired" all of this exists to prevent. A task-local is
+/// not inherited by `tokio::spawn`, so anything spawned out of these flows heals as usual.
+pub async fn without_healing<F: std::future::Future>(f: F) -> F::Output {
+    NO_HEALING.scope((), f).await
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -63,9 +95,11 @@ pub fn cookie_sapisid(cookie: &str) -> Option<&str> {
     })
 }
 
-/// Merge every `Set-Cookie` header in `set_cookie` into the stored `Cookie` header string `cookie`,
-/// replacing existing names in place and appending new ones. Returns `None` when no value changed,
-/// so callers can skip the disk write.
+/// Apply `Set-Cookie` response values to a `Cookie` request header, returning the new header only
+/// when something actually changed. Existing names keep their position; new ones go on the end.
+///
+/// No domain/path matching: every response this is fed comes from music.youtube.com and the jar
+/// only ever goes back there, so a `Domain=` a browser would reject cannot reach us.
 ///
 /// ponytail: deletions (`NAME=;`) are ignored rather than applied. A cookie Google wants gone is
 /// dead server-side anyway, so carrying it costs nothing, while honouring the deletion would let
@@ -99,6 +133,19 @@ pub(crate) fn merge_set_cookie(cookie: &str, set_cookie: &[&str]) -> Option<Stri
     changed.then(|| jar.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; "))
 }
 
+/// What the app's session healer is doing, as one value so a waiter can never read half of it.
+///
+/// `active` alone cannot answer the question a waiter actually has, because it reads zero both
+/// before anything started and after everything finished. `completed` is what separates the two.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct HealState {
+    /// Heals running right now. More than one is not reachable through the app's single healing
+    /// task, but `begin_heal` is public and nothing here needs to assume that.
+    active: usize,
+    /// Heals that have finished, ever.
+    completed: u64,
+}
+
 /// The transport client. One shared `reqwest::Client`; proxy must be set before the
 /// first request or reqwest snapshots it as none (context/12, the App.kt gotcha).
 ///
@@ -113,11 +160,27 @@ pub struct InnerTube {
     /// generates. Shared like `session` so a settings toggle reaches every clone, and an atomic
     /// rather than part of `Session` because the endpoints read it on every parse.
     hide_videos: Arc<AtomicBool>,
+    /// Artists the user blocked: dropped from the surfaces YouTube generates (radio, autoplay,
+    /// home, carousels), never from a list the user opened. Shared like `session` so a settings
+    /// change reaches every clone. A `RwLock` rather than an atomic because it is a set, and the
+    /// same reasoning as `session` applies: reads are quick and never held across an `.await`.
+    blocked: Arc<RwLock<BlockList>>,
     /// Pinged whenever a signed-in request comes back rejected (401/403, or a 200 carrying the
     /// logged-out browse state). The app listens and re-mints the cookie; this crate stays pure,
     /// so it only raises the flag. `notify_one` stores a permit, so a single listener that is
     /// busy healing still sees the next rejection.
     session_rejected: Arc<Notify>,
+    /// What the app's healer is doing. A `watch` rather than a flag plus a `Notify`, because a
+    /// waiter has to read the state and wait for the next change without a gap between the two:
+    /// `send_modify` publishes the new value and the wakeup together, and a change that lands
+    /// before the waiter gets back to `changed()` is still seen. Both halves of the answer are
+    /// carried here too, so a heal that starts, runs and finishes between two polls cannot be
+    /// mistaken for one that never ran.
+    ///
+    /// Deliberately not "a cookie was written": the healer declines most of a burst on its own
+    /// cooldown, and a sign-out or a rolled-back sign-in write a cookie without healing anything.
+    /// A waiter that treated either as success would retry straight into the same 401.
+    heal: Arc<watch::Sender<HealState>>,
     /// Pinged when a response's `Set-Cookie` actually changed the stored jar, so the app can
     /// write the rotated cookie back to disk. See [`InnerTube::absorb_cookies`].
     cookie_changed: Arc<Notify>,
@@ -137,7 +200,9 @@ impl InnerTube {
             http: builder.build()?,
             session: Arc::new(RwLock::new(session)),
             hide_videos: Arc::new(AtomicBool::new(false)),
+            blocked: Arc::new(RwLock::new(BlockList::default())),
             session_rejected: Arc::new(Notify::new()),
+            heal: Arc::new(watch::Sender::new(HealState::default())),
             cookie_changed: Arc::new(Notify::new()),
         })
     }
@@ -201,6 +266,17 @@ impl InnerTube {
         self.hide_videos.load(Ordering::Relaxed)
     }
 
+    /// Replace the blocked-artist list (the app rebuilds it from the stored settings row on every
+    /// change; there is no incremental update).
+    pub fn set_blocked(&self, list: BlockList) {
+        *self.blocked.write().unwrap() = list;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn blocked(&self) -> std::sync::RwLockReadGuard<'_, BlockList> {
+        self.blocked.read().unwrap()
+    }
+
     // --- session accessors (context/15) -----------------------------------------------------
 
     /// True when a login cookie is set.
@@ -234,6 +310,23 @@ impl InnerTube {
         self.session.write().unwrap().visitor_data = vd;
     }
 
+    /// The language YouTube answers in (`hl`), from the UI's own language setting.
+    ///
+    /// Home shelf titles, mood chips, playlist subtitles and auto-playlist names are YouTube's
+    /// text, not ours, so a Korean UI left on `hl=en` reads half English (#274). `gl` stays where
+    /// it is: that picks *which* feed comes back, not the language of its labels, and a user who
+    /// switches the interface to Korean has not asked for a different catalogue.
+    ///
+    /// Ignores anything that is not tag-shaped. The value comes from the webview and ends up in a
+    /// request header, and a locale we do not recognize is better dropped than sent.
+    pub fn set_locale(&self, hl: &str) {
+        if hl.is_empty() || !hl.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            tracing::warn!(hl, "ignoring an unusable locale");
+            return;
+        }
+        self.session.write().unwrap().locale.hl = hl.to_owned();
+    }
+
     /// Build the request `context` for a client from the current session. Crate-internal — the
     /// endpoints facade calls it. Reads and drops the lock synchronously (no `.await` inside).
     pub(crate) fn context_for(&self, client: &YouTubeClient) -> crate::models::context::Context {
@@ -242,6 +335,17 @@ impl InnerTube {
         // that would have worked anonymously into a hard 401. Only send it when we can authenticate.
         let dsid = s.cookie.as_ref().and(s.data_sync_id.as_deref());
         client.to_context(&s.locale, s.visitor_data.as_deref(), dsid)
+    }
+
+    /// A context with no account attached, for requests that must not be attributed to the user:
+    /// no `onBehalfOfUser`, and the caller passes `set_login = false` so no cookie goes with it.
+    #[allow(dead_code)]
+    pub(crate) fn context_anonymous(
+        &self,
+        client: &YouTubeClient,
+    ) -> crate::models::context::Context {
+        let s = self.session.read().unwrap();
+        client.to_context(&s.locale, s.visitor_data.as_deref(), None)
     }
 
     /// Build a one-off authenticated context for identity validation without changing the shared
@@ -269,21 +373,26 @@ impl InnerTube {
         // `path` may already carry query params (e.g. browse continuations); chain accordingly.
         let sep = if path.contains('?') { '&' } else { '?' };
         let url = format!("{BASE_URL}{path}{sep}prettyPrint=false");
-        let headers = self.headers(client, set_login);
         let body = serde_json::to_vec(body)?;
 
         let mut delay = Duration::from_millis(500);
         let mut attempt = 0;
+        let mut healed = false;
+
         loop {
             attempt += 1;
+            // Rebuild headers on every iteration so retried requests use the updated session cookie.
+            let headers = self.headers(client, set_login);
+
             let res = self
                 .http
                 .post(&url)
-                .headers(headers.clone())
+                .headers(headers)
                 .body(body.clone())
                 .send()
                 .await
                 .and_then(|r| r.error_for_status());
+
             match res {
                 Ok(resp) => {
                     self.absorb_cookies(resp.headers());
@@ -296,10 +405,39 @@ impl InnerTube {
                     delay *= 2;
                 }
                 // Signed in and Google says "no credential" (401) or "not for you" (403): the
-                // stored cookie has gone stale. Raw reqwest text here reads as a broken app and
-                // hands the user a URL instead of the one thing that fixes it.
+                // stored cookie has gone stale. Most of these are survivable: the healer
+                // re-mints from the login webview's own Google session, so wait for it and try
+                // once more rather than telling a user whose session is about to come back that
+                // it expired (#211). Only for a request that actually carried the cookie: a deliberately
+                // anonymous one (a search preview) is refused for its own reasons and says
+                // nothing about the session, and `headers` sends the cookie only for a client
+                // that supports login, so every anonymous stream client in the fallback chain
+                // would otherwise sign the user out on the 403 that made the orchestrator move to
+                // the next one. `healing_suspended` keeps the healer's own validation call from
+                // waiting on the healer that is making it.
                 Err(e)
-                    if self.is_logged_in() && e.status().is_some_and(|s| s == 401 || s == 403) =>
+                    if set_login
+                        && client.login_supported
+                        && self.is_logged_in()
+                        && !healed
+                        && !self.healing_suspended()
+                        && e.status().is_some_and(|s| s == 401 || s == 403) =>
+                {
+                    healed = true;
+                    tracing::warn!(status = ?e.status(), "InnerTube {path} rejected the session, healing");
+                    self.wait_for_session_heal().await?;
+                    tracing::info!("heal finished, retrying {path}");
+                    continue;
+                }
+                // Rejected again with whatever the heal produced, or with healing unavailable:
+                // the session really is dead. Raw reqwest text here reads as a broken app and
+                // hands the user a URL instead of the one thing that fixes it, so this stays
+                // `SessionExpired`.
+                Err(e)
+                    if set_login
+                        && client.login_supported
+                        && self.is_logged_in()
+                        && e.status().is_some_and(|s| s == 401 || s == 403) =>
                 {
                     tracing::warn!(status = ?e.status(), "InnerTube {path} rejected the session");
                     return Err(self.reject_session());
@@ -359,7 +497,6 @@ impl InnerTube {
         };
         set(&mut h, "content-type", "application/json");
         set(&mut h, "accept", "application/json");
-        set(&mut h, "accept-language", "en-US,en;q=0.9");
         set(&mut h, "x-goog-api-format-version", "1");
         set(&mut h, "x-youtube-client-name", &client.client_id);
         set(&mut h, "x-youtube-client-version", &client.client_version);
@@ -368,6 +505,7 @@ impl InnerTube {
         set(&mut h, "user-agent", &client.user_agent);
 
         let s = self.session.read().unwrap();
+        set(&mut h, "accept-language", &s.locale.accept_language());
         if let Some(vd) = &s.visitor_data {
             set(&mut h, "x-goog-visitor-id", vd);
         }
@@ -414,6 +552,68 @@ impl InnerTube {
     pub fn http(&self) -> &reqwest::Client {
         &self.http
     }
+
+    /// Raise the rejection flag and wait for the app's healer to have its go, so the caller can
+    /// retry once with whatever it managed to re-mint.
+    ///
+    /// Returns as soon as a heal has run its course, whether or not it re-minted anything: the
+    /// caller retries either way, and one that really is dead can then say so instead of holding
+    /// a spinner. While a heal is still running the wait continues however long it takes, since
+    /// [`HEAL_TIMEOUT`] is our deadline and not evidence about the session. The timeout only
+    /// resolves the case where nothing ever started.
+    pub(crate) async fn wait_for_session_heal(&self) -> Result<(), Error> {
+        let mut heals = self.heal.subscribe();
+        let start = *heals.borrow_and_update();
+
+        self.session_rejected.notify_one();
+
+        loop {
+            let waited = tokio::time::timeout(HEAL_TIMEOUT, heals.changed()).await;
+            // The transport outlives every waiter in the app, so this is shutdown, not a heal.
+            if matches!(waited, Ok(Err(_))) {
+                return Err(Error::SessionExpired);
+            }
+            let now = *heals.borrow_and_update();
+
+            if now.active == 0 && now.completed > start.completed {
+                return Ok(());
+            }
+            if waited.is_err() && now.active == 0 {
+                tracing::warn!("no answer from the session healer within {HEAL_TIMEOUT:?}");
+                return Err(Error::SessionExpired);
+            }
+            if waited.is_err() {
+                tracing::debug!("heal still running past {HEAL_TIMEOUT:?}, keeping the wait");
+            }
+        }
+    }
+
+    /// Mark a heal as under way. Dropping the guard records it as finished, which is what
+    /// releases the waiters. `Drop` rather than an explicit call because the app's healer returns
+    /// from a dozen places, and the one path that forgot to signal would be a hang.
+    pub fn begin_heal(&self) -> Healing {
+        self.heal.send_modify(|s| s.active += 1);
+        Healing(self.heal.clone())
+    }
+
+    pub(crate) fn healing_suspended(&self) -> bool {
+        NO_HEALING.try_with(|()| ()).is_ok()
+    }
+}
+
+/// A heal in progress. See [`InnerTube::begin_heal`].
+pub struct Healing(Arc<watch::Sender<HealState>>);
+
+impl Drop for Healing {
+    fn drop(&mut self) {
+        // One `send_modify` for both halves: a waiter cannot see `active` reach zero without the
+        // matching `completed`, and cannot miss the wakeup that goes with them. Overlapping
+        // heals therefore release nobody until the last one ends.
+        self.0.send_modify(|s| {
+            s.active -= 1;
+            s.completed += 1;
+        });
+    }
 }
 
 /// Build the playback-tracking GET URL. context/01 §registerPlayback. Pure — unit-tested. The
@@ -451,7 +651,7 @@ pub fn generate_cpn() -> String {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
     let bump = COUNTER.fetch_add(1, Ordering::Relaxed).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    let mut state = (nanos ^ bump).wrapping_add(0x0123_4567);
+    let mut state = (nanos ^ bump).wrapping_add(0x1234_567);
     if state == 0 {
         state = 0xDEAD_BEEF;
     }
@@ -565,6 +765,24 @@ mod tests {
     }
 
     #[test]
+    fn anonymous_context_carries_no_account() {
+        let clients = crate::clients::Clients::bundled();
+        let web = clients.get(crate::clients::METADATA_CLIENT).unwrap();
+        let session = Session {
+            cookie: Some("SAPISID=secret".into()),
+            data_sync_id: Some("abc123".into()),
+            visitor_data: Some("visitor".into()),
+            ..Default::default()
+        };
+        let it = InnerTube::new(session, None).unwrap();
+
+        // Signed in, yet `search` must stay unattributable (#203).
+        let ctx = it.context_anonymous(web);
+        assert_eq!(ctx.user.on_behalf_of_user, None);
+        assert_eq!(ctx.client.visitor_data.as_deref(), Some("visitor"), "still a session, no user");
+    }
+
+    #[test]
     fn identity_validation_context_does_not_mutate_the_committed_session() {
         let clients = crate::clients::Clients::bundled();
         let web = clients.get(crate::clients::METADATA_CLIENT).unwrap();
@@ -591,6 +809,143 @@ mod tests {
         assert_eq!(s.sapisid().as_deref(), Some("secret123"));
     }
 
+    #[tokio::test]
+    async fn only_the_end_of_a_heal_releases_a_waiter_not_a_cookie_write() {
+        tokio::time::pause();
+        let it = InnerTube::new(Session::default(), None).unwrap();
+        let healer = it.clone();
+        let waiter = it.clone();
+
+        let waiting = tokio::spawn(async move { waiter.wait_for_session_heal().await });
+        it.session_rejected.notified().await;
+
+        let heal = healer.begin_heal();
+        // A cookie write on its own must not count. Sign-out and a rolled-back sign-in write one
+        // too, and neither healed anything.
+        healer.set_cookie(Some("SAPISID=healed".into()));
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished(), "a cookie write is not the end of a heal");
+
+        drop(heal);
+        waiting.await.unwrap().expect("the heal ended, so the waiter must be released");
+        assert_eq!(it.cookie().as_deref(), Some("SAPISID=healed"));
+    }
+
+    // Overlapping heals: `begin_heal` is public, so the last one out is what releases a waiter.
+    // Releasing on the first would send it back at a session the remaining heal has not fixed
+    // yet, and its second 401 is final.
+    #[tokio::test]
+    async fn overlapping_heals_release_the_waiter_only_once_the_last_one_ends() {
+        tokio::time::pause();
+        let it = InnerTube::new(Session::default(), None).unwrap();
+        let healer = it.clone();
+        let waiter = it.clone();
+
+        let waiting = tokio::spawn(async move { waiter.wait_for_session_heal().await });
+        it.session_rejected.notified().await;
+
+        let first = healer.begin_heal();
+        let second = healer.begin_heal();
+        drop(first);
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished(), "the second heal is still running");
+
+        drop(second);
+        assert!(waiting.await.unwrap().is_ok());
+    }
+
+    // The burst case: the healer declines on its own cooldown and re-mints nothing, but it still
+    // reports back. A waiter watching for a new cookie would hold the caller's spinner for the
+    // full HEAL_TIMEOUT before returning the error it could have returned at once.
+    #[tokio::test]
+    async fn a_heal_that_re_minted_nothing_still_releases_the_waiter() {
+        tokio::time::pause();
+        let it = InnerTube::new(Session::default(), None).unwrap();
+        let healer = it.clone();
+        tokio::spawn(async move {
+            healer.session_rejected.notified().await;
+            drop(healer.begin_heal());
+        });
+
+        let start = tokio::time::Instant::now();
+        assert!(it.wait_for_session_heal().await.is_ok());
+        assert!(start.elapsed() < HEAL_TIMEOUT, "released by the healer, not by the timeout");
+    }
+
+    // The #211 case the timeout would otherwise re-create: the refresh webview, the jar read and
+    // the sign-in that follows have no shared ceiling, so a heal can outrun any number picked
+    // here. While one is demonstrably in flight the waiter holds instead of crying expired.
+    #[tokio::test]
+    async fn a_heal_running_past_the_timeout_is_waited_out() {
+        tokio::time::pause();
+        let it = InnerTube::new(Session::default(), None).unwrap();
+        let healer = it.clone();
+        let waiter = it.clone();
+
+        let waiting = tokio::spawn(async move { waiter.wait_for_session_heal().await });
+        it.session_rejected.notified().await;
+
+        let heal = healer.begin_heal();
+        tokio::time::advance(HEAL_TIMEOUT * 3).await;
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished(), "a heal in flight outranks our own deadline");
+
+        drop(heal);
+        assert!(waiting.await.unwrap().is_ok());
+    }
+
+    // A heal that begins and ends entirely between two polls of the waiter. `active` is back to
+    // zero by the time it looks, so only the completion count can tell this from "nothing ran".
+    #[tokio::test]
+    async fn a_heal_that_starts_and_ends_between_polls_still_releases_the_waiter() {
+        tokio::time::pause();
+        let it = InnerTube::new(Session::default(), None).unwrap();
+        let healer = it.clone();
+        let waiter = it.clone();
+
+        let waiting = tokio::spawn(async move { waiter.wait_for_session_heal().await });
+        it.session_rejected.notified().await;
+
+        drop(healer.begin_heal());
+        assert!(waiting.await.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn wait_for_session_heal_times_out_when_no_heal_ever_starts() {
+        // Virtual time: this asserts on HEAL_TIMEOUT without spending it.
+        tokio::time::pause();
+        let it = InnerTube::new(Session::default(), None).unwrap();
+        let waiter = it.clone();
+
+        let handle = tokio::spawn(async move { waiter.wait_for_session_heal().await });
+        tokio::task::yield_now().await;
+        tokio::time::advance(HEAL_TIMEOUT + Duration::from_secs(1)).await;
+
+        assert!(matches!(handle.await.unwrap(), Err(Error::SessionExpired)));
+    }
+
+    // A 401 inside the healer's own chain must come straight back, and only inside it: the
+    // transport is cloned everywhere, so a flag on it would silence healing for every request
+    // that merely overlapped a heal.
+    #[tokio::test]
+    async fn suspending_healing_covers_the_task_and_nothing_else() {
+        let it = InnerTube::new(Session::default(), None).unwrap();
+        assert!(!it.healing_suspended());
+
+        let inside = it.clone();
+        without_healing(async move {
+            assert!(inside.healing_suspended());
+            let spawned = inside.clone();
+            // `tokio::spawn` does not inherit it, so work sent off the auth path heals as usual.
+            tokio::spawn(async move { assert!(!spawned.healing_suspended()) }).await.unwrap();
+        })
+        .await;
+
+        assert!(!it.healing_suspended(), "and it is gone once the scope ends");
+    }
+
+    // The #165 regression: the rotated value has to land in the jar, in place, or the login dies
+    // a few hours in.
     #[test]
     fn a_rotated_cookie_replaces_the_stored_one() {
         let merged = merge_set_cookie(
@@ -605,6 +960,8 @@ mod tests {
 
     #[test]
     fn nothing_new_means_no_rewrite_and_no_deletions_applied() {
+        // Same values back, plus a deletion we deliberately ignore: no change, so no disk write
+        // and no chance of dropping the login.
         assert_eq!(
             merge_set_cookie("SAPISID=keep; PREF=x", &["PREF=x; Path=/", "SAPISID=; Max-Age=0"]),
             None

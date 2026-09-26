@@ -15,7 +15,7 @@ pub struct StreamCandidate {
     pub url: String,
     pub itag: u32,
     pub mime: String,
-    /// Full file size in bytes, for the bounded range probing.
+    /// Full file size in bytes, for the bounded `&range=` URL googlevideo requires.
     pub size: u64,
     pub bitrate: u32,
     pub expires_in_seconds: u32,
@@ -35,6 +35,24 @@ pub enum FallbackError {
     NoAudio,
     #[error("rustypipe: {0}")]
     RustyPipe(String),
+}
+
+impl FallbackError {
+    /// Did YouTube answer? A refusal is a verdict on the track; only `RustyPipe` can be silence.
+    ///
+    /// The orchestrator needs the two apart. With every InnerTube client skipped or erroring, the
+    /// last thing that spoke to YouTube is rustypipe, and reading its "unavailable" as an outage
+    /// makes the queue treat a dead video as systemic: it holds the track in place instead of
+    /// skipping it and fails on it forever. Issue #292.
+    pub fn answered(&self) -> bool {
+        match self {
+            // `map_err` builds these two from `ExtractionError::Unavailable` only, which is
+            // YouTube's own playability verdict, and `NoAudio` from a player response that
+            // parsed. Transport, parse and cipher failures all land in `RustyPipe`.
+            Self::AgeRestricted | Self::Unavailable(_) | Self::NoAudio => true,
+            Self::RustyPipe(_) => false,
+        }
+    }
 }
 
 /// Resolve a videoId to its best audio stream via rustypipe. `prefer_high`: pick the
@@ -77,14 +95,20 @@ fn pick_audio(streams: &[AudioStream], prefer_high: bool) -> Option<&AudioStream
             0
         }
     }
+    // A dubbed video lists every language at the same bitrates; keep to the original track
+    // (`track` is None when there is only one). Mirrors `Format::is_original`.
+    let original: Vec<&AudioStream> =
+        streams.iter().filter(|s| s.track.as_ref().is_none_or(|t| t.is_default)).collect();
+    let streams = if original.is_empty() { streams.iter().collect() } else { original };
     if prefer_high {
-        streams.iter().max_by(|a, b| {
+        streams.into_iter().max_by(|a, b| {
             codec_score(&a.mime).cmp(&codec_score(&b.mime)).then(a.bitrate.cmp(&b.bitrate))
         })
     } else {
-        let capped: Vec<&AudioStream> = streams.iter().filter(|s| s.bitrate <= 128_000).collect();
+        let capped: Vec<&AudioStream> =
+            streams.iter().copied().filter(|s| s.bitrate <= 128_000).collect();
         if capped.is_empty() {
-            streams.iter().min_by_key(|s| s.bitrate)
+            streams.into_iter().min_by_key(|s| s.bitrate)
         } else {
             capped.into_iter().max_by_key(|s| s.bitrate)
         }
@@ -98,5 +122,21 @@ fn map_err(e: RpError) -> FallbackError {
             _ => FallbackError::Unavailable(msg),
         },
         other => FallbackError::RustyPipe(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FallbackError;
+
+    #[test]
+    fn only_a_verdict_counts_as_an_answer() {
+        assert!(FallbackError::AgeRestricted.answered());
+        assert!(FallbackError::Unavailable("gone".into()).answered());
+        assert!(FallbackError::NoAudio.answered());
+        assert!(
+            !FallbackError::RustyPipe("connection refused".into()).answered(),
+            "a transport failure must still read as an outage"
+        );
     }
 }

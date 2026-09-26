@@ -107,6 +107,29 @@ fn parse_table(json: &str) -> HashMap<String, PlayerConfig> {
     out
 }
 
+/// The merged table in the registries' own wire shape, so [`PlayerConfigStore::new`] can read back
+/// exactly what this process is using.
+///
+/// Writing one registry's raw text (which is what this used to do) dropped every entry the other
+/// registry was the only source of, so a hash that carried the session was gone on the next
+/// launch. Aliases are already expanded into their own keys by `parse_table`, so re-serialising
+/// them as plain entries is lossless for our purposes.
+fn serialize_table(entries: &HashMap<String, PlayerConfig>) -> Option<String> {
+    let players: serde_json::Map<String, serde_json::Value> = entries
+        .iter()
+        .map(|(hash, c)| {
+            let mut o = serde_json::Map::new();
+            o.insert("sig".into(), c.sig_expr.clone().into());
+            o.insert("nClass".into(), c.n_class.clone().into());
+            if let Some(sts) = c.sts {
+                o.insert("sts".into(), sts.into());
+            }
+            (hash.clone(), serde_json::Value::Object(o))
+        })
+        .collect();
+    serde_json::to_string(&serde_json::json!({ "schemaVersion": 1, "players": players })).ok()
+}
+
 // --- store -----------------------------------------------------------------------------------
 
 pub struct PlayerConfigStore {
@@ -119,8 +142,8 @@ pub struct PlayerConfigStore {
 
 impl PlayerConfigStore {
     /// Load bundled configs overlaid with the cached remote file (context/05 `initialize`,
-    /// synchronous part). The TTL-gated remote refresh is `force_refresh` /
-    /// `refresh_after_stream_rejection`, scheduled by the caller off the hot path.
+    /// synchronous part). The rate-limited remote refresh is
+    /// `refresh_rate_limited`, scheduled by the caller off the hot path.
     pub fn new(app_data_dir: &Path) -> Self {
         let cache_file = app_data_dir.join("cipher_cache").join("player_configs.json");
         let mut entries = parse_table(BUNDLED);
@@ -144,9 +167,14 @@ impl PlayerConfigStore {
         self.epoch.load(Ordering::SeqCst)
     }
 
-    /// Self-heal after a deciphered URL got rejected (403): rate-limited remote re-fetch. Returns
-    /// true if the table changed (caller should rebuild the cipher webview). context/05.
-    pub async fn refresh_after_stream_rejection(&self) -> bool {
+    /// Re-fetch the registries, at most once per [`REFRESH_COOLDOWN`]. Returns true if the table
+    /// changed (the caller should then rebuild the cipher webview). context/05.
+    ///
+    /// Two callers, one budget: the self-heal after a deciphered URL was refused, and the
+    /// periodic re-check of a player hash the registries had no config for. Both are reacting to
+    /// the same thing (the table may be behind YouTube) and neither should be able to hammer two
+    /// third-party endpoints.
+    pub async fn refresh_rate_limited(&self) -> bool {
         let mut last = self.last_refresh.lock().await;
         if let Some(t) = *last {
             if t.elapsed() < REFRESH_COOLDOWN {
@@ -158,15 +186,8 @@ impl PlayerConfigStore {
         self.fetch_and_merge().await
     }
 
-    /// Pull the registries unconditionally (e.g. a brand-new player hash appeared).
-    pub async fn force_refresh(&self) -> bool {
-        *self.last_refresh.lock().await = Some(Instant::now());
-        self.fetch_and_merge().await
-    }
-
     async fn fetch_and_merge(&self) -> bool {
         let mut incoming: HashMap<String, PlayerConfig> = HashMap::new();
-        let mut newest_raw: Option<String> = None;
         for url in REGISTRY_URLS {
             let text = match crate::http::client().get(url).send().await {
                 Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
@@ -185,7 +206,6 @@ impl PlayerConfigStore {
             }
             tracing::debug!(url, entries = parsed.len(), "player config registry parsed");
             incoming.extend(parsed);
-            newest_raw = Some(text);
         }
         if incoming.is_empty() {
             return false;
@@ -197,7 +217,7 @@ impl PlayerConfigStore {
         let changed = {
             let mut entries = self.entries.write().unwrap();
             let changed = incoming.iter().any(|(k, v)| {
-                entries.get(k).map_or(true, |old| {
+                entries.get(k).is_none_or(|old| {
                     old.sig_expr != v.sig_expr || old.n_class != v.n_class || old.sts != v.sts
                 })
             });
@@ -205,7 +225,8 @@ impl PlayerConfigStore {
             changed
         };
         if changed {
-            if let Some(raw) = newest_raw {
+            let snapshot = self.entries.read().unwrap().clone();
+            if let Some(raw) = serialize_table(&snapshot) {
                 let _ = std::fs::write(&self.cache_file, raw);
             }
             self.epoch.fetch_add(1, Ordering::SeqCst);
@@ -232,6 +253,31 @@ mod tests {
         // The alias must resolve to the same config — YouTube serves one player under several
         // hashes, and iframe_api can hand us either.
         assert_eq!(t.get("a3fe4c92").unwrap().sig_expr, "Ii(25,558,INPUT)");
+    }
+
+    #[test]
+    fn the_cached_table_round_trips_every_entry() {
+        let mut t = HashMap::new();
+        t.insert(
+            "aaaa1111".to_string(),
+            PlayerConfig {
+                sts: Some(20670),
+                sig_expr: "Ii(25,558,INPUT)".into(),
+                n_class: "as".into(),
+            },
+        );
+        t.insert(
+            "bbbb2222".to_string(),
+            PlayerConfig { sts: None, sig_expr: "Xy(3,7,INPUT)".into(), n_class: "Qz".into() },
+        );
+        // Before the fix the cache held one registry's raw text, so a table built from two
+        // sources lost the other's entries on the next launch.
+        let back = parse_table(&serialize_table(&t).unwrap());
+        assert_eq!(back.len(), 2);
+        for (k, v) in &t {
+            let b = &back[k];
+            assert_eq!((&b.sig_expr, &b.n_class, b.sts), (&v.sig_expr, &v.n_class, v.sts), "{k}");
+        }
     }
 
     #[test]

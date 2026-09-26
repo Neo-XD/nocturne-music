@@ -187,6 +187,14 @@ pub fn run() {
                 }
             }
         }))
+        // The hidden cipher webview's document (webview.rs). A registered scheme, because a
+        // `data:` URL is not a document WebView2 will navigate to.
+        .register_uri_scheme_protocol(webview::SCHEME, |_ctx, _req| {
+            tauri::http::Response::builder()
+                .header(tauri::http::header::CONTENT_TYPE, "text/html")
+                .body(webview::HARNESS_HTML.as_bytes())
+                .expect("static harness response")
+        })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // Folder picker for the local-music library (local.rs).
@@ -245,10 +253,6 @@ pub fn run() {
             let cookie = db.get_setting("session_cookie").filter(|s| !s.is_empty());
             let data_sync_id = state::persisted_data_sync_id(&db);
             let visitor_data = db.get_setting("visitor_data").filter(|s| !s.is_empty());
-            // First run (no stored visitorData): bootstrap it in the background after the window is
-            // up, rather than blocking setup on a network GET (up to 60s on a bad connection). See
-            // the spawned task after AppState is created.
-            let needs_visitor_bootstrap = visitor_data.is_none();
             if cookie.is_some() {
                 tracing::info!("loaded persisted login session");
             }
@@ -417,10 +421,10 @@ pub fn run() {
                 });
             }
 
-            // First-run visitorData bootstrap, off the startup path. `set_visitor_data` writes
+            // VisitorData bootstrap and refresh, off the startup path. `set_visitor_data` writes
             // through the shared session (Arc<RwLock>), so the orchestrator's InnerTube clone sees
             // it; resolves degrade gracefully (no PoToken) until it lands. context/04 §A.
-            if needs_visitor_bootstrap {
+            {
                 let st = app_state.clone();
                 let potoken = potoken.clone();
                 tauri::async_runtime::spawn(async move {
@@ -428,11 +432,11 @@ pub fn run() {
                         Ok(vd) => {
                             st.it.set_visitor_data(Some(vd.clone()));
                             st.db.set_setting("visitor_data", &vd);
-                            tracing::info!("visitorData bootstrapped (background)");
+                            tracing::info!("visitorData bootstrapped/refreshed (background)");
                             potoken.prewarm(&vd).await;
                         }
                         Err(e) => {
-                            tracing::warn!(error = %e, "visitorData bootstrap failed (continuing)")
+                            tracing::warn!(error = %e, "visitorData bootstrap/refresh failed (continuing)")
                         }
                     }
                 });

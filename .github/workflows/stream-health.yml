@@ -11,6 +11,16 @@ name: Stream health
 # A RED RUN HERE IS USUALLY NOT A CODE REGRESSION. It means YouTube moved. Each assertion in
 # `crates/innertube/tests/live_smoke.rs` says in its failure message which part of the chain went.
 #
+# THE TWO TESTS THAT ASK FOR AUDIO BYTES DO NOT RUN HERE, they run from a home connection via
+# `scripts/stream-health-local.sh`. YouTube answers a GitHub runner's `/player` with UNPLAYABLE
+# "Sign in to confirm you're not a bot", and rustypipe's resolve with the same sentence, because
+# Actions runners sit in Azure ranges. Measured 2026-09-24 over three runs: the runner bootstraps a
+# perfectly good visitorData (520 chars, same length as a working one here) and is refused anyway,
+# so nothing in the code or the session can fix it. Skipping them is not a lowered bar: their
+# verdict from a datacenter IP was never about YouTube, and a job that is red every night stops
+# being read. What stays here is everything that answers the same from any IP, and the most
+# valuable of those is the cipher registry check, which goes stale within hours of a rotation.
+#
 # NEVER BLOCKS A MERGE. There is no `pull_request` or `push` trigger on purpose: a third party's
 # availability must not be able to stop work landing.
 #
@@ -59,14 +69,19 @@ jobs:
       # rustypipe URL (issue #292), so it fails every night, and a job that is always red gets
       # ignored. Run it by hand to see whether the cap has lifted; drop the skip when it passes,
       # or delete the test if the rustypipe fallback goes.
+      #
+      # `direct_clients_resolve_and_stream` and `rustypipe_url_is_fetchable` are skipped for the
+      # reason in the header: they are bot-challenged from any runner IP. They are the two
+      # `scripts/stream-health-local.sh` runs, so keep the two lists in step if either name moves.
       - name: Live extraction suite
         run: >-
           cargo test -p innertube --features integration-tests --
           --nocapture --skip rustypipe_url_streams_to_the_end
+          --skip direct_clients_resolve_and_stream --skip rustypipe_url_is_fetchable
 
       - name: What a failure here means
         if: failure()
         run: |
           echo "::notice::A red run usually means YouTube changed something, not that a commit broke."
-          echo "::notice::direct_clients red: a direct client (VISIONOS) stopped serving whole tracks."
           echo "::notice::cipher_registries red: YouTube rotated player.js and the registries are behind."
+          echo "::notice::Whether a track still streams is not answered here: scripts/stream-health-local.sh."
