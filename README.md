@@ -188,6 +188,16 @@ Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLAT
  - Nocturne from `v0.9.x` to `v1.x.x` will be more focused on **getting critical bugs and small QOL things out of the way** for a clean v1 release.
  - Nocturne from `v1.x.x` and after will be focused on **smaller refinements** with a slower release cycle.
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=neo-xd%2Fnocturne-music&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=neo-xd/nocturne-music&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=neo-xd/nocturne-music&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=neo-xd/nocturne-music&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## Note for Contributors
 
 This project relies heavily on "vibe coding". As a result, the underlying codebase might be unoptimized, and some features may have bugs or break randomly. I spent a lot of time tweaking the AI output to make it work, but the code architecture might not be perfect. Pull Requests to fix bugs, optimize the code, or enhance features are incredibly welcome! Please be kind and constructive with your feedback or criticism.
