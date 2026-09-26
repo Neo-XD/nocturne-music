@@ -497,7 +497,7 @@ async fn handle_connection(
                                     if let Some(app_state) = state_ref.read().await.as_ref() {
                                         let is_track_change = matches!(
                                             action.kind.as_str(),
-                                            "change_track" | "transfer_to_desktop" | "next_track" | "next" | "previous_track" | "prev" | "previous"
+                                            "change_track" | "transfer_to_desktop" | "sync_queue_from_mobile" | "next_track" | "next" | "previous_track" | "prev" | "previous"
                                         );
                                         apply_remote_action(app_state, action).await;
                                         // Broadcast updated state immediately for control actions.
@@ -563,8 +563,41 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
         "previous_track" | "prev" | "previous" => {
             state.prev_in_queue().await;
         }
-        "change_track" | "transfer_to_desktop" => {
-            if let Some(track) = action.track {
+        "change_track" | "transfer_to_desktop" | "sync_queue_from_mobile" => {
+            if let Some(queue) = action.queue.filter(|q| !q.is_empty()) {
+                let items: Vec<innertube::SongItem> = queue
+                    .into_iter()
+                    .map(|t| innertube::SongItem {
+                        video_id: t.id,
+                        title: t.title,
+                        artists: t.artist,
+                        thumbnail: t.thumbnail,
+                        duration: if t.duration_ms > 0 {
+                            Some(((t.duration_ms / 1000) as i64).to_string())
+                        } else {
+                            None
+                        },
+                        ..Default::default()
+                    })
+                    .collect();
+
+                let start_idx = action
+                    .track
+                    .as_ref()
+                    .and_then(|t| items.iter().position(|item| item.video_id == t.id))
+                    .unwrap_or(0);
+
+                state
+                    .play_tracks(
+                        items,
+                        Some(start_idx),
+                        None,
+                        Some("Nocturne Mobile".to_string()),
+                        false,
+                        None,
+                    )
+                    .await;
+            } else if let Some(track) = action.track {
                 let queue_idx = state.find_in_queue(&track.id).await;
                 if let Some(idx) = queue_idx {
                     state.play_index(idx).await;
@@ -579,11 +612,19 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
                     };
                     state.play_song(song).await;
                 }
-                if action.position_ms > 0 {
-                    let pos = action.position_ms as f64 / 1000.0;
-                    let _ = state.user_seek(pos).await;
-                    let _ = state.app.emit("position", serde_json::json!({ "position": pos }));
-                }
+            }
+
+            if action.position_ms > 0 {
+                let pos = action.position_ms as f64 / 1000.0;
+                let _ = state.user_seek(pos).await;
+                let _ = state.app.emit("position", serde_json::json!({ "position": pos }));
+            }
+
+            if action.kind == "sync_queue_from_mobile" && !action.playing {
+                let _ = state.player.pause();
+                state.media_set_playing(false);
+                crate::tray::set_playing(&state.app, false);
+                let _ = state.app.emit("playback-state", "paused");
             }
         }
         "set_volume" => {
