@@ -36,6 +36,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 rustypipe-botguard = "0.1.2"
 base64 = "0.22"
 regex = "1"
+quick-xml = "0.39.4"
 urlencoding = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "stream"] }
 # Loopback HTTP server for the music-video proxy (videoproxy.rs). Already in the tree behind

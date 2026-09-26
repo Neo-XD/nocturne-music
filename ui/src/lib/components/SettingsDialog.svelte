@@ -686,6 +686,12 @@
 			badge: 'Word Sync'
 		},
 		{
+			id: 'amll',
+			name: 'AMLL TTML DB',
+			description: 'Community-curated TTML lyrics with precise word and syllable timing.',
+			badge: 'TTML Word Sync'
+		},
+		{
 			id: 'lrclib',
 			name: 'LRCLIB',
 			description: 'Open community database of synchronized and plain lyrics with wide global coverage.',
@@ -734,6 +740,7 @@
 	function initLyricsProviders(saved?: string) {
 		const defaultIds = [
 			'betterlyrics',
+			'amll',
 			'lrclib',
 			'ytm',
 			'qq',
@@ -2409,6 +2416,9 @@
 															class="hover:text-foreground underline underline-offset-2"
 														>https://unison.boidu.dev</a>)
 													</p>
+												{/if}
+												{#if p.id === 'amll'}
+													<p class="mt-1 text-[10px] text-muted-foreground">Lyrics from AMLL TTML DB</p>
 												{/if}
 											</div>
 										</div>

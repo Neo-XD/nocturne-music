@@ -1844,9 +1844,9 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v086_note, v085_note, v084_note, v083_note, v082_note, v081_note, v080_note, v072_note, v071_note,
-        v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note, v061_note,
-        v06_note,
+        v086_note, v085_note, v084_note, v083_note, v082_note, v081_note, v080_note, v072_note,
+        v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note, v062_note,
+        v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
