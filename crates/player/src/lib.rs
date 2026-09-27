@@ -1,7 +1,8 @@
 //! libmpv wrapper. context/14. YouTube-agnostic: takes a fully-resolved URL + headers, never
-//! a videoId. Gapless via mpv's internal playlist (1-track lookahead fed by the orchestrator).
+//! a videoId. Gapless via mpv's internal playlist or true dual-deck overlapping crossfade.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicI8, AtomicI64, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use libmpv2::events::{Event, EventContext, PropertyData};
@@ -90,29 +91,24 @@ struct AudioFilters {
     eq_bands: Vec<EqBand>,
 }
 
-/// The player. Wraps `Arc<Mpv>` (Send+Sync); the event loop runs on a dedicated OS thread and
-/// pumps [`PlayerEvent`]s into a channel taken once via [`Player::take_events`].
-pub struct Player {
-    mpv: Arc<Mpv>,
-    events: Option<UnboundedReceiver<PlayerEvent>>,
-    /// Filter state for mpv's global `af` chain (gain, pitch, crossfade).
+/// Internal events from each deck's event loop to the central arbiter.
+enum InternalDeckEvent {
+    Position { deck_id: u8, pos: f64 },
+    Duration { deck_id: u8, dur: f64 },
+    Playing { deck_id: u8, playing: bool },
+    TrackEnded { deck_id: u8 },
+    TrackFailed { deck_id: u8, error: String },
+}
+
+/// Represents one playback deck (an independent libmpv instance).
+pub struct Deck {
+    pub id: u8,
+    pub mpv: Arc<Mpv>,
     af: std::sync::Mutex<AudioFilters>,
 }
 
-impl Player {
-    /// Create a player with a disk audio cache under `cache_dir` (the audio-bytes tier, context/14).
-    pub fn new(cache_dir: &str) -> Result<Self, Error> {
-        // libmpv requires LC_NUMERIC=="C" to parse internal option values; Tauri/GTK's init
-        // resets the process locale from the system locale first, which makes mpv_create()
-        // return null (ponytail: locale reset only, revisit if other LC_* categories start
-        // tripping mpv too).
-        #[cfg(unix)]
-        unsafe {
-            libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
-        }
-
-        // Mirror the Phase-0 spike: create, then set_property (setting some options during the
-        // pre-init phase returns PROPERTY_NOT_FOUND on this mpv build).
+impl Deck {
+    fn new(id: u8, cache_dir: &str) -> Result<Self, Error> {
         let mpv = Mpv::new()?;
         mpv.set_property("vid", "no")?; // audio only
         mpv.set_property("ytdl", "no")?;
@@ -121,120 +117,28 @@ impl Player {
         mpv.set_property("prefetch-playlist", "yes")?;
         mpv.set_property("cache", "yes")?;
         mpv.set_property("cache-on-disk", "yes")?;
-        mpv.set_property("demuxer-cache-dir", cache_dir)?;
+        let deck_cache = format!("{cache_dir}/deck_{id}");
+        let _ = std::fs::create_dir_all(&deck_cache);
+        mpv.set_property("demuxer-cache-dir", deck_cache.as_str())?;
         mpv.set_property("demuxer-max-bytes", 32 * 1024 * 1024_i64)?;
         mpv.set_property("demuxer-max-back-bytes", 32 * 1024 * 1024_i64)?;
         mpv.set_property("demuxer-readahead-secs", 120.0_f64)?;
         let mpv = Arc::new(mpv);
 
-        let (tx, rx) = unbounded_channel();
-        let ev = EventContext::new(mpv.ctx);
-        ev.disable_deprecated_events().ok();
-        ev.observe_property("time-pos", Format::Double, 0)?;
-        ev.observe_property("duration", Format::Double, 1)?;
-        ev.observe_property("pause", Format::Flag, 2)?;
-        ev.observe_property("idle-active", Format::Flag, 3)?;
-
-        std::thread::Builder::new()
-            .name("mpv-events".into())
-            .spawn(move || event_loop(ev, tx))
-            .expect("spawn mpv event thread");
-
-        Ok(Player { mpv, events: Some(rx), af: std::sync::Mutex::new(AudioFilters::default()) })
+        Ok(Deck {
+            id,
+            mpv,
+            af: std::sync::Mutex::new(AudioFilters::default()),
+        })
     }
 
-    /// Take the event receiver (once).
-    pub fn take_events(&mut self) -> Option<UnboundedReceiver<PlayerEvent>> {
-        self.events.take()
-    }
-
-    /// Load and play a fresh URL, replacing the playlist. context/14.
-    pub fn load(
-        &self,
-        url: &str,
-        headers: &HashMap<String, String>,
-        gain_db: Option<f64>,
-    ) -> Result<(), Error> {
-        self.apply_headers(headers)?;
-        {
-            let mut af = self.af.lock().unwrap();
-            af.track_duration = None;
-            af.gain_db = gain_db;
-        }
-        self.apply_af()?;
-        self.mpv.command("loadfile", &[&quoted(url), "replace"])?;
-        Ok(())
-    }
-
-    /// Append the next track for a gapless transition (the 1-track lookahead). context/14.
-    ///
-    /// Note: mpv's `http-header-fields`/`user-agent` are global properties, so appended tracks
-    /// inherit the currently-set headers. Phase 1 direct-URL clients need no per-track cookies,
-    /// so this is fine; per-track header divergence is a Phase 2+ concern (WEB_REMIX `&pot=`).
-    pub fn enqueue(&self, url: &str) -> Result<(), Error> {
-        self.mpv.command("loadfile", &[&quoted(url), "append"])?;
-        Ok(())
-    }
-
-    /// Clear the mpv playlist (e.g. when the user jumps to a new track).
-    pub fn clear_playlist(&self) -> Result<(), Error> {
-        self.mpv.command("playlist-clear", &[])?;
-        Ok(())
-    }
-
-    /// Stop playback outright and empty the playlist: mpv goes idle and stays there.
-    pub fn stop(&self) -> Result<(), Error> {
-        self.mpv.command("stop", &[])?;
-        Ok(())
-    }
-
-    /// True when mpv has nothing loaded (playlist exhausted or the last load failed). The
-    /// orchestrator uses this after a track ends/fails to tell "gaplessly advanced into the
-    /// lookahead" apart from "stalled — load the next track explicitly".
-    pub fn is_idle(&self) -> bool {
-        self.mpv.get_property::<bool>("idle-active").unwrap_or(true)
-    }
-
-    pub fn play(&self) -> Result<(), Error> {
-        self.mpv.set_property("pause", false)?;
-        Ok(())
-    }
-
-    pub fn pause(&self) -> Result<(), Error> {
-        self.mpv.set_property("pause", true)?;
-        Ok(())
-    }
-
-    pub fn toggle(&self) -> Result<(), Error> {
-        self.mpv.command("cycle", &["pause"])?;
-        Ok(())
-    }
-
-    /// Loop the current file seamlessly (repeat-one). mpv restarts the file at EOF *without*
-    /// emitting end-file, so the queue logic upstream never advances while this is on — by design.
-    pub fn set_loop_file(&self, on: bool) -> Result<(), Error> {
-        self.mpv.set_property("loop-file", if on { "inf" } else { "no" })?;
-        Ok(())
-    }
-
-    /// Absolute seek in seconds.
-    pub fn seek(&self, position_secs: f64) -> Result<(), Error> {
-        self.mpv.command("seek", &[&position_secs.to_string(), "absolute"])?;
-        Ok(())
-    }
-
-    /// Set output volume (0–100). The slider percent is perceptual, not mpv's raw scale:
-    /// mpv cubes its `volume` property (gain = (v/100)³), which makes a 10-step drag near
-    /// the bottom jump ~18 dB while the same drag near the top moves ~3 dB. Map the percent
-    /// onto a 60 dB loudness range instead (see [`perceptual_to_mpv`]), so steps stay roughly
-    /// the same size and the bottom of the slider is actually quiet rather than just near-floor.
-    pub fn set_volume(&self, volume: i64) -> Result<(), Error> {
-        self.mpv.set_property("volume", perceptual_to_mpv(volume))?;
+    fn apply_af(&self) -> Result<(), Error> {
+        let filters = self.af.lock().unwrap().clone();
+        self.mpv.set_property("af", af_chain(&filters).as_str())?;
         Ok(())
     }
 
     fn apply_headers(&self, headers: &HashMap<String, String>) -> Result<(), Error> {
-        // User-Agent has its own mpv property; everything else joins http-header-fields.
         if let Some(ua) = headers.get("User-Agent").or_else(|| headers.get("user-agent")) {
             self.mpv.set_property("user-agent", ua.as_str())?;
         }
@@ -248,72 +152,442 @@ impl Player {
         Ok(())
     }
 
-    /// Apply a per-track loudness gain (dB) as an mpv `volume` audio filter. context/14. Kept
-    /// YouTube-agnostic: the caller computes the gain from `loudnessDb` (see `state::loudness_gain`);
-    /// this just applies whatever dB it's handed.
-    ///
-    /// `af` is a **global** mpv property, not a per-playlist-entry one, so a gaplessly-advanced
-    /// track keeps whatever the last [`Self::load`] set. The orchestrator has to call this itself
-    /// on a gapless advance or every track after the first plays at the first track's gain.
-    // ponytail: set on advance, so the head of a gapless track carries the old gain for the event
-    // round-trip (a few ms) and the filter chain reinits mid-stream. If that ever clicks audibly,
-    // keep one labelled filter (`af=@gain:lavfi=[volume=0dB]`) and retune it with `af-command`.
-    pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
-        self.af.lock().unwrap().gain_db = gain_db;
-        self.apply_af()
+    fn stop(&self) {
+        let _ = self.mpv.command("stop", &[]);
     }
 
-    /// Tempo, 0.25–2.0. Pitch is unaffected: `audio-pitch-correction` (mpv's default) time-stretches
-    /// rather than resamples, so this is Metrolist's `PlaybackParameters.speed` exactly.
-    pub fn set_speed(&self, speed: f64) -> Result<(), Error> {
-        self.mpv.set_property("speed", speed.clamp(0.25, 2.0))?;
+    fn is_idle(&self) -> bool {
+        self.mpv.get_property::<bool>("idle-active").unwrap_or(true)
+    }
+}
+
+/// The player. Wraps two libmpv instances (`deck_a` and `deck_b`) to support gapless audio as well
+/// as true overlapping dual-deck crossfade playback where the outgoing track fades out while the
+/// incoming track fades in concurrently.
+pub struct Player {
+    deck_a: Arc<Deck>,
+    deck_b: Arc<Deck>,
+    active_deck: Arc<AtomicU8>,
+    fading_deck: Arc<AtomicI8>,
+    primed_deck: Arc<AtomicI8>,
+    crossfade_secs: Arc<AtomicU64>,
+    skip_fade_in: Arc<AtomicBool>,
+    events: Option<UnboundedReceiver<PlayerEvent>>,
+    shared_af: Arc<std::sync::Mutex<AudioFilters>>,
+    volume: Arc<AtomicI64>,
+    speed: Arc<AtomicU64>,
+    current_device: Arc<std::sync::Mutex<String>>,
+}
+
+impl Player {
+    /// Create a dual-deck player with disk audio cache under `cache_dir`.
+    pub fn new(cache_dir: &str) -> Result<Self, Error> {
+        #[cfg(unix)]
+        unsafe {
+            libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
+        }
+
+        let deck_a = Arc::new(Deck::new(0, cache_dir)?);
+        let deck_b = Arc::new(Deck::new(1, cache_dir)?);
+
+        let active_deck = Arc::new(AtomicU8::new(0));
+        let fading_deck = Arc::new(AtomicI8::new(-1));
+        let primed_deck = Arc::new(AtomicI8::new(-1));
+        let crossfade_secs = Arc::new(AtomicU64::new(0f64.to_bits()));
+        let skip_fade_in = Arc::new(AtomicBool::new(false));
+        let shared_af = Arc::new(std::sync::Mutex::new(AudioFilters::default()));
+        let volume = Arc::new(AtomicI64::new(100));
+        let speed = Arc::new(AtomicU64::new(1.0f64.to_bits()));
+        let current_device = Arc::new(std::sync::Mutex::new("auto".to_string()));
+
+        let (internal_tx, internal_rx) = std::sync::mpsc::channel();
+        let (external_tx, external_rx) = unbounded_channel();
+
+        // Spawn event context thread for deck 0
+        {
+            let ev_a = EventContext::new(deck_a.mpv.ctx);
+            ev_a.disable_deprecated_events().ok();
+            ev_a.observe_property("time-pos", Format::Double, 0)?;
+            ev_a.observe_property("duration", Format::Double, 1)?;
+            ev_a.observe_property("pause", Format::Flag, 2)?;
+            ev_a.observe_property("idle-active", Format::Flag, 3)?;
+
+            let tx0 = internal_tx.clone();
+            std::thread::Builder::new()
+                .name("mpv-events-0".into())
+                .spawn(move || deck_event_loop(0, ev_a, tx0))
+                .expect("spawn mpv deck 0 event thread");
+        }
+
+        // Spawn event context thread for deck 1
+        {
+            let ev_b = EventContext::new(deck_b.mpv.ctx);
+            ev_b.disable_deprecated_events().ok();
+            ev_b.observe_property("time-pos", Format::Double, 0)?;
+            ev_b.observe_property("duration", Format::Double, 1)?;
+            ev_b.observe_property("pause", Format::Flag, 2)?;
+            ev_b.observe_property("idle-active", Format::Flag, 3)?;
+
+            let tx1 = internal_tx;
+            std::thread::Builder::new()
+                .name("mpv-events-1".into())
+                .spawn(move || deck_event_loop(1, ev_b, tx1))
+                .expect("spawn mpv deck 1 event thread");
+        }
+
+        // Spawn central event arbiter thread
+        {
+            let act = active_deck.clone();
+            let fad = fading_deck.clone();
+            let prm = primed_deck.clone();
+            let da = deck_a.clone();
+            let db = deck_b.clone();
+            std::thread::Builder::new()
+                .name("mpv-arbiter".into())
+                .spawn(move || {
+                    arbitrate_events(act, fad, prm, da, db, internal_rx, external_tx);
+                })
+                .expect("spawn mpv arbiter thread");
+        }
+
+        Ok(Player {
+            deck_a,
+            deck_b,
+            active_deck,
+            fading_deck,
+            primed_deck,
+            crossfade_secs,
+            skip_fade_in,
+            events: Some(external_rx),
+            shared_af,
+            volume,
+            speed,
+            current_device,
+        })
+    }
+
+    /// Access the active deck helper.
+    pub fn deck(&self, id: u8) -> &Arc<Deck> {
+        if id == 0 {
+            &self.deck_a
+        } else {
+            &self.deck_b
+        }
+    }
+
+    pub fn active_deck(&self) -> &Arc<Deck> {
+        self.deck(self.active_deck.load(Ordering::SeqCst))
+    }
+
+    pub fn fading_deck(&self) -> Option<&Arc<Deck>> {
+        let f = self.fading_deck.load(Ordering::SeqCst);
+        if f >= 0 {
+            Some(self.deck(f as u8))
+        } else {
+            None
+        }
+    }
+
+    pub fn stop_fading_deck(&self) {
+        let f = self.fading_deck.swap(-1, Ordering::SeqCst);
+        if f >= 0 {
+            self.deck(f as u8).stop();
+        }
+    }
+
+    pub fn stop_primed_deck(&self) {
+        let p = self.primed_deck.swap(-1, Ordering::SeqCst);
+        if p >= 0 {
+            self.deck(p as u8).stop();
+        }
+    }
+
+    #[cfg(test)]
+    pub fn active_mpv(&self) -> &Arc<Mpv> {
+        &self.active_deck().mpv
+    }
+
+    /// Take the event receiver (once).
+    pub fn take_events(&mut self) -> Option<UnboundedReceiver<PlayerEvent>> {
+        self.events.take()
+    }
+
+    /// Load and play a fresh URL, replacing the active deck's playlist.
+    pub fn load(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+        gain_db: Option<f64>,
+    ) -> Result<(), Error> {
+        self.stop_fading_deck();
+        self.stop_primed_deck();
+
+        let active = self.active_deck();
+        active.apply_headers(headers)?;
+        {
+            let mut af = active.af.lock().unwrap();
+            let shared = self.shared_af.lock().unwrap();
+            af.gain_db = gain_db;
+            af.semitones = shared.semitones;
+            af.crossfade_secs = shared.crossfade_secs;
+            af.skip_fade_in = self.skip_fade_in.swap(false, Ordering::SeqCst);
+            af.track_duration = None;
+            af.eq_enabled = shared.eq_enabled;
+            af.eq_preamp_db = shared.eq_preamp_db;
+            af.eq_bands = shared.eq_bands.clone();
+        }
+        active.apply_af()?;
+        active.mpv.command("loadfile", &[&quoted(url), "replace"])?;
         Ok(())
     }
 
-    /// Pitch shift in semitones, −12..=12 (one octave either way), via the rubberband filter.
-    /// Independent of [`Self::set_speed`]: rubberband takes over the time-stretch mpv would
-    /// otherwise do with scaletempo2, and shifts pitch on top of it.
-    // ponytail: native `rubberband` only. A libmpv built without librubberband errors out and the
-    // command surfaces that to the user; wire the `lavfi=[rubberband=pitch=...]` fallback if a
-    // Windows/macOS build ever turns up without it.
+    /// Enqueue a URL for gapless transition (single deck fallback).
+    pub fn enqueue(&self, url: &str) -> Result<(), Error> {
+        self.enqueue_track(url, &HashMap::new(), None)
+    }
+
+    /// Enqueue the next track for either gapless transition (when crossfade is 0)
+    /// or true dual-deck overlapping crossfade (when crossfade > 0).
+    pub fn enqueue_track(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+        gain_db: Option<f64>,
+    ) -> Result<(), Error> {
+        let xf = self.crossfade_secs();
+        if xf <= 0.0 {
+            // Gapless single deck
+            self.active_deck().apply_headers(headers)?;
+            self.active_deck().mpv.command("loadfile", &[&quoted(url), "append"])?;
+            self.primed_deck.store(-1, Ordering::SeqCst);
+            return Ok(());
+        }
+
+        // Dual-deck overlapping crossfade: prime the standby deck
+        let standby_id = 1 - self.active_deck.load(Ordering::SeqCst);
+        let standby = self.deck(standby_id);
+
+        standby.apply_headers(headers)?;
+        {
+            let mut af = standby.af.lock().unwrap();
+            let shared = self.shared_af.lock().unwrap();
+            af.gain_db = gain_db;
+            af.semitones = shared.semitones;
+            af.crossfade_secs = xf;
+            af.skip_fade_in = false; // Primed lookahead track fades in
+            af.track_duration = None;
+            af.eq_enabled = shared.eq_enabled;
+            af.eq_preamp_db = shared.eq_preamp_db;
+            af.eq_bands = shared.eq_bands.clone();
+        }
+        standby.apply_af()?;
+        // Pre-load paused so it buffers and is ready to start playing instantly with 0 latency
+        standby.mpv.set_property("pause", true)?;
+        standby.mpv.command("loadfile", &[&quoted(url), "replace"])?;
+
+        self.primed_deck.store(standby_id as i8, Ordering::SeqCst);
+
+        // Also ensure active deck has fade-out configured if duration is known
+        let _ = self.active_deck().apply_af();
+
+        Ok(())
+    }
+
+    /// True if crossfade is configured (> 0) and the secondary deck is primed and ready.
+    pub fn can_crossfade(&self) -> bool {
+        self.crossfade_secs() > 0.0 && self.primed_deck.load(Ordering::SeqCst) >= 0
+    }
+
+    /// Trigger the overlapping crossfade handoff: starts the primed deck immediately with fade-in,
+    /// marks the current deck as fading-out, and flips active decks.
+    pub fn start_crossfade(&self) -> Result<(), Error> {
+        let primed = self.primed_deck.load(Ordering::SeqCst);
+        if primed < 0 {
+            return Ok(());
+        }
+        let incoming_id = primed as u8;
+        let outgoing_id = self.active_deck.load(Ordering::SeqCst);
+
+        let incoming = self.deck(incoming_id);
+        let outgoing = self.deck(outgoing_id);
+
+        // Start incoming deck playback immediately
+        incoming.mpv.set_property("pause", false)?;
+
+        // Switch active deck to incoming, outgoing becomes fading
+        self.fading_deck.store(outgoing_id as i8, Ordering::SeqCst);
+        self.active_deck.store(incoming_id, Ordering::SeqCst);
+        self.primed_deck.store(-1, Ordering::SeqCst);
+
+        // Stop outgoing deck after crossfade completes (with 0.5s safety margin)
+        let xf_secs = self.crossfade_secs();
+        let out_mpv = outgoing.mpv.clone();
+        let fading_ref = self.fading_deck.clone();
+        std::thread::Builder::new()
+            .name("crossfade-reaper".into())
+            .spawn(move || {
+                let wait_ms = ((xf_secs + 0.5) * 1000.0) as u64;
+                std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+                if fading_ref.load(Ordering::SeqCst) == outgoing_id as i8 {
+                    let _ = out_mpv.command("stop", &[]);
+                    fading_ref.store(-1, Ordering::SeqCst);
+                }
+            })
+            .ok();
+
+        Ok(())
+    }
+
+    /// Clear the mpv playlist.
+    pub fn clear_playlist(&self) -> Result<(), Error> {
+        self.stop_fading_deck();
+        self.stop_primed_deck();
+        self.active_deck().mpv.command("playlist-clear", &[])?;
+        Ok(())
+    }
+
+    /// Stop playback outright and empty the playlist: mpv goes idle and stays there.
+    pub fn stop(&self) -> Result<(), Error> {
+        self.stop_fading_deck();
+        self.stop_primed_deck();
+        self.active_deck().stop();
+        Ok(())
+    }
+
+    /// True when active deck has nothing loaded (playlist exhausted or the last load failed).
+    pub fn is_idle(&self) -> bool {
+        self.active_deck().is_idle() && self.fading_deck.load(Ordering::SeqCst) < 0
+    }
+
+    pub fn play(&self) -> Result<(), Error> {
+        self.active_deck().mpv.set_property("pause", false)?;
+        if let Some(fading) = self.fading_deck() {
+            let _ = fading.mpv.set_property("pause", false);
+        }
+        Ok(())
+    }
+
+    pub fn pause(&self) -> Result<(), Error> {
+        self.active_deck().mpv.set_property("pause", true)?;
+        if let Some(fading) = self.fading_deck() {
+            let _ = fading.mpv.set_property("pause", true);
+        }
+        Ok(())
+    }
+
+    pub fn toggle(&self) -> Result<(), Error> {
+        let is_paused = self.active_deck().mpv.get_property::<bool>("pause").unwrap_or(false);
+        if is_paused {
+            self.play()
+        } else {
+            self.pause()
+        }
+    }
+
+    /// Loop the current file seamlessly (repeat-one).
+    pub fn set_loop_file(&self, on: bool) -> Result<(), Error> {
+        self.deck_a.mpv.set_property("loop-file", if on { "inf" } else { "no" })?;
+        self.deck_b.mpv.set_property("loop-file", if on { "inf" } else { "no" })?;
+        Ok(())
+    }
+
+    /// Absolute seek in seconds. Immediately terminates any fading-out track.
+    pub fn seek(&self, position_secs: f64) -> Result<(), Error> {
+        self.stop_fading_deck();
+        self.active_deck().mpv.command("seek", &[&position_secs.to_string(), "absolute"])?;
+        Ok(())
+    }
+
+    /// Set output volume (0–100) mapped to perceptual scale across both decks.
+    pub fn set_volume(&self, volume: i64) -> Result<(), Error> {
+        self.volume.store(volume, Ordering::SeqCst);
+        let mpv_vol = perceptual_to_mpv(volume);
+        self.deck_a.mpv.set_property("volume", mpv_vol)?;
+        self.deck_b.mpv.set_property("volume", mpv_vol)?;
+        Ok(())
+    }
+
+    /// Apply a per-track loudness gain (dB) to active deck.
+    pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
+        let active = self.active_deck();
+        active.af.lock().unwrap().gain_db = gain_db;
+        active.apply_af()
+    }
+
+    /// Tempo, 0.25–2.0 across both decks.
+    pub fn set_speed(&self, speed: f64) -> Result<(), Error> {
+        let clamped = speed.clamp(0.25, 2.0);
+        self.speed.store(clamped.to_bits(), Ordering::SeqCst);
+        self.deck_a.mpv.set_property("speed", clamped)?;
+        self.deck_b.mpv.set_property("speed", clamped)?;
+        Ok(())
+    }
+
+    /// Pitch shift in semitones, −12..=12 across both decks.
     pub fn set_pitch(&self, semitones: i32) -> Result<(), Error> {
         let wanted = semitones.clamp(-12, 12);
-        let previous = {
-            let mut af = self.af.lock().unwrap();
-            let prev = af.semitones;
-            af.semitones = wanted;
-            prev
+        let prev = {
+            let mut shared = self.shared_af.lock().unwrap();
+            let p = shared.semitones;
+            shared.semitones = wanted;
+            p
         };
-        if let Err(e) = self.apply_af() {
-            // No librubberband in this build: mpv rejects the *whole* chain, loudness gain
-            // included, so put the old value back rather than leave every later set_gain failing.
-            // (mpv never applied the bad chain, so this restores what is already playing.)
-            self.af.lock().unwrap().semitones = previous;
-            let _ = self.apply_af();
+        let active = self.active_deck();
+        active.af.lock().unwrap().semitones = wanted;
+        if let Err(e) = active.apply_af() {
+            self.shared_af.lock().unwrap().semitones = prev;
+            active.af.lock().unwrap().semitones = prev;
+            let _ = active.apply_af();
             return Err(if wanted == 0 { e } else { Error::NoPitchFilter });
         }
+        let standby_id = 1 - self.active_deck.load(Ordering::SeqCst);
+        let standby = self.deck(standby_id);
+        standby.af.lock().unwrap().semitones = wanted;
+        let _ = standby.apply_af();
         Ok(())
     }
 
     /// Crossfade duration in seconds (0.0 = disabled).
     pub fn set_crossfade(&self, secs: f64) -> Result<(), Error> {
-        self.af.lock().unwrap().crossfade_secs = secs.max(0.0);
-        self.apply_af()
+        let secs = secs.max(0.0);
+        self.crossfade_secs.store(secs.to_bits(), Ordering::SeqCst);
+        {
+            let mut shared = self.shared_af.lock().unwrap();
+            shared.crossfade_secs = secs;
+        }
+        let active = self.active_deck();
+        active.af.lock().unwrap().crossfade_secs = secs;
+        active.apply_af()?;
+
+        let standby_id = 1 - self.active_deck.load(Ordering::SeqCst);
+        let standby = self.deck(standby_id);
+        standby.af.lock().unwrap().crossfade_secs = secs;
+        let _ = standby.apply_af();
+
+        Ok(())
+    }
+
+    /// Read the configured crossfade duration in seconds.
+    pub fn crossfade_secs(&self) -> f64 {
+        f64::from_bits(self.crossfade_secs.load(Ordering::SeqCst))
     }
 
     /// Set whether the incoming track should bypass the crossfade fade-in (e.g. on manual skip/jump).
     pub fn set_skip_fade_in(&self, skip: bool) -> Result<(), Error> {
-        self.af.lock().unwrap().skip_fade_in = skip;
-        self.apply_af()
+        self.skip_fade_in.store(skip, Ordering::SeqCst);
+        let active = self.active_deck();
+        active.af.lock().unwrap().skip_fade_in = skip;
+        active.apply_af()
     }
 
     /// Update current track duration for crossfade out timing.
     pub fn set_track_duration(&self, dur: Option<f64>) -> Result<(), Error> {
-        self.af.lock().unwrap().track_duration = dur;
-        self.apply_af()
+        let active = self.active_deck();
+        active.af.lock().unwrap().track_duration = dur;
+        active.apply_af()
     }
 
-    /// Apply parametric equalizer bands and preamp.
+    /// Apply parametric equalizer bands and preamp across both decks.
     pub fn set_equalizer(
         &self,
         enabled: bool,
@@ -321,41 +595,45 @@ impl Player {
         bands: Vec<EqBand>,
     ) -> Result<(), Error> {
         {
-            let mut af = self.af.lock().unwrap();
+            let mut shared = self.shared_af.lock().unwrap();
+            shared.eq_enabled = enabled;
+            shared.eq_preamp_db = preamp_db;
+            shared.eq_bands = bands.clone();
+        }
+        for deck in [&self.deck_a, &self.deck_b] {
+            let mut af = deck.af.lock().unwrap();
             af.eq_enabled = enabled;
             af.eq_preamp_db = preamp_db;
-            af.eq_bands = bands;
+            af.eq_bands = bands.clone();
+            drop(af);
+            let _ = deck.apply_af();
         }
-        self.apply_af()
-    }
-
-    fn apply_af(&self) -> Result<(), Error> {
-        let filters = self.af.lock().unwrap().clone();
-        self.mpv.set_property("af", af_chain(&filters).as_str())?;
         Ok(())
     }
 
     /// List output audio devices discovered by mpv.
     pub fn get_audio_devices(&self) -> Result<Vec<AudioDevice>, Error> {
-        let json_str = self.mpv.get_property::<String>("audio-device-list")?;
+        let json_str = self.active_deck().mpv.get_property::<String>("audio-device-list")?;
         let devices: Vec<AudioDevice> = serde_json::from_str(&json_str)?;
         Ok(devices)
     }
 
     /// Current active output audio device name ("auto" or driver/device identifier).
     pub fn get_current_audio_device(&self) -> Result<String, Error> {
-        let dev = self.mpv.get_property::<String>("audio-device")?;
+        let dev = self.active_deck().mpv.get_property::<String>("audio-device")?;
         Ok(dev)
     }
 
-    /// Set output audio device ("auto" or specific device name from `get_audio_devices`).
+    /// Set output audio device ("auto" or specific device name) across both decks.
     pub fn set_audio_device(&self, device: &str) -> Result<(), Error> {
-        self.mpv.set_property("audio-device", device)?;
+        *self.current_device.lock().unwrap() = device.to_owned();
+        self.deck_a.mpv.set_property("audio-device", device)?;
+        self.deck_b.mpv.set_property("audio-device", device)?;
         Ok(())
     }
 }
 
-/// The whole `af` chain: loudness gain, pitch, crossfade, and parametric equalizer. Empty when none is in play.
+/// The whole `af` chain: loudness gain, pitch, crossfade, and parametric equalizer.
 fn af_chain(af: &AudioFilters) -> String {
     let mut chain = Vec::new();
 
@@ -413,9 +691,6 @@ fn af_chain(af: &AudioFilters) -> String {
     chain.join(",")
 }
 
-/// Test seam. Set it to reproduce a libmpv built without librubberband: mpv then rejects the whole
-/// `af` chain, loudness gain included, which is the failure [`Player::set_pitch`] rolls back from.
-/// A machine that has the filter can't reach that path any other way. Not compiled into the app.
 #[cfg(test)]
 static NO_RUBBERBAND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -427,15 +702,11 @@ fn pitch_filter() -> &'static str {
     "rubberband"
 }
 
-fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<PlayerEvent>) {
-    // Playback state is derived from two properties, never polled: mpv answers `mpv_get_property`
-    // synchronously on its core lock, so asking it from the app's async event pump can stall that
-    // pump exactly when mpv is busiest (a gapless transition opening the next stream) — and a
-    // stalled pump stops draining mpv's events, so track-end is never handled and playback wedges.
-    // These arrive as events; nothing has to ask.
-    //
-    // mpv reports the initial value of an observed property immediately, so both are seeded here
-    // before anything is loaded: `pause: false`, `idle-active: true` ⇒ not playing.
+fn deck_event_loop(
+    deck_id: u8,
+    mut ev: EventContext,
+    tx: std::sync::mpsc::Sender<InternalDeckEvent>,
+) {
     let mut paused = false;
     let mut idle = true;
     let mut playing = false;
@@ -447,14 +718,16 @@ fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<Playe
                         name: "time-pos",
                         change: PropertyData::Double(p),
                         ..
-                    } => Some(PlayerEvent::Position(p)),
+                    } => Some(InternalDeckEvent::Position { deck_id, pos: p }),
                     Event::PropertyChange {
                         name: "duration",
                         change: PropertyData::Double(d),
                         ..
-                    } => Some(PlayerEvent::Duration(d)),
+                    } => Some(InternalDeckEvent::Duration { deck_id, dur: d }),
                     Event::PropertyChange {
-                        name: "pause", change: PropertyData::Flag(p), ..
+                        name: "pause",
+                        change: PropertyData::Flag(p),
+                        ..
                     } => {
                         paused = p;
                         None
@@ -468,36 +741,29 @@ fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<Playe
                         None
                     }
                     Event::EndFile(reason) => match reason as i32 {
-                        EOF => Some(PlayerEvent::TrackEnded),
-                        // STOP/QUIT/REDIRECT are deliberate (loadfile replace, shutdown) — ignore.
-                        // ERROR never reaches this arm: libmpv2 surfaces end-file-with-error as
-                        // Err from wait_event (see below).
+                        EOF => Some(InternalDeckEvent::TrackEnded { deck_id }),
                         _ => None,
                     },
                     _ => None,
                 };
                 if let Some(e) = out {
-                    // Receiver dropped ⇒ player gone ⇒ stop the thread.
                     if tx.send(e).is_err() {
                         break;
                     }
                 }
-                // A gapless advance never touches either property, so no spurious stop/start is
-                // emitted between tracks.
                 let now = !paused && !idle;
                 if now != playing {
                     playing = now;
-                    if tx.send(PlayerEvent::Playing(now)).is_err() {
+                    if tx.send(InternalDeckEvent::Playing { deck_id, playing: now }).is_err() {
                         break;
                     }
                 }
             }
-            #[allow(clippy::collapsible_match)]
             Some(Err(e)) => {
-                // libmpv2 routes MPV_EVENT_END_FILE with an error (dead URL, 403, bad format)
-                // through here instead of Event::EndFile — in our usage (no async get/set/command
-                // replies) an Err from wait_event *is* a failed track.
-                if tx.send(PlayerEvent::TrackFailed(friendly_error(&e))).is_err() {
+                if tx.send(InternalDeckEvent::TrackFailed {
+                    deck_id,
+                    error: friendly_error(&e),
+                }).is_err() {
                     break;
                 }
             }
@@ -506,26 +772,75 @@ fn event_loop(mut ev: EventContext, tx: tokio::sync::mpsc::UnboundedSender<Playe
     }
 }
 
+fn arbitrate_events(
+    active_deck: Arc<AtomicU8>,
+    fading_deck: Arc<AtomicI8>,
+    primed_deck: Arc<AtomicI8>,
+    deck_a: Arc<Deck>,
+    deck_b: Arc<Deck>,
+    internal_rx: std::sync::mpsc::Receiver<InternalDeckEvent>,
+    external_tx: tokio::sync::mpsc::UnboundedSender<PlayerEvent>,
+) {
+    while let Ok(event) = internal_rx.recv() {
+        let active = active_deck.load(Ordering::SeqCst);
+        let fading = fading_deck.load(Ordering::SeqCst);
+        let primed = primed_deck.load(Ordering::SeqCst);
+
+        match event {
+            InternalDeckEvent::Position { deck_id, pos } => {
+                if deck_id == active {
+                    if external_tx.send(PlayerEvent::Position(pos)).is_err() {
+                        break;
+                    }
+                }
+            }
+            InternalDeckEvent::Duration { deck_id, dur } => {
+                if deck_id == active {
+                    if external_tx.send(PlayerEvent::Duration(dur)).is_err() {
+                        break;
+                    }
+                }
+            }
+            InternalDeckEvent::Playing { deck_id, playing } => {
+                if deck_id == active {
+                    if external_tx.send(PlayerEvent::Playing(playing)).is_err() {
+                        break;
+                    }
+                }
+            }
+            InternalDeckEvent::TrackEnded { deck_id } => {
+                if deck_id as i8 == fading {
+                    // Outgoing track finished its fade-out cleanly! Stop it and reset fading deck.
+                    let deck = if deck_id == 0 { &deck_a } else { &deck_b };
+                    deck.stop();
+                    fading_deck.store(-1, Ordering::SeqCst);
+                } else if deck_id == active {
+                    // Active track reached EOF (no crossfade happened, or gapless transition)
+                    if external_tx.send(PlayerEvent::TrackEnded).is_err() {
+                        break;
+                    }
+                }
+            }
+            InternalDeckEvent::TrackFailed { deck_id, error } => {
+                if deck_id == active {
+                    if external_tx.send(PlayerEvent::TrackFailed(error)).is_err() {
+                        break;
+                    }
+                } else if deck_id as i8 == primed {
+                    tracing::warn!(deck_id, %error, "primed deck failed to load track");
+                    primed_deck.store(-1, Ordering::SeqCst);
+                }
+            }
+        }
+    }
+}
+
 /// Quote a filename/URL for mpv's command parser.
-///
-/// libmpv2's `command` builds one space-joined string and hands it to `mpv_command_string`, which
-/// splits it back apart on whitespace. So `loadfile /music/My music/a, b.mp3 replace` reaches mpv
-/// as six arguments and fails with INVALID_PARAMETER (-4) — which is every local file whose path
-/// has a space in it. Inside double quotes mpv only treats `\` specially, so escaping those two
-/// characters is the whole job (verified against libmpv: quotes, commas, `$` and backslashes all
-/// round-trip byte for byte through `playlist/0/filename`).
 fn quoted(arg: &str) -> String {
     format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Slider percent → mpv `volume` value, over a 60 dB range. mpv applies gain = (v/100)³,
-/// i.e. 60·log10(v/100) dB, so v = 100·10^(−(1−s/100)^1.5) yields −60·(1−s/100)^1.5 dB:
-/// 50% is −21 dB, 25% is −39 dB, 1% is −59 dB. 0 stays a hard mute.
-///
-/// The 1.5 exponent buys the low end its range without moving anyone's saved setting much
-/// (the old linear-in-dB curve put 50% at −20 dB, this one at −21). Steps are 0.9 dB at the
-/// quiet end and 0.3 dB near the top, which is the right way round: fine control is wanted
-/// where a dB is loud, and the bottom of the slider needs to reach somewhere quiet.
+/// Slider percent → mpv `volume` value, over a 60 dB range.
 fn perceptual_to_mpv(percent: i64) -> f64 {
     if percent <= 0 {
         return 0.0;
@@ -539,7 +854,6 @@ mod tests {
 
     #[test]
     fn gain_and_pitch_share_one_chain() {
-        // The bug this exists for: either setter clobbering the other's filter.
         let default_af = AudioFilters::default();
         assert_eq!(af_chain(&default_af), "");
 
@@ -553,16 +867,10 @@ mod tests {
             AudioFilters { gain_db: Some(-6.0), semitones: -12, ..Default::default() };
         assert_eq!(af_chain(&combined_af), "lavfi=[volume=-6.00dB],rubberband=pitch-scale=0.5");
 
-        // One semitone up is the twelfth root of two.
         let semi_af = AudioFilters { semitones: 1, ..Default::default() };
         assert!(af_chain(&semi_af).ends_with("1.0594630943592953"));
     }
 
-    /// Everything above is string-building; this drives a real libmpv and reads `af` back out of
-    /// it, because the questions that matter ("is the gain still in the chain", "what does mpv keep
-    /// when it rejects a chain") are answered by mpv, not by us. Nothing is played, so no audio
-    /// device is opened. One test rather than four: `NO_RUBBERBAND` is process-global and cargo
-    /// runs tests in parallel.
     #[test]
     fn mpv_keeps_the_gain_through_pitch_changes_and_failures() {
         use super::{Error, Player, NO_RUBBERBAND};
@@ -571,13 +879,13 @@ mod tests {
         let dir = std::env::temp_dir().join("nocturne-af-test");
         std::fs::create_dir_all(&dir).unwrap();
         let p = Player::new(dir.to_str().unwrap()).expect("libmpv");
-        let dev = p.mpv.get_property::<String>("audio-device");
+        let dev = p.active_mpv().get_property::<String>("audio-device");
         println!("current audio-device: {:?}", dev);
-        let dev_list_str = p.mpv.get_property::<String>("audio-device-list");
+        let dev_list_str = p.active_mpv().get_property::<String>("audio-device-list");
         println!("audio-device-list string: {:?}", dev_list_str);
-        let af = || p.mpv.get_property::<String>("af").unwrap();
+        let af = || p.active_mpv().get_property::<String>("af").unwrap();
 
-        // 1. Loudness normalization, then a pitch round trip. The gain has to survive both steps.
+        // 1. Loudness normalization, then a pitch round trip.
         p.set_gain(Some(-7.7)).unwrap();
         assert!(
             af().contains("volume=-7.70dB") || af().contains("volume=-7.7dB"),
@@ -599,8 +907,7 @@ mod tests {
         );
         assert!(!af().contains("rubberband"), "pitch 0 left a filter behind: {}", af());
 
-        // 2. Gapless advance: the orchestrator retunes the gain for the next track (state.rs, the
-        // `lookahead_gain` take). A pitch the user set must not fall out of the chain when it does.
+        // 2. Gapless advance
         p.set_pitch(-5).unwrap();
         p.set_gain(Some(-2.5)).unwrap();
         assert!(
@@ -611,26 +918,21 @@ mod tests {
         assert!(af().contains("rubberband"), "retune dropped the pitch: {}", af());
         p.set_pitch(0).unwrap();
 
-        // 3. A libmpv without librubberband. mpv rejects the chain wholesale, so this is also the
-        // case where loudness normalization could silently disappear.
+        // 3. Rejection rollback
         let before = af();
         NO_RUBBERBAND.store(true, Ordering::Relaxed);
         let err = p.set_pitch(3).unwrap_err();
         NO_RUBBERBAND.store(false, Ordering::Relaxed);
-        // The user is told, in words. mpv's own answer is `Raw(-9)`, which says nothing.
         assert!(matches!(err, Error::NoPitchFilter), "rejection must surface: {err}");
         assert_eq!(err.to_string(), "Pitch shifting isn't available in this build");
-        // mpv never applied the bad chain, and the rollback re-applied the good one either way.
         assert_eq!(af(), before, "a rejected pitch changed the live chain");
         assert!(
             af().contains("volume=-2.50dB") || af().contains("volume=-2.5dB"),
             "normalization lost: {}",
             af()
         );
-        // And the rolled-back state is clean: the next per-track retune is gain-only, not a
-        // permanently poisoned chain that fails from here on.
         p.set_gain(Some(-4.0)).unwrap();
-        let after = af(); // mpv hands the chain back in its own escaped form, hence `contains`
+        let after = af();
         assert!(
             after.contains("volume=-4.00dB") || after.contains("volume=-4dB"),
             "retune after a rejection failed: {after}"
@@ -640,26 +942,31 @@ mod tests {
 
     #[test]
     fn paths_survive_mpvs_command_parser() {
-        // The bug this exists for: a space used to end the argument.
         assert_eq!(quoted("/music/My music/a, b.mp3"), "\"/music/My music/a, b.mp3\"");
-        // Only backslash and double quote mean anything inside the quotes.
         assert_eq!(quoted(r#"/m/say "hi".mp3"#), r#""/m/say \"hi\".mp3""#);
         assert_eq!(quoted(r"C:\Music\x.mp3"), r#""C:\\Music\\x.mp3""#);
-        // A stream URL is unchanged apart from the wrapper.
         assert_eq!(quoted("https://x/y?a=1&b=2"), "\"https://x/y?a=1&b=2\"");
     }
 
     #[test]
     fn volume_curve() {
         let db = |s| 60.0 * (perceptual_to_mpv(s) / 100.0).log10();
-        assert_eq!(perceptual_to_mpv(0), 0.0); // hard mute, not just very quiet
+        assert_eq!(perceptual_to_mpv(0), 0.0);
         assert_eq!(perceptual_to_mpv(100), 100.0);
         assert!((db(50) + 21.21).abs() < 0.01);
-        // The point of the curve: 1% has somewhere to go. The old 40 dB range bottomed out
-        // here, which left anyone listening quietly pinned to the floor.
         assert!((db(1) + 59.10).abs() < 0.01);
-        // Monotonic, and finer steps at the loud end than the quiet one.
         assert!((1..=100).all(|s| perceptual_to_mpv(s) > perceptual_to_mpv(s - 1)));
         assert!(db(100) - db(99) < db(2) - db(1));
+    }
+
+    #[test]
+    fn test_two_mpv_instances() {
+        let dir1 = std::env::temp_dir().join("nocturne-test-deck-a");
+        let dir2 = std::env::temp_dir().join("nocturne-test-deck-b");
+        std::fs::create_dir_all(&dir1).unwrap();
+        std::fs::create_dir_all(&dir2).unwrap();
+        let p = super::Player::new(dir1.to_str().unwrap()).expect("dual deck player");
+        assert!(p.is_idle());
+        assert!(!p.can_crossfade());
     }
 }

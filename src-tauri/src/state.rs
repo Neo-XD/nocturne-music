@@ -1979,7 +1979,11 @@ impl AppState {
         // Headers are global in mpv; the direct-URL clients need none beyond UA, which the
         // current track already set. Just append the URL.
         let stream_url = mpv_stream_url(&data);
-        if let Err(e) = self.player.enqueue(&stream_url) {
+        if let Err(e) = self.player.enqueue_track(
+            &stream_url,
+            &data.headers,
+            loudness_gain(data.loudness_db),
+        ) {
             tracing::warn!(error = %e, "enqueue lookahead failed");
             return;
         }
@@ -2355,8 +2359,9 @@ impl AppState {
     /// §registerPlayback) this counts the play locally (the On Repeat playlist) and fires the
     /// watch-history ping, latched to happen exactly once per play. The ping is additionally
     /// gated on the `enable_history` setting + being logged in. Best-effort (errors logged).
-    pub async fn on_position(&self, pos: f64) {
+    pub async fn on_position(self: &std::sync::Arc<Self>, pos: f64) {
         self.record_position(pos);
+        self.check_crossfade_trigger(pos).await;
         let crossed = {
             let mut q = self.queue.lock().await;
             if q.history_pinged {
@@ -2421,6 +2426,73 @@ impl AppState {
                 Ok(()) => tracing::debug!(client = %ping.client, "watch-history ping sent"),
                 Err(e) => tracing::warn!(error = %e, "watch-history ping failed"),
             }
+        });
+    }
+
+    /// Check if playback has reached the crossfade overlap threshold (pos >= duration - crossfade_secs)
+    /// and a lookahead track is primed on the secondary deck. If so, immediately begins fading in
+    /// the incoming track on the secondary deck while fading out the outgoing track.
+    async fn check_crossfade_trigger(self: &std::sync::Arc<Self>, pos: f64) {
+        let xf = self.player.crossfade_secs();
+        if xf <= 0.0 {
+            return;
+        }
+        let (next_idx, should_trigger) = {
+            let q = self.queue.lock().await;
+            if q.repeat == RepeatMode::One {
+                return;
+            }
+            if q.duration <= xf * 1.5 {
+                return;
+            }
+            if pos < q.duration - xf {
+                return;
+            }
+            let Some(next_idx) = q.lookahead_loaded else {
+                return;
+            };
+            (next_idx, self.player.can_crossfade())
+        };
+
+        if !should_trigger {
+            return;
+        }
+
+        // Start overlapping crossfade: unpause primed deck with fade-in, fade out current deck
+        if let Err(e) = self.player.start_crossfade() {
+            tracing::warn!(error = %e, "start_crossfade failed");
+            return;
+        }
+
+        self.latest_position.store(0f64.to_bits(), Ordering::SeqCst);
+        let gen = self.generation.load(Ordering::SeqCst);
+        let (next_item, quality) = {
+            let mut q = self.queue.lock().await;
+            q.current = next_idx;
+            q.lookahead_loaded = None;
+            let _ = q.lookahead_gain.take();
+            q.current_client = q.lookahead_client.take();
+            q.current_audio_quality = q.lookahead_audio_quality.take();
+            q.playback_ping = q.lookahead_playback_ping.take();
+            q.cpn = innertube::generate_cpn();
+            q.history_pinged = false;
+            q.duration = 0.0;
+            (q.items.get(next_idx).cloned(), q.current_audio_quality.clone())
+        };
+
+        if let Some(item) = next_item {
+            self.emit_now_playing(&item, "crossfade", quality.as_deref());
+            self.refresh_rating(&item.video_id, gen);
+        }
+        self.emit_queue().await;
+        self.persist_queue().await;
+        self.lt_broadcast_current_track(0, true).await;
+        tracing::info!(index = next_idx, "advanced to next track (overlapping crossfade)");
+
+        let me = self.clone();
+        tauri::async_runtime::spawn(async move {
+            me.prime_lookahead(gen).await;
+            me.extend_queue_radio(gen).await;
         });
     }
 

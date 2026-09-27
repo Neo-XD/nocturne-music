@@ -603,8 +603,16 @@ async fn handle_conn(stream: TcpStream, server: Arc<Server>) {
                 Ok(cm) => server.dispatch(cm, &tx, &mut uid, &mut room_code).await,
                 Err(e) => tracing::debug!(error = %e, "bad client message"),
             },
+            Ok(Message::Binary(bin)) => {
+                if let Ok(t) = std::str::from_utf8(&bin) {
+                    match serde_json::from_str::<ClientMessage>(t) {
+                        Ok(cm) => server.dispatch(cm, &tx, &mut uid, &mut room_code).await,
+                        Err(e) => tracing::debug!(error = %e, "bad client binary message"),
+                    }
+                }
+            }
             Ok(Message::Close(_)) | Err(_) => break,
-            _ => {} // ping/pong/binary ignored (tungstenite auto-pongs)
+            _ => {} // ping/pong ignored (tungstenite auto-pongs)
         }
     }
 
