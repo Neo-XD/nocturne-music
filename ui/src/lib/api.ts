@@ -567,13 +567,15 @@ export const createPlaylist = (
 	title: string,
 	description?: string,
 	publicStatus?: boolean,
-	coverPath?: string
+	coverPath?: string,
+	platform?: 'ytm' | 'spotify'
 ) =>
 	invoke<string>('create_playlist', {
 		title,
 		description: description || undefined,
 		public: publicStatus,
-		coverPath: coverPath || undefined
+		coverPath: coverPath || undefined,
+		platform: platform || undefined
 	});
 /** Name / description / visibility, from the "Edit playlist" dialog. Leave a field out and
  *  YouTube is never told about it, so an untouched one can't be overwritten. */

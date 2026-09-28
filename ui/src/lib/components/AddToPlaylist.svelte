@@ -12,7 +12,9 @@
 		createLibraryPlaylist,
 		bumpLibraryTrackCount,
 		notePlaylistAdd,
-		noteSavedIn
+		noteSavedIn,
+		spotify,
+		loadSpotifyPlaylists
 	} from '$lib/player.svelte';
 
 	let playlists = $state<BrowseItem[]>([]);
@@ -44,14 +46,28 @@
 			filter = '';
 			showNew = false;
 			newTitle = '';
-			api
-				.getLibrary()
-				.then(
-					(p) =>
-						(playlists = p.filter(
-							(i) => i.id !== api.ON_REPEAT_ID && i.id !== api.LIKED_MUSIC_ID
-						))
-				)
+			const promises: Promise<unknown>[] = [api.getLibrary()];
+			if (spotify.status.linked) {
+				promises.push(api.spotifyGetPlaylists().catch(() => []));
+			}
+			Promise.all(promises)
+				.then(([p, sp]) => {
+					let list = ((p as BrowseItem[]) || []).filter(
+						(i) => i.id !== api.ON_REPEAT_ID && i.id !== api.LIKED_MUSIC_ID
+					);
+					if (Array.isArray(sp)) {
+						for (const s of sp as api.SpotifyPlaylistSummary[]) {
+							list.push({
+								id: `sp_${s.id}`,
+								title: s.title,
+								kind: 'playlist',
+								thumbnail: s.thumbnail,
+								subtitle: s.subtitle || 'Spotify Playlist'
+							});
+						}
+					}
+					playlists = list;
+				})
 				.catch((e) => toast.error(String(e)))
 				.finally(() => (loading = false));
 		}
@@ -99,6 +115,9 @@
 			if (added.length) {
 				bumpLibraryTrackCount(pl.id, added.length);
 				notePlaylistAdd(pl.id, added);
+			}
+			if (pl.id.startsWith('sp_')) {
+				void loadSpotifyPlaylists();
 			}
 			if (!added.length) {
 				toast(dupes > 1 ? `All ${dupes} are already in ${pl.title}` : `Already in ${pl.title}`);
@@ -200,16 +219,27 @@
 				<div class="min-h-0 flex-1 overflow-y-auto">
 					{#each matches as pl (pl.id)}
 						<button
-							class="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-accent/10"
+							class="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-accent/10 transition-colors cursor-pointer"
 							onclick={() => pick(pl)}
 						>
 							{#if pl.thumbnail}
 								<img src={pl.thumbnail} alt="" class="h-10 w-10 rounded-md object-cover" />
 							{:else}
-								<div class="h-10 w-10 rounded-md bg-muted"></div>
+								<div class="flex h-10 w-10 items-center justify-center rounded-md {pl.id.startsWith('sp_') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted'}">
+									{#if pl.id.startsWith('sp_')}
+										<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+											<path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10 5.524 0 10-4.476 10-10 0-5.523-4.476-10-10-10zm4.586 14.424a.627.627 0 0 1-.86.208c-2.355-1.439-5.32-1.765-8.812-.966a.625.625 0 0 1-.277-1.22c3.824-.874 7.099-.508 9.74 1.107.292.179.387.568.209.871zm1.226-2.723a.784.784 0 0 1-1.077.26c-2.695-1.656-6.804-2.136-9.992-1.168a.785.785 0 1 1-.462-1.501c3.642-1.106 8.188-.574 11.27 1.321a.784.784 0 0 1 .261 1.088zm.105-2.833c-3.232-1.919-8.566-2.096-11.657-1.157a.94.94 0 1 1-.552-1.8c3.553-1.078 9.444-.87 13.14 1.323a.94.94 0 0 1-.931 1.634z"/>
+										</svg>
+									{/if}
+								</div>
 							{/if}
-							<div class="min-w-0">
-								<div class="truncate text-sm font-medium">{pl.title}</div>
+							<div class="min-w-0 flex-1">
+								<div class="truncate text-sm font-medium flex items-center gap-1.5">
+									<span>{pl.title}</span>
+									{#if pl.id.startsWith('sp_')}
+										<span class="rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold text-emerald-400">Spotify</span>
+									{/if}
+								</div>
 								{#if pl.subtitle}
 									<div class="truncate text-xs text-muted-foreground">{pl.subtitle}</div>
 								{/if}

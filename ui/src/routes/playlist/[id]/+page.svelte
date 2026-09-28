@@ -132,7 +132,7 @@
 	const isSpotify = $derived(id.startsWith('sp_'));
 	// Only offer rename/delete on playlists the signed-in user actually owns (backend `owned` flag).
 	// Liked Music reports owned but can't be renamed/deleted, so exclude it explicitly.
-	const editable = $derived((pl?.owned ?? false) && !isLiked && !isSpotify);
+	const editable = $derived((pl?.owned ?? false) && !isLiked);
 	const savable = $derived(!isOnRepeat && !isLiked && !editable && !isSpotify);
 	const inLibrary = $derived(isItemSavedInLibrary({ kind: 'playlist', id }));
 	// YouTube's header count includes rows that never make it into the list (unavailable or
@@ -653,18 +653,21 @@
 				...(pl.title ? { title: pl.title } : {}),
 				thumbnail: pl.cover ?? pl.thumbnail
 			});
+			if (isSpotify) {
+				void loadSpotifyPlaylists();
+			}
 		}
 	}
 
 	// The liked-music auto-playlist can't be edited like a normal one — removing = un-liking.
 	async function removeTrack(track: SongItem) {
 		if (!pl) return;
-		if (!isLiked && !track.set_video_id) return;
+		if (!isLiked && !isSpotify && !track.set_video_id) return;
 		const prev = pl.items;
 		// Reassign `pl` (not mutate `pl.items`) so the list re-renders immediately. Match by the
-		// per-instance setVideoId on normal playlists (duplicates), by videoId on liked music.
+		// per-instance setVideoId on normal playlists (duplicates), by videoId on liked music or Spotify.
 		const kept = pl.items.filter((t) =>
-			isLiked ? t.video_id !== track.video_id : t.set_video_id !== track.set_video_id
+			isLiked || isSpotify ? t.video_id !== track.video_id : t.set_video_id !== track.set_video_id
 		);
 		pl = { ...pl, items: kept };
 		try {
@@ -672,9 +675,12 @@
 				await api.rate(track.video_id, 'indifferent');
 				toast.success('Removed from Liked Music');
 			} else {
-				await api.removeFromPlaylist(id, track.video_id, track.set_video_id!);
+				await api.removeFromPlaylist(id, track.video_id, track.set_video_id ?? '');
 				bumpLibraryTrackCount(id, -1);
 				noteUnsavedFrom(id, track.video_id);
+				if (isSpotify) {
+					void loadSpotifyPlaylists();
+				}
 				toast.success('Removed from playlist');
 			}
 			cacheCurrent();
@@ -689,6 +695,9 @@
 		try {
 			await api.deletePlaylist(id);
 			invalidateCached(`playlist:${id}`);
+			if (isSpotify) {
+				void loadSpotifyPlaylists();
+			}
 			toast.success('Playlist deleted');
 			goto('/library');
 		} catch (e) {
@@ -902,7 +911,7 @@
 									active={item.video_id === nowId}
 									onplay={() => playAll(n)}
 									onAdd={() => openAddToPlaylist(item)}
-									onRemove={isLiked || item.set_video_id
+									onRemove={isLiked || item.set_video_id || (isSpotify && editable)
 										? () => removeTrack(item)
 										: undefined}
 								/>

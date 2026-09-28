@@ -6,7 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
-	import { createLibraryPlaylist, toast } from '$lib/player.svelte';
+	import { createLibraryPlaylist, spotify, toast } from '$lib/player.svelte';
 
 	let {
 		open = $bindable(false),
@@ -16,6 +16,7 @@
 		onCreated?: (playlistId: string) => void;
 	} = $props();
 
+	let platform = $state<'ytm' | 'spotify'>('ytm');
 	let title = $state('');
 	let description = $state('');
 	let isPublic = $state(false);
@@ -25,6 +26,7 @@
 
 	$effect(() => {
 		if (!open) {
+			platform = 'ytm';
 			title = '';
 			description = '';
 			isPublic = false;
@@ -66,9 +68,10 @@
 				trimmedTitle,
 				description.trim() || undefined,
 				isPublic,
-				coverPath
+				platform === 'ytm' ? coverPath : null,
+				platform
 			);
-			toast.success(`Created "${trimmedTitle}"`);
+			toast.success(`Created "${trimmedTitle}"${platform === 'spotify' ? ' on Spotify' : ''}`);
 			open = false;
 			onCreated?.(id);
 		} catch (e) {
@@ -92,39 +95,71 @@
 				handleCreate();
 			}}
 		>
-			<div class="flex gap-4">
-				<div class="flex shrink-0 flex-col items-center gap-1.5">
-					<button
-						type="button"
-						class="group relative h-32 w-32 cursor-pointer overflow-hidden rounded-xl border border-border/80 bg-muted/40 transition hover:border-primary/50"
-						onclick={pickCover}
-						aria-label="Choose playlist artwork"
-					>
-						{#if coverPreview}
-							<img src={coverPreview} alt="" class="h-full w-full object-cover" />
-						{/if}
-						<span
-							class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 text-xs font-medium text-white transition group-hover:opacity-100 group-focus-visible:opacity-100 {coverPreview
-								? 'opacity-0'
-								: 'opacity-100'}"
-						>
-							<HugeiconsIcon icon={ImageAdd02Icon} class="h-6 w-6" />
-							Choose image
-						</span>
-					</button>
-					{#if coverPath}
-						<Button
+			{#if spotify.status.linked}
+				<div class="flex items-center gap-2">
+					<span class="text-xs font-medium text-muted-foreground">Platform:</span>
+					<div class="inline-flex rounded-lg bg-muted/60 p-0.5 text-xs">
+						<button
 							type="button"
-							variant="ghost"
-							size="sm"
-							class="gap-1.5 text-xs text-muted-foreground hover:text-destructive cursor-pointer"
-							onclick={removeCover}
+							class="px-2.5 py-1 rounded-md font-medium transition cursor-pointer {platform === 'ytm'
+								? 'bg-background shadow-xs text-foreground'
+								: 'text-muted-foreground hover:text-foreground'}"
+							onclick={() => (platform = 'ytm')}
 						>
-							<HugeiconsIcon icon={Delete02Icon} class="h-3.5 w-3.5" />
-							Remove
-						</Button>
-					{/if}
+							YouTube Music
+						</button>
+						<button
+							type="button"
+							class="px-2.5 py-1 rounded-md font-medium transition cursor-pointer {platform === 'spotify'
+								? 'bg-[#1ed760] text-black font-semibold shadow-xs'
+								: 'text-muted-foreground hover:text-foreground'}"
+							onclick={() => {
+								platform = 'spotify';
+								coverPath = null;
+								coverPreview = null;
+							}}
+						>
+							Spotify
+						</button>
+					</div>
 				</div>
+			{/if}
+
+			<div class="flex gap-4">
+				{#if platform === 'ytm'}
+					<div class="flex shrink-0 flex-col items-center gap-1.5">
+						<button
+							type="button"
+							class="group relative h-32 w-32 cursor-pointer overflow-hidden rounded-xl border border-border/80 bg-muted/40 transition hover:border-primary/50"
+							onclick={pickCover}
+							aria-label="Choose playlist artwork"
+						>
+							{#if coverPreview}
+								<img src={coverPreview} alt="" class="h-full w-full object-cover" />
+							{/if}
+							<span
+								class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 text-xs font-medium text-white transition group-hover:opacity-100 group-focus-visible:opacity-100 {coverPreview
+									? 'opacity-0'
+									: 'opacity-100'}"
+							>
+								<HugeiconsIcon icon={ImageAdd02Icon} class="h-6 w-6" />
+								Choose image
+							</span>
+						</button>
+						{#if coverPath}
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								class="gap-1.5 text-xs text-muted-foreground hover:text-destructive cursor-pointer"
+								onclick={removeCover}
+							>
+								<HugeiconsIcon icon={Delete02Icon} class="h-3.5 w-3.5" />
+								Remove
+							</Button>
+						{/if}
+					</div>
+				{/if}
 
 				<div class="flex min-w-0 flex-1 flex-col gap-3">
 					<Input
@@ -148,7 +183,9 @@
 					<div class="text-sm font-medium">Public</div>
 					<p class="text-xs text-muted-foreground">
 						{isPublic
-							? 'Anyone can find and listen to this playlist on YouTube Music.'
+							? platform === 'spotify'
+								? 'Anyone can find and listen to this playlist on Spotify.'
+								: 'Anyone can find and listen to this playlist on YouTube Music.'
 							: 'Only you can see this playlist.'}
 					</p>
 				</div>

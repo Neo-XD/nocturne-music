@@ -553,9 +553,14 @@ export async function createLibraryPlaylist(
 	title: string,
 	description?: string,
 	isPublic?: boolean,
-	coverPath?: string | null
+	coverPath?: string | null,
+	platform?: 'ytm' | 'spotify'
 ): Promise<string> {
-	const id = await api.createPlaylist(title, description, isPublic, coverPath ?? undefined);
+	const id = await api.createPlaylist(title, description, isPublic, coverPath ?? undefined, platform);
+	if (platform === 'spotify' || id.startsWith('sp_')) {
+		void loadSpotifyPlaylists();
+		return id;
+	}
 	// YouTube's library browse is eventually-consistent and won't include a brand-new playlist for a
 	// few seconds, so surface it immediately instead of refetching.
 	const browseId = id.startsWith('VL') ? id : `VL${id}`;

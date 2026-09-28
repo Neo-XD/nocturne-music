@@ -1072,6 +1072,9 @@ pub async fn add_to_playlist(
     playlist_id: String,
     video_id: String,
 ) -> Result<bool, String> {
+    if let Some(sp_id) = playlist_id.strip_prefix("sp_") {
+        return spotify_add_to_playlist(&state, sp_id, &video_id).await;
+    }
     let client = editable_playlist(&state, &playlist_id)?;
     let added =
         state.it.playlist_add(client, &playlist_id, &video_id).await.map_err(|e| e.to_string())?;
@@ -1088,6 +1091,9 @@ pub async fn remove_from_playlist(
     video_id: String,
     set_video_id: String,
 ) -> Result<(), String> {
+    if let Some(sp_id) = playlist_id.strip_prefix("sp_") {
+        return spotify_remove_from_playlist(&state, sp_id, &video_id).await;
+    }
     let client = editable_playlist(&state, &playlist_id)?;
     state
         .it
@@ -1105,6 +1111,9 @@ pub async fn remove_many_from_playlist(
     playlist_id: String,
     tracks: Vec<(String, String)>,
 ) -> Result<(), String> {
+    if let Some(sp_id) = playlist_id.strip_prefix("sp_") {
+        return spotify_remove_many_from_playlist(&state, sp_id, &tracks).await;
+    }
     let client = editable_playlist(&state, &playlist_id)?;
     state
         .it
@@ -1125,7 +1134,55 @@ pub async fn create_playlist(
     description: Option<String>,
     public: Option<bool>,
     cover_path: Option<String>,
+    platform: Option<String>,
 ) -> Result<String, String> {
+    if platform.as_deref() == Some("spotify") {
+        let mut token = get_spotify_token(&state).await?;
+        let http_client = crate::http::client();
+        let is_public = public.unwrap_or(false);
+        let create_body = serde_json::json!({
+            "name": title,
+            "description": description.as_deref().unwrap_or("Created via Nocturne"),
+            "public": is_public
+        });
+
+        let mut create_res = http_client
+            .post("https://api.spotify.com/v1/me/playlists")
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .json(&create_body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to create playlist on Spotify: {e}"))?;
+
+        if create_res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if let Ok(new_tok) = refresh_spotify_dev_token(&state).await {
+                token = new_tok;
+                create_res = http_client
+                    .post("https://api.spotify.com/v1/me/playlists")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Content-Type", "application/json")
+                    .json(&create_body)
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to create playlist on Spotify: {e}"))?;
+            }
+        }
+
+        if !create_res.status().is_success() {
+            let err_txt = create_res.text().await.unwrap_or_default();
+            return Err(format!("Spotify playlist creation failed: {err_txt}"));
+        }
+
+        let created_json: serde_json::Value =
+            create_res.json().await.map_err(|e| format!("Failed to parse response: {e}"))?;
+        let sp_id = created_json["id"]
+            .as_str()
+            .ok_or_else(|| "Missing id in created Spotify playlist response".to_string())?;
+
+        return Ok(format!("sp_{sp_id}"));
+    }
+
     let client = require_login(&state)?;
     let privacy = if public.unwrap_or(false) { "PUBLIC" } else { "PRIVATE" };
     let playlist_id = state
@@ -1160,6 +1217,9 @@ pub async fn edit_playlist_details(
     description: Option<String>,
     public: Option<bool>,
 ) -> Result<(), String> {
+    if let Some(sp_id) = playlist_id.strip_prefix("sp_") {
+        return spotify_edit_playlist_details(&state, sp_id, name, description).await;
+    }
     let client = editable_playlist(&state, &playlist_id)?;
     // The switch is two-state; YouTube's third value (UNLISTED) is only ever left as it was.
     let privacy = public.map(|p| if p { "PUBLIC" } else { "PRIVATE" });
@@ -1350,6 +1410,9 @@ fn custom_cover(state: &Arc<AppState>, playlist_id: &str) -> Option<String> {
 
 #[tauri::command]
 pub async fn delete_playlist(state: St<'_>, playlist_id: String) -> Result<(), String> {
+    if let Some(sp_id) = playlist_id.strip_prefix("sp_") {
+        return spotify_delete_playlist(&state, sp_id).await;
+    }
     let client = editable_playlist(&state, &playlist_id)?;
     state.it.delete_playlist(client, &playlist_id).await.map_err(|e| e.to_string())?;
     state.db.forget_playlist(&playlist_id);
@@ -2675,6 +2738,7 @@ pub struct ExtractedSpotifyPlaylist {
     pub thumbnail: Option<String>,
     pub collaborative: bool,
     pub tracks: Vec<ExtractedSpotifyTrack>,
+    pub owner_id: Option<String>,
 }
 
 pub async fn fetch_spotify_playlist_info(
@@ -2719,6 +2783,7 @@ pub async fn fetch_spotify_playlist_info(
                 if let Ok(pl_json) = res.json::<serde_json::Value>().await {
                     let title = pl_json["name"].as_str().unwrap_or("Spotify Playlist").to_string();
                     let description = pl_json["description"].as_str().map(|s| s.to_string());
+                    let owner_id = pl_json["owner"]["id"].as_str().map(|s| s.to_string());
                     let owner =
                         pl_json["owner"]["display_name"].as_str().unwrap_or("Spotify").to_string();
                     let thumbnail = pl_json["images"]
@@ -2822,6 +2887,7 @@ pub async fn fetch_spotify_playlist_info(
                             thumbnail,
                             collaborative,
                             tracks,
+                            owner_id,
                         });
                     }
                 }
@@ -2906,6 +2972,7 @@ pub async fn fetch_spotify_playlist_info(
                                     thumbnail,
                                     collaborative: false,
                                     tracks,
+                                    owner_id: None,
                                 });
                             }
                         }
@@ -2971,6 +3038,10 @@ pub async fn get_spotify_playlist_page(
         });
     }
 
+    let my_user = state.db.get_setting("spotify_user").unwrap_or_default();
+    let is_owned = (!my_user.is_empty() && playlist_info.owner_id.as_deref() == Some(&my_user))
+        || playlist_info.collaborative;
+
     Ok(PlaylistPage {
         title: Some(playlist_info.title),
         subtitle: playlist_info.subtitle,
@@ -2980,7 +3051,7 @@ pub async fn get_spotify_playlist_page(
         cover: playlist_info.thumbnail,
         items,
         continuation: None,
-        owned: false,
+        owned: is_owned,
         collaborative: playlist_info.collaborative,
         sort_menu: None,
     })
@@ -3042,12 +3113,311 @@ pub async fn spotify_transfer_to_ytm(
     ))
 }
 
+pub async fn spotify_add_to_playlist(
+    state: &Arc<AppState>,
+    spotify_playlist_id: &str,
+    video_id: &str,
+) -> Result<bool, String> {
+    let mut token = get_spotify_token(state).await?;
+    let http_client = crate::http::client();
+    let clean_id = clean_spotify_id(spotify_playlist_id);
+
+    let uri = if video_id.starts_with("SP:") {
+        let parts: Vec<&str> = video_id.split(':').collect();
+        let track_id = parts.get(1).copied().unwrap_or(video_id);
+        format!("spotify:track:{track_id}")
+    } else {
+        let mut query = String::new();
+        if let Some(dl) = state.db.get_downloaded_track(video_id) {
+            query = format!("{} {}", dl.title, dl.artist);
+        } else if let Ok(ytm_client) = metadata_client(state) {
+            if let Ok(next) = state.it.next(ytm_client, Some(video_id), None).await {
+                if let Some(curr) = next.items.iter().find(|i| i.video_id == video_id) {
+                    query = format!("{} {}", curr.title, curr.artists);
+                }
+            }
+        }
+        if query.is_empty() {
+            query = video_id.to_string();
+        }
+
+        let mut search_res = http_client
+            .get("https://api.spotify.com/v1/search")
+            .query(&[("q", query.as_str()), ("type", "track"), ("limit", "1")])
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .map_err(|e| format!("Spotify search error: {e}"))?;
+
+        if search_res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+                token = new_tok;
+                search_res = http_client
+                    .get("https://api.spotify.com/v1/search")
+                    .query(&[("q", query.as_str()), ("type", "track"), ("limit", "1")])
+                    .header("Authorization", format!("Bearer {token}"))
+                    .send()
+                    .await
+                    .map_err(|e| format!("Spotify search error: {e}"))?;
+            }
+        }
+
+        let s_json: serde_json::Value = search_res.json().await.map_err(|e| e.to_string())?;
+        s_json["tracks"]["items"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|t| t["uri"].as_str())
+            .ok_or_else(|| format!("Could not find matching track for \"{query}\" on Spotify"))?
+            .to_string()
+    };
+
+    let body = serde_json::json!({ "uris": [uri] });
+    let mut res = http_client
+        .post(format!("https://api.spotify.com/v1/playlists/{clean_id}/tracks"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to add track to Spotify: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+            token = new_tok;
+            res = http_client
+                .post(format!("https://api.spotify.com/v1/playlists/{clean_id}/tracks"))
+                .header("Authorization", format!("Bearer {token}"))
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to add track to Spotify: {e}"))?;
+        }
+    }
+
+    if res.status() == reqwest::StatusCode::FORBIDDEN {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!(
+            "Spotify rejected write permission (403). Make sure you own this playlist and are linked via Spotify Developer API: {err_txt}"
+        ));
+    }
+
+    if !res.status().is_success() {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!("Spotify add track failed: {err_txt}"));
+    }
+
+    Ok(true)
+}
+
+pub async fn spotify_remove_from_playlist(
+    state: &Arc<AppState>,
+    spotify_playlist_id: &str,
+    video_id: &str,
+) -> Result<(), String> {
+    let mut token = get_spotify_token(state).await?;
+    let http_client = crate::http::client();
+    let clean_id = clean_spotify_id(spotify_playlist_id);
+
+    let uri = if video_id.starts_with("SP:") {
+        let parts: Vec<&str> = video_id.split(':').collect();
+        let track_id = parts.get(1).copied().unwrap_or(video_id);
+        format!("spotify:track:{track_id}")
+    } else {
+        format!("spotify:track:{video_id}")
+    };
+
+    let body = serde_json::json!({
+        "tracks": [{ "uri": uri }]
+    });
+
+    let mut res = http_client
+        .delete(format!("https://api.spotify.com/v1/playlists/{clean_id}/tracks"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to remove track from Spotify: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+            token = new_tok;
+            res = http_client
+                .delete(format!("https://api.spotify.com/v1/playlists/{clean_id}/tracks"))
+                .header("Authorization", format!("Bearer {token}"))
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to remove track from Spotify: {e}"))?;
+        }
+    }
+
+    if res.status() == reqwest::StatusCode::FORBIDDEN {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!("Spotify rejected track removal (403): {err_txt}"));
+    }
+
+    if !res.status().is_success() {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!("Spotify track removal failed: {err_txt}"));
+    }
+
+    Ok(())
+}
+
+pub async fn spotify_remove_many_from_playlist(
+    state: &Arc<AppState>,
+    spotify_playlist_id: &str,
+    tracks: &[(String, String)],
+) -> Result<(), String> {
+    let mut token = get_spotify_token(state).await?;
+    let http_client = crate::http::client();
+    let clean_id = clean_spotify_id(spotify_playlist_id);
+
+    let uris: Vec<serde_json::Value> = tracks
+        .iter()
+        .map(|(video_id, _)| {
+            let uri = if video_id.starts_with("SP:") {
+                let parts: Vec<&str> = video_id.split(':').collect();
+                let track_id = parts.get(1).copied().unwrap_or(video_id.as_str());
+                format!("spotify:track:{track_id}")
+            } else {
+                format!("spotify:track:{video_id}")
+            };
+            serde_json::json!({ "uri": uri })
+        })
+        .collect();
+
+    for chunk in uris.chunks(100) {
+        let body = serde_json::json!({ "tracks": chunk });
+        let mut res = http_client
+            .delete(format!("https://api.spotify.com/v1/playlists/{clean_id}/tracks"))
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to remove tracks from Spotify: {e}"))?;
+
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+                token = new_tok;
+                res = http_client
+                    .delete(format!("https://api.spotify.com/v1/playlists/{clean_id}/tracks"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to remove tracks from Spotify: {e}"))?;
+            }
+        }
+
+        if !res.status().is_success() {
+            let err_txt = res.text().await.unwrap_or_default();
+            return Err(format!("Spotify batch removal failed: {err_txt}"));
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn spotify_edit_playlist_details(
+    state: &Arc<AppState>,
+    spotify_playlist_id: &str,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<(), String> {
+    let mut token = get_spotify_token(state).await?;
+    let http_client = crate::http::client();
+    let clean_id = clean_spotify_id(spotify_playlist_id);
+
+    let mut body = serde_json::Map::new();
+    if let Some(n) = name {
+        body.insert("name".to_string(), serde_json::Value::String(n));
+    }
+    if let Some(d) = description {
+        body.insert("description".to_string(), serde_json::Value::String(d));
+    }
+
+    let mut res = http_client
+        .put(format!("https://api.spotify.com/v1/playlists/{clean_id}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::Value::Object(body.clone()))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to edit Spotify playlist: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+            token = new_tok;
+            res = http_client
+                .put(format!("https://api.spotify.com/v1/playlists/{clean_id}"))
+                .header("Authorization", format!("Bearer {token}"))
+                .json(&serde_json::Value::Object(body))
+                .send()
+                .await
+                .map_err(|e| format!("Failed to edit Spotify playlist: {e}"))?;
+        }
+    }
+
+    if res.status() == reqwest::StatusCode::FORBIDDEN {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!(
+            "Spotify rejected playlist edit (403). Make sure you own this playlist and are linked via Developer API: {err_txt}"
+        ));
+    }
+
+    if !res.status().is_success() {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!("Spotify playlist edit failed: {err_txt}"));
+    }
+
+    Ok(())
+}
+
+pub async fn spotify_delete_playlist(
+    state: &Arc<AppState>,
+    spotify_playlist_id: &str,
+) -> Result<(), String> {
+    let mut token = get_spotify_token(state).await?;
+    let http_client = crate::http::client();
+    let clean_id = clean_spotify_id(spotify_playlist_id);
+
+    let mut res = http_client
+        .delete(format!("https://api.spotify.com/v1/playlists/{clean_id}/followers"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to delete/unfollow Spotify playlist: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+            token = new_tok;
+            res = http_client
+                .delete(format!("https://api.spotify.com/v1/playlists/{clean_id}/followers"))
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .map_err(|e| format!("Failed to delete/unfollow Spotify playlist: {e}"))?;
+        }
+    }
+
+    if res.status() == reqwest::StatusCode::FORBIDDEN {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!("Spotify rejected playlist deletion (403): {err_txt}"));
+    }
+
+    if !res.status().is_success() {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!("Spotify playlist delete failed: {err_txt}"));
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn ytm_transfer_to_spotify(
     state: St<'_>,
     ytm_playlist_id: String,
 ) -> Result<String, String> {
-    let token = get_spotify_token(&state).await?;
+    let mut token = get_spotify_token(&state).await?;
     let http_client = crate::http::client();
     let ytm_client = metadata_client(&state)?;
 
@@ -3059,27 +3429,14 @@ pub async fn ytm_transfer_to_spotify(
 
     let title = page.title.as_deref().unwrap_or("Playlist");
 
-    let me_res = http_client
-        .get("https://api.spotify.com/v1/me")
-        .header("Authorization", format!("Bearer {token}"))
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to get Spotify profile: {e}"))?;
-
-    let me_json: serde_json::Value =
-        me_res.json().await.map_err(|e| format!("Failed to parse profile: {e}"))?;
-
-    let user_id = me_json["id"].as_str().ok_or("Could not read Spotify user ID")?;
-
     let create_body = serde_json::json!({
         "name": format!("{} (YTM)", title),
         "description": "Transferred from YouTube Music to Spotify via Nocturne",
         "public": false
     });
 
-    let create_res = http_client
-        .post(format!("https://api.spotify.com/v1/users/{user_id}/playlists"))
+    let mut create_res = http_client
+        .post("https://api.spotify.com/v1/me/playlists")
         .header("Authorization", format!("Bearer {token}"))
         .header("Content-Type", "application/json")
         .json(&create_body)
@@ -3087,8 +3444,23 @@ pub async fn ytm_transfer_to_spotify(
         .await
         .map_err(|e| format!("Failed to create playlist on Spotify: {e}"))?;
 
+    if create_res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_tok) = refresh_spotify_dev_token(&state).await {
+            token = new_tok;
+            create_res = http_client
+                .post("https://api.spotify.com/v1/me/playlists")
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .json(&create_body)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to create playlist on Spotify: {e}"))?;
+        }
+    }
+
     if !create_res.status().is_success() {
-        return Err(format!("Spotify create playlist failed with status {}", create_res.status()));
+        let err_txt = create_res.text().await.unwrap_or_default();
+        return Err(format!("Spotify create playlist failed: {err_txt}"));
     }
 
     let created_json: serde_json::Value = create_res
@@ -3099,6 +3471,7 @@ pub async fn ytm_transfer_to_spotify(
     let spotify_pl_id = created_json["id"].as_str().ok_or("Missing created playlist id")?;
 
     let mut uris = Vec::new();
+    let mut matched_count = 0;
     for track in &page.items {
         let query = format!("{} {}", track.title, track.artists);
 
@@ -3117,6 +3490,7 @@ pub async fn ytm_transfer_to_spotify(
                     .and_then(|t| t["uri"].as_str())
                 {
                     uris.push(uri.to_string());
+                    matched_count += 1;
                 }
             }
         }
@@ -3143,7 +3517,11 @@ pub async fn ytm_transfer_to_spotify(
             .await;
     }
 
-    Ok(format!("Successfully transferred \"{}\" to Spotify!", title))
+    Ok(format!(
+        "Successfully transferred \"{}\" to Spotify ({matched_count}/{} tracks matched)!",
+        title,
+        page.items.len()
+    ))
 }
 
 #[tauri::command]
