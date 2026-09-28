@@ -105,7 +105,7 @@ HOST_BASELINE="libGL.so.1 libEGL.so.1 libGLX.so.0 libGLdispatch.so.0 libOpenGL.s
   libfribidi.so.0 libz.so.1 libasound.so.2 libusb-1.0.so.0 libcom_err.so.2 libgpg-error.so.0
   libresolv.so.2 libgcc_s.so.1 libstdc++.so.6
   libgnutls.so.30 libnettle.so.8 libhogweed.so.6 libgmp.so.10 libtasn1.so.6 libp11-kit.so.0
-  libidn2.so.0 libunistring.so.5"
+  libidn2.so.0 libunistring.so.5 libpipewire-0.3.so.0"
 
 # Copy every DT_NEEDED of $1 that the AppDir doesn't already have. glibc and the loader are the
 # host's job; everything else has to travel with us, or we just move "cannot open shared object
