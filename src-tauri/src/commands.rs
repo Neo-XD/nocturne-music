@@ -988,11 +988,12 @@ pub async fn rate(state: St<'_>, video_id: String, rating: Rating) -> Result<(),
                             .map_err(|e| format!("Spotify search error: {e}"))?;
                     }
                 }
-                let s_json: serde_json::Value = search_res.json().await.map_err(|e| e.to_string())?;
-                let matched = s_json["tracks"]["items"]
-                    .as_array()
-                    .and_then(|a| a.first())
-                    .ok_or_else(|| format!("Could not find matching track for \"{query}\" on Spotify"))?;
+                let s_json: serde_json::Value =
+                    search_res.json().await.map_err(|e| e.to_string())?;
+                let matched =
+                    s_json["tracks"]["items"].as_array().and_then(|a| a.first()).ok_or_else(
+                        || format!("Could not find matching track for \"{query}\" on Spotify"),
+                    )?;
                 matched["id"].as_str().unwrap_or_default().to_string()
             };
 
@@ -2871,7 +2872,10 @@ pub async fn fetch_spotify_liked_tracks(
             res = client
                 .get(format!("https://api.spotify.com/v1/me/tracks?limit={lim}&offset={offset}"))
                 .header("Authorization", format!("Bearer {token}"))
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                )
                 .send()
                 .await
                 .map_err(|e| format!("Failed to request Spotify liked songs: {e}"))?;
@@ -2883,10 +2887,8 @@ pub async fn fetch_spotify_liked_tracks(
         return Err(format!("Spotify returned error for liked songs: {err_txt}"));
     }
 
-    let json: serde_json::Value = res
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Spotify liked songs: {e}"))?;
+    let json: serde_json::Value =
+        res.json().await.map_err(|e| format!("Failed to parse Spotify liked songs: {e}"))?;
 
     let total = json["total"].as_u64().unwrap_or(0);
     let mut tracks = Vec::new();
@@ -2903,10 +2905,7 @@ pub async fn fetch_spotify_liked_tracks(
             let artists = t["artists"]
                 .as_array()
                 .map(|arr| {
-                    arr.iter()
-                        .filter_map(|a| a["name"].as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    arr.iter().filter_map(|a| a["name"].as_str()).collect::<Vec<_>>().join(", ")
                 })
                 .unwrap_or_else(|| "Unknown Artist".to_string());
             let album = t["album"]["name"].as_str().map(|s| s.to_string());
@@ -2957,7 +2956,11 @@ pub async fn fetch_spotify_playlist_info(
     if clean_id.is_empty() {
         return Err("Invalid Spotify playlist ID".to_string());
     }
-    if clean_id == "liked" || clean_id == "sp_liked" || clean_id == "spotify:liked" || clean_id == "saved" {
+    if clean_id == "liked"
+        || clean_id == "sp_liked"
+        || clean_id == "spotify:liked"
+        || clean_id == "saved"
+    {
         return fetch_spotify_liked_tracks(state, 0, 50).await;
     }
 
@@ -3414,7 +3417,9 @@ pub async fn spotify_add_to_playlist(
                     .header("Content-Length", "0")
                     .send()
                     .await
-                    .map_err(|e| format!("Network error saving track to Spotify Liked Songs: {e}"))?;
+                    .map_err(|e| {
+                        format!("Network error saving track to Spotify Liked Songs: {e}")
+                    })?;
             }
         }
         if !res.status().is_success() {
@@ -3497,7 +3502,9 @@ pub async fn spotify_remove_from_playlist(
                     .header("Content-Length", "0")
                     .send()
                     .await
-                    .map_err(|e| format!("Network error removing track from Spotify Liked Songs: {e}"))?;
+                    .map_err(|e| {
+                        format!("Network error removing track from Spotify Liked Songs: {e}")
+                    })?;
             }
         }
         if !res.status().is_success() {
@@ -3586,7 +3593,9 @@ pub async fn spotify_remove_many_from_playlist(
                         .header("Content-Length", "0")
                         .send()
                         .await
-                        .map_err(|e| format!("Failed to remove tracks from Spotify Liked Songs: {e}"))?;
+                        .map_err(|e| {
+                            format!("Failed to remove tracks from Spotify Liked Songs: {e}")
+                        })?;
                 }
             }
             if !res.status().is_success() {
