@@ -9,7 +9,7 @@
 //! 5. Plain fallbacks: LRCLIB fuzzy search → LRCLIB plain (from step 2's response) → YT plain
 //!    (WEB_REMIX browse) → the fuzzy search's plain text.
 //!
-//! Results are cached in SQLite (`lyrics_cache`): hits forever, "no lyrics" verdicts for 24h.
+//! Eligible hits are cached in SQLite (`lyrics_cache`); "no lyrics" verdicts last 24h.
 //! A run where every provider merely *errored* (offline) caches nothing, so lyrics come back
 //! when the network does. Everything is best-effort — a lyrics failure is never a user error.
 
@@ -39,6 +39,10 @@ const AMLL_ROOT: &str = "https://api.amll.dev";
 const AMLL_SOURCE: &str = "AMLL TTML DB";
 const AMLL_SEARCH_LIMIT: usize = 10;
 const AMLL_CANDIDATE_LIMIT: usize = 3;
+const KARAOKE_MUGEN_ROOT: &str = "https://kara.moe/api";
+const KARAOKE_MUGEN_SOURCE: &str = "Karaoke Mugen / kara.moe";
+const KARAOKE_MUGEN_SEARCH_LIMIT: usize = 10;
+const KARAOKE_MUGEN_CANDIDATE_LIMIT: usize = 3;
 const UNISON_SEARCH_LIMIT: usize = 10;
 const UNISON_CANDIDATE_LIMIT: usize = 3;
 const MANUAL_PROVIDER_CANDIDATE_LIMIT: usize = 3;
@@ -180,11 +184,11 @@ fn deserialize_cached_lyrics(json: &str) -> Option<Lyrics> {
     (cached.version == LYRICS_CACHE_VERSION).then_some(cached.lyrics)
 }
 
-/// The official Better Lyrics client marks Unison results as non-cacheable. Mirror that policy for
-/// persistent positive lyrics caching.
+/// Keep Unison and Karaoke Mugen results out of persistent positive lyrics caching. Kara.moe's
+/// metadata and synchronization licenses do not clearly cover stored third-party full lyrics.
 /// Negative cache entries remain governed by the normal whole-chain policy.
 fn positive_lyrics_cache_allowed(lyrics: &Lyrics) -> bool {
-    lyrics.source != UNISON_SOURCE
+    lyrics.source != UNISON_SOURCE && lyrics.source != KARAOKE_MUGEN_SOURCE
 }
 
 pub struct LyricsRequest {
@@ -207,8 +211,18 @@ fn forced_provider() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-pub const DEFAULT_PROVIDERS: [&str; 9] =
-    ["betterlyrics", "amll", "youlyplus", "unison", "paxsenix", "lrclib", "ytm", "qq", "kugou"];
+pub const DEFAULT_PROVIDERS: [&str; 10] = [
+    "betterlyrics",
+    "amll",
+    "karaokemugen",
+    "youlyplus",
+    "unison",
+    "paxsenix",
+    "lrclib",
+    "ytm",
+    "qq",
+    "kugou",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomLyricProvider {
@@ -284,6 +298,14 @@ pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> 
     lyrics
 }
 
+fn whole_chain_miss_cacheable(
+    definitive: bool,
+    amll_error: bool,
+    karaoke_mugen_error: bool,
+) -> bool {
+    definitive && !amll_error && !karaoke_mugen_error
+}
+
 /// Run the provider chain in user-configured priority order.
 async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, bool) {
     let mut definitive = false;
@@ -329,6 +351,15 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                     }
                 }
             }
+            "karaokemugen" => {
+                return match karaoke_mugen_get(req).await {
+                    Ok(hit) => (hit, false),
+                    Err(error) => {
+                        tracing::warn!(%error, "pinned: Karaoke Mugen failed");
+                        (None, false)
+                    }
+                }
+            }
             "paxsenix" => paxsenix_get(req).await,
             "qq" => qqmusic_get(req).await,
             "kugou" => kugou_get(req).await,
@@ -358,6 +389,8 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
     let mut fetched_unison: Option<Option<Lyrics>> = None;
     let mut fetched_amll: Option<Option<Lyrics>> = None;
     let mut amll_error = false;
+    let mut fetched_karaoke_mugen: Option<Option<Lyrics>> = None;
+    let mut karaoke_mugen_error = false;
     let mut fetched_paxsenix: Option<Option<Lyrics>> = None;
     let mut fetched_customs: std::collections::HashMap<String, Option<Lyrics>> =
         std::collections::HashMap::new();
@@ -424,6 +457,28 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 if let Some(Some(lyrics)) = &fetched_amll {
                     if has_genuine_word_timings(lyrics) {
                         return (Some(lyrics.clone()), true);
+                    }
+                }
+            }
+            "karaokemugen" => {
+                if fetched_karaoke_mugen.is_none() {
+                    match karaoke_mugen_get(req).await {
+                        Ok(hit) => {
+                            if karaoke_mugen_search_filter(req, true).is_some() {
+                                definitive = true;
+                            }
+                            fetched_karaoke_mugen = Some(hit);
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "lyrics: Karaoke Mugen failed");
+                            karaoke_mugen_error = true;
+                            fetched_karaoke_mugen = Some(None);
+                        }
+                    }
+                }
+                if let Some(Some(lyrics)) = &fetched_karaoke_mugen {
+                    if has_genuine_word_timings(lyrics) {
+                        return (Some(lyrics.clone()), false);
                     }
                 }
             }
@@ -529,6 +584,13 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                 if let Some(Some(lyrics)) = &fetched_amll {
                     if is_line_synced(lyrics) {
                         return (Some(lyrics.clone()), true);
+                    }
+                }
+            }
+            "karaokemugen" => {
+                if let Some(Some(lyrics)) = &fetched_karaoke_mugen {
+                    if is_line_synced(lyrics) {
+                        return (Some(lyrics.clone()), false);
                     }
                 }
             }
@@ -681,6 +743,11 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
                     return (Some(lyrics), true);
                 }
             }
+            "karaokemugen" => {
+                if let Some(Some(lyrics)) = fetched_karaoke_mugen.take() {
+                    return (Some(lyrics), false);
+                }
+            }
             "paxsenix" => {
                 if let Some(Some(l)) = fetched_paxsenix.take() {
                     return (Some(l), req.duration.is_some());
@@ -753,7 +820,7 @@ async fn fetch(state: &AppState, mut req: LyricsRequest) -> (Option<Lyrics>, boo
         }
     }
 
-    (None, definitive && !amll_error)
+    (None, whole_chain_miss_cacheable(definitive, amll_error, karaoke_mugen_error))
 }
 
 // --- LRCLIB (https://lrclib.net/docs) -------------------------------------------------------
@@ -928,6 +995,136 @@ fn from_parsed(source: &str, lines: Vec<LyricLine>) -> Option<Lyrics> {
         instrumental: false,
         lines,
     })
+}
+
+// Kara.moe's per-song API returns parsed ASS Dialogue lines, not raw ASS text.
+#[derive(Debug, Deserialize)]
+struct KaraokeMugenParsedSong {
+    lyrics: Vec<KaraokeMugenParsedLine>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KaraokeMugenParsedLine {
+    start: f64,
+    end: f64,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    full_text: Option<Vec<serde_json::Value>>,
+    #[serde(default, alias = "type")]
+    event_type: Option<String>,
+    #[serde(default)]
+    comment: bool,
+    #[serde(default)]
+    instrumental: bool,
+}
+
+fn karaoke_mugen_seconds_to_ms(seconds: f64) -> Option<u64> {
+    // A bad API value must not saturate a lyric timestamp or make a huge interval.
+    (seconds.is_finite() && (0.0..=86_400.0).contains(&seconds))
+        .then_some((seconds * 1000.0).round() as u64)
+}
+
+fn karaoke_mugen_segment_words(
+    parts: &[serde_json::Value],
+    line_start_ms: u64,
+    line_end_ms: u64,
+) -> Option<Vec<LyricWord>> {
+    let mut cursor = line_start_ms;
+    let mut words = Vec::new();
+    for part in parts {
+        let text = part.get("text")?.as_str()?;
+        if part
+            .get("drawing")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|drawing| !drawing.is_empty())
+        {
+            return None;
+        }
+        let Some(tags) = part.get("tags").and_then(serde_json::Value::as_array) else {
+            if text.is_empty() {
+                continue;
+            }
+            return None;
+        };
+        let mut duration_cs = None;
+        for tag in tags {
+            let tag = tag.as_object()?;
+            if tag.contains_key("kt") {
+                return None; // Absolute ASS offsets need different timing semantics.
+            }
+            for key in ["k", "K", "kf", "ko"] {
+                if let Some(value) = tag.get(key) {
+                    if duration_cs.replace(value.as_u64()?).is_some() {
+                        return None;
+                    }
+                }
+            }
+        }
+        let Some(duration_cs) = duration_cs else {
+            if text.is_empty() {
+                continue; // A style-only segment has no lyric or elapsed time.
+            }
+            return None;
+        };
+        let end_ms = cursor.checked_add(duration_cs.checked_mul(10)?)?;
+        if end_ms > line_end_ms {
+            return None;
+        }
+        if !text.is_empty() {
+            if end_ms == cursor && !text.trim().is_empty() {
+                return None;
+            }
+            words.push(LyricWord { text: text.to_owned(), start_ms: cursor, end_ms });
+        }
+        cursor = end_ms;
+    }
+    (!words.is_empty()).then_some(words)
+}
+
+fn convert_karaoke_mugen_lyrics(song: KaraokeMugenParsedSong) -> Option<Lyrics> {
+    let mut lines = Vec::new();
+    for line in song.lyrics {
+        if line.comment
+            || line
+                .event_type
+                .as_deref()
+                .is_some_and(|event_type| !event_type.eq_ignore_ascii_case("dialogue"))
+        {
+            continue;
+        }
+        let segmented_text = line.full_text.as_ref().and_then(|parts| {
+            parts
+                .iter()
+                .map(|part| part.get("text")?.as_str())
+                .collect::<Option<Vec<_>>>()
+                .map(|parts| parts.concat())
+        });
+        let use_segments = segmented_text.as_ref().is_some_and(|text| !text.trim().is_empty());
+        let text = if use_segments { segmented_text } else { line.text.clone() }?;
+        if text.trim().is_empty() {
+            continue;
+        }
+        let start_ms = karaoke_mugen_seconds_to_ms(line.start);
+        let end_ms = start_ms
+            .and_then(|start| karaoke_mugen_seconds_to_ms(line.end).filter(|end| *end > start));
+        let words = if use_segments && !line.instrumental {
+            line.full_text
+                .as_deref()
+                .and_then(|parts| karaoke_mugen_segment_words(parts, start_ms?, end_ms?))
+        } else {
+            None
+        };
+        lines.push(LyricLine {
+            time_ms: start_ms,
+            end_time_ms: end_ms,
+            text,
+            words,
+            translation: None,
+        });
+    }
+    from_parsed(KARAOKE_MUGEN_SOURCE, lines)
 }
 
 // --- LRC parsing ----------------------------------------------------------------------------
@@ -1460,6 +1657,436 @@ fn amll_manual_items(req: &LyricsRequest, items: Vec<AmllSongItem>) -> Vec<AmllS
         .take(AMLL_CANDIDATE_LIMIT)
         .map(|(item, _, _)| item)
         .collect()
+}
+
+fn karaoke_mugen_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+#[derive(Debug, Deserialize)]
+struct KaraokeMugenSearchResponse {
+    content: Vec<KaraokeMugenCatalogItem>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct KaraokeMugenTag {
+    name: String,
+    #[serde(default, deserialize_with = "karaoke_mugen_null_default")]
+    aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct KaraokeMugenCatalogItem {
+    kid: String,
+    titles: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    titles_default_language: Option<String>,
+    #[serde(default, deserialize_with = "karaoke_mugen_null_default")]
+    titles_aliases: Vec<String>,
+    #[serde(default, deserialize_with = "karaoke_mugen_null_default")]
+    singers: Vec<KaraokeMugenTag>,
+    #[serde(default, deserialize_with = "karaoke_mugen_null_default")]
+    series: Vec<KaraokeMugenTag>,
+    #[serde(default, deserialize_with = "karaoke_mugen_null_default")]
+    franchises: Vec<KaraokeMugenTag>,
+    #[serde(default)]
+    duration: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KaraokeMugenGetResponse {
+    #[serde(flatten)]
+    metadata: KaraokeMugenCatalogItem,
+    lyrics: Vec<KaraokeMugenParsedLine>,
+}
+
+fn karaoke_mugen_valid_kid(kid: &str) -> bool {
+    let bytes = kid.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn karaoke_mugen_validate_metadata(item: &KaraokeMugenCatalogItem) -> anyhow::Result<()> {
+    anyhow::ensure!(karaoke_mugen_valid_kid(&item.kid), "Karaoke Mugen returned an invalid KID");
+    anyhow::ensure!(
+        item.titles.values().chain(&item.titles_aliases).any(|title| !title.trim().is_empty()),
+        "Karaoke Mugen returned no title"
+    );
+    Ok(())
+}
+
+fn karaoke_mugen_search_filter(req: &LyricsRequest, automatic: bool) -> Option<&str> {
+    let title = req.title.trim();
+    let artist = req.artists.trim();
+    if automatic && (title.is_empty() || artist.is_empty()) {
+        None
+    } else if !title.is_empty() {
+        Some(title)
+    } else if !artist.is_empty() {
+        Some(artist)
+    } else {
+        None
+    }
+}
+
+fn karaoke_mugen_title_aliases(item: &KaraokeMugenCatalogItem) -> Vec<&str> {
+    item.titles
+        .values()
+        .map(String::as_str)
+        .chain(item.titles_aliases.iter().map(String::as_str))
+        .filter(|title| !title.trim().is_empty())
+        .collect()
+}
+
+fn karaoke_mugen_tag_names(tags: &[KaraokeMugenTag]) -> Vec<&str> {
+    tags.iter()
+        .flat_map(|tag| {
+            std::iter::once(tag.name.as_str()).chain(tag.aliases.iter().map(String::as_str))
+        })
+        .filter(|name| !name.trim().is_empty())
+        .collect()
+}
+
+fn karaoke_mugen_metadata(
+    req: &LyricsRequest,
+    item: &KaraokeMugenCatalogItem,
+) -> CandidateMetadata {
+    let title = karaoke_mugen_title_aliases(item)
+        .into_iter()
+        .find(|title| normalize_search_text(title) == normalize_search_text(&req.title))
+        .or_else(|| {
+            item.titles.get("eng").map(String::as_str).filter(|title| !title.trim().is_empty())
+        })
+        .or_else(|| {
+            item.titles_default_language
+                .as_deref()
+                .and_then(|language| item.titles.get(language))
+                .map(String::as_str)
+                .filter(|title| !title.trim().is_empty())
+        })
+        .or_else(|| item.titles.values().map(String::as_str).find(|title| !title.trim().is_empty()))
+        .or_else(|| {
+            item.titles_aliases.iter().map(String::as_str).find(|title| !title.trim().is_empty())
+        })
+        .map(str::to_owned);
+    let singer = item
+        .singers
+        .iter()
+        .map(|singer| singer.name.trim())
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ");
+    CandidateMetadata::canonical(title, (!singer.is_empty()).then_some(singer), None, item.duration)
+}
+
+fn karaoke_mugen_manual_rank(
+    req: &LyricsRequest,
+    item: &KaraokeMugenCatalogItem,
+) -> Option<MetadataRank> {
+    let titles = karaoke_mugen_title_aliases(item);
+    let singers = karaoke_mugen_tag_names(&item.singers);
+    let contexts = karaoke_mugen_tag_names(&item.series)
+        .into_iter()
+        .chain(karaoke_mugen_tag_names(&item.franchises))
+        .collect::<Vec<_>>();
+    let mut best: Option<MetadataRank> = None;
+    let mut consider = |rank: Option<MetadataRank>, max_tier: u8| {
+        if let Some(mut rank) = rank {
+            if rank.tier > max_tier {
+                rank.score -= (rank.tier - max_tier) as f64 * 100.0;
+                rank.tier = max_tier;
+            }
+            if best.is_none_or(|current| {
+                (rank.tier, rank.score.to_bits()) > (current.tier, current.score.to_bits())
+            }) {
+                best = Some(rank);
+            }
+        }
+    };
+
+    for title in &titles {
+        if req.artists.trim().is_empty() {
+            consider(rank_provider_metadata(req, Some(title), None), 4);
+        } else {
+            for singer in &singers {
+                consider(rank_provider_metadata(req, Some(title), Some(singer)), 4);
+            }
+            for context in &contexts {
+                consider(rank_provider_metadata(req, Some(title), Some(context)), 2);
+            }
+        }
+    }
+    for context in &contexts {
+        if req.artists.trim().is_empty() {
+            consider(rank_provider_metadata(req, Some(context), None), 2);
+        } else {
+            for singer in &singers {
+                consider(rank_provider_metadata(req, Some(context), Some(singer)), 2);
+            }
+            if req.title.trim().is_empty() {
+                consider(rank_provider_metadata(req, None, Some(context)), 2);
+            }
+        }
+    }
+    if req.title.trim().is_empty() {
+        for singer in &singers {
+            consider(rank_provider_metadata(req, None, Some(singer)), 4);
+        }
+    }
+    best
+}
+
+fn karaoke_mugen_manual_items(
+    req: &LyricsRequest,
+    items: Vec<KaraokeMugenCatalogItem>,
+) -> Vec<KaraokeMugenCatalogItem> {
+    let mut ranked: Vec<_> = items
+        .into_iter()
+        .filter_map(|item| karaoke_mugen_manual_rank(req, &item).map(|rank| (item, rank)))
+        .collect();
+    ranked.sort_by(|(left, left_rank), (right, right_rank)| {
+        right_rank
+            .tier
+            .cmp(&left_rank.tier)
+            .then_with(|| right_rank.score.total_cmp(&left_rank.score))
+            .then_with(|| {
+                let distance = |item: &KaraokeMugenCatalogItem| match (req.duration, item.duration)
+                {
+                    (Some(query), Some(duration)) if query.is_finite() && duration.is_finite() => {
+                        (query - duration).abs()
+                    }
+                    _ => f64::INFINITY,
+                };
+                distance(left).total_cmp(&distance(right))
+            })
+            .then_with(|| left.kid.cmp(&right.kid))
+    });
+    let mut seen = std::collections::HashSet::new();
+    ranked
+        .into_iter()
+        .filter_map(|(item, _)| seen.insert(item.kid.clone()).then_some(item))
+        .take(KARAOKE_MUGEN_CANDIDATE_LIMIT)
+        .collect()
+}
+
+fn karaoke_mugen_automatic_matches(req: &LyricsRequest, item: &KaraokeMugenCatalogItem) -> bool {
+    let title = normalize_search_text(&req.title);
+    !title.is_empty()
+        && karaoke_mugen_title_aliases(item)
+            .iter()
+            .any(|alias| normalize_search_text(alias) == title)
+        && (karaoke_mugen_singer_matches(req, item) || karaoke_mugen_context_supports(req, item))
+}
+
+fn karaoke_mugen_singer_matches(req: &LyricsRequest, item: &KaraokeMugenCatalogItem) -> bool {
+    karaoke_mugen_tag_names(&item.singers).iter().any(|singer| {
+        // The shared AMLL credit matcher compares complete components, not substrings.
+        // Check both directions because either side may list several credited artists.
+        amll_artist_credit_matches(singer, &req.artists)
+            || amll_artist_credit_matches(&req.artists, singer)
+    })
+}
+
+fn karaoke_mugen_context_supports(req: &LyricsRequest, item: &KaraokeMugenCatalogItem) -> bool {
+    // A franchise credit can stand in for a vocalist in track metadata only with an
+    // independent, close duration match. Never admit a row on series alone.
+    let Some(duration) = req.duration.filter(|duration| duration.is_finite() && *duration > 0.0)
+    else {
+        return false;
+    };
+    if !item.duration.is_some_and(|candidate| {
+        candidate.is_finite() && candidate > 0.0 && (candidate - duration).abs() <= 5.0
+    }) || karaoke_mugen_tag_names(&item.singers).is_empty()
+    {
+        return false;
+    }
+    karaoke_mugen_tag_names(&item.series)
+        .into_iter()
+        .chain(karaoke_mugen_tag_names(&item.franchises))
+        .any(|name| {
+            amll_artist_credit_matches(name, &req.artists)
+                || amll_artist_credit_matches(&req.artists, name)
+        })
+}
+
+fn karaoke_mugen_automatic_id(
+    req: &LyricsRequest,
+    items: Vec<KaraokeMugenCatalogItem>,
+) -> Option<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut matches: Vec<_> = items
+        .into_iter()
+        .filter(|item| karaoke_mugen_automatic_matches(req, item) && seen.insert(item.kid.clone()))
+        .collect();
+    let has_singer_match = matches.iter().any(|item| karaoke_mugen_singer_matches(req, item));
+    if has_singer_match {
+        matches.retain(|item| karaoke_mugen_singer_matches(req, item));
+    } else if matches.len() > 1 {
+        // Contextual evidence is weaker than a singer credit; never guess among variants.
+        return None;
+    }
+    if matches.len() == 1 {
+        return matches.pop().map(|item| item.kid);
+    }
+    // A matching series or franchise can resolve a tie only after title and singer both match.
+    if let Some(album) =
+        req.album.as_deref().map(normalize_search_text).filter(|album| {
+            !album.is_empty() && !matches!(album.as_str(), "unknown album" | "single")
+        })
+    {
+        let supporting: Vec<_> = matches
+            .iter()
+            .filter(|item| {
+                karaoke_mugen_tag_names(&item.series)
+                    .into_iter()
+                    .chain(karaoke_mugen_tag_names(&item.franchises))
+                    .any(|name| normalize_search_text(name) == album)
+            })
+            .collect();
+        if supporting.len() == 1 {
+            return Some(supporting[0].kid.clone());
+        }
+    }
+    let duration = req.duration.filter(|duration| duration.is_finite() && *duration > 0.0)?;
+    if matches
+        .iter()
+        .any(|item| !item.duration.is_some_and(|value| value.is_finite() && value > 0.0))
+    {
+        return None;
+    }
+    matches.sort_by(|left, right| {
+        let distance = |item: &KaraokeMugenCatalogItem| {
+            item.duration
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .map_or(f64::INFINITY, |value| (duration - value).abs())
+        };
+        distance(left).total_cmp(&distance(right))
+    });
+    let best = matches.first()?;
+    let best_distance = best.duration.map(|value| (duration - value).abs())?;
+    let next_distance = matches.get(1)?.duration.map(|value| (duration - value).abs())?;
+    (best_distance <= 5.0 && next_distance >= 15.0).then(|| best.kid.clone())
+}
+
+fn karaoke_mugen_lyrics(response: KaraokeMugenGetResponse) -> anyhow::Result<Lyrics> {
+    let lyrics = convert_karaoke_mugen_lyrics(KaraokeMugenParsedSong { lyrics: response.lyrics })
+        .ok_or_else(|| anyhow::anyhow!("Karaoke Mugen returned empty lyrics"))?;
+    anyhow::ensure!(
+        lyrics.lines.iter().any(|line| {
+            matches!((line.time_ms, line.end_time_ms), (Some(start), Some(end)) if end > start)
+        }),
+        "Karaoke Mugen returned no usable timing"
+    );
+    Ok(lyrics)
+}
+
+async fn karaoke_mugen_search_at(
+    base: &str,
+    filter: &str,
+) -> anyhow::Result<Vec<KaraokeMugenCatalogItem>> {
+    let response = crate::http::client()
+        .get(format!("{base}/karas/search"))
+        .query(&[
+            ("filter", filter.to_owned()),
+            ("from", "0".into()),
+            ("size", KARAOKE_MUGEN_SEARCH_LIMIT.to_string()),
+        ])
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(Vec::new());
+    }
+    let payload: KaraokeMugenSearchResponse = response.error_for_status()?.json().await?;
+    for item in &payload.content {
+        karaoke_mugen_validate_metadata(item)?;
+    }
+    Ok(payload.content.into_iter().take(KARAOKE_MUGEN_SEARCH_LIMIT).collect())
+}
+
+async fn karaoke_mugen_get_at(
+    base: &str,
+    kid: &str,
+) -> anyhow::Result<Option<KaraokeMugenGetResponse>> {
+    anyhow::ensure!(karaoke_mugen_valid_kid(kid), "Karaoke Mugen KID is invalid");
+    let response = crate::http::client()
+        .get(format!("{base}/karas/{kid}"))
+        .header("User-Agent", LRCLIB_UA)
+        .timeout(Duration::from_secs(6))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let response: KaraokeMugenGetResponse = response.error_for_status()?.json().await?;
+    anyhow::ensure!(response.metadata.kid == kid, "Karaoke Mugen get returned a different KID");
+    karaoke_mugen_validate_metadata(&response.metadata)?;
+    Ok(Some(response))
+}
+
+async fn karaoke_mugen_get_from(base: &str, req: &LyricsRequest) -> anyhow::Result<Option<Lyrics>> {
+    let Some(filter) = karaoke_mugen_search_filter(req, true) else { return Ok(None) };
+    let items = karaoke_mugen_search_at(base, filter).await?;
+    let Some(kid) = karaoke_mugen_automatic_id(req, items) else { return Ok(None) };
+    let Some(response) = karaoke_mugen_get_at(base, &kid).await? else {
+        return Ok(None);
+    };
+    if !karaoke_mugen_automatic_matches(req, &response.metadata) {
+        return Ok(None);
+    }
+    Ok(Some(karaoke_mugen_lyrics(response)?))
+}
+
+async fn karaoke_mugen_get(req: &LyricsRequest) -> anyhow::Result<Option<Lyrics>> {
+    karaoke_mugen_get_from(KARAOKE_MUGEN_ROOT, req).await
+}
+
+fn karaoke_mugen_candidate(
+    req: &LyricsRequest,
+    item: &KaraokeMugenCatalogItem,
+    rank: MetadataRank,
+    lyrics: Lyrics,
+    priority: usize,
+) -> RankedCandidate {
+    let metadata = karaoke_mugen_metadata(req, item);
+    let duration_distance = match (req.duration, metadata.duration) {
+        (Some(query), Some(candidate)) if query.is_finite() && query > 0.0 => {
+            (query - candidate).abs()
+        }
+        (Some(query), None) if query.is_finite() && query > 0.0 => f64::INFINITY,
+        _ => 0.0,
+    };
+    let quality = lyrics_quality(&lyrics);
+    RankedCandidate {
+        candidate: LyricCandidate {
+            id: format!("karaokemugen-{}", item.kid),
+            source: KARAOKE_MUGEN_SOURCE.into(),
+            title: metadata.title,
+            artist: metadata.artist,
+            album: None,
+            duration: metadata.duration,
+            synced: lyrics.synced,
+            has_words: quality == LyricsQuality::WordSynced,
+            lyrics,
+        },
+        metadata_rank: rank,
+        duration_distance,
+        quality,
+        provider_priority: priority,
+        // The global deduper uses provider_key; Kara.moe variants must dedupe by KID.
+        provider_key: format!("karaokemugen-{}", item.kid),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2550,14 +3177,36 @@ fn rank_candidate(
 }
 
 fn finish_ranked_candidates(mut candidates: Vec<RankedCandidate>) -> Vec<LyricCandidate> {
+    // A two-point score band treats tiny fuzzy-match differences as equivalent while
+    // preserving relevance tiers and meaningful album/version evidence.
+    let metadata_confidence = |rank: &MetadataRank| (rank.score / 2.0).floor() as i64;
+    let duration_confidence = |distance: f64| {
+        if distance <= 2.0 {
+            3
+        } else if distance <= 5.0 {
+            2
+        } else if distance <= 10.0 {
+            1
+        } else {
+            0
+        }
+    };
     candidates.sort_by(|left, right| {
         right
             .metadata_rank
             .tier
             .cmp(&left.metadata_rank.tier)
+            .then_with(|| {
+                metadata_confidence(&right.metadata_rank)
+                    .cmp(&metadata_confidence(&left.metadata_rank))
+            })
+            .then_with(|| {
+                duration_confidence(right.duration_distance)
+                    .cmp(&duration_confidence(left.duration_distance))
+            })
+            .then_with(|| right.quality.cmp(&left.quality))
             .then_with(|| right.metadata_rank.score.total_cmp(&left.metadata_rank.score))
             .then_with(|| left.duration_distance.total_cmp(&right.duration_distance))
-            .then_with(|| right.quality.cmp(&left.quality))
             .then_with(|| left.provider_priority.cmp(&right.provider_priority))
             .then_with(|| left.candidate.id.cmp(&right.candidate.id))
     });
@@ -2685,6 +3334,7 @@ enum ManualSearchProvider {
     YouLyPlus,
     Unison,
     Amll,
+    KaraokeMugen,
     Paxsenix,
     Lrclib,
     YouTubeMusic,
@@ -2701,6 +3351,7 @@ impl ManualSearchProvider {
             Self::YouLyPlus => "youlyplus",
             Self::Unison => "unison",
             Self::Amll => "amll",
+            Self::KaraokeMugen => "karaokemugen",
             Self::Paxsenix => "paxsenix",
             Self::Lrclib => "lrclib",
             Self::YouTubeMusic => "ytm",
@@ -2730,6 +3381,7 @@ fn manual_search_providers(
             "youlyplus" => Some(ManualSearchProvider::YouLyPlus),
             "unison" => Some(ManualSearchProvider::Unison),
             "amll" => Some(ManualSearchProvider::Amll),
+            "karaokemugen" => Some(ManualSearchProvider::KaraokeMugen),
             "paxsenix" => Some(ManualSearchProvider::Paxsenix),
             "lrclib" => Some(ManualSearchProvider::Lrclib),
             "ytm" => Some(ManualSearchProvider::YouTubeMusic),
@@ -2876,6 +3528,48 @@ async fn search_manual_provider(
             }
             Err(error) => tracing::warn!(%error, "manual AMLL search failed"),
         },
+        ManualSearchProvider::KaraokeMugen => {
+            if let Some(filter) = karaoke_mugen_search_filter(req, false) {
+                match karaoke_mugen_search_at(KARAOKE_MUGEN_ROOT, filter).await {
+                    Ok(items) => {
+                        let mut gets = FuturesUnordered::new();
+                        for item in karaoke_mugen_manual_items(req, items) {
+                            gets.push(async move {
+                                karaoke_mugen_get_at(KARAOKE_MUGEN_ROOT, &item.kid).await
+                            });
+                        }
+                        while let Some(result) = gets.next().await {
+                            match result {
+                                Ok(Some(response)) => {
+                                    if let Some(rank) =
+                                        karaoke_mugen_manual_rank(req, &response.metadata)
+                                    {
+                                        let item = response.metadata.clone();
+                                        match karaoke_mugen_lyrics(response) {
+                                            Ok(lyrics) => candidates.push(karaoke_mugen_candidate(
+                                                req,
+                                                &item,
+                                                rank,
+                                                lyrics,
+                                                provider_priority,
+                                            )),
+                                            Err(error) => {
+                                                tracing::warn!(%error, "manual Karaoke Mugen lyrics failed")
+                                            }
+                                        }
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    tracing::warn!(%error, "manual Karaoke Mugen get failed")
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => tracing::warn!(%error, "manual Karaoke Mugen search failed"),
+                }
+            }
+        }
         ManualSearchProvider::Paxsenix => {
             for (item, metadata) in
                 select_relevant_metadata(req, itunes_song_search(req, 10).await, 2, itunes_metadata)
@@ -3977,6 +4671,494 @@ fn ttml_seconds_to_ms(seconds: f64) -> Option<u64> {
 mod tests {
     use super::*;
 
+    fn karaoke_mugen_fixture(lines: serde_json::Value) -> Lyrics {
+        // The live GET has an array of parsed lines; legacy `subfile` is not required.
+        let song: KaraokeMugenParsedSong = serde_json::from_value(serde_json::json!({
+            "kid": "synthetic-kid", "lyrics_infos": [{"filename": "synthetic.ass"}],
+            "lyrics": lines
+        }))
+        .unwrap();
+        convert_karaoke_mugen_lyrics(song).unwrap()
+    }
+
+    #[test]
+    fn karaoke_mugen_parsed_k_syllables_preserve_text_and_centiseconds() {
+        // Small synthetic counterpart of the observed array/fullText/{k} GET shape.
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 10.0, "end": 10.9, "text": "Bright stars shine!",
+            "fullText": [
+                {"text": "Bright ", "tags": [{"k": 40}], "drawing": []},
+                {"text": "stars", "tags": [{"k": 30}], "drawing": []},
+                {"text": " shine!", "tags": [{"k": 20}], "drawing": []}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!((line.time_ms, line.end_time_ms), (Some(10_000), Some(10_900)));
+        assert_eq!(line.text, "Bright stars shine!"); // `text` and `fullText` are not doubled.
+        let words = line.words.as_ref().unwrap();
+        assert_eq!(words.len(), 3);
+        assert_eq!((words[0].start_ms, words[0].end_ms), (10_000, 10_400));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (10_400, 10_700));
+        assert_eq!((words[2].start_ms, words[2].end_ms), (10_700, 10_900));
+        assert_eq!(words.iter().map(|word| word.text.as_str()).collect::<String>(), line.text);
+        assert!(lyrics.synced);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_parsed_kf_upper_k_and_ko_keep_unicode_and_punctuation() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 12.25, "end": 13.25, "text": "unused fallback",
+            "fullText": [
+                {"text": "日", "tags": [{"kf": 20}]},
+                {"text": "本 ", "tags": [{"K": 30}]},
+                {"text": "語！", "tags": [{"ko": 25}]},
+                {"text": "안녕", "tags": [{"k": 25}]}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "日本 語！안녕");
+        assert_eq!((line.time_ms, line.end_time_ms), (Some(12_250), Some(13_250)));
+        let words = line.words.as_ref().unwrap();
+        assert_eq!(
+            words.iter().map(|word| (word.start_ms, word.end_ms)).collect::<Vec<_>>(),
+            vec![(12_250, 12_450), (12_450, 12_750), (12_750, 13_000), (13_000, 13_250)]
+        );
+        assert_eq!(words.iter().map(|word| word.text.as_str()).collect::<String>(), line.text);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_whitespace_segments_preserve_display_text_without_quality_credit() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 1.0, "end": 1.7, "text": "A B",
+            "fullText": [
+                {"text": "", "tags": [{"k": 10}]},
+                {"text": "", "tags": [{"c": "red"}]},
+                {"text": "A", "tags": [{"k": 20}]},
+                {"text": " ", "tags": [{"k": 0}]},
+                {"text": "B", "tags": [{"kf": 40}]}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "A B");
+        let words = line.words.as_ref().unwrap();
+        assert_eq!(words.len(), 3);
+        assert_eq!(words.iter().map(|word| word.text.as_str()).collect::<String>(), "A B");
+        assert_eq!((words[0].start_ms, words[0].end_ms), (1_100, 1_300));
+        assert_eq!((words[1].start_ms, words[1].end_ms), (1_300, 1_300));
+        assert_eq!((words[2].start_ms, words[2].end_ms), (1_300, 1_700));
+        let quality = provider_word_quality(&lyrics);
+        assert_eq!(quality.valid_tokens, 2);
+        assert_eq!(quality.timed_text_chars, 2);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_whitespace_does_not_promote_a_single_timed_token() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 1.0, "end": 1.4, "text": "A ",
+            "fullText": [
+                {"text": "A", "tags": [{"k": 20}]},
+                {"text": " ", "tags": [{"k": 20}]}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "A ");
+        assert_eq!(
+            line.words.as_ref().unwrap().iter().map(|word| word.text.as_str()).collect::<String>(),
+            "A "
+        );
+        assert_eq!(provider_word_quality(&lyrics).valid_tokens, 1);
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_mixed_timed_and_untimed_text_falls_back_as_a_whole_line() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 2.0, "end": 3.0, "text": "A and B",
+            "fullText": [
+                {"text": "A", "tags": [{"k": 20}]},
+                {"text": " and ", "tags": []},
+                {"text": "B", "tags": [{"k": 20}]}
+            ]
+        }]));
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "A and B");
+        assert_eq!((line.time_ms, line.end_time_ms), (Some(2_000), Some(3_000)));
+        assert!(line.words.is_none());
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_unreliable_segments_fall_back_to_line_sync() {
+        let bad_parts = [
+            serde_json::json!([{"text":"A","tags":[{"k":0}]}]),
+            serde_json::json!([{"text":"A","tags":[{"k":-2}]}]),
+            serde_json::json!([{"text":"A","tags":[{"k":"bad"}]}]),
+            serde_json::json!([{"text":"A","tags":[{"unknown":40}]}]),
+            serde_json::json!([{"text":"A","tags":[]}]),
+            serde_json::json!([{"text":"A"}]),
+            serde_json::json!([{"text":"A","tags":[{"k":101}]}]),
+            serde_json::json!([{"text":"A","tags":[{"kt":10},{"k":20}]}]),
+            serde_json::json!([{"text":"A","tags":[{"k":20}],"drawing":["shape"]}]),
+            serde_json::json!([{"tags":[{"k":20}]}]),
+        ];
+        for (index, full_text) in bad_parts.into_iter().enumerate() {
+            let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+                "start": 2.0, "end": 3.0, "text": "Fallback line", "fullText": full_text
+            }]));
+            let line = &lyrics.lines[0];
+            assert_eq!(line.text, if index == 9 { "Fallback line" } else { "A" });
+            assert_eq!((line.time_ms, line.end_time_ms), (Some(2_000), Some(3_000)));
+            assert!(line.words.is_none());
+            assert!(!has_genuine_word_timings(&lyrics));
+        }
+    }
+
+    #[test]
+    fn karaoke_mugen_line_only_overlap_comments_and_markers() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([
+            {"start": 3.0, "end": 5.0, "text": "First line"},
+            {"start": 4.0, "end": 6.0, "text": "Second line", "fullText": []},
+            {"start": 4.0, "end": 5.0, "text": "hidden", "comment": true},
+            {"start": 4.0, "end": 5.0, "text": "hidden", "eventType": "Comment"},
+            {"start": 6.0, "end": 7.0, "text": "[Instrumental]", "instrumental": true, "fullText": [
+                {"text": "[Instru", "tags": [{"k": 50}]},
+                {"text": "mental]", "tags": [{"k": 50}]}
+            ]}
+        ]));
+        assert_eq!(lyrics.lines.len(), 3);
+        assert_eq!(
+            (lyrics.lines[0].time_ms, lyrics.lines[0].end_time_ms),
+            (Some(3_000), Some(5_000))
+        );
+        assert_eq!(
+            (lyrics.lines[1].time_ms, lyrics.lines[1].end_time_ms),
+            (Some(4_000), Some(6_000))
+        );
+        assert!(lyrics.lines.iter().all(|line| line.words.is_none()));
+        assert!(!has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_literal_instrumental_text_keeps_structured_timing() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 1.0, "end": 2.0, "text": "instrumental",
+            "fullText": [
+                {"text": "instru", "tags": [{"k": 50}]},
+                {"text": "mental", "tags": [{"k": 50}]}
+            ]
+        }]));
+        assert_eq!(lyrics.lines[0].text, "instrumental");
+        assert_eq!(lyrics.lines[0].words.as_ref().unwrap().len(), 2);
+        assert!(has_genuine_word_timings(&lyrics));
+    }
+
+    #[test]
+    fn karaoke_mugen_bad_line_bounds_never_make_invalid_words() {
+        let lyrics = karaoke_mugen_fixture(serde_json::json!([
+            {"start": 8.0, "end": 7.0, "text": "Backwards", "fullText": [
+                {"text": "Back", "tags": [{"k": 40}]}, {"text": "wards", "tags": [{"k": 40}]}
+            ]},
+            {"start": -1.0, "end": 2.0, "text": "Bad start"},
+            {"start": 1000000.0, "end": 1000001.0, "text": "Huge start"}
+        ]));
+        assert_eq!(lyrics.lines[0].time_ms, Some(8_000));
+        assert_eq!(lyrics.lines[0].end_time_ms, None);
+        assert!(lyrics.lines[0].words.is_none());
+        assert!(lyrics.lines[1].time_ms.is_none());
+        assert!(lyrics.lines[2].time_ms.is_none());
+        assert!(lyrics.lines.iter().all(|line| line.words.is_none()));
+    }
+
+    const KARAOKE_MUGEN_TEST_KID: &str = "c970d6d1-f485-4001-8d89-7bdd8f06a294";
+
+    fn karaoke_mugen_request(title: &str, artist: &str) -> LyricsRequest {
+        LyricsRequest {
+            video_id: String::new(),
+            title: title.into(),
+            artists: artist.into(),
+            album: None,
+            duration: None,
+        }
+    }
+
+    fn karaoke_mugen_test_item(kid: &str, title: &str, singer: &str) -> KaraokeMugenCatalogItem {
+        serde_json::from_value(serde_json::json!({
+            "kid": kid,
+            "titles": {"eng": title},
+            "singers": [{"name": singer}],
+            "duration": 232,
+            "lyrics_infos": [{"filename": "song.ass"}]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn karaoke_mugen_live_style_search_schema_and_metadata() {
+        let payload: KaraokeMugenSearchResponse = serde_json::from_value(serde_json::json!({
+            "infos": {"count": 1, "from": 0, "to": 1},
+            "i18n": {},
+            "content": [{
+                "kid": KARAOKE_MUGEN_TEST_KID,
+                "titles": {"eng": "With Glory I Shall Fall", "jpn": "栄光の歌"},
+                "titles_default_language": "eng",
+                "titles_aliases": ["Glory Shall Fall"],
+                "singers": [{"name": "Thena A"}],
+                "series": [{"name": "Wuthering Waves"}],
+                "franchises": [{"name": "Wuthering"}],
+                "langs": [{"name": "eng"}],
+                "songtypes": [{"name": "IN"}],
+                "origins": [{"name": "Video Game"}],
+                "platforms": null,
+                "authors": [{"name": "Evolto"}],
+                "versions": null,
+                "year": 2025,
+                "duration": 232,
+                "lyrics_infos": [{"default": true, "version": "Default", "filename": "song.ass"}]
+            }]
+        }))
+        .unwrap();
+        let item = &payload.content[0];
+        assert_eq!(item.kid, KARAOKE_MUGEN_TEST_KID);
+        assert_eq!(item.titles["eng"], "With Glory I Shall Fall");
+        assert_eq!(item.titles_aliases, ["Glory Shall Fall"]);
+        assert_eq!(item.singers[0].name, "Thena A");
+        assert_eq!(item.series[0].name, "Wuthering Waves");
+        assert_eq!(item.franchises[0].name, "Wuthering");
+        assert_eq!(item.duration, Some(232.0));
+        let metadata = karaoke_mugen_metadata(
+            &karaoke_mugen_request("With Glory I Shall Fall", "Thena A"),
+            item,
+        );
+        assert_eq!(metadata.title.as_deref(), Some("With Glory I Shall Fall"));
+        assert_eq!(metadata.artist.as_deref(), Some("Thena A"));
+        assert_eq!(metadata.album, None);
+        assert_eq!(metadata.duration, Some(232.0));
+        let omitted: KaraokeMugenSearchResponse = serde_json::from_value(serde_json::json!({
+            "content": [{"kid": KARAOKE_MUGEN_TEST_KID, "titles": {"eng": "Title"},
+                "titles_aliases": null, "series": null, "singers": null, "lyrics_infos": null}]
+        }))
+        .unwrap();
+        assert!(omitted.content[0].singers.is_empty());
+        assert!(karaoke_mugen_validate_metadata(&omitted.content[0]).is_ok());
+    }
+
+    #[test]
+    fn karaoke_mugen_automatic_requires_exact_title_alias_and_singer() {
+        let req = karaoke_mugen_request("With Glory I Shall Fall", "Thena A");
+        let mut exact =
+            karaoke_mugen_test_item(KARAOKE_MUGEN_TEST_KID, "With Glory I Shall Fall", "Thena A");
+        exact.series = vec![KaraokeMugenTag { name: "Wuthering Waves".into(), aliases: vec![] }];
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![exact.clone()]), Some(exact.kid.clone()));
+        let mut alias = exact.clone();
+        alias.titles = [("jpn".into(), "栄光の歌".into())].into();
+        alias.titles_aliases = vec!["With Glory I Shall Fall".into()];
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![alias]), Some(exact.kid.clone()));
+        let mut weak = exact.clone();
+        weak.titles = [("eng".into(), "With Glory".into())].into();
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![weak]), None);
+        let mut same_series = exact.clone();
+        same_series.titles = [("eng".into(), "Different song".into())].into();
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![same_series]), None);
+        let mut wrong_singer = exact.clone();
+        wrong_singer.singers =
+            vec![KaraokeMugenTag { name: "Other Singer".into(), aliases: vec![] }];
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![wrong_singer]), None);
+        assert_eq!(
+            karaoke_mugen_automatic_id(
+                &karaoke_mugen_request("With Glory", "Wuthering Waves"),
+                vec![exact]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn karaoke_mugen_automatic_matches_complete_artist_components() {
+        let item =
+            karaoke_mugen_test_item(KARAOKE_MUGEN_TEST_KID, "With Glory I Shall Fall", "Thena A");
+        for artists in [
+            "Thena A, Another Artist & Third Singer",
+            "Thena A feat. Another Artist",
+            "Thena A featuring Another Artist",
+            "Thena A ft. Another Artist",
+            "Thena A x Another Artist",
+            "Thena A × Another Artist",
+            "Thena A; Another Artist",
+        ] {
+            let req = karaoke_mugen_request("With Glory I Shall Fall", artists);
+            assert!(karaoke_mugen_automatic_matches(&req, &item), "{artists}");
+            assert_eq!(
+                karaoke_mugen_automatic_id(&req, vec![item.clone()]),
+                Some(item.kid.clone())
+            );
+        }
+
+        let waves = karaoke_mugen_test_item(KARAOKE_MUGEN_TEST_KID, "Song", "Wuthering Waves");
+        assert!(!karaoke_mugen_automatic_matches(&karaoke_mugen_request("Song", "Wave"), &waves));
+        let vision = karaoke_mugen_test_item(KARAOKE_MUGEN_TEST_KID, "Song", "VISION SOUND");
+        assert!(!karaoke_mugen_automatic_matches(
+            &karaoke_mugen_request("Song", "Vision"),
+            &vision
+        ));
+    }
+
+    #[test]
+    fn karaoke_mugen_context_requires_title_duration_and_unique_row() {
+        let mut item =
+            karaoke_mugen_test_item(KARAOKE_MUGEN_TEST_KID, "With Glory I Shall Fall", "Thena A");
+        item.series = vec![KaraokeMugenTag { name: "Wuthering Waves".into(), aliases: vec![] }];
+        item.franchises = vec![KaraokeMugenTag { name: "Wuthering".into(), aliases: vec![] }];
+
+        let mut req = karaoke_mugen_request("With Glory I Shall Fall", "Wuthering Waves");
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![item.clone()]), None);
+        req.duration = Some(232.0);
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![item.clone()]), Some(item.kid.clone()));
+        assert_eq!(karaoke_mugen_metadata(&req, &item).artist.as_deref(), Some("Thena A"));
+
+        req.title = "Another song".into();
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![item.clone()]), None);
+        req.title = "With Glory I Shall Fall".into();
+        req.artists = "Unrelated studio".into();
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![item.clone()]), None);
+        req.artists = "Wuthering Waves".into();
+        req.duration = Some(250.0);
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![item.clone()]), None);
+        req.duration = Some(232.0);
+
+        let mut another = item.clone();
+        another.kid = "00000000-0000-0000-0000-000000000002".into();
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![item, another]), None);
+    }
+
+    #[test]
+    fn karaoke_mugen_automatic_rejects_ambiguous_versions_without_distinct_duration() {
+        let req = karaoke_mugen_request("WHITE NIGHT", "Jake Miller");
+        let first = karaoke_mugen_test_item(
+            "00000000-0000-0000-0000-000000000001",
+            "WHITE NIGHT",
+            "Jake Miller",
+        );
+        let mut second = karaoke_mugen_test_item(
+            "00000000-0000-0000-0000-000000000002",
+            "WHITE NIGHT",
+            "Jake Miller",
+        );
+        assert_eq!(karaoke_mugen_automatic_id(&req, vec![first.clone(), second.clone()]), None);
+        assert_eq!(
+            karaoke_mugen_automatic_id(&req, vec![first.clone(), first.clone()]),
+            Some(first.kid.clone())
+        );
+        let mut context_req = karaoke_mugen_request("WHITE NIGHT", "Jake Miller");
+        context_req.album = Some("Wuthering Waves".into());
+        let mut contextual = first.clone();
+        contextual.series =
+            vec![KaraokeMugenTag { name: "Wuthering Waves".into(), aliases: vec![] }];
+        assert_eq!(
+            karaoke_mugen_automatic_id(&context_req, vec![contextual, second.clone()]),
+            Some(first.kid.clone())
+        );
+        let mut timed = req;
+        timed.duration = Some(232.0);
+        second.duration = None;
+        assert_eq!(karaoke_mugen_automatic_id(&timed, vec![first.clone(), second.clone()]), None);
+        second.duration = Some(260.0);
+        assert_eq!(
+            karaoke_mugen_automatic_id(&timed, vec![first, second]),
+            Some("00000000-0000-0000-0000-000000000001".into())
+        );
+    }
+
+    #[test]
+    fn karaoke_mugen_manual_partial_artist_series_and_kid_dedupe() {
+        let mut item =
+            karaoke_mugen_test_item(KARAOKE_MUGEN_TEST_KID, "With Glory I Shall Fall", "Thena A");
+        item.series = vec![KaraokeMugenTag { name: "Wuthering Waves".into(), aliases: vec![] }];
+        item.franchises = vec![KaraokeMugenTag { name: "Wuthering".into(), aliases: vec![] }];
+        assert!(karaoke_mugen_manual_rank(&karaoke_mugen_request("Glory", ""), &item).is_some());
+        assert!(karaoke_mugen_manual_rank(&karaoke_mugen_request("", "Thena A"), &item).is_some());
+        assert!(karaoke_mugen_manual_rank(&karaoke_mugen_request("Wuthering Waves", ""), &item)
+            .is_some());
+        let req = karaoke_mugen_request("With Glory I Shall Fall", "Wuthering Waves");
+        let rank = karaoke_mugen_manual_rank(&req, &item).unwrap();
+        assert_eq!(rank.tier, 2); // Series supports manual discovery, never automatic admission.
+        assert!(!karaoke_mugen_automatic_matches(&req, &item));
+        let rows = vec![item.clone(), item.clone(), item.clone(), item.clone()];
+        assert_eq!(karaoke_mugen_manual_items(&req, rows).len(), 1);
+        let more: Vec<_> = (1..=5)
+            .map(|index| {
+                let mut row = item.clone();
+                row.kid = format!("00000000-0000-0000-0000-{index:012}");
+                row
+            })
+            .collect();
+        assert_eq!(karaoke_mugen_manual_items(&req, more).len(), KARAOKE_MUGEN_CANDIDATE_LIMIT);
+        let lyrics =
+            from_parsed(KARAOKE_MUGEN_SOURCE, vec![LyricLine::simple(Some(1000), "Line".into())])
+                .unwrap();
+        let mut second = item.clone();
+        second.kid = "00000000-0000-0000-0000-000000000002".into();
+        let candidates = finish_ranked_candidates(vec![
+            karaoke_mugen_candidate(&req, &item, rank, lyrics.clone(), 1),
+            karaoke_mugen_candidate(&req, &item, rank, lyrics.clone(), 1),
+            karaoke_mugen_candidate(&req, &second, rank, lyrics, 1),
+        ]);
+        assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn karaoke_mugen_get_uses_existing_converter_and_global_candidate_ranking() {
+        let response: KaraokeMugenGetResponse = serde_json::from_value(serde_json::json!({
+            "kid": KARAOKE_MUGEN_TEST_KID,
+            "titles": {"eng": "With Glory I Shall Fall"},
+            "singers": [{"name": "Thena A"}],
+            "series": [{"name": "Wuthering Waves"}],
+            "lyrics_infos": [{"filename": "song.ass"}],
+            "lyrics": [{"start": 1.0, "end": 2.0, "text": "A B", "fullText": [
+                {"text": "A ", "tags": [{"k": 50}], "drawing": []},
+                {"text": "B", "tags": [{"kf": 50}], "drawing": []}
+            ]}]
+        }))
+        .unwrap();
+        let req = karaoke_mugen_request("With Glory I Shall Fall", "Thena A");
+        let rank = karaoke_mugen_manual_rank(&req, &response.metadata).unwrap();
+        let item = response.metadata.clone();
+        let lyrics = karaoke_mugen_lyrics(response).unwrap();
+        assert_eq!(lyrics.source, KARAOKE_MUGEN_SOURCE);
+        assert!(has_genuine_word_timings(&lyrics));
+        assert!(!positive_lyrics_cache_allowed(&lyrics));
+        let candidate = karaoke_mugen_candidate(&req, &item, rank, lyrics, 2);
+        let ranked = finish_ranked_candidates(vec![candidate]);
+        assert_eq!(ranked[0].id, format!("karaokemugen-{KARAOKE_MUGEN_TEST_KID}"));
+        assert_eq!(ranked[0].title.as_deref(), Some("With Glory I Shall Fall"));
+        assert_eq!(ranked[0].artist.as_deref(), Some("Thena A"));
+        assert_eq!(ranked[0].album, None);
+        assert!(ranked[0].has_words);
+        assert_eq!(ranked[0].lyrics.lines[0].text, "A B");
+        let line_only: KaraokeMugenGetResponse = serde_json::from_value(serde_json::json!({
+            "kid": KARAOKE_MUGEN_TEST_KID, "titles": {"eng": "Title"},
+            "lyrics": [{"start": 1.0, "end": 2.0, "text": "Line only"}]
+        }))
+        .unwrap();
+        let line_lyrics = karaoke_mugen_lyrics(line_only).unwrap();
+        assert!(line_lyrics.synced);
+        assert!(!has_genuine_word_timings(&line_lyrics));
+        let malformed: KaraokeMugenGetResponse = serde_json::from_value(serde_json::json!({
+            "kid": KARAOKE_MUGEN_TEST_KID, "titles": {"eng": "Title"},
+            "lyrics": [{"start": -1.0, "end": 2.0, "text": "Bad timing"}]
+        }))
+        .unwrap();
+        assert!(karaoke_mugen_lyrics(malformed).is_err());
+        let bad_end: KaraokeMugenGetResponse = serde_json::from_value(serde_json::json!({
+            "kid": KARAOKE_MUGEN_TEST_KID, "titles": {"eng": "Title"},
+            "lyrics": [{"start": 2.0, "end": 1.0, "text": "Bad end"}]
+        }))
+        .unwrap();
+        assert!(karaoke_mugen_lyrics(bad_end).is_err());
+    }
+
     #[test]
     fn lyric_candidate_serialization_matches_ui_contract() {
         let candidate = LyricCandidate {
@@ -4325,6 +5507,126 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn karaoke_mugen_http_search_has_bounded_filter_and_error_semantics() {
+        let body = serde_json::json!({"infos": {"count": 1}, "content": [{
+            "kid": KARAOKE_MUGEN_TEST_KID,
+            "titles": {"eng": "With Glory I Shall Fall"},
+            "singers": [{"name": "Thena A"}],
+            "lyrics_infos": [{"filename": "song.ass"}]
+        }]})
+        .to_string();
+        let (base, request) = amll_mock("200 OK", &body);
+        let items = karaoke_mugen_search_at(&base, "With Glory I Shall Fall").await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kid, KARAOKE_MUGEN_TEST_KID);
+        let request = request.recv().unwrap();
+        assert!(request.contains("/karas/search?"));
+        assert!(request.contains("filter=With+Glory+I+Shall+Fall"));
+        assert!(request.contains("from=0"));
+        assert!(request.contains("size=10"));
+        assert!(!request.contains("artistName="));
+        assert_eq!(
+            karaoke_mugen_search_filter(&karaoke_mugen_request("Title", "Artist"), true),
+            Some("Title")
+        );
+        assert_eq!(
+            karaoke_mugen_search_filter(&karaoke_mugen_request("", "Artist"), false),
+            Some("Artist")
+        );
+        assert_eq!(karaoke_mugen_search_filter(&karaoke_mugen_request("", "Artist"), true), None);
+        assert_eq!(karaoke_mugen_search_filter(&karaoke_mugen_request("", ""), false), None);
+
+        for (status, body, error) in [
+            ("200 OK", r#"{"infos":{"count":0},"content":[]}"#, false),
+            ("404 Not Found", "{}", false),
+            ("429 Too Many Requests", "{}", true),
+            ("500 Internal Server Error", "{}", true),
+            ("200 OK", "not json", true),
+            ("200 OK", r#"{"content":[{"kid":"bad","titles":{"eng":"Title"}}]}"#, true),
+            ("200 OK", r#"{"content":[{"kid":"00000000-0000-0000-0000-000000000001"}]}"#, true),
+        ] {
+            let (base, _) = amll_mock(status, body);
+            let result = karaoke_mugen_search_at(&base, "Title").await;
+            assert_eq!(result.is_err(), error, "status {status}, body {body}");
+            if !error {
+                assert!(result.unwrap().is_empty());
+            }
+        }
+        assert!(whole_chain_miss_cacheable(true, false, false));
+        assert!(!whole_chain_miss_cacheable(true, false, true));
+    }
+
+    #[tokio::test]
+    async fn karaoke_mugen_http_get_uses_exact_kid_and_rejects_unusable_lyrics() {
+        let body = serde_json::json!({
+            "kid": KARAOKE_MUGEN_TEST_KID,
+            "titles": {"eng": "With Glory I Shall Fall"},
+            "singers": [{"name": "Thena A"}],
+            "lyrics_infos": [{"filename": "song.ass"}],
+            "lyrics": [{"start": 1.0, "end": 2.0, "text": "A B", "fullText": [
+                {"text": "A ", "tags": [{"k": 50}]},
+                {"text": "B", "tags": [{"k": 50}]}
+            ]}]
+        })
+        .to_string();
+        let (base, request) = amll_mock("200 OK", &body);
+        let response = karaoke_mugen_get_at(&base, KARAOKE_MUGEN_TEST_KID).await.unwrap().unwrap();
+        assert_eq!(response.metadata.kid, KARAOKE_MUGEN_TEST_KID);
+        assert!(has_genuine_word_timings(&karaoke_mugen_lyrics(response).unwrap()));
+        assert!(request.recv().unwrap().contains(&format!("/karas/{KARAOKE_MUGEN_TEST_KID}")));
+        let (base, _) = amll_mock("404 Not Found", "{}");
+        assert!(karaoke_mugen_get_at(&base, KARAOKE_MUGEN_TEST_KID).await.unwrap().is_none());
+        let (base, _) = amll_mock("200 OK", "not json");
+        assert!(karaoke_mugen_get_at(&base, KARAOKE_MUGEN_TEST_KID).await.is_err());
+        let mismatch = body.replace(KARAOKE_MUGEN_TEST_KID, "00000000-0000-0000-0000-000000000001");
+        let (base, _) = amll_mock("200 OK", &mismatch);
+        assert!(karaoke_mugen_get_at(&base, KARAOKE_MUGEN_TEST_KID).await.is_err());
+        assert!(karaoke_mugen_get_at(&base, "../bad").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn karaoke_mugen_automatic_http_resolves_only_the_selected_kid() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let search = serde_json::json!({"content": [{
+            "kid": KARAOKE_MUGEN_TEST_KID,
+            "titles": {"eng": "With Glory I Shall Fall"},
+            "singers": [{"name": "Thena A"}],
+            "series": [{"name": "Wuthering Waves"}]
+        }]})
+        .to_string();
+        let get = serde_json::json!({
+            "kid": KARAOKE_MUGEN_TEST_KID,
+            "titles": {"eng": "With Glory I Shall Fall"},
+            "singers": [{"name": "Thena A"}],
+            "lyrics_infos": [{"filename": "song.ass"}],
+            "lyrics": [{"start": 1.0, "end": 2.0, "text": "A B", "fullText": [
+                {"text": "A ", "tags": [{"k": 50}]},
+                {"text": "B", "tags": [{"k": 50}]}
+            ]}]
+        })
+        .to_string();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for body in [search, get] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+                let mut buffer = [0u8; 8192];
+                let count = stream.read(&mut buffer).unwrap();
+                sender.send(String::from_utf8_lossy(&buffer[..count]).into_owned()).unwrap();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let req = karaoke_mugen_request("With Glory I Shall Fall", "Thena A");
+        let lyrics = karaoke_mugen_get_from(&base, &req).await.unwrap().unwrap();
+        assert!(has_genuine_word_timings(&lyrics));
+        assert!(!positive_lyrics_cache_allowed(&lyrics));
+        assert!(receiver.recv().unwrap().contains("/karas/search?"));
+        assert!(receiver.recv().unwrap().contains(&format!("/karas/{KARAOKE_MUGEN_TEST_KID}")));
+    }
+
+    #[tokio::test]
     async fn amll_http_search_distinguishes_misses_from_provider_errors() {
         let req = amll_request("Provider Title", "Provider Artist");
         let empty = r#"{"status":200,"data":{"items":[],"pagination":{"page":1,"pageSize":10,"total":0,"totalPages":0,"hasMore":false}}}"#;
@@ -4622,6 +5924,100 @@ mod tests {
         assert_eq!(ranked[0].id, "exact-line");
         assert!(!ranked[0].has_words);
         assert!(ranked[1].has_words);
+    }
+
+    #[test]
+    fn manual_ranking_prefers_genuine_timing_within_same_duration_confidence() {
+        let mut req = karaoke_mugen_request("With Glory I Shall Fall", "Thena A");
+        req.duration = Some(232.0);
+        let metadata = |duration| {
+            CandidateMetadata::canonical(
+                Some("With Glory I Shall Fall".into()),
+                Some("Thena A".into()),
+                None,
+                Some(duration),
+            )
+        };
+        let words = karaoke_mugen_fixture(serde_json::json!([{
+            "start": 1.0, "end": 2.0, "text": "A B", "fullText": [
+                {"text": "A ", "tags": [{"k": 50}]},
+                {"text": "B", "tags": [{"k": 50}]}
+            ]
+        }]));
+        assert!(has_genuine_word_timings(&words));
+        let line = from_parsed("Line Provider", parse_lrc("[00:01.00]A B")).unwrap();
+        let plain = plain_from_text(Some("A B"), "Plain Provider").unwrap();
+
+        let word_candidate = rank_candidate(
+            &req,
+            "word".into(),
+            "Word Provider".into(),
+            "word".into(),
+            9,
+            metadata(233.4),
+            words.clone(),
+        )
+        .unwrap();
+        let line_candidate = rank_candidate(
+            &req,
+            "line".into(),
+            "Line Provider".into(),
+            "line".into(),
+            0,
+            metadata(232.1),
+            line.clone(),
+        )
+        .unwrap();
+        let ranked = finish_ranked_candidates(vec![line_candidate, word_candidate]);
+        assert_eq!(ranked[0].id, "word");
+        assert!(ranked[0].has_words);
+
+        let line_candidate = rank_candidate(
+            &req,
+            "line".into(),
+            "Line Provider".into(),
+            "line".into(),
+            9,
+            metadata(232.1),
+            line.clone(),
+        )
+        .unwrap();
+        let plain_candidate = rank_candidate(
+            &req,
+            "plain".into(),
+            "Plain Provider".into(),
+            "plain".into(),
+            0,
+            metadata(232.0),
+            plain,
+        )
+        .unwrap();
+        let ranked = finish_ranked_candidates(vec![plain_candidate, line_candidate]);
+        assert_eq!(ranked[0].id, "line");
+        assert!(!ranked[0].has_words);
+
+        let distant_word = rank_candidate(
+            &req,
+            "distant-word".into(),
+            "Word Provider".into(),
+            "word".into(),
+            0,
+            metadata(240.0),
+            words,
+        )
+        .unwrap();
+        let close_line = rank_candidate(
+            &req,
+            "close-line".into(),
+            "Line Provider".into(),
+            "line".into(),
+            9,
+            metadata(232.1),
+            line,
+        )
+        .unwrap();
+        let ranked = finish_ranked_candidates(vec![distant_word, close_line]);
+        assert_eq!(ranked[0].id, "close-line");
     }
 
     #[test]
@@ -5424,6 +6820,7 @@ mod tests {
             vec![
                 "betterlyrics",
                 "amll",
+                "karaokemugen",
                 "youlyplus",
                 "unison",
                 "paxsenix",
@@ -5438,9 +6835,10 @@ mod tests {
         db.set_setting("lyrics_providers", "lrclib, betterlyrics, kugou");
         assert_eq!(resolve_providers(&db), vec!["lrclib", "betterlyrics", "kugou"]);
         assert!(!resolve_providers(&db).iter().any(|provider| provider == "amll"));
+        assert!(!resolve_providers(&db).iter().any(|provider| provider == "karaokemugen"));
 
-        db.set_setting("lyrics_providers", "amll, lrclib");
-        assert_eq!(resolve_providers(&db), vec!["amll", "lrclib"]);
+        db.set_setting("lyrics_providers", "karaokemugen, amll, lrclib");
+        assert_eq!(resolve_providers(&db), vec!["karaokemugen", "amll", "lrclib"]);
 
         // JSON list
         db.set_setting("lyrics_providers", "[\"ytm\", \"qq\"]");
@@ -5463,15 +6861,17 @@ mod tests {
             format: "lrc".into(),
             enabled: false,
         };
-        let configured = vec!["lrclib".into(), "amll".into(), "unison".into()];
+        let configured =
+            vec!["lrclib".into(), "karaokemugen".into(), "amll".into(), "unison".into()];
 
         let providers = manual_search_providers(&configured, vec![custom_enabled, custom_disabled]);
         let keys: Vec<_> = providers.iter().map(|(provider, _)| provider.key()).collect();
 
-        assert_eq!(keys, vec!["lrclib", "amll", "unison", "custom-enabled"]);
+        assert_eq!(keys, vec!["lrclib", "karaokemugen", "amll", "unison", "custom-enabled"]);
         assert_eq!(providers[1].1, 1);
         let disabled = manual_search_providers(&["lrclib".into()], Vec::new());
         assert!(!disabled.iter().any(|(provider, _)| provider.key() == "amll"));
+        assert!(!disabled.iter().any(|(provider, _)| provider.key() == "karaokemugen"));
         assert!(!keys.contains(&"qq"));
         assert!(!keys.contains(&"custom-disabled"));
     }
@@ -5550,6 +6950,19 @@ mod tests {
             .and_then(|entry| entry)
             .and_then(|json| deserialize_cached_lyrics(&json));
         assert_eq!(stored.map(|lyrics| lyrics.source), Some("LRCLIB".into()));
+    }
+
+    #[test]
+    fn karaoke_mugen_positive_result_is_not_persisted() {
+        let db = crate::db::Db::open(std::path::Path::new(":memory:")).unwrap();
+        let lyrics = from_parsed(
+            KARAOKE_MUGEN_SOURCE,
+            vec![LyricLine::simple(Some(1000), "Provider lyric".into())],
+        )
+        .unwrap();
+        assert!(!positive_lyrics_cache_allowed(&lyrics));
+        assert!(!persist_selected_lyrics(&db, "karaoke-track", &lyrics));
+        assert!(db.get_lyrics("karaoke-track", now_secs(), MISS_TTL_SECS).is_none());
     }
 
     #[test]
