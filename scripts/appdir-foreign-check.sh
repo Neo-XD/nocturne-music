@@ -75,7 +75,9 @@ for tool in xvfb-run dbus-run-session ldd python3; do
 done
 
 step "ldd -r: every load-time symbol resolves"
-LD_LIBRARY_PATH="$APPDIR/usr/lib" ldd -r "$BIN" 2>&1 \
+LDPATH="$APPDIR/usr/lib"
+[ -d "$APPDIR/usr/lib/gnutls-fallback" ] && LDPATH="$LDPATH:$APPDIR/usr/lib/gnutls-fallback"
+LD_LIBRARY_PATH="$LDPATH" ldd -r "$BIN" 2>&1 \
   | grep -E 'not found|undefined symbol' | sort -u > /tmp/ldd.txt
 if [ -s /tmp/ldd.txt ]; then sed 's/^/   /' /tmp/ldd.txt; bad "unresolved symbols in $BIN"
 else echo "   clean"; fi
