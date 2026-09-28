@@ -2,7 +2,7 @@
 //! a videoId. Gapless via mpv's internal playlist or true dual-deck overlapping crossfade.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicI8, AtomicI64, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicI8, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use libmpv2::events::{Event, EventContext, PropertyData};
@@ -125,11 +125,7 @@ impl Deck {
         mpv.set_property("demuxer-readahead-secs", 120.0_f64)?;
         let mpv = Arc::new(mpv);
 
-        Ok(Deck {
-            id,
-            mpv,
-            af: std::sync::Mutex::new(AudioFilters::default()),
-        })
+        Ok(Deck { id, mpv, af: std::sync::Mutex::new(AudioFilters::default()) })
     }
 
     fn apply_af(&self) -> Result<(), Error> {
@@ -725,9 +721,7 @@ fn deck_event_loop(
                         ..
                     } => Some(InternalDeckEvent::Duration { deck_id, dur: d }),
                     Event::PropertyChange {
-                        name: "pause",
-                        change: PropertyData::Flag(p),
-                        ..
+                        name: "pause", change: PropertyData::Flag(p), ..
                     } => {
                         paused = p;
                         None
@@ -760,10 +754,10 @@ fn deck_event_loop(
                 }
             }
             Some(Err(e)) => {
-                if tx.send(InternalDeckEvent::TrackFailed {
-                    deck_id,
-                    error: friendly_error(&e),
-                }).is_err() {
+                if tx
+                    .send(InternalDeckEvent::TrackFailed { deck_id, error: friendly_error(&e) })
+                    .is_err()
+                {
                     break;
                 }
             }

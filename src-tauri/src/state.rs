@@ -1979,11 +1979,9 @@ impl AppState {
         // Headers are global in mpv; the direct-URL clients need none beyond UA, which the
         // current track already set. Just append the URL.
         let stream_url = mpv_stream_url(&data);
-        if let Err(e) = self.player.enqueue_track(
-            &stream_url,
-            &data.headers,
-            loudness_gain(data.loudness_db),
-        ) {
+        if let Err(e) =
+            self.player.enqueue_track(&stream_url, &data.headers, loudness_gain(data.loudness_db))
+        {
             tracing::warn!(error = %e, "enqueue lookahead failed");
             return;
         }
