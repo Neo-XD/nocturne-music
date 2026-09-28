@@ -6,16 +6,21 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
-	import { createLibraryPlaylist, spotify, toast } from '$lib/player.svelte';
+	import { auth, createLibraryPlaylist, spotify, toast } from '$lib/player.svelte';
 
 	let {
 		open = $bindable(false),
+		initialPlatform,
 		onCreated
 	}: {
 		open: boolean;
+		initialPlatform?: 'ytm' | 'spotify';
 		onCreated?: (playlistId: string) => void;
 	} = $props();
 
+	let defaultPlatform = $derived<'ytm' | 'spotify'>(
+		initialPlatform ?? (!auth.account?.signedIn && spotify.status.linked ? 'spotify' : 'ytm')
+	);
 	let platform = $state<'ytm' | 'spotify'>('ytm');
 	let title = $state('');
 	let description = $state('');
@@ -25,8 +30,9 @@
 	let creating = $state(false);
 
 	$effect(() => {
-		if (!open) {
-			platform = 'ytm';
+		if (open) {
+			platform = defaultPlatform;
+		} else {
 			title = '';
 			description = '';
 			isPublic = false;
@@ -95,7 +101,7 @@
 				handleCreate();
 			}}
 		>
-			{#if spotify.status.linked}
+			{#if spotify.status.linked && auth.account?.signedIn}
 				<div class="flex items-center gap-2">
 					<span class="text-xs font-medium text-muted-foreground">Platform:</span>
 					<div class="inline-flex rounded-lg bg-muted/60 p-0.5 text-xs">
@@ -122,6 +128,16 @@
 							Spotify
 						</button>
 					</div>
+				</div>
+			{:else if spotify.status.linked && !auth.account?.signedIn}
+				<div class="flex items-center gap-2 text-xs text-muted-foreground">
+					<span>Platform:</span>
+					<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#1ed760]/15 text-[#1ed760] font-semibold">
+						<svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+							<path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10 5.524 0 10-4.476 10-10 0-5.523-4.476-10-10-10zm4.586 14.424a.627.627 0 0 1-.86.208c-2.355-1.439-5.32-1.765-8.812-.966a.625.625 0 0 1-.277-1.22c3.824-.874 7.099-.508 9.74 1.107.292.179.387.568.209.871zm1.226-2.723a.784.784 0 0 1-1.077.26c-2.695-1.656-6.804-2.136-9.992-1.168a.785.785 0 1 1-.462-1.501c3.642-1.106 8.188-.574 11.27 1.321a.784.784 0 0 1 .261 1.088zm.105-2.833c-3.232-1.919-8.566-2.096-11.657-1.157a.94.94 0 1 1-.552-1.8c3.553-1.078 9.444-.87 13.14 1.323a.94.94 0 0 1-.931 1.634z"/>
+						</svg>
+						Spotify
+					</span>
 				</div>
 			{/if}
 

@@ -191,6 +191,11 @@ export const ON_REPEAT_ID = 'LIMUSIC_ON_REPEAT';
 export const LIKED_MUSIC_ID = 'VLLM';
 
 /**
+ * Spotify Liked Songs browse ID. Handled via backend `fetch_spotify_liked_tracks`.
+ */
+export const SPOTIFY_LIKED_ID = 'sp_liked';
+
+/**
  * YouTube Music's own Library ▸ Songs, despite the name: the songs saved to the account's library.
  * It browses like a playlist (no header, no sort menu), so `getPlaylist` reads it and the Library
  * page's Songs tab pages through it with `getPlaylistMore`.
@@ -1014,6 +1019,8 @@ export const spotifyGetPlaylists = () =>
 	invoke<SpotifyPlaylistSummary[]>('spotify_get_playlists');
 export const spotifyGetPlaylist = (spotifyPlaylistId: string) =>
 	invoke<PlaylistPage>('spotify_get_playlist', { spotifyPlaylistId });
+export const spotifyGetLikedSongs = (offset?: number, limit?: number) =>
+	invoke<PlaylistPage>('spotify_get_liked_songs', { offset, limit });
 export const spotifyTransferToYtm = (spotifyPlaylistId: string) =>
 	invoke<string>('spotify_transfer_to_ytm', { spotifyPlaylistId });
 export const ytmTransferToSpotify = (ytmPlaylistId: string) =>

@@ -54,13 +54,22 @@
 		renamePlaylistFolder,
 		deletePlaylistFolder,
 		movePlaylistToFolder,
-		moveFolderToFolder
+		moveFolderToFolder,
+		spotify,
+		loadSpotifyPlaylists
 	} from '$lib/player.svelte';
 	import { PLAYLIST_DND_MIME, FOLDER_DND_MIME } from '$lib/dnd';
 	import { mergeSaved, unsynced } from '$lib/personal';
 	import { reveal } from '$lib/reveal.svelte';
 
 	let dialogOpen = $state(false);
+	let dialogInitialPlatform = $state<'ytm' | 'spotify' | undefined>(undefined);
+	let songsPlatform = $state<'ytm' | 'spotify'>('ytm');
+	$effect(() => {
+		if (!auth.account?.signedIn && spotify.status.linked) {
+			songsPlatform = 'spotify';
+		}
+	});
 	// `?tab=local` so anything that sends you back here (an album whose files were deleted) lands
 	// on the tab you came from instead of a sign-in prompt.
 	let tab = $state(page.url.searchParams.get('tab') ?? lastTab);
@@ -83,6 +92,28 @@
 	const rvPlaylists = reveal();
 	const rvAlbums = reveal();
 	const rvArtists = reveal();
+	const rvSpotify = reveal();
+
+	const spotifyPlaylistItems = $derived<BrowseItem[]>([
+		...(spotify.status.linked
+			? [
+					{
+						kind: 'playlist' as const,
+						id: 'sp_liked',
+						title: 'Liked Songs',
+						subtitle: 'Spotify Liked Songs',
+						thumbnail: undefined
+					}
+			  ]
+			: []),
+		...spotify.playlists.map((pl) => ({
+			kind: 'playlist' as const,
+			id: `sp_${pl.id}`,
+			title: pl.title,
+			subtitle: pl.subtitle || 'Spotify Playlist',
+			thumbnail: pl.thumbnail ?? undefined
+		}))
+	]);
 	const loading = $derived((library.loading || library.extrasLoading) && !all.length);
 	const error = $derived(library.error ?? library.extrasError);
 	// Only the empty states differ: signed out there is no account library to be missing yet.
@@ -236,15 +267,9 @@
 <div class="p-6">
 	<div class="mb-6 flex items-center justify-between">
 		<h1 class="font-heading text-2xl font-bold">Library</h1>
-		{#if auth.account?.signedIn}
+		{#if auth.account?.signedIn || spotify.status.linked}
 			<div class="flex items-center gap-2">
-				<!-- Only with something to push: saves made before signing in, which live on this
-				     machine until this button puts them on the account. -->
-				{#if toSync.length}
-					<!-- A cloud glyph with a number on it says nothing about what pressing it does, and
-					     that's a write to someone's YouTube account. Hence a real tooltip rather than the
-					     `title` this app uses elsewhere: it has to be read before the click, not after a
-					     second of hovering. `child` keeps our own Button as the trigger element. -->
+				{#if auth.account?.signedIn && toSync.length}
 					<Tooltip.Provider delayDuration={150}>
 						<Tooltip.Root>
 							<Tooltip.Trigger>
@@ -284,7 +309,15 @@
 				<Button variant="outline" size="sm" class="gap-2" onclick={() => (folderDialogOpen = true)}>
 					<HugeiconsIcon icon={FolderAddIcon} class="h-4 w-4" /> New folder
 				</Button>
-				<Button variant="outline" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
+				<Button
+					variant="outline"
+					size="sm"
+					class="gap-2 cursor-pointer"
+					onclick={() => {
+						dialogInitialPlatform = !auth.account?.signedIn && spotify.status.linked ? 'spotify' : 'ytm';
+						dialogOpen = true;
+					}}
+				>
 					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
 				</Button>
 			</div>
@@ -298,7 +331,7 @@
 	</div>
 
 	<!-- Create Playlist Dialog with Picture, Description & Privacy -->
-	<CreatePlaylistDialog bind:open={dialogOpen} />
+	<CreatePlaylistDialog bind:open={dialogOpen} initialPlatform={dialogInitialPlatform} />
 
 	<!-- Create Folder Dialog -->
 	<Dialog.Root bind:open={folderDialogOpen}>
@@ -441,13 +474,46 @@
 		     third needs neither an account nor a connection, and the states below fit none of them. -->
 		<Tabs.Content value="songs">
 			{#if tab === 'songs'}
-				{#if signedOut}
-					<p class="text-sm text-muted-foreground">
-						Sign in to see the songs saved in your YouTube Music library. Music on this machine is
-						in the Local tab.
-					</p>
-				{:else}
+				{#if auth.account?.signedIn && spotify.status.linked}
+					<!-- Segmented toggle keeping YouTube Music and Spotify Liked Songs strictly separate -->
+					<div class="mb-4 flex items-center gap-2">
+						<div class="inline-flex rounded-lg bg-muted/80 p-0.5 border border-border/60 text-xs">
+							<button
+								type="button"
+								class="px-3 py-1.5 rounded-md font-medium transition cursor-pointer {songsPlatform === 'ytm'
+									? 'bg-background shadow-xs text-foreground font-semibold'
+									: 'text-muted-foreground hover:text-foreground'}"
+								onclick={() => (songsPlatform = 'ytm')}
+							>
+								YouTube Music Liked
+							</button>
+							<button
+								type="button"
+								class="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition cursor-pointer {songsPlatform === 'spotify'
+									? 'bg-emerald-500/20 text-emerald-400 font-semibold shadow-xs'
+									: 'text-muted-foreground hover:text-foreground'}"
+								onclick={() => (songsPlatform = 'spotify')}
+							>
+								<svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+									<path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10 5.524 0 10-4.476 10-10 0-5.523-4.476-10-10-10zm4.586 14.424a.627.627 0 0 1-.86.208c-2.355-1.439-5.32-1.765-8.812-.966a.625.625 0 0 1-.277-1.22c3.824-.874 7.099-.508 9.74 1.107.292.179.387.568.209.871zm1.226-2.723a.784.784 0 0 1-1.077.26c-2.695-1.656-6.804-2.136-9.992-1.168a.785.785 0 1 1-.462-1.501c3.642-1.106 8.188-.574 11.27 1.321a.784.784 0 0 1 .261 1.088zm.105-2.833c-3.232-1.919-8.566-2.096-11.657-1.157a.94.94 0 1 1-.552-1.8c3.553-1.078 9.444-.87 13.14 1.323a.94.94 0 0 1-.931 1.634z"/>
+								</svg>
+								Spotify Liked
+							</button>
+						</div>
+					</div>
+					{#if songsPlatform === 'spotify'}
+						<LibrarySongs spotifyLiked />
+					{:else}
+						<LibrarySongs />
+					{/if}
+				{:else if spotify.status.linked && !auth.account?.signedIn}
+					<LibrarySongs spotifyLiked />
+				{:else if auth.account?.signedIn}
 					<LibrarySongs />
+				{:else}
+					<p class="text-sm text-muted-foreground">
+						Sign in to see songs saved in your YouTube Music library, or link your Spotify account in Settings to browse Spotify Liked Songs. Music on this machine is in the Local tab.
+					</p>
 				{/if}
 			{/if}
 		</Tabs.Content>
@@ -479,13 +545,21 @@
 		{:else}
 			<Tabs.Content value="all">
 				{#if tab === 'all'}
-					{@render grid(
-						all,
-						signedOut
-							? 'Nothing saved yet. Open a playlist or album and hit Save to library, or sign in for the one on your account.'
-							: 'Your library is empty.',
-						rvAll
-					)}
+					{#if spotify.status.linked && !auth.account?.signedIn}
+						{@render grid(
+							spotifyPlaylistItems,
+							'No Spotify playlists found.',
+							rvSpotify
+						)}
+					{:else}
+						{@render grid(
+							all,
+							signedOut
+								? 'Nothing saved yet. Open a playlist or album and hit Save to library, or sign in for the one on your account.'
+								: 'Your library is empty.',
+							rvAll
+						)}
+					{/if}
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="playlists">
@@ -621,32 +695,69 @@
 							</p>
 						{/if}
 					{:else}
-						{#if rootFolders.length > 0}
+						{#if spotify.status.linked}
 							<div class="mb-8">
-								<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-									Folders
-								</h3>
-								<div class="card-grid content-in mb-8">
-									{#each rootFolders as folder (folder.id)}
-										<FolderCard
-											{folder}
-											playlists={playlists.filter((p) => folder.playlistIds.includes(p.id))}
-											onclick={() => (activeFolderId = folder.id)}
-											onrename={() => openRename(folder.id, folder.name)}
-											ondelete={() => promptDelete(folder.id)}
-										/>
-									{/each}
+								<div class="mb-3 flex items-center justify-between">
+									<h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+										<svg class="h-3.5 w-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+											<path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10 5.524 0 10-4.476 10-10 0-5.523-4.476-10-10-10zm4.586 14.424a.627.627 0 0 1-.86.208c-2.355-1.439-5.32-1.765-8.812-.966a.625.625 0 0 1-.277-1.22c3.824-.874 7.099-.508 9.74 1.107.292.179.387.568.209.871zm1.226-2.723a.784.784 0 0 1-1.077.26c-2.695-1.656-6.804-2.136-9.992-1.168a.785.785 0 1 1-.462-1.501c3.642-1.106 8.188-.574 11.27 1.321a.784.784 0 0 1 .261 1.088zm.105-2.833c-3.232-1.919-8.566-2.096-11.657-1.157a.94.94 0 1 1-.552-1.8c3.553-1.078 9.444-.87 13.14 1.323a.94.94 0 0 1-.931 1.634z"/>
+										</svg>
+										Spotify Playlists
+									</h3>
+									<Button
+										variant="ghost"
+										size="sm"
+										class="h-7 gap-1 text-xs text-muted-foreground hover:text-emerald-400 cursor-pointer"
+										onclick={() => {
+											dialogInitialPlatform = 'spotify';
+											dialogOpen = true;
+										}}
+									>
+										<HugeiconsIcon icon={Add01Icon} class="h-3.5 w-3.5" />
+										<span>New Spotify Playlist</span>
+									</Button>
 								</div>
-								<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-									All Playlists
-								</h3>
+								{@render grid(
+									spotifyPlaylistItems,
+									'No Spotify playlists found.',
+									rvSpotify
+								)}
 							</div>
 						{/if}
-						{@render grid(
-							playlists,
-							'No playlists yet. Open one and hit Save to library to keep it here.',
-							rvPlaylists
-						)}
+						{#if auth.account?.signedIn || playlists.length || rootFolders.length || !spotify.status.linked}
+							{#if spotify.status.linked}
+								<div class="my-6 h-px w-full bg-border/60"></div>
+								<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+									YouTube Music Playlists
+								</h3>
+							{/if}
+							{#if rootFolders.length > 0}
+								<div class="mb-8">
+									<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+										Folders
+									</h3>
+									<div class="card-grid content-in mb-8">
+										{#each rootFolders as folder (folder.id)}
+											<FolderCard
+												{folder}
+												playlists={playlists.filter((p) => folder.playlistIds.includes(p.id))}
+												onclick={() => (activeFolderId = folder.id)}
+												onrename={() => openRename(folder.id, folder.name)}
+												ondelete={() => promptDelete(folder.id)}
+											/>
+										{/each}
+									</div>
+									<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+										All Playlists
+									</h3>
+								</div>
+							{/if}
+							{@render grid(
+								playlists,
+								'No playlists yet. Open one and hit Save to library to keep it here.',
+								rvPlaylists
+							)}
+						{/if}
 					{/if}
 				{/if}
 			</Tabs.Content>

@@ -8,6 +8,7 @@
 	import type { BrowseItem } from '$lib/api';
 	import {
 		ui,
+		auth,
 		toast,
 		createLibraryPlaylist,
 		bumpLibraryTrackCount,
@@ -46,7 +47,12 @@
 			filter = '';
 			showNew = false;
 			newTitle = '';
-			const promises: Promise<unknown>[] = [api.getLibrary()];
+			const promises: Promise<unknown>[] = [];
+			if (auth.account?.signedIn) {
+				promises.push(api.getLibrary().catch(() => []));
+			} else {
+				promises.push(Promise.resolve([]));
+			}
 			if (spotify.status.linked) {
 				promises.push(api.spotifyGetPlaylists().catch(() => []));
 			}
@@ -55,6 +61,15 @@
 					let list = ((p as BrowseItem[]) || []).filter(
 						(i) => i.id !== api.ON_REPEAT_ID && i.id !== api.LIKED_MUSIC_ID
 					);
+					if (spotify.status.linked) {
+						list.unshift({
+							id: 'sp_liked',
+							title: 'Liked Songs',
+							kind: 'playlist',
+							thumbnail: undefined,
+							subtitle: 'Spotify Liked Songs'
+						});
+					}
 					if (Array.isArray(sp)) {
 						for (const s of sp as api.SpotifyPlaylistSummary[]) {
 							list.push({
@@ -84,7 +99,8 @@
 		if (!title || !songs?.length || creating) return;
 		creating = true;
 		try {
-			const id = await createLibraryPlaylist(title);
+			const platform = !auth.account?.signedIn && spotify.status.linked ? 'spotify' : 'ytm';
+			const id = await createLibraryPlaylist(title, undefined, false, null, platform);
 			newTitle = '';
 			showNew = false;
 			await pick({ id, title, kind: 'playlist' });

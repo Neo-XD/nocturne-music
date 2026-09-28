@@ -946,6 +946,113 @@ fn require_login(state: &Arc<AppState>) -> Result<&innertube::YouTubeClient, Str
 /// mutually exclusive, so a dislike un-likes in the same call and the UI never has to send two.
 #[tauri::command]
 pub async fn rate(state: St<'_>, video_id: String, rating: Rating) -> Result<(), String> {
+    if video_id.starts_with("SP:") || !state.it.is_logged_in() {
+        if !state.db.get_setting("spotify_token").unwrap_or_default().is_empty()
+            || !state.db.get_setting("spotify_refresh_token").unwrap_or_default().is_empty()
+        {
+            let track_id = if video_id.starts_with("SP:") {
+                let parts: Vec<&str> = video_id.split(':').collect();
+                parts.get(1).copied().unwrap_or(video_id.as_str()).to_string()
+            } else {
+                let mut query = String::new();
+                if let Some(dl) = state.db.get_downloaded_track(&video_id) {
+                    query = format!("{} {}", dl.title, dl.artist);
+                } else if let Ok(ytm_client) = metadata_client(&state) {
+                    if let Ok(next) = state.it.next(ytm_client, Some(&video_id), None).await {
+                        if let Some(curr) = next.items.iter().find(|i| i.video_id == video_id) {
+                            query = format!("{} {}", curr.title, curr.artists);
+                        }
+                    }
+                }
+                if query.is_empty() {
+                    query = video_id.clone();
+                }
+                let mut token = get_spotify_token(&state).await?;
+                let http_client = crate::http::client();
+                let mut search_res = http_client
+                    .get("https://api.spotify.com/v1/search")
+                    .query(&[("q", query.as_str()), ("type", "track"), ("limit", "1")])
+                    .header("Authorization", format!("Bearer {token}"))
+                    .send()
+                    .await
+                    .map_err(|e| format!("Spotify search error: {e}"))?;
+                if search_res.status() == reqwest::StatusCode::UNAUTHORIZED {
+                    if let Ok(new_tok) = refresh_spotify_dev_token(&state).await {
+                        token = new_tok;
+                        search_res = http_client
+                            .get("https://api.spotify.com/v1/search")
+                            .query(&[("q", query.as_str()), ("type", "track"), ("limit", "1")])
+                            .header("Authorization", format!("Bearer {token}"))
+                            .send()
+                            .await
+                            .map_err(|e| format!("Spotify search error: {e}"))?;
+                    }
+                }
+                let s_json: serde_json::Value = search_res.json().await.map_err(|e| e.to_string())?;
+                let matched = s_json["tracks"]["items"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .ok_or_else(|| format!("Could not find matching track for \"{query}\" on Spotify"))?;
+                matched["id"].as_str().unwrap_or_default().to_string()
+            };
+
+            let mut token = get_spotify_token(&state).await?;
+            let http_client = crate::http::client();
+            let put_or_delete_url = format!("https://api.spotify.com/v1/me/tracks?ids={track_id}");
+
+            let mut res = match rating {
+                Rating::Like => {
+                    http_client
+                        .put(&put_or_delete_url)
+                        .header("Authorization", format!("Bearer {token}"))
+                        .header("Content-Length", "0")
+                        .send()
+                        .await
+                }
+                Rating::Dislike | Rating::Indifferent => {
+                    http_client
+                        .delete(&put_or_delete_url)
+                        .header("Authorization", format!("Bearer {token}"))
+                        .header("Content-Length", "0")
+                        .send()
+                        .await
+                }
+            }
+            .map_err(|e| format!("Spotify rating request error: {e}"))?;
+
+            if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+                if let Ok(new_tok) = refresh_spotify_dev_token(&state).await {
+                    token = new_tok;
+                    res = match rating {
+                        Rating::Like => {
+                            http_client
+                                .put(&put_or_delete_url)
+                                .header("Authorization", format!("Bearer {token}"))
+                                .header("Content-Length", "0")
+                                .send()
+                                .await
+                        }
+                        Rating::Dislike | Rating::Indifferent => {
+                            http_client
+                                .delete(&put_or_delete_url)
+                                .header("Authorization", format!("Bearer {token}"))
+                                .header("Content-Length", "0")
+                                .send()
+                                .await
+                        }
+                    }
+                    .map_err(|e| format!("Spotify rating request error: {e}"))?;
+                }
+            }
+
+            if !res.status().is_success() {
+                let err_txt = res.text().await.unwrap_or_default();
+                return Err(format!("Spotify rating failed: {err_txt}"));
+            }
+            return Ok(());
+        }
+    }
+
     let client = require_login(&state)?;
     // Before the write, not after: a `refresh_rating` round trip already in flight was asked
     // before this rating existed, so its answer is stale from here on either way (issue #93).
@@ -2221,7 +2328,7 @@ pub async fn spotify_start_dev_auth(
 
     let (code_verifier, code_challenge) = generate_pkce_pair();
     let redirect_uri = "http://127.0.0.1:8888/callback";
-    let scopes = "user-read-private user-read-email playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private streaming user-read-playback-state user-modify-playback-state user-read-currently-playing";
+    let scopes = "user-read-private user-read-email user-library-read user-library-modify playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private streaming user-read-playback-state user-modify-playback-state user-read-currently-playing";
     let auth_url = format!(
         "https://accounts.spotify.com/authorize?client_id={}&response_type=code&redirect_uri={}&code_challenge_method=S256&code_challenge={}&scope={}&show_dialog=true",
         urlencoding::encode(&clean_id),
@@ -2741,6 +2848,107 @@ pub struct ExtractedSpotifyPlaylist {
     pub owner_id: Option<String>,
 }
 
+pub async fn fetch_spotify_liked_tracks(
+    state: &Arc<AppState>,
+    offset: u32,
+    limit: u32,
+) -> Result<ExtractedSpotifyPlaylist, String> {
+    let client = crate::http::client();
+    let mut token = get_spotify_token(state).await?;
+    let lim = limit.min(50).max(1);
+
+    let mut res = client
+        .get(format!("https://api.spotify.com/v1/me/tracks?limit={lim}&offset={offset}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to request Spotify liked songs: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+            token = new_tok;
+            res = client
+                .get(format!("https://api.spotify.com/v1/me/tracks?limit={lim}&offset={offset}"))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to request Spotify liked songs: {e}"))?;
+        }
+    }
+
+    if !res.status().is_success() {
+        let err_txt = res.text().await.unwrap_or_default();
+        return Err(format!("Spotify returned error for liked songs: {err_txt}"));
+    }
+
+    let json: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Spotify liked songs: {e}"))?;
+
+    let total = json["total"].as_u64().unwrap_or(0);
+    let mut tracks = Vec::new();
+    let mut first_thumb = None;
+
+    if let Some(items) = json["items"].as_array() {
+        for item in items {
+            let t = &item["track"];
+            let id = t["id"].as_str().unwrap_or_default().to_string();
+            if id.is_empty() {
+                continue;
+            }
+            let name = t["name"].as_str().unwrap_or("Unknown Title").to_string();
+            let artists = t["artists"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|a| a["name"].as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_else(|| "Unknown Artist".to_string());
+            let album = t["album"]["name"].as_str().map(|s| s.to_string());
+            let thumbnail = t["album"]["images"]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|img| img["url"].as_str())
+                .map(|s| s.to_string());
+            if first_thumb.is_none() && thumbnail.is_some() {
+                first_thumb = thumbnail.clone();
+            }
+            let duration_ms = t["duration_ms"].as_u64().unwrap_or(0);
+            let preview_url = t["preview_url"].as_str().unwrap_or_default().to_string();
+            let explicit = t["explicit"].as_bool().unwrap_or(false);
+
+            tracks.push(ExtractedSpotifyTrack {
+                id,
+                name,
+                artists,
+                album,
+                duration_ms,
+                thumbnail,
+                preview_url,
+                explicit,
+            });
+        }
+    }
+
+    let my_user = state.db.get_setting("spotify_user").unwrap_or_default();
+    let subtitle = Some(format!("{total} {} • Spotify", if total == 1 { "song" } else { "songs" }));
+
+    Ok(ExtractedSpotifyPlaylist {
+        title: "Liked Songs".to_string(),
+        subtitle,
+        description: Some("Your saved and liked tracks on Spotify".to_string()),
+        thumbnail: first_thumb,
+        collaborative: false,
+        tracks,
+        owner_id: Some(my_user),
+    })
+}
+
 pub async fn fetch_spotify_playlist_info(
     state: &Arc<AppState>,
     raw_id: &str,
@@ -2748,6 +2956,9 @@ pub async fn fetch_spotify_playlist_info(
     let clean_id = clean_spotify_id(raw_id);
     if clean_id.is_empty() {
         return Err("Invalid Spotify playlist ID".to_string());
+    }
+    if clean_id == "liked" || clean_id == "sp_liked" || clean_id == "spotify:liked" || clean_id == "saved" {
+        return fetch_spotify_liked_tracks(state, 0, 50).await;
     }
 
     let client = crate::http::client();
@@ -3038,8 +3249,11 @@ pub async fn get_spotify_playlist_page(
         });
     }
 
+    let clean_id = clean_spotify_id(spotify_playlist_id);
+    let is_liked = clean_id == "liked" || clean_id == "sp_liked";
     let my_user = state.db.get_setting("spotify_user").unwrap_or_default();
-    let is_owned = (!my_user.is_empty() && playlist_info.owner_id.as_deref() == Some(&my_user))
+    let is_owned = is_liked
+        || (!my_user.is_empty() && playlist_info.owner_id.as_deref() == Some(&my_user))
         || playlist_info.collaborative;
 
     Ok(PlaylistPage {
@@ -3047,7 +3261,7 @@ pub async fn get_spotify_playlist_page(
         subtitle: playlist_info.subtitle,
         thumbnail: playlist_info.thumbnail.clone(),
         description: playlist_info.description,
-        privacy: Some("PUBLIC".into()),
+        privacy: Some(if is_liked { "PRIVATE".into() } else { "PUBLIC".into() }),
         cover: playlist_info.thumbnail,
         items,
         continuation: None,
@@ -3063,6 +3277,15 @@ pub async fn spotify_get_playlist(
     spotify_playlist_id: String,
 ) -> Result<PlaylistPage, String> {
     get_spotify_playlist_page(&state, &spotify_playlist_id).await
+}
+
+#[tauri::command]
+pub async fn spotify_get_liked_songs(
+    state: St<'_>,
+    _offset: Option<u32>,
+    _limit: Option<u32>,
+) -> Result<PlaylistPage, String> {
+    get_spotify_playlist_page(&state, "liked").await
 }
 
 #[tauri::command]
@@ -3122,10 +3345,10 @@ pub async fn spotify_add_to_playlist(
     let http_client = crate::http::client();
     let clean_id = clean_spotify_id(spotify_playlist_id);
 
-    let uri = if video_id.starts_with("SP:") {
+    let (uri, track_id) = if video_id.starts_with("SP:") {
         let parts: Vec<&str> = video_id.split(':').collect();
         let track_id = parts.get(1).copied().unwrap_or(video_id);
-        format!("spotify:track:{track_id}")
+        (format!("spotify:track:{track_id}"), track_id.to_string())
     } else {
         let mut query = String::new();
         if let Some(dl) = state.db.get_downloaded_track(video_id) {
@@ -3163,13 +3386,43 @@ pub async fn spotify_add_to_playlist(
         }
 
         let s_json: serde_json::Value = search_res.json().await.map_err(|e| e.to_string())?;
-        s_json["tracks"]["items"]
+        let matched = s_json["tracks"]["items"]
             .as_array()
             .and_then(|a| a.first())
-            .and_then(|t| t["uri"].as_str())
-            .ok_or_else(|| format!("Could not find matching track for \"{query}\" on Spotify"))?
-            .to_string()
+            .ok_or_else(|| format!("Could not find matching track for \"{query}\" on Spotify"))?;
+        let u = matched["uri"].as_str().unwrap_or_default().to_string();
+        let tid = matched["id"].as_str().unwrap_or_default().to_string();
+        (u, tid)
     };
+
+    if clean_id == "liked" || clean_id == "sp_liked" || clean_id == "spotify:liked" {
+        let put_url = format!("https://api.spotify.com/v1/me/tracks?ids={track_id}");
+        let mut res = http_client
+            .put(&put_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Length", "0")
+            .send()
+            .await
+            .map_err(|e| format!("Network error saving track to Spotify Liked Songs: {e}"))?;
+
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+                token = new_tok;
+                res = http_client
+                    .put(&put_url)
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Content-Length", "0")
+                    .send()
+                    .await
+                    .map_err(|e| format!("Network error saving track to Spotify Liked Songs: {e}"))?;
+            }
+        }
+        if !res.status().is_success() {
+            let err_txt = res.text().await.unwrap_or_default();
+            return Err(format!("Spotify rejected saving to Liked Songs: {err_txt}"));
+        }
+        return Ok(true);
+    }
 
     let body = serde_json::json!({ "uris": [uri] });
     let mut res = http_client
@@ -3217,13 +3470,42 @@ pub async fn spotify_remove_from_playlist(
     let http_client = crate::http::client();
     let clean_id = clean_spotify_id(spotify_playlist_id);
 
-    let uri = if video_id.starts_with("SP:") {
+    let (uri, track_id) = if video_id.starts_with("SP:") {
         let parts: Vec<&str> = video_id.split(':').collect();
         let track_id = parts.get(1).copied().unwrap_or(video_id);
-        format!("spotify:track:{track_id}")
+        (format!("spotify:track:{track_id}"), track_id.to_string())
     } else {
-        format!("spotify:track:{video_id}")
+        (format!("spotify:track:{video_id}"), video_id.to_string())
     };
+
+    if clean_id == "liked" || clean_id == "sp_liked" || clean_id == "spotify:liked" {
+        let del_url = format!("https://api.spotify.com/v1/me/tracks?ids={track_id}");
+        let mut res = http_client
+            .delete(&del_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Length", "0")
+            .send()
+            .await
+            .map_err(|e| format!("Network error removing track from Spotify Liked Songs: {e}"))?;
+
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+                token = new_tok;
+                res = http_client
+                    .delete(&del_url)
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Content-Length", "0")
+                    .send()
+                    .await
+                    .map_err(|e| format!("Network error removing track from Spotify Liked Songs: {e}"))?;
+            }
+        }
+        if !res.status().is_success() {
+            let err_txt = res.text().await.unwrap_or_default();
+            return Err(format!("Spotify rejected removing from Liked Songs: {err_txt}"));
+        }
+        return Ok(());
+    }
 
     let body = serde_json::json!({
         "tracks": [{ "uri": uri }]
@@ -3271,6 +3553,49 @@ pub async fn spotify_remove_many_from_playlist(
     let mut token = get_spotify_token(state).await?;
     let http_client = crate::http::client();
     let clean_id = clean_spotify_id(spotify_playlist_id);
+
+    if clean_id == "liked" || clean_id == "sp_liked" || clean_id == "spotify:liked" {
+        let ids: Vec<String> = tracks
+            .iter()
+            .map(|(video_id, _)| {
+                if video_id.starts_with("SP:") {
+                    let parts: Vec<&str> = video_id.split(':').collect();
+                    parts.get(1).copied().unwrap_or(video_id.as_str()).to_string()
+                } else {
+                    video_id.clone()
+                }
+            })
+            .collect();
+
+        for chunk in ids.chunks(50) {
+            let ids_param = chunk.join(",");
+            let del_url = format!("https://api.spotify.com/v1/me/tracks?ids={ids_param}");
+            let mut res = http_client
+                .delete(&del_url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Length", "0")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to remove tracks from Spotify Liked Songs: {e}"))?;
+            if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+                if let Ok(new_tok) = refresh_spotify_dev_token(state).await {
+                    token = new_tok;
+                    res = http_client
+                        .delete(&del_url)
+                        .header("Authorization", format!("Bearer {token}"))
+                        .header("Content-Length", "0")
+                        .send()
+                        .await
+                        .map_err(|e| format!("Failed to remove tracks from Spotify Liked Songs: {e}"))?;
+                }
+            }
+            if !res.status().is_success() {
+                let err_txt = res.text().await.unwrap_or_default();
+                return Err(format!("Spotify batch removal from Liked Songs failed: {err_txt}"));
+            }
+        }
+        return Ok(());
+    }
 
     let uris: Vec<serde_json::Value> = tracks
         .iter()
@@ -3324,6 +3649,11 @@ pub async fn spotify_edit_playlist_details(
     name: Option<String>,
     description: Option<String>,
 ) -> Result<(), String> {
+    let clean_id = clean_spotify_id(spotify_playlist_id);
+    if clean_id == "liked" || clean_id == "sp_liked" || clean_id == "spotify:liked" {
+        return Err("Cannot edit details of Liked Songs collection".to_string());
+    }
+
     let mut token = get_spotify_token(state).await?;
     let http_client = crate::http::client();
     let clean_id = clean_spotify_id(spotify_playlist_id);
@@ -3376,9 +3706,13 @@ pub async fn spotify_delete_playlist(
     state: &Arc<AppState>,
     spotify_playlist_id: &str,
 ) -> Result<(), String> {
+    let clean_id = clean_spotify_id(spotify_playlist_id);
+    if clean_id == "liked" || clean_id == "sp_liked" || clean_id == "spotify:liked" {
+        return Err("Cannot delete Liked Songs collection".to_string());
+    }
+
     let mut token = get_spotify_token(state).await?;
     let http_client = crate::http::client();
-    let clean_id = clean_spotify_id(spotify_playlist_id);
 
     let mut res = http_client
         .delete(format!("https://api.spotify.com/v1/playlists/{clean_id}/followers"))

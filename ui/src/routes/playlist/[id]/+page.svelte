@@ -18,7 +18,8 @@
 		BookmarkMinus02Icon,
 		ListRestartIcon,
 		Sorting01Icon,
-		ArrowUpDownIcon
+		ArrowUpDownIcon,
+		FavouriteIcon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import * as RadioGroup from '$lib/components/ui/radio-group';
@@ -126,7 +127,8 @@
 	const id = $derived(page.params.id ?? '');
 	const nowId = $derived(playback.now?.videoId);
 	// The liked-music auto-playlist isn't a user playlist — no rename/delete, but shuffle is fine.
-	const isLiked = $derived(id === api.LIKED_MUSIC_ID);
+	const isLiked = $derived(id === api.LIKED_MUSIC_ID || id === 'sp_liked');
+	const isSpotifyLiked = $derived(id === 'sp_liked');
 	// On Repeat is built locally from play counts: no artwork, and no radio to seed autoplay from.
 	const isOnRepeat = $derived(id === ON_REPEAT_ID);
 	const isSpotify = $derived(id.startsWith('sp_'));
@@ -671,7 +673,7 @@
 		);
 		pl = { ...pl, items: kept };
 		try {
-			if (isLiked) {
+			if (isLiked && !isSpotifyLiked) {
 				await api.rate(track.video_id, 'indifferent');
 				toast.success('Removed from Liked Music');
 			} else {
@@ -681,7 +683,7 @@
 				if (isSpotify) {
 					void loadSpotifyPlaylists();
 				}
-				toast.success('Removed from playlist');
+				toast.success(isSpotifyLiked ? 'Removed from Spotify Liked Songs' : 'Removed from playlist');
 			}
 			cacheCurrent();
 		} catch (e) {
@@ -800,12 +802,32 @@
 					</div>
 				{:else if art}
 					<img src={art} alt="" class="relative h-40 w-40 rounded-xl object-cover shadow-lg" />
+				{:else if isSpotifyLiked}
+					<div class="relative flex h-40 w-40 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-800 text-white shadow-lg">
+						<HugeiconsIcon icon={FavouriteIcon} class="h-20 w-20 fill-white text-white" />
+					</div>
 				{:else}
 					<div class="relative h-40 w-40 rounded-xl bg-muted"></div>
 				{/if}
 				<div class="relative min-w-0 flex-1">
 					<div class="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
-						Playlist
+						{#if isSpotifyLiked}
+							<span class="inline-flex items-center gap-1 text-emerald-400 font-semibold">
+								<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+									<path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10 5.524 0 10-4.476 10-10 0-5.523-4.476-10-10-10zm4.586 14.424a.627.627 0 0 1-.86.208c-2.355-1.439-5.32-1.765-8.812-.966a.625.625 0 0 1-.277-1.22c3.824-.874 7.099-.508 9.74 1.107.292.179.387.568.209.871zm1.226-2.723a.784.784 0 0 1-1.077.26c-2.695-1.656-6.804-2.136-9.992-1.168a.785.785 0 1 1-.462-1.501c3.642-1.106 8.188-.574 11.27 1.321a.784.784 0 0 1 .261 1.088zm.105-2.833c-3.232-1.919-8.566-2.096-11.657-1.157a.94.94 0 1 1-.552-1.8c3.553-1.078 9.444-.87 13.14 1.323a.94.94 0 0 1-.931 1.634z"/>
+								</svg>
+								Spotify Collection
+							</span>
+						{:else if isSpotify}
+							<span class="inline-flex items-center gap-1 text-emerald-400 font-semibold">
+								<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+									<path d="M12 2C6.477 2 2 6.477 2 12c0 5.524 4.477 10 10 10 5.524 0 10-4.476 10-10 0-5.523-4.476-10-10-10zm4.586 14.424a.627.627 0 0 1-.86.208c-2.355-1.439-5.32-1.765-8.812-.966a.625.625 0 0 1-.277-1.22c3.824-.874 7.099-.508 9.74 1.107.292.179.387.568.209.871zm1.226-2.723a.784.784 0 0 1-1.077.26c-2.695-1.656-6.804-2.136-9.992-1.168a.785.785 0 1 1-.462-1.501c3.642-1.106 8.188-.574 11.27 1.321a.784.784 0 0 1 .261 1.088zm.105-2.833c-3.232-1.919-8.566-2.096-11.657-1.157a.94.94 0 1 1-.552-1.8c3.553-1.078 9.444-.87 13.14 1.323a.94.94 0 0 1-.931 1.634z"/>
+								</svg>
+								Spotify Playlist
+							</span>
+						{:else}
+							Playlist
+						{/if}
 						{#if pl.collaborative}
 							<span
 								class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"

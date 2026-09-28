@@ -662,6 +662,7 @@ pub fn run() {
             commands::spotify_unlink,
             commands::spotify_get_playlists,
             commands::spotify_get_playlist,
+            commands::spotify_get_liked_songs,
             commands::spotify_transfer_to_ytm,
             commands::ytm_transfer_to_spotify,
             commands::spotify_get_sync_mode,

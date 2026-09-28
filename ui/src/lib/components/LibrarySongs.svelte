@@ -23,17 +23,27 @@
 	import type { SongItem } from '$lib/api';
 	import { getCached, putCached } from '$lib/pagecache';
 	import { thumb } from '$lib/thumb';
-	import { openAddToPlaylist, openPlayer, playback } from '$lib/player.svelte';
+	import { openAddToPlaylist, openPlayer, playback, toast } from '$lib/player.svelte';
 
 	// The same tab, pointed at a different browse id: Library ▸ Songs by default, or the tracks the
 	// user uploaded to YouTube Music themselves. Both browse like a headerless playlist and page the
 	// same way, so the only differences are the id and the words around it.
-	let { uploads = false }: { uploads?: boolean } = $props();
-	const BROWSE_ID = $derived(uploads ? api.LIBRARY_UPLOADS_ID : api.LIBRARY_SONGS_ID);
+	let {
+		uploads = false,
+		spotifyLiked = false
+	}: {
+		uploads?: boolean;
+		spotifyLiked?: boolean;
+	} = $props();
+	const BROWSE_ID = $derived(
+		spotifyLiked ? 'sp_liked' : uploads ? api.LIBRARY_UPLOADS_ID : api.LIBRARY_SONGS_ID
+	);
 
 	// Cached like every other browse page, so switching tabs (or leaving the Library and coming
 	// back) paints the list instead of refetching it and losing every page you scrolled in.
-	const KEY = $derived(uploads ? 'library:uploads' : 'library:songs');
+	const KEY = $derived(
+		spotifyLiked ? 'library:spotify_liked' : uploads ? 'library:uploads' : 'library:songs'
+	);
 	type Cached = { items: SongItem[]; continuation?: string };
 
 	// `$state.raw`, same reason as the playlist page: a deep proxy puts every read of every row
@@ -71,9 +81,11 @@
 	const line = $derived(
 		filtering
 			? `${shownSongs.length.toLocaleString()} matching${token && !moreError ? ' so far' : ''}`
-			: uploads
-				? 'Tracks you uploaded to YouTube Music'
-				: 'Every song you’ve saved, in one list'
+			: spotifyLiked
+				? 'Every song you’ve liked on Spotify, in one list'
+				: uploads
+					? 'Tracks you uploaded to YouTube Music'
+					: 'Every song you’ve saved, in one list'
 	);
 	// Four covers for the mosaic. Distinct ones: a library that opens on six tracks off the same
 	// album would otherwise draw the same sleeve four times.
@@ -268,6 +280,17 @@
 					active={song.video_id === nowId}
 					onplay={() => play(songs.indexOf(song))}
 					onAdd={() => openAddToPlaylist(song)}
+					onRemove={spotifyLiked
+						? async () => {
+								try {
+									await api.removeFromPlaylist('sp_liked', song.video_id, '');
+									songs = songs.filter((s) => s.video_id !== song.video_id);
+									toast.success('Removed from Spotify Liked Songs');
+								} catch (e) {
+									toast.error(String(e));
+								}
+						  }
+						: undefined}
 				/>
 			{/each}
 		</div>
@@ -279,7 +302,9 @@
 		<p class="text-sm text-muted-foreground">
 			{uploads
 				? 'No uploaded songs found on your YouTube Music account.'
-				: 'No songs in your library yet. Hit the ⋯ on a song and save it, or like it, and it lands here.'}
+				: spotifyLiked
+					? 'No liked songs found on your Spotify account.'
+					: 'No songs in your library yet. Hit the ⋯ on a song and save it, or like it, and it lands here.'}
 		</p>
 	{/if}
 
