@@ -184,10 +184,8 @@ Windows and macOS instructions live in [docs/BUILD-PLATFORMS.md](docs/BUILD-PLAT
 ---
 
 ## Current Status
- - Nocturne from `v0.8.x` to `v0.9.x` will have mostly new features to **refine the UI and UX**.
- - Nocturne from `v0.9.x` to `v1.x.x` will be more focused on **getting critical bugs and small QOL things out of the way** for a clean v1 release.
- - Nocturne from `v1.x.x` and after will be focused on **smaller refinements** with a slower release cycle.
-
+ - Nocturne is slowing down in development due to other work occupying my time but all pull requests will be looked into if opened.
+ - v0.8 Has the base of NocturneUI set. I am starting work on v0.9.x to get crucial features ironed out along with translations set.
 ## Star History
 
 <a href="https://www.star-history.com/?repos=neo-xd%2Fnocturne-music&type=date&legend=top-left">
