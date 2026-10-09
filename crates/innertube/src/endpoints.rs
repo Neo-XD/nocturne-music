@@ -4,8 +4,8 @@ use serde::Serialize;
 
 use crate::clients::YouTubeClient;
 use crate::models::browse::{
-    self, AlbumPage, ArtistPage, BrowseItem, HomePage, PlaylistContinuation, PlaylistPage,
-    PlaylistSort, SearchResults,
+    self, AlbumPage, ArtistPage, BrowseItem, HomePage, MoodSection, PlaylistContinuation,
+    PlaylistPage, PlaylistSort, SearchResults,
 };
 use crate::models::context::Context;
 use crate::models::lyrics::{self, PlainLyrics, TimedLyricLine};
@@ -380,6 +380,14 @@ impl InnerTube {
         Ok(page)
     }
 
+    /// Moods & Genres (`FEmusic_moods_and_genres`): the tiles the search page browses from. A tile's
+    /// `params` opens its playlists via `browse_grid("FEmusic_moods_and_genres_category", ..)`.
+    /// Works signed out. context/08.
+    pub async fn moods(&self, client: &YouTubeClient) -> Result<Vec<MoodSection>, Error> {
+        let value = self.browse(client, Some("FEmusic_moods_and_genres"), None).await?;
+        Ok(browse::parse_moods(&value))
+    }
+
     /// Library playlists grid (`FEmusic_liked_playlists`). context/08. Needs login.
     pub async fn library_playlists(
         &self,
@@ -398,6 +406,14 @@ impl InnerTube {
     /// live under `FEmusic_library_corpus_artists`). context/08. Needs login.
     pub async fn library_artists(&self, client: &YouTubeClient) -> Result<Vec<BrowseItem>, Error> {
         self.library_grid(client, "FEmusic_library_corpus_track_artists").await
+    }
+
+    /// Subscribed artists (`FEmusic_library_corpus_artists`). context/08. Needs login.
+    pub async fn library_subscriptions(
+        &self,
+        client: &YouTubeClient,
+    ) -> Result<Vec<BrowseItem>, Error> {
+        self.library_grid(client, "FEmusic_library_corpus_artists").await
     }
 
     /// A playlist or album page by browseId (`VL…` / `MPRE…`). context/08.

@@ -18,6 +18,7 @@ import * as pl from './personal';
 import type { Personal } from './personal';
 import { appearance } from './theme.svelte';
 import { thumb } from './thumb';
+import { parseScrobbleConfig } from './scrobble';
 
 export const playback = $state({
 	now: null as NowPlaying | null,
@@ -152,6 +153,7 @@ export const prefs = $state({
 	musicVideos: false,
 	filterExplicit: false,
 	animatedArtwork: true,
+	scrobbling: true,
 	floatingSidebarMode: initialMode,
 	floatingSidebarLeft: initialMode === 'both' || initialMode === 'left',
 	floatingSidebarRight: initialMode === 'both' || initialMode === 'right',
@@ -485,6 +487,7 @@ export const library = $state({
 	// while three requests go out again.
 	albums: [] as BrowseItem[],
 	artists: [] as BrowseItem[],
+	subscriptions: [] as BrowseItem[],
 	extrasLoaded: false,
 	extrasLoading: false,
 	extrasError: null as string | null
@@ -503,6 +506,7 @@ function resetLibraryForAccount() {
 	library.error = null;
 	library.albums = [];
 	library.artists = [];
+	library.subscriptions = [];
 	library.extrasLoaded = false;
 	library.extrasLoading = false;
 	library.extrasError = null;
@@ -526,20 +530,22 @@ export async function loadLibrary(force = false) {
 	}
 }
 
-/** Saved albums + artists, same caching rules as `loadLibrary`. */
+/** Saved albums, artists and subscriptions, same caching rules as `loadLibrary`. */
 export async function loadLibraryExtras(force = false) {
 	if (library.extrasLoading || (library.extrasLoaded && !force)) return;
 	const generation = libraryGeneration;
 	library.extrasLoading = true;
 	library.extrasError = null;
 	try {
-		const [albums, artists] = await Promise.all([
+		const [albums, artists, subscriptions] = await Promise.all([
 			api.getLibraryAlbums(),
-			api.getLibraryArtists()
+			api.getLibraryArtists(),
+			api.getLibrarySubscriptions()
 		]);
 		if (generation !== libraryGeneration) return;
 		library.albums = albums;
 		library.artists = artists;
+		library.subscriptions = subscriptions;
 		library.extrasLoaded = true;
 	} catch (e) {
 		if (generation === libraryGeneration) library.extrasError = String(e);
@@ -783,15 +789,27 @@ export const downloaded = $state({
 });
 
 export function downloadedToSongItem(d: api.DownloadedSong): SongItem {
+	const vid = d.video_id || d.videoId || '';
+	const title = d.title || 'Unknown Title';
+	const artists = d.artist || 'Unknown Artist';
+	const album = d.album || undefined;
+	let durStr: string | undefined = undefined;
+	if (typeof d.duration === 'string' && d.duration.includes(':')) {
+		durStr = d.duration;
+	} else if (typeof d.duration === 'number' && d.duration > 0) {
+		durStr = `${Math.floor(d.duration / 60)}:${String(d.duration % 60).padStart(2, '0')}`;
+	} else if ((d.duration_secs || d.durationSecs) && (d.duration_secs || d.durationSecs)! > 0) {
+		const s = (d.duration_secs || d.durationSecs)!;
+		durStr = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+	}
+	const thumb = d.thumbnail || d.cover_path || d.coverPath || undefined;
 	return {
-		video_id: d.video_id,
-		title: d.title,
-		artists: d.artist,
-		album: d.album || undefined,
-		duration: d.duration
-			? `${Math.floor(d.duration / 60)}:${String(d.duration % 60).padStart(2, '0')}`
-			: undefined,
-		thumbnail: d.cover_path || undefined
+		video_id: vid,
+		title,
+		artists,
+		album,
+		duration: durStr,
+		thumbnail: thumb
 	};
 }
 
@@ -827,7 +845,7 @@ export async function scanDownloadedSongs() {
 export async function deleteDownloadedSong(videoId: string) {
 	try {
 		await api.deleteDownloadedSong(videoId);
-		downloaded.songs = downloaded.songs.filter((s) => s.video_id !== videoId);
+		downloaded.songs = downloaded.songs.filter((s) => (s.video_id || s.videoId) !== videoId);
 		toast.success('Removed download from disk');
 	} catch (e) {
 		toast.error(String(e));
@@ -835,7 +853,16 @@ export async function deleteDownloadedSong(videoId: string) {
 }
 
 export function isSongDownloaded(videoId: string): boolean {
-	return downloaded.songs.some((s) => s.video_id === videoId);
+	if (!videoId) return false;
+	return downloaded.songs.some((s) => {
+		const sid = s.video_id || s.videoId;
+		if (!sid) return false;
+		return (
+			sid === videoId ||
+			(videoId.startsWith('SP:') && sid.includes(videoId)) ||
+			(sid.startsWith('SP:') && videoId.includes(sid))
+		);
+	});
 }
 
 export async function toggleOfflineMode() {
@@ -984,7 +1011,7 @@ export function isItemSavedInLibrary(item: BrowseItem | SongItem | { id?: string
 		return isSaved(b.id) || library.albums.some((a) => a.id === b.id);
 	}
 	if (b.kind === 'artist') {
-		return isSaved(b.id) || library.artists.some((a) => a.id === b.id);
+		return isSaved(b.id) || library.artists.some((a) => a.id === b.id) || library.subscriptions.some((a) => a.id === b.id);
 	}
 	if (b.kind === 'playlist') {
 		return isSaved(b.id) || library.items.some((p) => p.id === b.id);
@@ -1057,18 +1084,21 @@ export async function toggleItemLibrary(item: BrowseItem | SongItem): Promise<bo
 			return currentlyIn;
 		}
 	} else if (b.kind === 'artist') {
-		const prev = [...library.artists];
+		const prevArtists = [...library.artists];
+		const prevSubs = [...library.subscriptions];
 		if (next) {
-			if (!library.artists.some((a) => a.id === b.id)) library.artists = [b, ...library.artists];
+			if (!library.subscriptions.some((a) => a.id === b.id)) library.subscriptions = [b, ...library.subscriptions];
 		} else {
 			library.artists = library.artists.filter((a) => a.id !== b.id);
+			library.subscriptions = library.subscriptions.filter((a) => a.id !== b.id);
 		}
 		try {
 			await api.subscribe(b.id, next);
 			toast.success(next ? 'Saved to library' : 'Removed from library');
 			return next;
 		} catch (e) {
-			library.artists = prev;
+			library.artists = prevArtists;
+			library.subscriptions = prevSubs;
 			toast.error(String(e));
 			return currentlyIn;
 		}
@@ -1457,6 +1487,8 @@ export const ui = $state({
 	share: null as BrowseItem | null, // the share modal's target
 	toast: null as Toast | null,
 	settingsOpen: false, // the settings modal
+	settingsFocus: null as 'lyrics' | 'scrobbling' | null,
+	scrobbleTrack: null as SongItem | null,
 	ltOpen: false, // the Listen Together modal
 	linkOpen: false, // the "open a pasted link" modal
 	paletteOpen: false, // the Ctrl+K search palette
@@ -1693,6 +1725,7 @@ export function initApp(mini = false): () => void {
 			prefs.musicVideos = s.music_videos === 'true';
 			prefs.filterExplicit = s.filter_explicit === 'true';
 			prefs.animatedArtwork = s.animated_artwork !== 'false';
+			prefs.scrobbling = parseScrobbleConfig(s.lastfm_config).enabled;
 		})
 		.catch(() => {});
 	api.getAccount()

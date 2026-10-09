@@ -1,5 +1,6 @@
 // Shared window state, one listener, initialized once by the root layout.
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 
 export const win = $state({ maximized: false, fullscreen: false });
 
@@ -59,7 +60,7 @@ export function initWin(): () => void {
 	started = true;
 	try {
 		const w = getCurrentWindow();
-		w.show().catch(() => {});
+		invoke<boolean>('show_main').catch(() => w.show().catch(() => {}));
 		const sync = () => {
 			w.isMaximized()
 				.then((m) => (win.maximized = m))

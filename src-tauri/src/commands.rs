@@ -247,7 +247,7 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
 /// into the webview: they'd otherwise ship the login credential to the renderer on every open, and
 /// the webview can't overwrite them either.
-const UI_SETTINGS: [&str; 40] = [
+const UI_SETTINGS: &[&str] = &[
     "volume",
     "proxy",
     "quality",
@@ -257,6 +257,8 @@ const UI_SETTINGS: [&str; 40] = [
     "discord_rpc_config",
     "close_to_tray",
     "autostart",
+    "start_minimized",
+    "track_notifications",
     "autoplay",
     "hide_videos",
     "prevent_duplicates",
@@ -268,6 +270,9 @@ const UI_SETTINGS: [&str; 40] = [
     "music_videos",
     "lastfm_api_key",
     "lastfm_api_secret",
+    "lastfm_config",
+    "lastfm_primary_artist",
+    "lastfm_primary_strict",
     "custom_keybindings",
     "filter_explicit",
     "animated_artwork",
@@ -387,6 +392,9 @@ pub async fn set_setting(
         let k = crate::lastfm::resolve_api_key(&state.db);
         let s = crate::lastfm::resolve_api_secret(&state.db);
         state.lastfm.set_keys(k, s);
+    }
+    if matches!(key.as_str(), "lastfm_config" | "lastfm_primary_artist" | "lastfm_primary_strict") {
+        state.lastfm.set_config(crate::lastfm::ScrobbleConfig::load(&state.db));
     }
     // Applies to what's fetched from here on: the live queue keeps whatever is already in it.
     if key == "hide_videos" {
@@ -669,6 +677,17 @@ pub async fn close_mini(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub async fn show_main(state: St<'_>, window: tauri::WebviewWindow) -> Result<bool, String> {
+    if crate::should_start_minimized(&state.db) {
+        return Ok(false);
+    }
+    window.show().map_err(|e| e.to_string())?;
+    window.unminimize().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 // --- browse / library (context/08) ---------------------------------------------------------
 
 fn metadata_client(state: &Arc<AppState>) -> Result<&innertube::YouTubeClient, String> {
@@ -745,6 +764,15 @@ pub async fn get_library_artists(state: St<'_>) -> Result<Vec<BrowseItem>, Strin
     }
     let client = metadata_client(&state)?;
     state.it.library_artists(client).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_library_subscriptions(state: St<'_>) -> Result<Vec<BrowseItem>, String> {
+    if !state.it.is_logged_in() {
+        return Ok(Vec::new());
+    }
+    let client = metadata_client(&state)?;
+    state.it.library_subscriptions(client).await.map_err(|e| e.to_string())
 }
 
 /// A playlist or album page. `id` is the browseId (`VL…` / `MPRE…`); Liked Songs is `VLLM`, and
@@ -878,6 +906,38 @@ pub async fn get_album(state: St<'_>, id: String) -> Result<AlbumPage, String> {
 pub async fn get_artist(state: St<'_>, id: String) -> Result<ArtistPage, String> {
     let client = metadata_client(&state)?;
     state.it.artist(client, &id).await.map_err(|e| e.to_string())
+}
+
+/// Moods & Genres, the tiles the search page opens on.
+#[tauri::command]
+pub async fn get_moods(state: St<'_>) -> Result<Vec<innertube::MoodSection>, String> {
+    let client = metadata_client(&state)?;
+    state.it.moods(client).await.map_err(|e| e.to_string())
+}
+
+const MOODS_CATEGORY_ID: &str = "FEmusic_moods_and_genres_category";
+
+/// A cover for each Moods & Genres tile, which YouTube draws as a coloured button with no art: the
+/// first playlist in that tile's category. Six categories at a time. A tile whose category fails
+/// or comes back empty is left out, and the page draws it without art. The page keeps what comes
+/// back, so this runs once per tile, not once per visit.
+#[tauri::command]
+pub async fn get_mood_art(
+    state: St<'_>,
+    params: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    use futures_util::StreamExt;
+    let client = metadata_client(&state)?;
+    let it = &state.it;
+    Ok(futures_util::stream::iter(params)
+        .map(|p| async move {
+            let items = it.browse_grid(client, MOODS_CATEGORY_ID, Some(&p)).await.ok()?;
+            Some((p, items.into_iter().find_map(|i| i.thumbnail)?))
+        })
+        .buffer_unordered(6)
+        .filter_map(|art| async move { art })
+        .collect()
+        .await)
 }
 
 /// A card grid reached from a carousel's "More" button (e.g. an artist's full albums list).
@@ -1712,6 +1772,12 @@ pub async fn get_lyrics(
     .await)
 }
 
+/// Every lyrics provider in the user's order, for Settings and the source picker.
+#[tauri::command]
+pub fn lyrics_providers(state: St<'_>) -> Vec<crate::lyrics::ProviderInfo> {
+    crate::lyrics::providers(state.inner())
+}
+
 // --- Changelog ------------------------------------------------------------------------------
 
 #[derive(Clone, serde::Serialize)]
@@ -2158,6 +2224,21 @@ pub async fn lastfm_disconnect(state: St<'_>) -> Result<(), String> {
 #[tauri::command]
 pub async fn lastfm_status(state: St<'_>) -> Result<serde_json::Value, String> {
     Ok(crate::lastfm::status(&state))
+}
+
+/// Avatar and counts for the Scrobbling tab's account card. One Last.fm call per tab open.
+#[tauri::command]
+pub async fn lastfm_profile(state: St<'_>) -> Result<Option<crate::lastfm::Profile>, String> {
+    Ok(crate::lastfm::profile(&state).await)
+}
+
+/// What `track` would scrobble as under `config` (the Scrobbling tab's unsaved state, as JSON).
+#[tauri::command]
+pub async fn lastfm_preview(
+    config: String,
+    track: crate::lastfm::Track,
+) -> crate::lastfm::Resolved {
+    crate::lastfm::resolve(&track, &crate::lastfm::ScrobbleConfig::parse(&config))
 }
 
 // --- Spotify account linking (Developer API & psst-style) -----------------------------------

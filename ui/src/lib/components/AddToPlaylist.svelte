@@ -76,7 +76,7 @@
 								id: `sp_${s.id}`,
 								title: s.title,
 								kind: 'playlist',
-								thumbnail: s.thumbnail,
+								thumbnail: s.thumbnail ?? undefined,
 								subtitle: s.subtitle || 'Spotify Playlist'
 							});
 						}

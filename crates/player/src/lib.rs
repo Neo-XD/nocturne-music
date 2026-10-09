@@ -120,9 +120,9 @@ impl Deck {
         let deck_cache = format!("{cache_dir}/deck_{id}");
         let _ = std::fs::create_dir_all(&deck_cache);
         mpv.set_property("demuxer-cache-dir", deck_cache.as_str())?;
-        mpv.set_property("demuxer-max-bytes", 32 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-max-back-bytes", 32 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-readahead-secs", 120.0_f64)?;
+        mpv.set_property("demuxer-max-bytes", 16 * 1024 * 1024_i64)?;
+        mpv.set_property("demuxer-max-back-bytes", 8 * 1024 * 1024_i64)?;
+        mpv.set_property("demuxer-readahead-secs", 60.0_f64)?;
         let mpv = Arc::new(mpv);
 
         Ok(Deck { id, mpv, af: std::sync::Mutex::new(AudioFilters::default()) })

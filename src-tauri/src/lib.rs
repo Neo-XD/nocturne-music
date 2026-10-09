@@ -17,6 +17,7 @@ mod local;
 mod lyrics;
 mod media;
 mod mini;
+pub mod notify;
 mod orchestrator;
 mod potoken;
 pub mod recognition;
@@ -68,6 +69,12 @@ fn spawn_heap_trimmer(db: Arc<Db>) {
             }
         }
     });
+}
+
+pub fn should_start_minimized(db: &Db) -> bool {
+    let is_autostart = std::env::args().any(|arg| arg == "--autostart");
+    let start_minimized = db.get_setting("start_minimized").as_deref() == Some("true");
+    is_autostart && start_minimized
 }
 
 /// Pull WebKitGTK off its full-browser defaults, which wry never touches.
@@ -493,12 +500,14 @@ pub fn run() {
             // is already applied by then (#45). Safety net: if the frontend never gets that far,
             // show it anyway rather than leaving the app with no window at all.
             if let Some(w) = app.get_webview_window("main") {
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                    if !w.is_visible().unwrap_or(true) {
-                        let _ = w.show();
-                    }
-                });
+                if !should_start_minimized(&app_state.db) {
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        if !w.is_visible().unwrap_or(true) {
+                            let _ = w.show();
+                        }
+                    });
+                }
             }
 
             // Cookie rotation absorption: when InnerTube absorbs rotated cookies from responses,
@@ -585,11 +594,13 @@ pub fn run() {
             commands::login_webview,
             commands::open_mini,
             commands::close_mini,
+            commands::show_main,
             commands::get_home,
             commands::get_home_more,
             commands::get_library,
             commands::get_library_albums,
             commands::get_library_artists,
+            commands::get_library_subscriptions,
             commands::get_playlist,
             commands::get_playlist_more,
             commands::playlist_index,
@@ -601,6 +612,8 @@ pub fn run() {
             commands::remove_local_folder,
             commands::allow_font_file,
             commands::get_artist,
+            commands::get_moods,
+            commands::get_mood_art,
             commands::get_browse_grid,
             commands::play_playlist,
             commands::start_radio,
@@ -630,9 +643,12 @@ pub fn run() {
             commands::lt_request_sync,
             commands::trigger_lt_join_request,
             commands::get_lyrics,
+            commands::lyrics_providers,
             commands::lastfm_connect,
             commands::lastfm_disconnect,
             commands::lastfm_status,
+            commands::lastfm_profile,
+            commands::lastfm_preview,
             commands::release_notes,
             commands::can_self_update,
             commands::open_external,

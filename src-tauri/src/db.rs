@@ -601,6 +601,8 @@ impl Db {
             .ok()?;
         stmt.query_row([video_id], |r| {
             let file_size_i64: i64 = r.get(8)?;
+            let path: String = r.get(7)?;
+            let thumb: Option<String> = r.get(6)?;
             Ok(DownloadedTrack {
                 video_id: r.get(0)?,
                 title: r.get(1)?,
@@ -608,8 +610,10 @@ impl Db {
                 album: r.get(3)?,
                 duration: r.get(4)?,
                 duration_secs: r.get(5)?,
-                thumbnail: r.get(6)?,
-                path: r.get(7)?,
+                thumbnail: thumb.clone(),
+                path: path.clone(),
+                file_path: Some(path),
+                cover_path: thumb,
                 file_size: file_size_i64.max(0) as u64,
                 downloaded_at: r.get(9)?,
             })
@@ -624,6 +628,8 @@ impl Db {
         let mut out = Vec::new();
         let row = |r: &rusqlite::Row| {
             let file_size_i64: i64 = r.get(8)?;
+            let path: String = r.get(7)?;
+            let thumb: Option<String> = r.get(6)?;
             Ok(DownloadedTrack {
                 video_id: r.get(0)?,
                 title: r.get(1)?,
@@ -631,8 +637,10 @@ impl Db {
                 album: r.get(3)?,
                 duration: r.get(4)?,
                 duration_secs: r.get(5)?,
-                thumbnail: r.get(6)?,
-                path: r.get(7)?,
+                thumbnail: thumb.clone(),
+                path: path.clone(),
+                file_path: Some(path),
+                cover_path: thumb,
                 file_size: file_size_i64.max(0) as u64,
                 downloaded_at: r.get(9)?,
             })
@@ -703,17 +711,24 @@ pub struct LocalTrack {
 
 /// A track downloaded directly within Nocturne, with full metadata preserved.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct DownloadedTrack {
+    #[serde(alias = "videoId")]
     pub video_id: String,
     pub title: String,
     pub artist: String,
     pub album: Option<String>,
     pub duration: Option<String>,
+    #[serde(alias = "durationSecs", default)]
     pub duration_secs: i64,
     pub thumbnail: Option<String>,
     pub path: String,
+    #[serde(alias = "filePath", default)]
+    pub file_path: Option<String>,
+    #[serde(alias = "coverPath", default)]
+    pub cover_path: Option<String>,
+    #[serde(alias = "fileSize", default)]
     pub file_size: u64,
+    #[serde(alias = "downloadedAt", default)]
     pub downloaded_at: i64,
 }
 

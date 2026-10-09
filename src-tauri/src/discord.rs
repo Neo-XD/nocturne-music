@@ -180,6 +180,10 @@ pub fn load_discord_config(db: &crate::db::Db) -> RpcConfig {
 
 enum Msg {
     Track(Box<Track>),
+    Album {
+        video_id: String,
+        album: String,
+    },
     Duration(f64),
     /// A position tick. `at` is when the value was read — the thread ages it before use.
     Position {
@@ -224,6 +228,12 @@ impl DiscordHandle {
             thumbnail: item.thumbnail.as_deref().filter(|_| !local).and_then(discord_thumb),
             local,
         })));
+    }
+
+    /// Same as LastfmHandle::set_album: a card played from search has no album until the radio
+    /// behind it arrives, and set_track would reset the card's timeline.
+    pub fn set_album(&self, video_id: &str, album: &str) {
+        let _ = self.tx.send(Msg::Album { video_id: video_id.to_owned(), album: album.to_owned() });
     }
 
     /// mpv's reported track length.
@@ -371,6 +381,12 @@ impl Presence {
                 self.pos = 0.0;
                 self.pos_at = Instant::now();
                 self.duration = 0.0;
+            }
+            Msg::Album { video_id, album } => {
+                if let Some(t) = self.track.as_mut().filter(|t| t.video_id == video_id) {
+                    t.album = Some(album);
+                    self.cfg_dirty = true;
+                }
             }
             Msg::Duration(secs) => self.duration = secs,
             Msg::Position { pos, at } => {

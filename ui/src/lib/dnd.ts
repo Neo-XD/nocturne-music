@@ -10,6 +10,8 @@ export const QUEUE_ROW_MIME = 'application/x-nocturne-queue-row';
 export const PLAYLIST_DND_MIME = 'application/x-nocturne-playlist';
 /** A playlist folder being dragged in the sidebar or library */
 export const FOLDER_DND_MIME = 'application/x-nocturne-folder';
+/** A lyrics provider row being dragged in Settings */
+export const LYRICS_SOURCE_MIME = 'application/x-nocturne-lyrics-source';
 
 export function setDragItem(e: DragEvent, item: BrowseItem): void {
 	e.dataTransfer?.setData(ITEM_MIME, JSON.stringify(item));

@@ -62,6 +62,8 @@
 	} from '$lib/player.svelte';
 	import DiscordSettings from '$lib/components/DiscordSettings.svelte';
 	import DiscordIcon from '$lib/components/DiscordIcon.svelte';
+	import ScrobbleSettings from '$lib/components/ScrobbleSettings.svelte';
+	import LastFmIcon from '$lib/components/LastFmIcon.svelte';
 	import GlobalHotkeysSettings from '$lib/components/GlobalHotkeysSettings.svelte';
 	import {
 		formatKey,
@@ -107,12 +109,13 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'scrobbling' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
 	const TABS: { id: TabId; label: string; hint: string; icon?: typeof Settings02Icon; customIcon?: any }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
 		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and stream clients.', icon: PlayCircleIcon },
 		{ id: 'discord', label: 'Discord RPC', hint: 'Rich presence, custom activity text and live preview.', customIcon: DiscordIcon },
+		{ id: 'scrobbling', label: 'Scrobbling', hint: 'What Last.fm gets, timing rules and edits.', customIcon: LastFmIcon },
 		{ id: 'sync', label: 'Nocturne Sync', hint: 'Pair and control playback across PC and mobile devices.', icon: Wifi01Icon },
 		{ id: 'performance', label: 'Performance', hint: 'Graphics, animation speed and resource optimizations.', icon: FlashIcon },
 		{ id: 'lyrics', label: 'Lyrics', hint: 'Provider priority, sources and synchronization.', icon: Mic01Icon },
@@ -339,6 +342,12 @@
 	}
 
 	let tab = $state<TabId>('general');
+	$effect(() => {
+		if (ui.settingsFocus) {
+			tab = ui.settingsFocus;
+			ui.settingsFocus = null;
+		}
+	});
 	const currentTab = $derived(TABS.find((t) => t.id === tab) ?? TABS[0]);
 	let settings = $state<Record<string, string>>({});
 	let clients = $state<string[]>([]);
@@ -1055,6 +1064,18 @@
 		}
 	}
 
+	const startMinimizedOn = $derived(settings.start_minimized === 'true');
+	async function setStartMinimized(on: boolean) {
+		settings.start_minimized = on ? 'true' : 'false';
+		await api.setSetting('start_minimized', settings.start_minimized);
+	}
+
+	const trackNotificationsOn = $derived(settings.track_notifications === 'true');
+	async function setTrackNotifications(on: boolean) {
+		settings.track_notifications = on ? 'true' : 'false';
+		await api.setSetting('track_notifications', settings.track_notifications);
+	}
+
 	const remoteSyncOn = $derived(settings.remote_sync_enabled === 'true');
 	let remoteSyncPort = $state('8080');
 	let syncInfo = $state<api.RemoteSyncInfo | null>(null);
@@ -1510,6 +1531,18 @@
 									title: 'Start on login',
 									desc: 'Launch Nocturne automatically when you log in.',
 									control: autostartSwitch
+								})}
+								{#if autostartOn}
+									{@render row({
+										title: 'Start minimized to tray',
+										desc: 'Keep Nocturne minimized to the system tray on startup.',
+										control: startMinimizedSwitch
+									})}
+								{/if}
+								{@render row({
+									title: 'Song notifications',
+									desc: 'Show an OS notification whenever a new track starts playing and Nocturne is in the background.',
+									control: trackNotificationsSwitch
 								})}
 							</div>
 						</section>
@@ -2217,6 +2250,8 @@
 						</section>
 					{:else if tab === 'discord'}
 						<DiscordSettings {settings} />
+					{:else if tab === 'scrobbling'}
+						<ScrobbleSettings {settings} />
 					{:else if tab === 'sync'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Nocturne Sync (Tailscale / Local Wi-Fi)</h3>
@@ -3274,6 +3309,8 @@
 {/snippet}
 {#snippet traySwitch()}<Switch checked={trayOn} onCheckedChange={setTray} />{/snippet}
 {#snippet autostartSwitch()}<Switch checked={autostartOn} onCheckedChange={setAutostart} />{/snippet}
+{#snippet startMinimizedSwitch()}<Switch checked={startMinimizedOn} onCheckedChange={setStartMinimized} />{/snippet}
+{#snippet trackNotificationsSwitch()}<Switch checked={trackNotificationsOn} onCheckedChange={setTrackNotifications} />{/snippet}
 {#snippet autoplaySwitch()}<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />{/snippet}
 {#snippet normalizeSwitch()}<Switch checked={normalizeOn} onCheckedChange={setNormalize} />{/snippet}
 {#snippet showAudioQualitySwitch()}<Switch checked={prefs.showAudioQuality} onCheckedChange={setShowAudioQuality} />{/snippet}

@@ -29,6 +29,14 @@ fn sanitize_filename(name: &str) -> String {
     }
 }
 
+pub fn get_offline_cache_dir(app: &AppHandle) -> PathBuf {
+    if let Ok(mut p) = app.path().app_data_dir() {
+        p.push("offline_cache");
+        return p;
+    }
+    PathBuf::from("Nocturne_Offline_Cache")
+}
+
 pub fn get_default_download_dir(app: &AppHandle) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
@@ -101,7 +109,7 @@ pub async fn download_song_track(
 
     let dir = match custom_dir {
         Some(d) if !d.trim().is_empty() => PathBuf::from(d),
-        _ => get_default_download_dir(&app),
+        _ => get_offline_cache_dir(&app),
     };
 
     std::fs::create_dir_all(&dir)
@@ -120,12 +128,8 @@ pub async fn download_song_track(
     let effective_album = album.or_else(|| playback_data.title.clone());
     let effective_duration = duration.or_else(|| playback_data.duration.clone());
 
-    let filename = format!(
-        "{} - {}.{}",
-        sanitize_filename(&effective_artist),
-        sanitize_filename(&effective_title),
-        ext
-    );
+    let clean_vid = sanitize_filename(&video_id);
+    let filename = format!("{}_{}.{}", clean_vid, sanitize_filename(&effective_title), ext);
     let target_path = dir.join(&filename);
 
     // Initial progress event
@@ -275,6 +279,8 @@ pub async fn download_song_track(
         duration_secs,
         thumbnail: local_thumbnail.clone(),
         path: saved_path_str.clone(),
+        file_path: Some(saved_path_str.clone()),
+        cover_path: local_thumbnail.clone(),
         file_size: downloaded_bytes,
         downloaded_at: crate::db::now_secs(),
     };
@@ -445,10 +451,53 @@ pub fn show_in_folder(path: &str) -> Result<(), String> {
 }
 
 pub fn get_downloaded_file(
+    app: &AppHandle,
     db: &crate::db::Db,
     video_id: &str,
 ) -> Option<crate::db::DownloadedTrack> {
-    db.get_downloaded_track(video_id)
+    if let Some(track) = db.get_downloaded_track(video_id) {
+        if Path::new(&track.path).is_file() {
+            return Some(track);
+        }
+    }
+
+    // Also check offline_cache on disk by filename prefix
+    let cache_dir = get_offline_cache_dir(app);
+    let clean_id = sanitize_filename(video_id);
+    let prefix = format!("{}_", clean_id);
+    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with(&prefix)
+                        || name == format!("{}.m4a", clean_id)
+                        || name == format!("{}.webm", clean_id)
+                    {
+                        let path_str = p.to_string_lossy().to_string();
+                        let file_size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                        let record = crate::db::DownloadedTrack {
+                            video_id: video_id.to_string(),
+                            title: name.to_string(),
+                            artist: "Downloaded Track".to_string(),
+                            album: None,
+                            duration: None,
+                            duration_secs: 0,
+                            thumbnail: None,
+                            path: path_str.clone(),
+                            file_path: Some(path_str.clone()),
+                            cover_path: None,
+                            file_size,
+                            downloaded_at: crate::db::now_secs(),
+                        };
+                        db.save_downloaded_track(&record);
+                        return Some(record);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn scan_downloaded_songs(
@@ -458,83 +507,110 @@ pub fn scan_downloaded_songs(
     // 1. Prune missing files from DB
     let _ = db.prune_missing_downloaded_tracks();
 
-    // 2. Scan download directory for audio files
-    let download_dir = get_default_download_dir(app);
     let scope = app.asset_protocol_scope();
-    let _ = scope.allow_directory(&download_dir, true);
     let covers_dir = crate::local::covers_dir(app);
     let _ = scope.allow_directory(&covers_dir, true);
 
-    if let Ok(entries) = std::fs::read_dir(&download_dir) {
-        let existing = db.get_all_downloaded_tracks();
-        let existing_paths: std::collections::HashSet<String> =
-            existing.into_iter().map(|t| t.path).collect();
+    let dirs_to_scan = vec![get_offline_cache_dir(app), get_default_download_dir(app)];
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-            if !["mp3", "m4a", "webm", "opus", "flac", "ogg", "wav", "aac"].contains(&ext.as_str())
-            {
-                continue;
-            }
+    for scan_dir in dirs_to_scan {
+        let _ = scope.allow_directory(&scan_dir, true);
+        if let Ok(entries) = std::fs::read_dir(&scan_dir) {
+            let existing = db.get_all_downloaded_tracks();
+            let existing_paths: std::collections::HashSet<String> =
+                existing.into_iter().map(|t| t.path).collect();
 
-            let path_str = path.to_string_lossy().to_string();
-            if existing_paths.contains(&path_str) {
-                continue;
-            }
-
-            let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            let mut title = None;
-            let mut artist = None;
-            let mut album = None;
-            let mut duration_secs = 0;
-
-            if let Ok(tagged_file) = lofty::probe::Probe::open(&path).and_then(|p| p.read()) {
-                use lofty::file::AudioFile;
-                use lofty::tag::Accessor;
-                duration_secs = tagged_file.properties().duration().as_secs() as i64;
-                if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
-                    title = tag.title().map(|s| s.to_string());
-                    artist = tag.artist().map(|s| s.to_string());
-                    album = tag.album().map(|s| s.to_string());
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
                 }
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                if !["mp3", "m4a", "webm", "opus", "flac", "ogg", "wav", "aac"]
+                    .contains(&ext.as_str())
+                {
+                    continue;
+                }
+
+                let path_str = path.to_string_lossy().to_string();
+                if existing_paths.contains(&path_str) {
+                    continue;
+                }
+
+                let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                let mut title = None;
+                let mut artist = None;
+                let mut album = None;
+                let mut duration_secs = 0;
+
+                if let Ok(tagged_file) = lofty::probe::Probe::open(&path).and_then(|p| p.read()) {
+                    use lofty::file::AudioFile;
+                    use lofty::tag::Accessor;
+                    duration_secs = tagged_file.properties().duration().as_secs() as i64;
+                    if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag())
+                    {
+                        title = tag.title().map(|s| s.to_string());
+                        artist = tag.artist().map(|s| s.to_string());
+                        album = tag.album().map(|s| s.to_string());
+                    }
+                }
+
+                let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Track");
+                // Check if file stem starts with video_id (pattern: "<video_id>_<title>")
+                let (vid, f_artist, f_title) =
+                    if let Some((id_part, rest)) = file_stem.split_once('_') {
+                        if id_part.len() == 11 || id_part.starts_with("SP_") {
+                            let restored_id = if id_part.starts_with("SP_") {
+                                id_part.replacen("SP_", "SP:", 1)
+                            } else {
+                                id_part.to_string()
+                            };
+                            (restored_id, "Unknown Artist".to_string(), rest.to_string())
+                        } else if let Some((a, t)) = file_stem.split_once(" - ") {
+                            (format!("DL:{}", path_str), a.trim().to_string(), t.trim().to_string())
+                        } else {
+                            (
+                                format!("DL:{}", path_str),
+                                "Unknown Artist".to_string(),
+                                file_stem.to_string(),
+                            )
+                        }
+                    } else if let Some((a, t)) = file_stem.split_once(" - ") {
+                        (format!("DL:{}", path_str), a.trim().to_string(), t.trim().to_string())
+                    } else {
+                        (
+                            format!("DL:{}", path_str),
+                            "Unknown Artist".to_string(),
+                            file_stem.to_string(),
+                        )
+                    };
+
+                let final_title = title.unwrap_or(f_title);
+                let final_artist = artist.unwrap_or(f_artist);
+                let duration = if duration_secs > 0 {
+                    let mins = duration_secs / 60;
+                    let secs = duration_secs % 60;
+                    Some(format!("{}:{:02}", mins, secs))
+                } else {
+                    None
+                };
+
+                let record = crate::db::DownloadedTrack {
+                    video_id: vid,
+                    title: final_title,
+                    artist: final_artist,
+                    album,
+                    duration,
+                    duration_secs,
+                    thumbnail: None,
+                    path: path_str.clone(),
+                    file_path: Some(path_str),
+                    cover_path: None,
+                    file_size,
+                    downloaded_at: crate::db::now_secs(),
+                };
+                db.save_downloaded_track(&record);
             }
-
-            let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Track");
-            let (f_artist, f_title) = if let Some((a, t)) = file_stem.split_once(" - ") {
-                (a.trim().to_string(), t.trim().to_string())
-            } else {
-                ("Unknown Artist".to_string(), file_stem.to_string())
-            };
-
-            let final_title = title.unwrap_or(f_title);
-            let final_artist = artist.unwrap_or(f_artist);
-            let duration = if duration_secs > 0 {
-                let mins = duration_secs / 60;
-                let secs = duration_secs % 60;
-                Some(format!("{}:{:02}", mins, secs))
-            } else {
-                None
-            };
-
-            let video_id = format!("DL:{}", path_str);
-
-            let record = crate::db::DownloadedTrack {
-                video_id,
-                title: final_title,
-                artist: final_artist,
-                album,
-                duration,
-                duration_secs,
-                thumbnail: None,
-                path: path_str,
-                file_size,
-                downloaded_at: crate::db::now_secs(),
-            };
-            db.save_downloaded_track(&record);
         }
     }
 

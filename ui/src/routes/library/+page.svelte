@@ -18,6 +18,7 @@
 		Playlist02Icon,
 		SquareStackIcon,
 		UserSharingIcon,
+		UserCheck01Icon,
 		Folder01Icon,
 		FolderAddIcon,
 		FolderOpenIcon,
@@ -77,12 +78,15 @@
 		lastTab = tab;
 	});
 
+	let artistTab = $state('artists');
+
 	// Everything here lives in the shared `library` store, so a revisit renders the cached grid
 	// immediately and the forced refresh below swaps in fresh data behind it. What was saved on this
 	// machine merges in per tab (`mergeSaved`), which is the whole library when signed out.
 	const playlists = $derived(mergeSaved(personal, library.items, 'playlist'));
 	const albums = $derived(mergeSaved(personal, library.albums, 'album'));
 	const artists = $derived(mergeSaved(personal, library.artists, 'artist'));
+	const subscriptions = $derived(mergeSaved(personal, library.subscriptions, 'artist'));
 	const all = $derived([...playlists, ...albums, ...artists]);
 	// One per tab rather than one shared instance reset on switch: an `$effect` reset lands
 	// after the render it is meant to govern, so switching tabs would build the new tab's grid
@@ -92,6 +96,7 @@
 	const rvPlaylists = reveal();
 	const rvAlbums = reveal();
 	const rvArtists = reveal();
+	const rvSubscriptions = reveal();
 	const rvSpotify = reveal();
 
 	const spotifyPlaylistItems = $derived<BrowseItem[]>([
@@ -771,14 +776,41 @@
 				{/if}
 			</Tabs.Content>
 			<Tabs.Content value="artists">
-				{#if tab === 'artists'}
+				{#if tab === 'artists' && signedOut}
 					{@render grid(
 						artists,
-						signedOut
-							? 'No artists yet. Save one from its page to keep it here.'
-							: 'No artists yet. They show up once you save their songs or albums.',
+						'No artists yet. Save one from its page to keep it here.',
 						rvArtists
 					)}
+				{:else if tab === 'artists'}
+					<Tabs.Root bind:value={artistTab}>
+						<Tabs.List variant="line" class="mb-4">
+							<Tabs.Trigger value="artists">
+								<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> Artists
+							</Tabs.Trigger>
+							<Tabs.Trigger value="subscriptions">
+								<HugeiconsIcon icon={UserCheck01Icon} class="h-4 w-4" /> Subscriptions
+							</Tabs.Trigger>
+						</Tabs.List>
+						<Tabs.Content value="artists">
+							{#if artistTab === 'artists'}
+								{@render grid(
+									library.artists,
+									'No artists yet. They show up once you save their songs or albums.',
+									rvArtists
+								)}
+							{/if}
+						</Tabs.Content>
+						<Tabs.Content value="subscriptions">
+							{#if artistTab === 'subscriptions'}
+								{@render grid(
+									subscriptions,
+									'No subscribed artists yet. Subscribe to an artist to keep them here.',
+									rvSubscriptions
+								)}
+							{/if}
+						</Tabs.Content>
+					</Tabs.Root>
 				{/if}
 			</Tabs.Content>
 		{/if}

@@ -62,6 +62,7 @@ lofty = "0.22.2"
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-window-state = "2.4.1"
 dirs = "5"
+notify-rust = "4"
 
 # Taskbar thumbnail toolbar (#47). Same `windows` version tauri-runtime-wry already pulls in, so
 # `Window::hwnd()` hands us a matching HWND.

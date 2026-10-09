@@ -114,7 +114,7 @@
 	title={auth.account?.signedIn
 		? (auth.account.name ?? 'Account')
 		: spotify.status.linked
-			? (spotify.status.user ? `${spotify.status.user} (Spotify)` : 'Spotify Account')
+			? (spotify.status.display_name || spotify.status.username || spotify.status.user ? `${spotify.status.display_name || spotify.status.username || spotify.status.user} (Spotify)` : 'Spotify Account')
 			: 'Sign in'}
 	aria-expanded={menuOpen}
 	class="flex h-full cursor-pointer items-center gap-2 px-2.5 text-xs transition-colors hover:bg-muted aria-expanded:bg-muted"
@@ -142,7 +142,7 @@
 		{auth.account?.signedIn
 			? (auth.account.name ?? 'Account')
 			: spotify.status.linked
-				? (spotify.status.user || 'Spotify')
+				? (spotify.status.display_name || spotify.status.username || spotify.status.user || 'Spotify')
 				: 'Sign in'}
 	</span>
 	<HugeiconsIcon
@@ -271,7 +271,7 @@
 					</svg>
 					<span class="text-xs font-semibold text-emerald-400">Spotify Connected</span>
 				</div>
-				<div class="truncate text-sm font-medium text-foreground">{spotify.status.user ?? 'Spotify User'}</div>
+				<div class="truncate text-sm font-medium text-foreground">{spotify.status.display_name || spotify.status.username || spotify.status.user || 'Spotify User'}</div>
 				<div class="text-[11px] text-muted-foreground mt-0.5">Using Nocturne with Spotify account</div>
 			</div>
 			<Button variant="outline" size="sm" class="mb-2 w-full gap-2" onclick={signInGoogle}>

@@ -88,6 +88,20 @@ pub struct HomePage {
     pub continuation: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mood {
+    pub title: String,
+    pub params: String,
+    /// `#rrggbb` hex colour parsed off YouTube's `leftStripeColor`.
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoodSection {
+    pub title: String,
+    pub items: Vec<Mood>,
+}
+
 /// The orders YouTube can put a playlist in. context/08.
 ///
 /// YouTube stores this choice itself, which is why Nocturne asks for a sorted page instead of
@@ -352,6 +366,34 @@ pub fn parse_library(root: &Value) -> Vec<BrowseItem> {
     find_all(root, "musicResponsiveListItemRenderer")
         .into_iter()
         .filter_map(list_item_to_browse_item)
+        .collect()
+}
+
+/// Parse a `FEmusic_moods_and_genres` response: one `gridRenderer` per section. context/08.
+pub fn parse_moods(root: &Value) -> Vec<MoodSection> {
+    find_all(root, "gridRenderer")
+        .into_iter()
+        .filter_map(|grid| {
+            let title = find_all(grid.get("header")?, "gridHeaderRenderer")
+                .into_iter()
+                .find_map(|h| runs_text(h.get("title")))?;
+            let items: Vec<Mood> = find_all(grid.get("items")?, "musicNavigationButtonRenderer")
+                .into_iter()
+                .filter_map(|b| {
+                    let params = find_all(b.get("clickCommand")?, "browseEndpoint")
+                        .into_iter()
+                        .find_map(|e| e.get("params")?.as_str())?
+                        .to_owned();
+                    let argb = b.get("solid")?.get("leftStripeColor")?.as_u64()?;
+                    Some(Mood {
+                        title: runs_text(b.get("buttonText"))?,
+                        params,
+                        color: format!("#{:06x}", argb & 0xff_ffff),
+                    })
+                })
+                .collect();
+            (!items.is_empty()).then_some(MoodSection { title, items })
+        })
         .collect()
 }
 

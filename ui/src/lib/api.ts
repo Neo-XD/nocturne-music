@@ -89,6 +89,7 @@ export interface NowPlaying {
 	artistRuns?: ArtistRun[];
 	thumbnail?: string;
 	duration?: string;
+	album?: string | null;
 	streamClient: string;
 	/** Human-readable audio quality string, e.g. "OPUS 160 kbps" or "FLAC Lossless". */
 	audioQuality?: string;
@@ -490,6 +491,7 @@ export const getHomeMore = (token: string) => invoke<HomePage>('get_home_more', 
 export const getLibrary = () => invoke<BrowseItem[]>('get_library');
 export const getLibraryAlbums = () => invoke<BrowseItem[]>('get_library_albums');
 export const getLibraryArtists = () => invoke<BrowseItem[]>('get_library_artists');
+export const getLibrarySubscriptions = () => invoke<BrowseItem[]>('get_library_subscriptions');
 /**
  * `sort` asks YouTube to order the tracks; omit it to get whatever order the account already has
  * the list in, which is the one a fresh visit wants (it is what YouTube Music would show).
@@ -547,6 +549,22 @@ export const startRadio = (kind: 'song' | 'artist' | 'album' | 'playlist', id: s
 	invoke<void>('start_radio', { kind, id, name });
 export const getAlbum = (id: string) => invoke<AlbumPage>('get_album', { id });
 export const getArtist = (id: string) => invoke<ArtistPage>('get_artist', { id });
+/** A Moods & Genres tile. `params` browses `MOODS_CATEGORY_ID` into that mood's playlists. */
+export interface Mood {
+	title: string;
+	params: string;
+	/** YouTube's own colour for the tile, `#rrggbb`. */
+	color: string;
+}
+export interface MoodSection {
+	title: string;
+	items: Mood[];
+}
+export const MOODS_CATEGORY_ID = 'FEmusic_moods_and_genres_category';
+export const getMoods = () => invoke<MoodSection[]>('get_moods');
+/** A cover per tile (the first playlist in its category), keyed by the tile's `params`. */
+export const getMoodArt = (params: string[]) =>
+	invoke<Record<string, string>>('get_mood_art', { params });
 export const getBrowseGrid = (id: string, params?: string) =>
 	invoke<BrowseItem[]>('get_browse_grid', { id, params });
 
@@ -735,6 +753,13 @@ export const getLyrics = (args: {
 	duration?: number;
 }) => invoke<Lyrics | null>('get_lyrics', args);
 
+export interface LyricsProvider {
+	id: string;
+	name: string;
+	on: boolean;
+}
+export const lyricsProviders = () => invoke<LyricsProvider[]>('lyrics_providers');
+
 // --- Last.fm scrobbling ---------------------------------------------------------------------
 export interface LastfmState {
 	connected: boolean;
@@ -749,6 +774,38 @@ export const lastfmConnect = () => invoke<void>('lastfm_connect');
 export const lastfmDisconnect = () => invoke<void>('lastfm_disconnect');
 export const onLastfmState = (cb: (s: LastfmState) => void): Promise<UnlistenFn> =>
 	listen<LastfmState>('lastfm-state', (e) => cb(e.payload));
+
+export interface LastfmProfile {
+	image: string | null;
+	url: string | null;
+	scrobbles: number;
+	artists: number;
+	tracks: number;
+	since: number;
+}
+export const lastfmProfile = () => invoke<LastfmProfile | null>('lastfm_profile');
+
+export interface ScrobbleTrack {
+	video_id: string;
+	title: string;
+	artists: string;
+	album?: string | null;
+	is_video?: boolean;
+}
+
+export interface ScrobblePreview {
+	artist: string;
+	title: string;
+	album: string;
+	skip: 'edit' | 'incomplete' | null;
+	edit: number | null;
+	split: boolean;
+	rules: number[];
+	errors: [number, string][];
+}
+
+export const lastfmPreview = (config: string, track: ScrobbleTrack) =>
+	invoke<ScrobblePreview>('lastfm_preview', { config, track });
 
 // --- Listen Together (context/19) -----------------------------------------------------------
 export interface LtUser {
@@ -837,14 +894,23 @@ export const downloadSong = (args: {
 
 export interface DownloadedSong {
 	video_id: string;
+	videoId?: string;
 	title: string;
 	artist: string;
 	album?: string | null;
-	duration: number;
-	file_path: string;
+	duration?: string | number | null;
+	duration_secs?: number;
+	durationSecs?: number;
+	path: string;
+	file_path?: string;
+	filePath?: string;
+	thumbnail?: string | null;
 	cover_path?: string | null;
+	coverPath?: string | null;
 	file_size: number;
+	fileSize?: number;
 	downloaded_at: number;
+	downloadedAt?: number;
 }
 
 export const getDownloadedSongs = () => invoke<DownloadedSong[]>('get_downloaded_songs');
@@ -980,6 +1046,7 @@ export interface SpotifyAccountStatus {
 	linked: boolean;
 	username?: string | null;
 	display_name?: string | null;
+	user?: string | null;
 	product?: string | null;
 	avatar_url?: string | null;
 	auth_type?: string | null;

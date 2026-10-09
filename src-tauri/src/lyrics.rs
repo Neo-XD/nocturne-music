@@ -43,6 +43,56 @@ const UNISON_SEARCH_LIMIT: usize = 10;
 const UNISON_CANDIDATE_LIMIT: usize = 3;
 const MANUAL_PROVIDER_CANDIDATE_LIMIT: usize = 3;
 
+/// Every provider, in the order a fresh install asks them.
+pub const PROVIDERS: [&str; 8] =
+    ["boidu", "lyricsplus", "lrclib", "youtube", "simpmusic", "netease", "qq", "kugou"];
+
+pub fn provider_name(id: &str) -> &'static str {
+    match id {
+        "boidu" => "Boidu",
+        "lyricsplus" => "LyricsPlus",
+        "lrclib" => "LRCLIB",
+        "youtube" => "YouTube Music",
+        "simpmusic" => "SimpMusic",
+        "netease" => "Netease Cloud Music",
+        "qq" => "QQ Music",
+        "kugou" => "Kugou",
+        _ => "",
+    }
+}
+
+pub fn provider_order(setting: Option<&str>) -> Vec<(&'static str, bool)> {
+    let mut out: Vec<(&'static str, bool)> = Vec::new();
+    for tok in setting.unwrap_or_default().split(',').map(str::trim) {
+        let (id, on) = tok.strip_prefix('-').map_or((tok, true), |id| (id, false));
+        if let Some(&p) = PROVIDERS.iter().find(|p| **p == id) {
+            if !out.iter().any(|(q, _)| *q == p) {
+                out.push((p, on));
+            }
+        }
+    }
+    for p in PROVIDERS {
+        if !out.iter().any(|(q, _)| *q == p) {
+            out.push((p, true));
+        }
+    }
+    out
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderInfo {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub on: bool,
+}
+
+pub fn providers(state: &AppState) -> Vec<ProviderInfo> {
+    provider_order(state.db.get_setting("lyrics_providers").as_deref())
+        .into_iter()
+        .map(|(id, on)| ProviderInfo { id, name: provider_name(id), on })
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LyricWord {
     pub text: String,

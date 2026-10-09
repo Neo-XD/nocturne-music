@@ -15,7 +15,7 @@
 	// hundred rather than mounting the lot when the page opens.
 	const rv = reveal();
 
-	const id = $derived(page.url.searchParams.get('id') ?? '');
+	const id = $derived(page.url.searchParams.get('id') ?? page.url.searchParams.get('browseId') ?? '');
 	const params = $derived(page.url.searchParams.get('params') ?? undefined);
 	const title = $derived(page.url.searchParams.get('title') ?? 'More');
 

@@ -1017,14 +1017,35 @@ impl AppState {
                 });
             }
 
-            if let Some(client) = self.clients.get(innertube::METADATA_CLIENT) {
-                if let Ok(results) = self.it.search_songs(client, &query).await {
-                    if let Some(first) = results.items.first() {
-                        actual_id = first.video_id.clone();
+            if !self.is_offline_mode() {
+                if let Some(client) = self.clients.get(innertube::METADATA_CLIENT) {
+                    if let Ok(results) = self.it.search_songs(client, &query).await {
+                        if let Some(first) = results.items.first() {
+                            actual_id = first.video_id.clone();
+                        }
                     }
                 }
             }
         }
+
+        // If downloaded in Nocturne, play directly from disk (zero network, works offline).
+        if let Some(downloaded) =
+            crate::download::get_downloaded_file(&self.app, &self.db, video_id)
+                .or_else(|| crate::download::get_downloaded_file(&self.app, &self.db, &actual_id))
+        {
+            if std::path::Path::new(&downloaded.path).is_file() {
+                let mut data = crate::local::playback_data(video_id, &downloaded.path)
+                    .map_err(|_| ResolveError::LocalMissing(downloaded.path.clone()))?;
+                data.title = Some(downloaded.title);
+                data.artists = Some(downloaded.artist);
+                data.duration = downloaded.duration;
+                data.thumbnail = downloaded.thumbnail;
+                data.stream_client = "download".to_string();
+                data.audio_quality = Some("Offline Cache".to_string());
+                return Ok(data);
+            }
+        }
+
         let video_id = actual_id.as_str();
 
         // A local file is its own "stream": no network, no cache, no extraction (local.rs).
@@ -1037,21 +1058,6 @@ impl AppState {
                 let _ = self.app.emit("local-changed", serde_json::json!({ "removed": removed }));
                 ResolveError::LocalMissing(path.to_owned())
             });
-        }
-
-        // If downloaded in Nocturne, play directly from disk (zero network, works offline).
-        if let Some(downloaded) = crate::download::get_downloaded_file(&self.db, video_id) {
-            if std::path::Path::new(&downloaded.path).is_file() {
-                let mut data = crate::local::playback_data(video_id, &downloaded.path)
-                    .map_err(|_| ResolveError::LocalMissing(downloaded.path.clone()))?;
-                data.title = Some(downloaded.title);
-                data.artists = Some(downloaded.artist);
-                data.duration = downloaded.duration;
-                data.thumbnail = downloaded.thumbnail;
-                data.stream_client = "download".to_string();
-                data.audio_quality = Some("Downloaded".to_string());
-                return Ok(data);
-            }
         }
 
         // When offline mode is active, reject un-downloaded online tracks immediately
@@ -1179,10 +1185,10 @@ impl AppState {
             return;
         }
 
-        // A local file isn't a videoId YouTube has ever heard of: asking for its radio is a
-        // guaranteed-useless request, and offline (where local music earns its keep) it's a
-        // guaranteed-failing one.
-        if local {
+        // A local or downloaded file, or running in offline mode, skips radio hydration.
+        let is_downloaded =
+            crate::download::get_downloaded_file(&self.app, &self.db, &video_id).is_some();
+        if local || is_downloaded || self.is_offline_mode() {
             self.prime_lookahead(gen).await;
             return;
         }
@@ -1205,10 +1211,24 @@ impl AppState {
                 if self.generation.load(Ordering::SeqCst) != gen {
                     return; // superseded
                 }
-                for item in next.items {
+                for item in &next.items {
                     if item.video_id != video_id {
-                        q.items.push(item);
+                        q.items.push(item.clone());
                     }
+                }
+                if let Some(album) = next
+                    .items
+                    .iter()
+                    .find(|i| i.video_id == video_id)
+                    .and_then(|i| i.album.as_deref())
+                {
+                    if let Some(m) = &self.media {
+                        m.set_album(album);
+                    }
+                    if let Some(d) = &self.discord {
+                        d.set_album(&video_id, album);
+                    }
+                    self.lastfm.set_album(&video_id, album);
                 }
                 // Shuffle on → the radio hydration is part of the queue: snapshot it as the
                 // "original" order, then shuffle the upcoming tracks. (Runs before the lookahead
@@ -2158,6 +2178,11 @@ impl AppState {
             d.set_track(item);
         }
         self.lastfm.set_track(item);
+        if stream_client != "restored"
+            && self.db.get_setting("track_notifications").as_deref() == Some("true")
+        {
+            crate::notify::track_changed(&self.app, &item.title, &item.artists);
+        }
         // New track ⇒ let the next position tick through immediately instead of waiting out the
         // ~1s throttle, so a restored seek position (and the play-state self-heal) lands at once.
         self.last_media_push.store(0, Ordering::Relaxed);

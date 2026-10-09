@@ -64,7 +64,8 @@
 		bumpLibraryTrackCount,
 		noteUnsavedFrom,
 		patchLibraryPlaylist,
-		lastPlaylistAdd
+		lastPlaylistAdd,
+		loadSpotifyPlaylists
 	} from '$lib/player.svelte';
 
 	// `$state.raw`, not `$state`: a deep proxy makes every read of a row go through a trap and
