@@ -101,7 +101,7 @@
 				title: song.title,
 				artist: song.artists,
 				album: song.album,
-				duration: durationSecs(song.duration),
+				duration: song.duration,
 				thumbnail: song.thumbnail
 			});
 			toast.success(`Downloaded "${song.title}"`);

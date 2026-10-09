@@ -3987,10 +3987,29 @@ pub async fn download_song(
     title: String,
     artist: String,
     album: Option<String>,
-    duration: Option<String>,
+    duration: Option<serde_json::Value>,
     thumbnail: Option<String>,
     custom_dir: Option<String>,
 ) -> Result<String, String> {
+    let duration_str = duration.and_then(|v| match v {
+        serde_json::Value::String(s) => Some(s),
+        serde_json::Value::Number(n) => {
+            if let Some(secs) = n.as_i64() {
+                let m = secs / 60;
+                let s = secs % 60;
+                Some(format!("{m}:{s:02}"))
+            } else if let Some(secs) = n.as_f64() {
+                let secs = secs as i64;
+                let m = secs / 60;
+                let s = secs % 60;
+                Some(format!("{m}:{s:02}"))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    });
+
     crate::download::download_song_track(
         app,
         state.inner().clone(),
@@ -3998,7 +4017,7 @@ pub async fn download_song(
         title,
         artist,
         album,
-        duration,
+        duration_str,
         thumbnail,
         custom_dir,
     )

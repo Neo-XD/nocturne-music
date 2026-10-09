@@ -1146,6 +1146,123 @@ impl AppState {
         Ok(data)
     }
 
+    /// Resolve an audio stream specifically for downloading to local disk.
+    /// Bypasses the local downloaded file check (since we are performing a download)
+    /// and allows cache eviction on failure.
+    pub(crate) async fn resolve_for_download(
+        &self,
+        video_id: &str,
+        bypass_cache: bool,
+    ) -> Result<PlaybackData, ResolveError> {
+        let mut actual_id = video_id.to_string();
+        if let Some(sp_info) = video_id.strip_prefix("SP:") {
+            let parts: Vec<&str> = sp_info.split(':').collect();
+            let query = parts.get(1).and_then(|q| urlencoding::decode(q).ok()).unwrap_or_default();
+            let preview_url =
+                parts.get(2).and_then(|p| urlencoding::decode(p).ok()).unwrap_or_default();
+            let audio_source =
+                self.db.get_setting("audio_stream_source").unwrap_or_else(|| "ytm".to_string());
+
+            if audio_source == "spotify" && !preview_url.trim().is_empty() {
+                return Ok(PlaybackData {
+                    video_id: video_id.to_owned(),
+                    stream_url: preview_url.to_string(),
+                    itag: 140,
+                    headers: Default::default(),
+                    expires_in_seconds: 3600,
+                    loudness_db: None,
+                    playback_ping: None,
+                    title: None,
+                    artists: None,
+                    duration: None,
+                    thumbnail: None,
+                    is_video: Some(false),
+                    stream_client: "spotify".to_owned(),
+                    audio_quality: Some("Spotify Stream (Preview)".into()),
+                });
+            }
+
+            if let Some(client) = self.clients.get(innertube::METADATA_CLIENT) {
+                if let Ok(results) = self.it.search_songs(client, &query).await {
+                    if let Some(first) = results.items.first() {
+                        actual_id = first.video_id.clone();
+                    }
+                }
+            }
+        }
+
+        let video_id = actual_id.as_str();
+
+        // If local library file, return it
+        if let Some(path) = crate::local::song_path(video_id) {
+            return crate::local::playback_data(video_id, path)
+                .map_err(|_| ResolveError::LocalMissing(path.to_owned()));
+        }
+
+        let now = now_secs();
+        if !bypass_cache {
+            if let Some(c) = self.db.get_stream(video_id, now + 60) {
+                tracing::debug!(video_id, "stream url cache hit for download");
+                let headers = match c.ping_client.as_deref() {
+                    Some(k) => self.orchestrator.headers_for(k, false),
+                    None => self.orchestrator.headers_for("VISIONOS", false),
+                };
+                return Ok(PlaybackData {
+                    video_id: video_id.to_owned(),
+                    stream_url: c.url,
+                    itag: c.itag,
+                    headers,
+                    expires_in_seconds: c.expires_at - now,
+                    loudness_db: c.loudness_db,
+                    playback_ping: c
+                        .ping_url
+                        .zip(c.ping_client)
+                        .map(|(url, client)| PlaybackPing { url, client }),
+                    title: None,
+                    artists: None,
+                    duration: None,
+                    thumbnail: None,
+                    is_video: c.is_video,
+                    stream_client: "cache".to_owned(),
+                    audio_quality: None,
+                });
+            }
+        } else {
+            self.db.evict_stream(video_id);
+        }
+
+        let custom_priority = self.stream_client_priority();
+        let auto_rank = self.stream_client_auto_rank();
+        let data = self
+            .orchestrator
+            .resolve(
+                video_id,
+                false,
+                self.quality(),
+                &self.disabled_clients(),
+                custom_priority.as_deref(),
+                auto_rank,
+            )
+            .await?;
+
+        if data.stream_client != "rustypipe" {
+            self.db.put_stream(
+                video_id,
+                &crate::db::CachedStream {
+                    url: data.stream_url.clone(),
+                    itag: data.itag,
+                    expires_at: now + data.expires_in_seconds.max(0),
+                    loudness_db: data.loudness_db,
+                    is_video: data.is_video,
+                    ping_url: data.playback_ping.as_ref().map(|p| p.url.clone()),
+                    ping_client: data.playback_ping.as_ref().map(|p| p.client.clone()),
+                },
+                now,
+            );
+        }
+        Ok(data)
+    }
+
     /// Start a fresh queue from one track (a search-result click), then hydrate the radio via
     /// `next` and prime the gapless lookahead.
     pub async fn play_song(self: &std::sync::Arc<Self>, seed: SongItem) {

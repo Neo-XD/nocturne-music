@@ -86,15 +86,114 @@ pub async fn download_song_track(
     thumbnail: Option<String>,
     custom_dir: Option<String>,
 ) -> Result<String, String> {
-    // 1. Resolve audio stream
-    let playback_data = state
-        .resolve(&video_id, false)
-        .await
-        .map_err(|e| format!("Failed to resolve audio stream: {e}"))?;
+    let effective_artist =
+        if artist.trim().is_empty() { "Unknown Artist".to_string() } else { artist.clone() };
+    let effective_title = if title.trim().is_empty() { "Track".to_string() } else { title.clone() };
 
-    let stream_url = playback_data.stream_url;
+    // 0. Check if this track is already downloaded to disk
+    if let Some(existing) = get_downloaded_file(&app, &state.db, &video_id) {
+        if Path::new(&existing.path).is_file() {
+            let _ = app.emit(
+                "download-progress",
+                DownloadProgress {
+                    video_id: video_id.clone(),
+                    title: existing.title.clone(),
+                    artist: existing.artist.clone(),
+                    downloaded_bytes: existing.file_size,
+                    total_bytes: Some(existing.file_size),
+                    percent: 100.0,
+                    status: "complete".into(),
+                    path: Some(existing.path.clone()),
+                },
+            );
+            return Ok(existing.path);
+        }
+    }
+
+    // 1. Resolve audio stream (with fallback retry on cache miss/stale URL)
+    let playback_data = match state.resolve_for_download(&video_id, false).await {
+        Ok(data) => data,
+        Err(e) => {
+            tracing::warn!(error = ?e, "Initial resolve failed for download, attempting fresh resolve");
+            state
+                .resolve_for_download(&video_id, true)
+                .await
+                .map_err(|err| format!("Failed to resolve audio stream: {err}"))?
+        }
+    };
+
+    let stream_url = playback_data.stream_url.clone();
     if stream_url.is_empty() {
         return Err("Resolved stream URL is empty".into());
+    }
+
+    let dir = match custom_dir {
+        Some(d) if !d.trim().is_empty() => PathBuf::from(d),
+        _ => get_offline_cache_dir(&app),
+    };
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create download folder {:?}: {e}", dir))?;
+
+    let effective_album = album.or_else(|| playback_data.title.clone());
+    let effective_duration = duration.or_else(|| playback_data.duration.clone());
+
+    let clean_vid = if video_id.starts_with("SP:") {
+        let parts: Vec<&str> = video_id.split(':').collect();
+        let track_id = parts.get(1).unwrap_or(&"unknown");
+        format!("SP_{}", sanitize_filename(track_id))
+    } else {
+        sanitize_filename(&video_id)
+    };
+
+    // If stream_url is already a local file (e.g. from local library), copy to offline cache or use directly
+    if stream_url.starts_with("file://") || Path::new(&stream_url).is_file() {
+        let src_path = if let Some(stripped) = stream_url.strip_prefix("file://") {
+            PathBuf::from(stripped)
+        } else {
+            PathBuf::from(&stream_url)
+        };
+        let ext = src_path.extension().and_then(|e| e.to_str()).unwrap_or("m4a");
+        let filename = format!("{}_{}.{}", clean_vid, sanitize_filename(&effective_title), ext);
+        let target_path = dir.join(&filename);
+
+        if src_path != target_path && src_path.is_file() {
+            let _ = std::fs::copy(&src_path, &target_path);
+        }
+        let saved_path_str = target_path.to_string_lossy().to_string();
+        let duration_secs = parse_duration_secs(effective_duration.as_deref());
+        let file_size = std::fs::metadata(&target_path).map(|m| m.len()).unwrap_or(0);
+
+        let record = crate::db::DownloadedTrack {
+            video_id: video_id.clone(),
+            title: effective_title.clone(),
+            artist: effective_artist.clone(),
+            album: effective_album,
+            duration: effective_duration,
+            duration_secs,
+            thumbnail: thumbnail.clone(),
+            path: saved_path_str.clone(),
+            file_path: Some(saved_path_str.clone()),
+            cover_path: thumbnail.clone(),
+            file_size,
+            downloaded_at: crate::db::now_secs(),
+        };
+        state.db.save_downloaded_track(&record);
+
+        let _ = app.emit(
+            "download-progress",
+            DownloadProgress {
+                video_id: video_id.clone(),
+                title: effective_title,
+                artist: effective_artist,
+                downloaded_bytes: file_size,
+                total_bytes: Some(file_size),
+                percent: 100.0,
+                status: "complete".into(),
+                path: Some(saved_path_str.clone()),
+            },
+        );
+        let _ = app.emit("downloaded-songs-changed", ());
+        return Ok(saved_path_str);
     }
 
     // Determine extension based on itag
@@ -107,28 +206,6 @@ pub async fn download_song_track(
         _ => "m4a",
     };
 
-    let dir = match custom_dir {
-        Some(d) if !d.trim().is_empty() => PathBuf::from(d),
-        _ => get_offline_cache_dir(&app),
-    };
-
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Could not create download folder {:?}: {e}", dir))?;
-
-    let effective_artist = if artist.trim().is_empty() {
-        playback_data.artists.clone().unwrap_or_else(|| "Unknown Artist".into())
-    } else {
-        artist.clone()
-    };
-    let effective_title = if title.trim().is_empty() {
-        playback_data.title.clone().unwrap_or_else(|| "Track".into())
-    } else {
-        title.clone()
-    };
-    let effective_album = album.or_else(|| playback_data.title.clone());
-    let effective_duration = duration.or_else(|| playback_data.duration.clone());
-
-    let clean_vid = sanitize_filename(&video_id);
     let filename = format!("{}_{}.{}", clean_vid, sanitize_filename(&effective_title), ext);
     let target_path = dir.join(&filename);
 
@@ -148,30 +225,85 @@ pub async fn download_song_track(
     );
 
     let client = crate::http::client();
-    let mut req = client.get(&stream_url);
-    for (k, v) in &playback_data.headers {
-        req = req.header(k, v);
+    let mut current_playback = playback_data;
+    let mut response_opt = None;
+
+    // Try downloading; if server returns 403/410 or connection fails, evict cache and retry with fresh resolve
+    for attempt in 0..2 {
+        let raw_url = &current_playback.stream_url;
+        // Leverage local audioproxy for un-throttled bounded chunk streaming
+        let download_url = crate::audioproxy::register(raw_url, &current_playback.headers)
+            .unwrap_or_else(|| raw_url.clone());
+
+        let mut req = client.get(&download_url);
+        if download_url == *raw_url {
+            for (k, v) in &current_playback.headers {
+                req = req.header(k, v);
+            }
+        }
+
+        match req.send().await {
+            Ok(res) if res.status().is_success() => {
+                response_opt = Some(res);
+                break;
+            }
+            Ok(res) => {
+                tracing::warn!(status = %res.status(), attempt, "Download request failed");
+                if attempt == 0 {
+                    state.db.evict_stream(&video_id);
+                    if let Ok(fresh) = state.resolve_for_download(&video_id, true).await {
+                        current_playback = fresh;
+                        continue;
+                    }
+                }
+                let err_msg = format!("Server returned HTTP {}", res.status());
+                let _ = app.emit(
+                    "download-progress",
+                    DownloadProgress {
+                        video_id: video_id.clone(),
+                        title: effective_title.clone(),
+                        artist: effective_artist.clone(),
+                        downloaded_bytes: 0,
+                        total_bytes: None,
+                        percent: 0.0,
+                        status: "error".into(),
+                        path: None,
+                    },
+                );
+                return Err(err_msg);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, attempt, "Download connection error");
+                if attempt == 0 {
+                    state.db.evict_stream(&video_id);
+                    if let Ok(fresh) = state.resolve_for_download(&video_id, true).await {
+                        current_playback = fresh;
+                        continue;
+                    }
+                }
+                let err_msg = format!("Download connection failed: {e}");
+                let _ = app.emit(
+                    "download-progress",
+                    DownloadProgress {
+                        video_id: video_id.clone(),
+                        title: effective_title.clone(),
+                        artist: effective_artist.clone(),
+                        downloaded_bytes: 0,
+                        total_bytes: None,
+                        percent: 0.0,
+                        status: "error".into(),
+                        path: None,
+                    },
+                );
+                return Err(err_msg);
+            }
+        }
     }
 
-    let res = req.send().await.map_err(|e| format!("Download connection failed: {e}"))?;
-
-    if !res.status().is_success() {
-        let err_msg = format!("Server returned HTTP {}", res.status());
-        let _ = app.emit(
-            "download-progress",
-            DownloadProgress {
-                video_id: video_id.clone(),
-                title: effective_title.clone(),
-                artist: effective_artist.clone(),
-                downloaded_bytes: 0,
-                total_bytes: None,
-                percent: 0.0,
-                status: "error".into(),
-                path: None,
-            },
-        );
-        return Err(err_msg);
-    }
+    let res = match response_opt {
+        Some(r) => r,
+        None => return Err("Failed to obtain download response".into()),
+    };
 
     let total_bytes = res.content_length();
     let mut stream = res.bytes_stream();
@@ -185,8 +317,48 @@ pub async fn download_song_track(
     let mut last_emit = std::time::Instant::now();
 
     while let Some(chunk_res) = stream.next().await {
-        let chunk = chunk_res.map_err(|e| format!("Download stream error: {e}"))?;
-        file.write_all(&chunk).map_err(|e| format!("Disk write error: {e}"))?;
+        let chunk = match chunk_res {
+            Ok(c) => c,
+            Err(e) => {
+                drop(file);
+                let _ = std::fs::remove_file(&target_path);
+                let err_msg = format!("Download stream error: {e}");
+                let _ = app.emit(
+                    "download-progress",
+                    DownloadProgress {
+                        video_id: video_id.clone(),
+                        title: effective_title.clone(),
+                        artist: effective_artist.clone(),
+                        downloaded_bytes,
+                        total_bytes,
+                        percent: 0.0,
+                        status: "error".into(),
+                        path: None,
+                    },
+                );
+                return Err(err_msg);
+            }
+        };
+
+        if let Err(e) = file.write_all(&chunk) {
+            drop(file);
+            let _ = std::fs::remove_file(&target_path);
+            let err_msg = format!("Disk write error: {e}");
+            let _ = app.emit(
+                "download-progress",
+                DownloadProgress {
+                    video_id: video_id.clone(),
+                    title: effective_title.clone(),
+                    artist: effective_artist.clone(),
+                    downloaded_bytes,
+                    total_bytes,
+                    percent: 0.0,
+                    status: "error".into(),
+                    path: None,
+                },
+            );
+            return Err(err_msg);
+        }
 
         downloaded_bytes += chunk.len() as u64;
 
@@ -216,13 +388,15 @@ pub async fn download_song_track(
     }
 
     file.flush().map_err(|e| format!("Failed to flush file to disk: {e}"))?;
+    // Explicitly drop file handle to release Windows sharing locks before Lofty tag inspection
+    drop(file);
 
     let saved_path_str = target_path.to_string_lossy().to_string();
 
     // Download and save thumbnail locally for offline use
     let covers_dir = crate::local::covers_dir(&app);
     let _ = std::fs::create_dir_all(&covers_dir);
-    let thumb_url = thumbnail.clone().or_else(|| playback_data.thumbnail.clone());
+    let thumb_url = thumbnail.clone().or_else(|| current_playback.thumbnail.clone());
     let mut local_thumbnail = None;
     if let Some(ref url) = thumb_url {
         if url.starts_with("http://") || url.starts_with("https://") {
@@ -463,7 +637,13 @@ pub fn get_downloaded_file(
 
     // Also check offline_cache on disk by filename prefix
     let cache_dir = get_offline_cache_dir(app);
-    let clean_id = sanitize_filename(video_id);
+    let clean_id = if video_id.starts_with("SP:") {
+        let parts: Vec<&str> = video_id.split(':').collect();
+        let track_id = parts.get(1).unwrap_or(&"unknown");
+        format!("SP_{}", sanitize_filename(track_id))
+    } else {
+        sanitize_filename(video_id)
+    };
     let prefix = format!("{}_", clean_id);
     if let Ok(entries) = std::fs::read_dir(&cache_dir) {
         for entry in entries.flatten() {

@@ -887,7 +887,7 @@ export const downloadSong = (args: {
 	title: string;
 	artist: string;
 	album?: string;
-	duration?: number;
+	duration?: string | number;
 	thumbnail?: string;
 	customDir?: string;
 }) => invoke<string>('download_song', args);
