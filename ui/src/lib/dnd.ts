@@ -12,6 +12,8 @@ export const PLAYLIST_DND_MIME = 'application/x-nocturne-playlist';
 export const FOLDER_DND_MIME = 'application/x-nocturne-folder';
 /** A lyrics provider row being dragged in Settings */
 export const LYRICS_SOURCE_MIME = 'application/x-nocturne-lyrics-source';
+/** A home section being reordered in the Edit home panel (`HomeLayoutDialog`). */
+export const SECTION_ROW_MIME = 'application/x-nocturne-section-row';
 
 export function setDragItem(e: DragEvent, item: BrowseItem): void {
 	e.dataTransfer?.setData(ITEM_MIME, JSON.stringify(item));

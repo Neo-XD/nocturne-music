@@ -3,7 +3,13 @@
 	import { fade } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
-	import { ArrowUpBigIcon, MusicNote01Icon, ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
+	import {
+		ArrowUpBigIcon,
+		MusicNote01Icon,
+		ArrowLeft01Icon,
+		ArrowRight01Icon,
+		DashboardSquareEditIcon
+	} from '@hugeicons/core-free-icons';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Button } from '$lib/components/ui/button';
 	import MediaCardSkeleton from '$lib/components/MediaCardSkeleton.svelte';
@@ -87,6 +93,7 @@
 	// --- the arrangement the user set in the Edit modal (personal.ts) ---------------------------
 	// The two sections the app builds itself get reserved keys — a YouTube shelf title can't start
 	// with "@" — so they keep their slot even before (or without) any content to show.
+	const SHORTCUTS = '@shortcuts';
 	const RECENT = '@recent';
 	const FAMILIAR = '@familiar';
 	const FORGOTTEN = '@forgotten';
@@ -104,6 +111,7 @@
 		const local: Block[] = selected
 			? [] // a mood feed is the chip's: neither of ours belongs in it
 			: [
+					{ id: SHORTCUTS, key: SHORTCUTS, title: 'Shortcuts' },
 					{ id: RECENT, key: RECENT, title: 'Jump back in' },
 					{ id: FAMILIAR, key: FAMILIAR, title: 'Familiar Artists' },
 					{ id: FORGOTTEN, key: FORGOTTEN, title: 'Forgotten favourites' }
@@ -360,76 +368,90 @@
 
 <div {@attach watchScroll}>
 	<HomeHero />
-	{#if chips.length}
-		<div class="sticky top-3.5 z-20 my-2 px-6 flex w-fit max-w-full items-center">
-			<div class="flex items-center gap-1 rounded-[calc(var(--radius,0.45rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md max-w-full">
-				{#if canScrollChipsLeft}
-					<button
-						type="button"
-						onclick={() => scrollChips(-200)}
-						aria-label="Scroll filters left"
-						class="flex h-8 w-7 shrink-0 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground cursor-pointer"
-					>
-						<HugeiconsIcon icon={ArrowLeft01Icon} class="h-3.5 w-3.5" />
-					</button>
-				{/if}
+	{#if chips.length || personal.home.chips}
+		<div class="sticky top-3.5 z-20 my-2 px-6 flex w-fit max-w-full items-center gap-2">
+			<!-- Customize pill next to the vibe tab bar -->
+			<button
+				type="button"
+				onclick={() => (editing = true)}
+				title="Customize home"
+				aria-label="Customize home"
+				class="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-[calc(var(--radius,0.33rem)+4px)] border border-border/70 bg-muted/80 px-3 text-xs font-medium text-foreground shadow-md backdrop-blur-md transition-all hover:bg-muted hover:border-border hover:shadow-lg active:scale-95"
+			>
+				<HugeiconsIcon icon={DashboardSquareEditIcon} class="h-4 w-4 text-primary" />
+				<span class="hidden sm:inline">Customize</span>
+			</button>
 
-				<div
-					{@attach trackChipScroll}
-					class="no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto overflow-y-hidden select-none"
-				>
-					<!-- An explicit "All" is the way out of a filter. -->
-					<button
-						onclick={() => load(null)}
-						class="gap-1.5 rounded-[var(--radius,0.45rem)] border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {!selected
-							? 'bg-foreground/15 text-foreground shadow-xs border-foreground/10 dark:bg-white/15 dark:border-white/10 dark:text-foreground'
-							: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
-					>
-						All
-					</button>
-					{#each chips as chip (chip.params)}
+			{#if personal.home.chips && chips.length}
+				<div class="flex items-center gap-1 rounded-[calc(var(--radius,0.33rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md max-w-full">
+					{#if canScrollChipsLeft}
 						<button
-							onclick={() => load(selected === chip.params ? null : chip.params)}
-							class="gap-1.5 rounded-[var(--radius,0.45rem)] border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {selected === chip.params
+							type="button"
+							onclick={() => scrollChips(-200)}
+							aria-label="Scroll filters left"
+							class="flex h-8 w-7 shrink-0 items-center justify-center rounded-[var(--radius,0.33rem)] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground cursor-pointer"
+						>
+							<HugeiconsIcon icon={ArrowLeft01Icon} class="h-3.5 w-3.5" />
+						</button>
+					{/if}
+
+					<div
+						{@attach trackChipScroll}
+						class="no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto overflow-y-hidden select-none"
+					>
+						<!-- An explicit "All" is the way out of a filter. -->
+						<button
+							onclick={() => load(null)}
+							class="gap-1.5 rounded-[var(--radius,0.33rem)] border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {!selected
 								? 'bg-foreground/15 text-foreground shadow-xs border-foreground/10 dark:bg-white/15 dark:border-white/10 dark:text-foreground'
 								: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
 						>
-							{chip.title}
+							All
 						</button>
-					{/each}
-				</div>
+						{#each chips as chip (chip.params)}
+							<button
+								onclick={() => load(selected === chip.params ? null : chip.params)}
+								class="gap-1.5 rounded-[var(--radius,0.33rem)] border border-transparent px-3.5 py-1.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap {selected === chip.params
+									? 'bg-foreground/15 text-foreground shadow-xs border-foreground/10 dark:bg-white/15 dark:border-white/10 dark:text-foreground'
+									: 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'}"
+							>
+								{chip.title}
+							</button>
+						{/each}
+					</div>
 
-				{#if canScrollChipsRight}
-					<button
-						type="button"
-						onclick={() => scrollChips(200)}
-						aria-label="Scroll filters right"
-						class="flex h-8 w-7 shrink-0 items-center justify-center rounded-[var(--radius,0.45rem)] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground cursor-pointer"
-					>
-						<HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" />
-					</button>
-				{/if}
-			</div>
+					{#if canScrollChipsRight}
+						<button
+							type="button"
+							onclick={() => scrollChips(200)}
+							aria-label="Scroll filters right"
+							class="flex h-8 w-7 shrink-0 items-center justify-center rounded-[var(--radius,0.33rem)] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground cursor-pointer"
+						>
+							<HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" />
+						</button>
+					{/if}
+				</div>
+			{/if}
 		</div>
-	{:else if loading}
+	{:else if loading && personal.home.chips}
 		<!-- Hold the bar's height on a cold load -->
-		<div class="sticky top-3.5 z-20 my-2 px-6 flex w-fit max-w-full items-center" aria-hidden="true">
-			<div class="no-scrollbar flex items-center gap-1 overflow-hidden rounded-[calc(var(--radius,0.45rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
+		<div class="sticky top-3.5 z-20 my-2 px-6 flex w-fit max-w-full items-center gap-2" aria-hidden="true">
+			<button
+				type="button"
+				onclick={() => (editing = true)}
+				class="flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-[calc(var(--radius,0.33rem)+4px)] border border-border/70 bg-muted/80 px-3 text-xs font-medium text-foreground shadow-md backdrop-blur-md"
+			>
+				<HugeiconsIcon icon={DashboardSquareEditIcon} class="h-4 w-4 text-primary" />
+				<span class="hidden sm:inline">Customize</span>
+			</button>
+			<div class="no-scrollbar flex items-center gap-1 overflow-hidden rounded-[calc(var(--radius,0.33rem)+4px)] border border-border/60 bg-muted/80 p-1 shadow-md backdrop-blur-md">
 				{#each ['w-12', 'w-20', 'w-24', 'w-16', 'w-28', 'w-20'] as w, i (i)}
-					<Skeleton class="h-8 shrink-0 rounded-[var(--radius,0.45rem)] {w}" />
+					<Skeleton class="h-8 shrink-0 rounded-[var(--radius,0.33rem)] {w}" />
 				{/each}
 			</div>
 		</div>
 	{/if}
 	<div class="px-6 pb-6 pt-2">
-		<!-- Zone one: what's yours. The grid you arranged, above the rule that separates it from
-		     everything the app or YouTube chose. It steps aside entirely while a mood filter is
-		     active: none of it is filterable, and neither is the arrangement it edits. -->
-		{#if !selected}
-			<div class="mb-10 border-b pb-8">
-				<Shortcuts onEdit={() => (editing = true)} />
-			</div>
-		{/if}
 		{#snippet shelfSkeletons(n: number)}
 			{#each Array(n) as _, s (s)}
 				<section aria-hidden="true">
@@ -447,11 +469,22 @@
 		     gap-10, not gap-8: with a heading, a row of cards and no rule between them, shelves any
 		     closer than this stop reading as separate sections. -->
 		<div class="content-in flex flex-col gap-10">
+			{#if visible.length === 0 && !loading}
+				<div class="flex flex-col items-center justify-center py-20 text-center">
+					<p class="text-sm font-medium text-muted-foreground">Everything on home is switched off.</p>
+					<Button variant="outline" size="sm" class="mt-3 cursor-pointer" onclick={() => (editing = true)}>
+						Customize home
+					</Button>
+				</div>
+			{/if}
 			{#each visible as block (block.id)}
-				{#if block.shelf}
+				{#if block.key === SHORTCUTS}
+					<Shortcuts onEdit={() => (editing = true)} />
+				{:else if block.shelf}
 					<Shelf
 						title={block.shelf.title}
 						items={block.shelf.items}
+						size={personal.home.cards}
 						queueAll={false}
 						community={/community/i.test(block.shelf.title)}
 						onMore={block.shelf.moreBrowseId ? () => showMore(block.shelf!) : undefined}

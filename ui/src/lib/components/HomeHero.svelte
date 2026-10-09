@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { UserGroup02Icon } from '@hugeicons/core-free-icons';
-	import { auth, playback, ui } from '$lib/player.svelte';
+	import { auth, personal, playback, ui } from '$lib/player.svelte';
 	import { lt } from '$lib/lt.svelte';
 	import { thumb } from '$lib/thumb';
 
@@ -22,6 +22,21 @@
 <!-- overflow-hidden lives on the backdrop wrapper, not the hero: the scaled blur has to be clipped,
      but the search preview below has to hang out past the bottom edge. -->
 <div class="relative bg-transparent text-foreground">
+	<div class="pointer-events-none absolute inset-0 overflow-hidden">
+		{#if personal.home.backdrop && playback.now?.thumbnail && !artFailed}
+			<img
+				src={thumb(playback.now.thumbnail, 96)}
+				alt=""
+				class="h-full w-full scale-125 object-cover opacity-20 blur-2xl filter transition-opacity duration-700"
+				onerror={() => (artFailed = true)}
+			/>
+		{:else}
+			<div
+				class="pointer-events-none absolute inset-0 opacity-[0.12]"
+				style="background:radial-gradient(120% 130% at 12% 0%, var(--primary) 0%, transparent 58%)"
+			></div>
+		{/if}
+	</div>
 	<div class="relative p-6 pt-8">
 		<div class="flex items-center justify-between gap-4">
 			<div class="flex min-w-0 items-center gap-3">

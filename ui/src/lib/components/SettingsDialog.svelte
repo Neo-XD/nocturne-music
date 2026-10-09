@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack, onMount, type Snippet } from 'svelte';
 	import { open } from '@tauri-apps/plugin-dialog';
+	import { mode, setMode, userPrefersMode } from 'mode-watcher';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import {
 		Cancel01Icon,
@@ -22,6 +23,8 @@
 		FlashIcon,
 		CpuIcon,
 		ComputerIcon,
+		Sun01Icon,
+		Moon02Icon,
 		SmartPhone01Icon,
 		CheckmarkCircle02Icon,
 		Wifi01Icon,
@@ -32,6 +35,8 @@
 		SquareIcon,
 		MinimizeScreenIcon
 	} from '@hugeicons/core-free-icons';
+	import ThemeMock from '$lib/components/ThemeMock.svelte';
+	import { thumb } from '$lib/thumb';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
@@ -135,6 +140,41 @@
 	const ACCENT_THEMES = THEMES.filter((t) => t.kind === 'accent');
 	const PALETTE_THEMES = THEMES.filter((t) => t.kind === 'palette');
 	const currentTheme = $derived(THEMES.find((t) => t.id === theme.id) ?? THEMES[0]);
+
+	const isDark = $derived(mode.current === 'dark');
+	let hoveredTheme = $state<ThemeId | null>(null);
+
+	const MODES = [
+		{ id: 'light', label: 'Light', icon: Sun01Icon },
+		{ id: 'dark', label: 'Dark', icon: Moon02Icon },
+		{ id: 'system', label: 'System', icon: ComputerIcon }
+	] as const;
+
+	const previewHour = new Date().getHours();
+	const previewDaypart =
+		previewHour < 5
+			? 'Good night'
+			: previewHour < 12
+				? 'Good morning'
+				: previewHour < 18
+					? 'Good afternoon'
+					: 'Good evening';
+
+	const detail = $derived({
+		heading: previewDaypart,
+		title: playback.now?.title ?? 'Higher Ground',
+		artist: playback.now?.artists ?? 'Nova Sky',
+		play: 'Play all',
+		cover: thumb(playback.now?.thumbnail, 120)
+	});
+
+	const live = $derived({
+		accent: custom.accent,
+		hue: custom.hue,
+		radius: custom.radius,
+		fontSans: custom.fontSans,
+		fontHeading: custom.fontHeading
+	});
 
 	interface ThemePreviewStyle {
 		bg: string;
@@ -1623,6 +1663,11 @@
 										desc: 'Pick a theme preset. Palettes customize the full interface, accents style highlights.',
 										below: themeBoxesWithPreview,
 										tall: true
+									})}
+									{@render row({
+										title: 'Appearance mode',
+										desc: 'Choose light, dark, or sync with your system theme.',
+										below: modePicker
 									})}
 									{@render row({
 										title: 'Accent color',
@@ -3410,153 +3455,87 @@
 	</div>
 {/snippet}
 {#snippet waveformSeekbarSwitch()}<Switch checked={prefs.waveformSeekbar} onCheckedChange={setWaveformSeekbar} />{/snippet}
+{#snippet modePicker()}
+	<div class="inline-flex rounded-lg bg-muted/60 p-0.5 border border-border/60">
+		{#each MODES as m (m.id)}
+			<button
+				type="button"
+				onclick={() => setMode(m.id)}
+				aria-pressed={userPrefersMode.current === m.id}
+				class="flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors {userPrefersMode.current ===
+				m.id
+					? 'bg-background text-foreground shadow-xs'
+					: 'text-muted-foreground hover:text-foreground'}"
+			>
+				<HugeiconsIcon icon={m.icon} size={14} strokeWidth={2} />
+				{m.label}
+			</button>
+		{/each}
+	</div>
+{/snippet}
 {#snippet themeBoxesWithPreview()}
-	<div class="space-y-3">
-		<!-- Visual Theme Selection Boxes with Preview Mockups -->
-		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-			{#each THEMES as t (t.id)}
-				{@const isSelected = theme.id === t.id}
-				{@const preview = THEME_PREVIEWS[t.id] ?? THEME_PREVIEWS.monochrome}
-				<button
-					type="button"
-					onclick={() => applyTheme(t.id)}
-					class="group/tbox relative flex flex-col justify-between rounded-xl border p-2 text-left transition-all cursor-pointer {isSelected
-						? 'border-primary bg-primary/10 ring-2 ring-primary/40 shadow-xs'
-						: 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'}"
-				>
-					<!-- Mini Desktop App Mockup Image above text -->
-					<div
-						class="relative mb-2 h-20 w-full overflow-hidden rounded-lg border transition-all duration-200 group-hover/tbox:scale-[1.02] shadow-2xs flex flex-col justify-between p-1.5"
-						style="background: {preview.bg}; border-color: {isSelected ? preview.accent : preview.border};"
-					>
-						<!-- Top App Bar / Window dots -->
-						<div class="flex items-center justify-between">
-							<div class="flex items-center gap-1">
-								<div class="size-1.5 rounded-full" style="background: {preview.accent}; opacity: 0.9;"></div>
-								<div class="h-1.5 w-7 rounded-full" style="background: {preview.cardBg};"></div>
-							</div>
-							{#if isSelected}
-								<span
-									class="flex size-3.5 items-center justify-center rounded-full shadow-xs"
-									style="background: {preview.accent}; color: {preview.accentFg};"
-								>
-									<HugeiconsIcon icon={Tick02Icon} class="size-2.5" />
-								</span>
-							{:else}
-								<div class="size-1.5 rounded-full" style="background: {preview.mutedText}; opacity: 0.4;"></div>
-							{/if}
-						</div>
-
-						<!-- Main Mock Content: Sidebar + Artwork Tile + Track Lines -->
-						<div class="flex items-center gap-1.5 flex-1 my-1">
-							<!-- Mini Sidebar representation -->
-							<div
-								class="h-full w-3 rounded-xs flex flex-col gap-0.5 justify-center py-0.5"
-								style="background: {preview.sidebarBg};"
-							>
-								<div class="h-1 w-1.5 rounded-2xs mx-auto" style="background: {preview.accent};"></div>
-								<div class="h-1 w-1.5 rounded-2xs mx-auto opacity-35" style="background: {preview.text};"></div>
-								<div class="h-1 w-1.5 rounded-2xs mx-auto opacity-35" style="background: {preview.text};"></div>
-							</div>
-
-							<!-- Mini Artwork Tile -->
-							<div
-								class="size-8 rounded-sm shrink-0 shadow-xs flex items-center justify-center overflow-hidden"
-								style="background: {preview.artGradient};"
-							>
-								<div class="size-3 rounded-full opacity-65" style="background: {preview.accentFg};"></div>
-							</div>
-
-							<!-- Mock Track Lines -->
-							<div class="flex-1 flex flex-col gap-1 min-w-0 pr-0.5">
-								<div class="h-1.5 w-4/5 rounded-full" style="background: {preview.text}; opacity: 0.9;"></div>
-								<div class="h-1 w-3/5 rounded-full" style="background: {preview.mutedText}; opacity: 0.65;"></div>
-							</div>
-						</div>
-
-						<!-- Bottom Player Seekbar Strip -->
-						<div class="w-full">
-							<div class="h-1 w-full rounded-full overflow-hidden" style="background: {preview.cardBg};">
-								<div class="h-full w-2/5 rounded-full" style="background: {preview.accent};"></div>
-							</div>
-						</div>
-					</div>
-
-					<!-- Text label and color swatch -->
-					<div class="flex items-center justify-between px-0.5">
-						<div class="min-w-0 flex-1">
-							<div class="text-xs font-semibold text-foreground truncate">{t.label}</div>
-							<div class="text-[10px] text-muted-foreground capitalize">{t.kind}</div>
-						</div>
+	<div class="space-y-4">
+		<!-- Live Theme Preview Mockup matching limusic ThemeMock with live hover preview -->
+		<div class="flex flex-col sm:flex-row items-center sm:items-stretch gap-4 p-3 rounded-xl border border-border/60 bg-muted/20 backdrop-blur-sm">
+			<div class="w-56 sm:w-64 shrink-0 shadow-sm rounded-lg overflow-hidden border border-border/80">
+				<ThemeMock id={hoveredTheme ?? theme.id} dark={isDark} overrides={live} {detail} />
+			</div>
+			<div class="flex flex-1 flex-col justify-between py-1 min-w-0">
+				<div class="space-y-1.5">
+					<div class="flex items-center gap-2">
 						<span
-							class="size-3 rounded-full ring-1 ring-black/15 shadow-2xs shrink-0 ml-1.5"
-							style="background:{t.color}"
+							class="size-2.5 rounded-full ring-1 ring-border"
+							style="background: {THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.color ?? 'var(--primary)'}"
 						></span>
+						<span class="text-sm font-semibold text-foreground">
+							{THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.label ?? 'Theme'}
+						</span>
+						{#if hoveredTheme && hoveredTheme !== theme.id}
+							<span class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+								Hover preview
+							</span>
+						{:else}
+							<span class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+								Current theme
+							</span>
+						{/if}
 					</div>
-				</button>
-			{/each}
+					<p class="text-xs text-muted-foreground leading-relaxed">
+						Hover any preset below to preview how it styles backgrounds, cards, typography, and highlights. Click to apply.
+					</p>
+				</div>
+				{#if hoveredTheme && hoveredTheme !== theme.id}
+					<div class="pt-2">
+						<Button size="sm" variant="outline" class="h-7 text-xs cursor-pointer" onclick={() => applyTheme(hoveredTheme!)}>
+							Apply {THEMES.find((t) => t.id === hoveredTheme)?.label}
+						</Button>
+					</div>
+				{/if}
+			</div>
 		</div>
 
-		<!-- Live Selected Theme Preview Card -->
-		<div class="overflow-hidden rounded-xl border border-border/80 bg-background/80 p-3 shadow-xs backdrop-blur-md">
-			<div class="flex items-center justify-between border-b border-border/40 pb-2 mb-2.5">
-				<div class="flex items-center gap-2">
+		<!-- Theme chips from limusic with hover preview -->
+		<div class="flex flex-wrap gap-2" role="group" aria-label="Theme presets">
+			{#each THEMES as th (th.id)}
+				<button
+					type="button"
+					onclick={() => applyTheme(th.id)}
+					onmouseenter={() => (hoveredTheme = th.id)}
+					onmouseleave={() => (hoveredTheme = null)}
+					aria-pressed={theme.id === th.id}
+					class="flex cursor-pointer items-center gap-2 rounded-full border py-1.5 pr-3.5 pl-2 text-sm transition-all {theme.id ===
+					th.id
+						? 'border-primary bg-primary/15 text-foreground font-medium ring-1 ring-primary/40 shadow-xs'
+						: 'border-border/60 bg-muted/20 text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
+				>
 					<span
-						class="size-3.5 rounded-full ring-2 ring-primary/40"
-						style="background:{currentTheme.color}"
+						class="theme-{th.id} {isDark
+							? 'dark'
+							: ''} size-4 shrink-0 rounded-full bg-[linear-gradient(135deg,var(--background)_50%,var(--primary)_50%)] ring-1 ring-foreground/20"
 					></span>
-					<div class="text-xs font-bold text-foreground">{currentTheme.label} Theme Preview</div>
-				</div>
-				<span class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary capitalize">
-					{currentTheme.kind} Theme Active
-				</span>
-			</div>
-
-			<!-- Mini Mock Player Window Preview -->
-			<div class="rounded-lg border border-border/60 bg-card/60 p-2.5 space-y-2">
-				<div class="flex items-center justify-between">
-					<div class="flex items-center gap-2 min-w-0">
-						<div class="size-7 rounded-[var(--radius,0.45rem)] bg-primary/20 border border-primary/30 flex items-center justify-center text-primary font-bold text-xs shrink-0">
-							♪
-						</div>
-						<div class="min-w-0">
-							<div class="text-[11px] font-semibold text-foreground truncate">Nocturne Serenade</div>
-							<div class="text-[9px] text-muted-foreground truncate">Chopin • Nocturne Op. 9 No. 2</div>
-						</div>
-					</div>
-					<div class="flex items-center gap-1.5">
-						<span class="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
-						<span class="text-[9px] font-mono text-muted-foreground">Playing</span>
-					</div>
-				</div>
-
-				<div class="space-y-0.5">
-					<div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-						<div class="h-full w-[45%] rounded-full bg-primary"></div>
-					</div>
-					<div class="flex justify-between text-[8px] font-mono text-muted-foreground">
-						<span>1:42</span>
-						<span>3:48</span>
-					</div>
-				</div>
-
-				<div class="flex items-center justify-between pt-1 border-t border-border/30">
-					<div class="flex items-center gap-1.5">
-						<span class="rounded px-1.5 py-0.5 text-[9px] font-semibold bg-primary text-primary-foreground">
-							Accent
-						</span>
-						<span class="rounded px-1.5 py-0.5 text-[9px] font-medium bg-muted text-muted-foreground">
-							Surface
-						</span>
-					</div>
-					<div class="flex items-center gap-1">
-						<span class="size-3 rounded-full bg-background border border-border/60" title="Background"></span>
-						<span class="size-3 rounded-full bg-card border border-border/60" title="Card"></span>
-						<span class="size-3 rounded-full bg-muted border border-border/60" title="Muted"></span>
-						<span class="size-3 rounded-full bg-primary" title="Primary Accent"></span>
-					</div>
-				</div>
-			</div>
+					{th.label}
+				</button>
+			{/each}
 		</div>
 	</div>
 {/snippet}

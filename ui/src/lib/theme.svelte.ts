@@ -16,7 +16,21 @@ import { artworkAccent, warmAccent } from './artcolor';
 import { allowFontFile, getDesktopEnvironment } from './api';
 import { toggleMode as baseToggleMode } from 'mode-watcher';
 
-export type ThemeId = 'monochrome' | 'rose' | 'blue' | 'lime' | 'purple' | 'teal' | 'catppuccin' | 'caffeine' | 'neon' | 'breeze' | 'glassy' | 'native';
+export type ThemeId =
+	| 'monochrome'
+	| 'rose'
+	| 'blue'
+	| 'lime'
+	| 'purple'
+	| 'teal'
+	| 'catppuccin'
+	| 'tokyonight'
+	| 'caffeine'
+	| 'neon'
+	| 'breeze'
+	| 'amoled'
+	| 'glassy'
+	| 'native';
 
 // `fg` (accent themes only) is the text/icon colour that sits ON the accent: light accents (lime,
 // teal) need a dark foreground; dark accents keep the light one. `color` is just the picker swatch.
@@ -26,17 +40,19 @@ type Theme =
 
 export const THEMES: Theme[] = [
 	{ id: 'monochrome', label: 'Monochrome', kind: 'palette', color: 'oklch(0.985 0 0)' },
+	{ id: 'amoled', label: 'AMOLED', kind: 'palette', color: 'oklch(0 0 0)' },
+	{ id: 'catppuccin', label: 'Catppuccin', kind: 'palette', color: 'oklch(0.5547 0.2503 297.0156)' },
+	{ id: 'tokyonight', label: 'Tokyo Night', kind: 'palette', color: 'oklch(0.3593 0.0513 273.1802)' },
+	{ id: 'glassy', label: 'Glassy', kind: 'palette', color: 'oklch(0.7 0.15 220)' },
+	{ id: 'native', label: 'Native', kind: 'palette', color: 'oklch(0.58 0.18 250)' },
+	{ id: 'caffeine', label: 'Caffeine', kind: 'palette', color: 'oklch(0.4341 0.0392 41.9938)' },
+	{ id: 'neon', label: 'Neon', kind: 'palette', color: 'oklch(0.6726 0.2904 341.4084)' },
+	{ id: 'breeze', label: 'Breeze', kind: 'palette', color: 'oklch(0.7227 0.1920 149.5793)' },
 	{ id: 'rose', label: 'Rose', kind: 'accent', color: 'oklch(0.455 0.188 13.697)', fg: 'oklch(0.985 0 0)' },
 	{ id: 'blue', label: 'Blue', kind: 'accent', color: 'oklch(0.49 0.22 264)', fg: 'oklch(0.985 0 0)' },
 	{ id: 'lime', label: 'Lime', kind: 'accent', color: 'oklch(0.77 0.2 131)', fg: 'oklch(0.205 0 0)' },
 	{ id: 'purple', label: 'Purple', kind: 'accent', color: 'oklch(0.56 0.25 302)', fg: 'oklch(0.985 0 0)' },
-	{ id: 'teal', label: 'Teal', kind: 'accent', color: 'oklch(0.85 0.13 181)', fg: 'oklch(0.205 0 0)' },
-	{ id: 'catppuccin', label: 'Catppuccin', kind: 'palette', color: 'oklch(0.5547 0.2503 297.0156)' },
-	{ id: 'caffeine', label: 'Caffeine', kind: 'palette', color: 'oklch(0.4341 0.0392 41.9938)' },
-	{ id: 'neon', label: 'Neon', kind: 'palette', color: 'oklch(0.6726 0.2904 341.4084)' },
-	{ id: 'breeze', label: 'Breeze', kind: 'palette', color: 'oklch(0.7227 0.1920 149.5793)' },
-	{ id: 'glassy', label: 'Glassy', kind: 'palette', color: 'oklch(0.7 0.15 220)' },
-	{ id: 'native', label: 'Native', kind: 'palette', color: 'oklch(0.58 0.18 250)' }
+	{ id: 'teal', label: 'Teal', kind: 'accent', color: 'oklch(0.85 0.13 181)', fg: 'oklch(0.205 0 0)' }
 ];
 
 /** Font stacks bundled with the app (imported in layout.css). "System" needs no download. */
@@ -70,9 +86,9 @@ const ACCENT_VARS = ['--primary', '--primary-foreground', '--accent', '--accent-
 /** Set on <html> while the artwork tint is live; the surface rules in layout.css hang off it. */
 const TINT_CLASS = 'art-tint';
 const CUSTOM_VARS = ['--hue', '--radius', '--font-sans', '--font-heading', '--font-lyrics'];
-// Same two neutrals the preset accent themes pick between.
 const ON_DARK = 'oklch(0.985 0 0)';
 const ON_LIGHT = 'oklch(0.205 0 0)';
+export const onAccent = (color: string) => (isLight(color) ? ON_LIGHT : ON_DARK);
 
 /** Reactive current selection, so the picker reflects it. */
 export const theme = $state<{ id: ThemeId }>({ id: 'monochrome' });
@@ -171,7 +187,7 @@ export function setAppearance(patch: Partial<typeof appearance>): void {
  */
 export const effective = $state({
 	hue: 0,
-	radius: 0.45,
+	radius: 0.33,
 	accent: '#ffffff',
 	fontSans: '',
 	fontHeading: '',

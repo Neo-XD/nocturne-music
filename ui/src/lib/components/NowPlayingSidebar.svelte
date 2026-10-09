@@ -132,6 +132,16 @@
 		return cur?.video_id === playback.now?.videoId ? cur : null;
 	});
 
+	const albumId = $derived(
+		currentSong && !api.isLocalId(currentSong.video_id) ? currentSong.album_id : undefined
+	);
+
+	function openAlbum() {
+		if (albumId) {
+			goto(`/album/${encodeURIComponent(albumId)}`);
+		}
+	}
+
 	const nextSong = $derived.by<SongItem | null>(() => {
 		const items = playback.queue.items;
 		const nextIndex = playback.queue.currentIndex + 1;
@@ -265,11 +275,36 @@
 				</button>
 			{:else}
 				{#if playback.now?.thumbnail}
-					<img
-						src={thumb(playback.now.thumbnail, 1080)}
-						alt={playback.now?.title ?? 'Album Art'}
-						class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-					/>
+					{#if albumId}
+						<button
+							type="button"
+							onclick={openAlbum}
+							class="group/art relative h-full w-full cursor-pointer overflow-hidden p-0 border-0 bg-transparent text-left focus:outline-none"
+							title={currentSong?.album ? `Go to album: ${currentSong.album}` : 'Go to album'}
+							aria-label={currentSong?.album ? `Go to album: ${currentSong.album}` : 'Go to album'}
+						>
+							<img
+								src={thumb(playback.now.thumbnail, 1080)}
+								alt={playback.now?.title ?? 'Album Art'}
+								class="h-full w-full object-cover transition duration-500 group-hover/art:scale-105"
+							/>
+							<div
+								class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25 opacity-0 backdrop-blur-2xs transition-opacity duration-200 group-hover/art:opacity-100"
+							>
+								<span
+									class="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white shadow-md backdrop-blur-md"
+								>
+									View Album
+								</span>
+							</div>
+						</button>
+					{:else}
+						<img
+							src={thumb(playback.now.thumbnail, 1080)}
+							alt={playback.now?.title ?? 'Album Art'}
+							class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+						/>
+					{/if}
 				{:else}
 					<div class="flex h-full w-full items-center justify-center text-muted-foreground">
 						<HugeiconsIcon icon={MusicNote01Icon} class="h-16 w-16" />
