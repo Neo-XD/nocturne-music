@@ -159,6 +159,7 @@
 
 	const isDark = $derived(mode.current === 'dark');
 	let hoveredTheme = $state<ThemeId | null>(null);
+	let showThemePreview = $state(true);
 
 	const MODES = [
 		{ id: 'light', label: 'Light', icon: Sun01Icon },
@@ -1456,7 +1457,7 @@
 <svelte:window onkeydown={recordingAction ? onKeyRecord : undefined} />
 
 <Dialog.Root bind:open={ui.settingsOpen}>
-	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 transition-all duration-200 border border-border/80 shadow-2xl {isMaximized ? 'w-[98vw] max-w-[98vw] sm:max-w-[98vw] lg:max-w-[98vw] xl:max-w-[98vw] h-[96vh] max-h-[96vh] rounded-xl' : 'w-[94vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-[70rem] h-[min(46rem,86vh)] max-h-[86vh] rounded-2xl'}">
+	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 transition-all duration-200 border border-border/80 shadow-2xl {isMaximized ? 'w-[98vw] max-w-[98vw] sm:max-w-[98vw] lg:max-w-[98vw] xl:max-w-[98vw] h-[96vh] max-h-[96vh] rounded-xl' : 'w-[95vw] sm:max-w-5xl lg:max-w-6xl xl:max-w-[78rem] 2xl:max-w-[86rem] h-[min(48rem,88vh)] max-h-[88vh] rounded-2xl'}">
 		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
 		<!-- Maximize / Restore window button placed next to Close button -->
@@ -1591,7 +1592,7 @@
 							</div>
 						</section>
 					{:else if tab === 'themes'}
-						<div class="flex min-h-0 min-w-0 flex-1 overflow-hidden max-lg:flex-col-reverse">
+						<div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
 							<!-- Left column: Scrollable customization options list -->
 							<div class="relative min-w-0 min-h-0 flex-1">
 								<div
@@ -1657,6 +1658,16 @@
 									class="text-[11px] font-medium text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
 								>
 									Collapse all
+								</button>
+								<span class="text-border text-xs">•</span>
+								<button
+									type="button"
+									onclick={() => (showThemePreview = !showThemePreview)}
+									class="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+									title={showThemePreview ? 'Hide theme preview panel' : 'Show theme preview panel'}
+								>
+									<HugeiconsIcon icon={showThemePreview ? ViewOffSlashIcon : ViewIcon} size={12} strokeWidth={2} />
+									{showThemePreview ? 'Hide preview' : 'Show preview'}
 								</button>
 							</div>
 						</div>
@@ -2085,55 +2096,72 @@
 							</div>
 
 							<!-- Right: Persistent Theme Preview Aside -->
-							<aside
-								class="flex shrink-0 gap-4 bg-muted/20 px-6 py-6 lg:w-[22rem] lg:flex-col lg:border-l border-border/60 max-lg:items-center max-lg:border-b max-lg:py-3.5 overflow-y-auto"
-							>
-								<h3 class="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground max-lg:hidden">Preview</h3>
-								<div class="max-lg:w-56 max-lg:shrink-0 w-full shadow-sm rounded-lg overflow-hidden border border-border/80">
-									<ThemeMock id={hoveredTheme ?? theme.id} dark={isDark} overrides={live} {detail} />
-								</div>
-								<div class="flex min-w-0 flex-col gap-3 lg:flex-1">
-									<div class="space-y-1.5">
-										<div class="flex items-center gap-2">
-											<span
-												class="size-2.5 rounded-full ring-1 ring-border"
-												style="background: {THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.color ?? 'var(--primary)'}"
-											></span>
-											<span class="text-sm font-semibold text-foreground">
-												{THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.label ?? 'Theme'}
-											</span>
-											{#if hoveredTheme && hoveredTheme !== theme.id}
-												<span class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
-													Hover preview
-												</span>
-											{:else}
-												<span class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-													Current theme
-												</span>
-											{/if}
+							{#if showThemePreview}
+								<aside
+									class="flex w-72 shrink-0 flex-col gap-4 border-l border-border/60 bg-muted/15 p-5 overflow-y-auto xl:w-80 xl:p-6"
+								>
+									<div class="flex items-center justify-between px-0.5">
+										<div class="flex items-center gap-1.5">
+											<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Live Preview</h3>
+											<span class="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">Live</span>
 										</div>
-										<p class="text-xs leading-relaxed text-muted-foreground">
-											Hover any preset on the left to preview how it styles backgrounds, cards, typography, and highlights. Click to apply.
-										</p>
-									</div>
-									{#if hoveredTheme && hoveredTheme !== theme.id}
-										<div>
-											<Button size="sm" variant="outline" class="h-7 text-xs cursor-pointer" onclick={() => applyTheme(hoveredTheme!)}>
-												Apply {THEMES.find((t) => t.id === hoveredTheme)?.label}
-											</Button>
-										</div>
-									{/if}
-									<div class="flex flex-col items-start gap-1.5 lg:mt-auto pt-4 border-t border-border/40">
-										<Button variant="outline" size="sm" disabled={isDefaultCustom()} onclick={() => { resetCustom(); toast.success('Customization reset to theme default'); }} class="cursor-pointer">
-											<HugeiconsIcon icon={RotateLeft01Icon} size={15} strokeWidth={2} class="mr-1.5" />
-											Reset customization
+										<Button
+											variant="ghost"
+											size="icon-xs"
+											class="size-6 text-muted-foreground hover:text-foreground cursor-pointer"
+											onclick={() => (showThemePreview = false)}
+											title="Hide preview panel"
+											aria-label="Hide preview panel"
+										>
+											<HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
 										</Button>
-										<p class="text-xs leading-relaxed text-muted-foreground max-lg:hidden">
-											Drop the color, roundness and font overrides. Keeps the preset.
-										</p>
 									</div>
-								</div>
-							</aside>
+									<div class="w-full shadow-sm rounded-lg overflow-hidden border border-border/80">
+										<ThemeMock id={hoveredTheme ?? theme.id} dark={isDark} overrides={live} {detail} />
+									</div>
+									<div class="flex min-w-0 flex-col gap-3 flex-1">
+										<div class="space-y-1.5">
+											<div class="flex items-center gap-2">
+												<span
+													class="size-2.5 rounded-full ring-1 ring-border"
+													style="background: {THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.color ?? 'var(--primary)'}"
+												></span>
+												<span class="text-sm font-semibold text-foreground">
+													{THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.label ?? 'Theme'}
+												</span>
+												{#if hoveredTheme && hoveredTheme !== theme.id}
+													<span class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+														Hover preview
+													</span>
+												{:else}
+													<span class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+														Current theme
+													</span>
+												{/if}
+											</div>
+											<p class="text-xs leading-relaxed text-muted-foreground">
+												Hover any preset on the left to preview how it styles backgrounds, cards, typography, and highlights. Click to apply.
+											</p>
+										</div>
+										{#if hoveredTheme && hoveredTheme !== theme.id}
+											<div>
+												<Button size="sm" variant="outline" class="h-7 text-xs cursor-pointer" onclick={() => applyTheme(hoveredTheme!)}>
+													Apply {THEMES.find((t) => t.id === hoveredTheme)?.label}
+												</Button>
+											</div>
+										{/if}
+										<div class="flex flex-col items-start gap-1.5 mt-auto pt-4 border-t border-border/40">
+											<Button variant="outline" size="sm" disabled={isDefaultCustom()} onclick={() => { resetCustom(); toast.success('Customization reset to theme default'); }} class="cursor-pointer">
+												<HugeiconsIcon icon={RotateLeft01Icon} size={15} strokeWidth={2} class="mr-1.5" />
+												Reset customization
+											</Button>
+											<p class="text-[11px] leading-relaxed text-muted-foreground">
+												Drop the color, roundness, and font overrides. Keeps the preset.
+											</p>
+										</div>
+									</div>
+								</aside>
+							{/if}
 						</div>
 					{:else if tab === 'playback'}
 						<section class={GROUP}>
