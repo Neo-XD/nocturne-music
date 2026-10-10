@@ -82,6 +82,7 @@
 	} from '$lib/shortcuts.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import Changelog from '$lib/components/Changelog.svelte';
+	import * as Popover from '$lib/components/ui/popover';
 	import {
 		THEMES,
 		FONTS,
@@ -95,6 +96,7 @@
 		setCustom,
 		resetCustom,
 		isDefaultCustom,
+		onAccent,
 		readBack,
 		familyName,
 		fontAvailable,
@@ -137,9 +139,23 @@
 	const CARD =
 		'divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-card/80 dark:bg-card/65 backdrop-blur-md shadow-xs';
 
-	const ACCENT_THEMES = THEMES.filter((t) => t.kind === 'accent');
-	const PALETTE_THEMES = THEMES.filter((t) => t.kind === 'palette');
 	const currentTheme = $derived(THEMES.find((t) => t.id === theme.id) ?? THEMES[0]);
+
+	const ACCENTS = [
+		'#e11d48',
+		'#ea580c',
+		'#d97706',
+		'#16a34a',
+		'#0d9488',
+		'#2563eb',
+		'#7c3aed',
+		'#db2777'
+	];
+	const customAccent = $derived(
+		custom.accent && !ACCENTS.some((a) => a.toLowerCase() === custom.accent?.toLowerCase())
+			? custom.accent
+			: null
+	);
 
 	const isDark = $derived(mode.current === 'dark');
 	let hoveredTheme = $state<ThemeId | null>(null);
@@ -1370,15 +1386,17 @@
 	let activeAppearanceSection = $state('sec-theme');
 	let collapsedCategories = $state<Record<string, boolean>>({});
 	let settingsScrollEl = $state<HTMLDivElement | null>(null);
+	let appearanceScrollEl = $state<HTMLDivElement | null>(null);
 
 	function scrollToAppearanceSection(id: string) {
 		activeAppearanceSection = id;
 		const el = document.getElementById(id);
-		if (el && settingsScrollEl) {
-			const containerRect = settingsScrollEl.getBoundingClientRect();
+		const container = appearanceScrollEl ?? settingsScrollEl;
+		if (el && container) {
+			const containerRect = container.getBoundingClientRect();
 			const elRect = el.getBoundingClientRect();
-			const targetScroll = settingsScrollEl.scrollTop + (elRect.top - containerRect.top) - 16;
-			settingsScrollEl.scrollTo({ top: targetScroll, behavior: 'smooth' });
+			const targetScroll = container.scrollTop + (elRect.top - containerRect.top) - 16;
+			container.scrollTo({ top: targetScroll, behavior: 'smooth' });
 		}
 	}
 
@@ -1502,21 +1520,7 @@
 
 				<div
 					bind:this={settingsScrollEl}
-					class="relative min-w-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-8 {tab === 'themes' ? 'pr-14' : ''} pb-12"
-					onscroll={(e) => {
-						if (tab !== 'themes') return;
-						const target = e.currentTarget;
-						const containerRect = target.getBoundingClientRect();
-						for (const s of visibleAppearanceSections) {
-							const el = document.getElementById(s.id);
-							if (el) {
-								const rect = el.getBoundingClientRect();
-								if (rect.top - containerRect.top <= 140 && rect.bottom - containerRect.top > 40) {
-									activeAppearanceSection = s.id;
-								}
-							}
-						}
-					}}
+					class="relative min-w-0 min-h-0 flex-1 {tab === 'themes' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto overscroll-contain px-8 pb-12'}"
 				>
 					{#if !loaded}
 						<p class="text-sm text-muted-foreground">Loading…</p>
@@ -1587,7 +1591,27 @@
 							</div>
 						</section>
 					{:else if tab === 'themes'}
-						<!-- Customization Mode Segmented Switch -->
+						<div class="flex min-h-0 min-w-0 flex-1 overflow-hidden max-lg:flex-col-reverse">
+							<!-- Left column: Scrollable customization options list -->
+							<div class="relative min-w-0 min-h-0 flex-1">
+								<div
+									bind:this={appearanceScrollEl}
+									class="h-full min-w-0 min-h-0 overflow-y-auto overscroll-contain px-8 pr-12 pt-1 pb-12"
+									onscroll={(e) => {
+										const target = e.currentTarget;
+										const containerRect = target.getBoundingClientRect();
+										for (const s of visibleAppearanceSections) {
+											const el = document.getElementById(s.id);
+											if (el) {
+												const rect = el.getBoundingClientRect();
+												if (rect.top - containerRect.top <= 140 && rect.bottom - containerRect.top > 40) {
+													activeAppearanceSection = s.id;
+												}
+											}
+										}
+									}}
+								>
+									<!-- Customization Mode Segmented Switch -->
 						<div class="mb-4 flex items-center justify-between rounded-xl border border-border/80 bg-card/60 p-3 backdrop-blur-md">
 							<div>
 								<div class="text-xs font-semibold uppercase tracking-wider text-foreground">Customization Mode</div>
@@ -1660,8 +1684,8 @@
 								<div class={CARD}>
 									{@render row({
 										title: 'Theme presets',
-										desc: 'Pick a theme preset. Palettes customize the full interface, accents style highlights.',
-										below: themeBoxesWithPreview,
+										desc: 'Pick a curated color theme palette for the whole interface.',
+										below: themeBoxes,
 										tall: true
 									})}
 									{@render row({
@@ -1671,16 +1695,15 @@
 									})}
 									{@render row({
 										title: 'Accent color',
-										desc: 'Buttons, highlights and the progress bar. Applies over any preset.',
-										control: accentSwatch,
-										below: pickerOpen ? accentPicker : undefined
+										desc: 'Buttons, highlights, rings and sidebar elements. Applies over any preset.',
+										below: accentSwatches
 									})}
 									{@render row({
 										title: 'Background tint',
 										desc:
-											currentTheme.kind === 'palette'
-												? `Only shades the default palette, ${currentTheme.label} brings its own colors.`
-												: 'Shades the greys: surfaces, borders and secondary text.',
+											theme.id === 'monochrome'
+												? 'Shades the greys: surfaces, borders and secondary text.'
+												: `Only shades the default monochrome palette, ${currentTheme.label} brings its own colors.`,
 										control: tintSlider
 									})}
 									{@render row({
@@ -2038,7 +2061,80 @@
 								</div>
 							{/if}
 						</section>
-					</div>
+									</div>
+								</div>
+
+								<!-- Quick Section Dots Navigation (Sticky on the right of the scroll column) -->
+								<nav class="absolute right-2.5 top-16 z-30 hidden sm:flex flex-col items-center gap-2 rounded-full border border-white/15 dark:border-white/10 bg-card/50 dark:bg-black/50 py-2.5 px-1.5 shadow-lg backdrop-blur-2xl" aria-label="Appearance section dots">
+									{#each visibleAppearanceSections as sec}
+										<button
+											type="button"
+											onclick={() => scrollToAppearanceSection(sec.id)}
+											class="group relative flex size-5 items-center justify-center rounded-full cursor-pointer transition-transform hover:scale-110 active:scale-95"
+											title={sec.label}
+											aria-label="Jump to {sec.label}"
+										>
+											<span class="rounded-full transition-all duration-200 {activeAppearanceSection === sec.id ? 'size-2.5 bg-white dark:bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]' : 'size-1.5 bg-white/25 dark:bg-white/25 group-hover:bg-white/60'}"></span>
+											<!-- Tooltip on hover -->
+											<span class="pointer-events-none absolute right-8 whitespace-nowrap rounded-[--radius] border border-border/70 bg-popover/95 px-2 py-0.5 text-[10px] font-semibold text-popover-foreground opacity-0 shadow-sm backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100">
+												{sec.label}
+											</span>
+										</button>
+									{/each}
+								</nav>
+							</div>
+
+							<!-- Right: Persistent Theme Preview Aside -->
+							<aside
+								class="flex shrink-0 gap-4 bg-muted/20 px-6 py-6 lg:w-[22rem] lg:flex-col lg:border-l border-border/60 max-lg:items-center max-lg:border-b max-lg:py-3.5 overflow-y-auto"
+							>
+								<h3 class="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground max-lg:hidden">Preview</h3>
+								<div class="max-lg:w-56 max-lg:shrink-0 w-full shadow-sm rounded-lg overflow-hidden border border-border/80">
+									<ThemeMock id={hoveredTheme ?? theme.id} dark={isDark} overrides={live} {detail} />
+								</div>
+								<div class="flex min-w-0 flex-col gap-3 lg:flex-1">
+									<div class="space-y-1.5">
+										<div class="flex items-center gap-2">
+											<span
+												class="size-2.5 rounded-full ring-1 ring-border"
+												style="background: {THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.color ?? 'var(--primary)'}"
+											></span>
+											<span class="text-sm font-semibold text-foreground">
+												{THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.label ?? 'Theme'}
+											</span>
+											{#if hoveredTheme && hoveredTheme !== theme.id}
+												<span class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+													Hover preview
+												</span>
+											{:else}
+												<span class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+													Current theme
+												</span>
+											{/if}
+										</div>
+										<p class="text-xs leading-relaxed text-muted-foreground">
+											Hover any preset on the left to preview how it styles backgrounds, cards, typography, and highlights. Click to apply.
+										</p>
+									</div>
+									{#if hoveredTheme && hoveredTheme !== theme.id}
+										<div>
+											<Button size="sm" variant="outline" class="h-7 text-xs cursor-pointer" onclick={() => applyTheme(hoveredTheme!)}>
+												Apply {THEMES.find((t) => t.id === hoveredTheme)?.label}
+											</Button>
+										</div>
+									{/if}
+									<div class="flex flex-col items-start gap-1.5 lg:mt-auto pt-4 border-t border-border/40">
+										<Button variant="outline" size="sm" disabled={isDefaultCustom()} onclick={() => { resetCustom(); toast.success('Customization reset to theme default'); }} class="cursor-pointer">
+											<HugeiconsIcon icon={RotateLeft01Icon} size={15} strokeWidth={2} class="mr-1.5" />
+											Reset customization
+										</Button>
+										<p class="text-xs leading-relaxed text-muted-foreground max-lg:hidden">
+											Drop the color, roundness and font overrides. Keeps the preset.
+										</p>
+									</div>
+								</div>
+							</aside>
+						</div>
 					{:else if tab === 'playback'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Audio</h3>
@@ -2838,26 +2934,7 @@
 					{/if}
 				</div>
 
-				<!-- Quick Section Dots Navigation (Sticky & pinned on the right of Appearance tab) -->
-				{#if tab === 'themes'}
-					<nav class="absolute right-3.5 top-24 z-30 hidden sm:flex flex-col items-center gap-2 rounded-full border border-white/15 dark:border-white/10 bg-card/50 dark:bg-black/50 py-2.5 px-1.5 shadow-lg backdrop-blur-2xl" aria-label="Appearance section dots">
-						{#each visibleAppearanceSections as sec}
-							<button
-								type="button"
-								onclick={() => scrollToAppearanceSection(sec.id)}
-								class="group relative flex size-5 items-center justify-center rounded-full cursor-pointer transition-transform hover:scale-110 active:scale-95"
-								title={sec.label}
-								aria-label="Jump to {sec.label}"
-							>
-								<span class="rounded-full transition-all duration-200 {activeAppearanceSection === sec.id ? 'size-2.5 bg-white dark:bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]' : 'size-1.5 bg-white/25 dark:bg-white/25 group-hover:bg-white/60'}"></span>
-								<!-- Tooltip on hover -->
-								<span class="pointer-events-none absolute right-8 whitespace-nowrap rounded-[--radius] border border-border/70 bg-popover/95 px-2 py-0.5 text-[10px] font-semibold text-popover-foreground opacity-0 shadow-sm backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100">
-									{sec.label}
-								</span>
-							</button>
-						{/each}
-					</nav>
-				{/if}
+
 			</div>
 		</div>
 	</Dialog.Content>
@@ -3473,70 +3550,28 @@
 		{/each}
 	</div>
 {/snippet}
-{#snippet themeBoxesWithPreview()}
-	<div class="space-y-4">
-		<!-- Live Theme Preview Mockup matching limusic ThemeMock with live hover preview -->
-		<div class="flex flex-col sm:flex-row items-center sm:items-stretch gap-4 p-3 rounded-xl border border-border/60 bg-muted/20 backdrop-blur-sm">
-			<div class="w-56 sm:w-64 shrink-0 shadow-sm rounded-lg overflow-hidden border border-border/80">
-				<ThemeMock id={hoveredTheme ?? theme.id} dark={isDark} overrides={live} {detail} />
-			</div>
-			<div class="flex flex-1 flex-col justify-between py-1 min-w-0">
-				<div class="space-y-1.5">
-					<div class="flex items-center gap-2">
-						<span
-							class="size-2.5 rounded-full ring-1 ring-border"
-							style="background: {THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.color ?? 'var(--primary)'}"
-						></span>
-						<span class="text-sm font-semibold text-foreground">
-							{THEMES.find((t) => t.id === (hoveredTheme ?? theme.id))?.label ?? 'Theme'}
-						</span>
-						{#if hoveredTheme && hoveredTheme !== theme.id}
-							<span class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
-								Hover preview
-							</span>
-						{:else}
-							<span class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-								Current theme
-							</span>
-						{/if}
-					</div>
-					<p class="text-xs text-muted-foreground leading-relaxed">
-						Hover any preset below to preview how it styles backgrounds, cards, typography, and highlights. Click to apply.
-					</p>
-				</div>
-				{#if hoveredTheme && hoveredTheme !== theme.id}
-					<div class="pt-2">
-						<Button size="sm" variant="outline" class="h-7 text-xs cursor-pointer" onclick={() => applyTheme(hoveredTheme!)}>
-							Apply {THEMES.find((t) => t.id === hoveredTheme)?.label}
-						</Button>
-					</div>
-				{/if}
-			</div>
-		</div>
-
-		<!-- Theme chips from limusic with hover preview -->
-		<div class="flex flex-wrap gap-2" role="group" aria-label="Theme presets">
-			{#each THEMES as th (th.id)}
-				<button
-					type="button"
-					onclick={() => applyTheme(th.id)}
-					onmouseenter={() => (hoveredTheme = th.id)}
-					onmouseleave={() => (hoveredTheme = null)}
-					aria-pressed={theme.id === th.id}
-					class="flex cursor-pointer items-center gap-2 rounded-full border py-1.5 pr-3.5 pl-2 text-sm transition-all {theme.id ===
-					th.id
-						? 'border-primary bg-primary/15 text-foreground font-medium ring-1 ring-primary/40 shadow-xs'
-						: 'border-border/60 bg-muted/20 text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
-				>
-					<span
-						class="theme-{th.id} {isDark
-							? 'dark'
-							: ''} size-4 shrink-0 rounded-full bg-[linear-gradient(135deg,var(--background)_50%,var(--primary)_50%)] ring-1 ring-foreground/20"
-					></span>
-					{th.label}
-				</button>
-			{/each}
-		</div>
+{#snippet themeBoxes()}
+	<div class="flex flex-wrap gap-2" role="group" aria-label="Theme presets">
+		{#each THEMES as th (th.id)}
+			<button
+				type="button"
+				onclick={() => applyTheme(th.id)}
+				onmouseenter={() => (hoveredTheme = th.id)}
+				onmouseleave={() => (hoveredTheme = null)}
+				aria-pressed={theme.id === th.id}
+				class="theme-{th.id} {isDark
+					? 'dark'
+					: ''} flex cursor-pointer items-center gap-2 rounded-full border py-1.5 pr-3.5 pl-2 text-sm transition-all {theme.id ===
+				th.id
+					? 'border-primary bg-primary/15 text-foreground font-medium ring-1 ring-primary/40 shadow-xs'
+					: 'border-border/60 bg-muted/20 text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
+			>
+				<span
+					class="size-4 shrink-0 rounded-full bg-[linear-gradient(135deg,var(--background)_50%,var(--primary)_50%)] ring-1 ring-foreground/20"
+				></span>
+				{th.label}
+			</button>
+		{/each}
 	</div>
 {/snippet}
 {#snippet pcAudioRecognitionSwitch()}<Switch checked={prefs.pcAudioRecognition} onCheckedChange={setPcAudioRecognition} />{/snippet}
@@ -3861,59 +3896,63 @@
 	<Button variant="outline" size="sm" onclick={resetTranslucencyVisuals}>Reset translucency</Button>
 {/snippet}
 
-{#snippet presetSelect()}
-	<Select.Root type="single" value={theme.id} onValueChange={(v) => applyTheme(v as ThemeId)}>
-		<Select.Trigger class="w-44 shrink-0" aria-label="Theme">
-			<span
-				class="size-4 shrink-0 rounded-full ring-1 ring-black/10"
-				style="background:{currentTheme.color}"
-			></span>
-			<span class="flex-1 truncate text-left">{currentTheme.label}</span>
-		</Select.Trigger>
-		<Select.Content>
-			<Select.Group>
-				<Select.GroupHeading>Accent colors</Select.GroupHeading>
-				{#each ACCENT_THEMES as t (t.id)}
-					<Select.Item value={t.id} label={t.label}>
-						<span
-							class="size-4 shrink-0 rounded-full ring-1 ring-black/10"
-							style="background:{t.color}"
-						></span>
-						{t.label}
-					</Select.Item>
-				{/each}
-			</Select.Group>
-			<Select.Group>
-				<Select.GroupHeading>Palettes</Select.GroupHeading>
-				{#each PALETTE_THEMES as t (t.id)}
-					<Select.Item value={t.id} label={t.label}>
-						<span
-							class="size-4 shrink-0 rounded-full ring-1 ring-black/10"
-							style="background:{t.color}"
-						></span>
-						{t.label}
-					</Select.Item>
-				{/each}
-			</Select.Group>
-		</Select.Content>
-	</Select.Root>
-{/snippet}
-
-{#snippet accentSwatch()}
-	<button
-		type="button"
-		onclick={() => (pickerOpen = !pickerOpen)}
-		aria-label="Choose accent color"
-		aria-expanded={pickerOpen}
-		class="size-8 cursor-pointer rounded-lg ring-1 ring-black/10 transition-transform hover:scale-105 {pickerOpen
-			? 'ring-2 ring-primary/60'
-			: ''}"
-		style="background:{effective.accent}"
-	></button>
-{/snippet}
-
-{#snippet accentPicker()}
-	<ColorPicker value={effective.accent} onchange={(hex) => setCustom({ accent: hex })} />
+{#snippet accentSwatches()}
+	<div class="flex flex-wrap items-center gap-2">
+		<!-- The theme's own default accent swatch -->
+		<button
+			type="button"
+			onclick={() => setCustom({ accent: null })}
+			aria-pressed={!custom.accent}
+			aria-label="Theme default accent"
+			title="Theme default accent"
+			class="theme-{theme.id} {isDark
+				? 'dark'
+				: ''} flex size-7 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground ring-offset-2 ring-offset-card transition-transform hover:scale-105 {!custom.accent
+				? 'ring-2 ring-foreground/60 shadow-xs'
+				: ''}"
+		>
+			{#if !custom.accent}
+				<HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2.6} />
+			{/if}
+		</button>
+		<span class="mx-0.5 h-5 w-px bg-border/80"></span>
+		{#each ACCENTS as hex (hex)}
+			<button
+				type="button"
+				onclick={() => setCustom({ accent: hex })}
+				aria-pressed={custom.accent?.toLowerCase() === hex.toLowerCase()}
+				aria-label="Choose accent: {hex}"
+				title={hex}
+				class="flex size-7 cursor-pointer items-center justify-center rounded-full ring-offset-2 ring-offset-card transition-transform hover:scale-105 {custom.accent?.toLowerCase() === hex.toLowerCase() ? 'ring-2 ring-foreground/60 shadow-xs' : ''}"
+				style="background:{hex}; color:{onAccent(hex)}"
+			>
+				{#if custom.accent?.toLowerCase() === hex.toLowerCase()}
+					<HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2.6} />
+				{/if}
+			</button>
+		{/each}
+		<!-- Custom color picker popover -->
+		<Popover.Root bind:open={pickerOpen}>
+			<Popover.Trigger>
+				<button
+					type="button"
+					aria-label="Custom accent color"
+					title="Custom accent color"
+					class="flex size-7 cursor-pointer items-center justify-center rounded-full border border-dashed border-border ring-offset-2 ring-offset-card hover:border-foreground/50 transition-transform hover:scale-105 {customAccent ? 'ring-2 ring-foreground/60 shadow-xs' : ''}"
+					style={customAccent ? `background:${customAccent}; color:${onAccent(customAccent)}` : ''}
+				>
+					{#if customAccent}
+						<HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={2.6} />
+					{:else}
+						<HugeiconsIcon icon={PaintBoardIcon} size={14} strokeWidth={2} />
+					{/if}
+				</button>
+			</Popover.Trigger>
+			<Popover.Content class="w-auto p-3" align="end">
+				<ColorPicker value={effective.accent} onchange={(hex) => setCustom({ accent: hex })} />
+			</Popover.Content>
+		</Popover.Root>
+	</div>
 {/snippet}
 
 {#snippet tintSlider()}
@@ -3922,7 +3961,7 @@
 		aria-label="Background tint"
 		max={360}
 		step={1}
-		disabled={currentTheme.kind === 'palette'}
+		disabled={theme.id !== 'monochrome'}
 		value={effective.hue}
 		onValueChange={(hue) => setCustom({ hue })}
 		class="w-44 shrink-0 [&_[data-slot=slider-range]]:bg-transparent [&_[data-slot=slider-track]]:bg-[linear-gradient(to_right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)]"

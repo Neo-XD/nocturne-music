@@ -1799,6 +1799,23 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v090_note = ReleaseNote {
+        version: "0.9.0".to_string(),
+        date: "2026-10-10".to_string(),
+        body: r#"### Nocturne Music v0.9.0
+
+#### 🚀 New Features & Enhancements
+- **Persistent Theme Preview**: Theme preview mockup is now persistent on the right side of the Appearance customization list with real-time hover previews and reset controls.
+- **Unified Accent Color System**: Curated color swatches with one-click theme default reset and custom color picker popover. Switching themes now applies each palette's native colors cleanly.
+- **Home Customization Quick Pill**: Added an inline customize pill button next to the vibe pills bar on the home screen.
+- **Now Playing Artwork Navigation**: Clicking album art in the info sidebar opens the album page.
+- **Refined Corner Radius & Dark Mode**: Default corner radius set to 0.33rem, accompanied by Light / Dark / System segmented picker.
+
+#### 🐛 Bug Fixes
+- **Audio Download Stream Error**: Fixed song download failure with chunked audioproxy streaming, robust duration deserialization, and lock safety.
+- **Accent Theme Overrides**: Fixed accent color not updating properly across sidebar items, rings, and components after choosing a theme."#.to_string(),
+    };
+
     let v087_note = ReleaseNote {
         version: "0.8.7".to_string(),
         date: "2026-09-26".to_string(),
@@ -2100,15 +2117,17 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v087_note, v086_note, v085_note, v084_note, v083_note, v082_note, v081_note, v080_note,
-        v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note, v063_note,
-        v062_note, v061_note, v06_note,
+        v090_note, v087_note, v086_note, v085_note, v084_note, v083_note, v082_note, v081_note,
+        v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note,
+        v063_note, v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "0.9.0".to_string(),
+            "0.9".to_string(),
             "0.8.7".to_string(),
             "0.8.6".to_string(),
             "0.8.5".to_string(),

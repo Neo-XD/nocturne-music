@@ -33,6 +33,12 @@
 	style:--primary-foreground={fg}
 	style:--accent={overrides.accent}
 	style:--accent-foreground={fg}
+	style:--ring={overrides.accent}
+	style:--sidebar-primary={overrides.accent}
+	style:--sidebar-primary-foreground={fg}
+	style:--sidebar-accent={overrides.accent ? `color-mix(in oklab, ${overrides.accent} 22%, var(--sidebar))` : null}
+	style:--sidebar-accent-foreground={fg}
+	style:--sidebar-ring={overrides.accent}
 	style:--hue={overrides.hue === null ? null : String(overrides.hue)}
 	style:--radius={overrides.radius === null ? '0.33rem' : `${overrides.radius}rem`}
 	style:--font-sans={overrides.fontSans}

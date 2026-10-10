@@ -18,11 +18,6 @@ import { toggleMode as baseToggleMode } from 'mode-watcher';
 
 export type ThemeId =
 	| 'monochrome'
-	| 'rose'
-	| 'blue'
-	| 'lime'
-	| 'purple'
-	| 'teal'
 	| 'catppuccin'
 	| 'tokyonight'
 	| 'caffeine'
@@ -32,28 +27,30 @@ export type ThemeId =
 	| 'glassy'
 	| 'native';
 
-// `fg` (accent themes only) is the text/icon colour that sits ON the accent: light accents (lime,
-// teal) need a dark foreground; dark accents keep the light one. `color` is just the picker swatch.
-type Theme =
-	| { id: ThemeId; label: string; kind: 'accent'; color: string; fg: string }
-	| { id: ThemeId; label: string; kind: 'palette'; color: string };
+// `color` is just the picker swatch.
+type Theme = { id: ThemeId; label: string; color: string };
 
 export const THEMES: Theme[] = [
-	{ id: 'monochrome', label: 'Monochrome', kind: 'palette', color: 'oklch(0.985 0 0)' },
-	{ id: 'amoled', label: 'AMOLED', kind: 'palette', color: 'oklch(0 0 0)' },
-	{ id: 'catppuccin', label: 'Catppuccin', kind: 'palette', color: 'oklch(0.5547 0.2503 297.0156)' },
-	{ id: 'tokyonight', label: 'Tokyo Night', kind: 'palette', color: 'oklch(0.3593 0.0513 273.1802)' },
-	{ id: 'glassy', label: 'Glassy', kind: 'palette', color: 'oklch(0.7 0.15 220)' },
-	{ id: 'native', label: 'Native', kind: 'palette', color: 'oklch(0.58 0.18 250)' },
-	{ id: 'caffeine', label: 'Caffeine', kind: 'palette', color: 'oklch(0.4341 0.0392 41.9938)' },
-	{ id: 'neon', label: 'Neon', kind: 'palette', color: 'oklch(0.6726 0.2904 341.4084)' },
-	{ id: 'breeze', label: 'Breeze', kind: 'palette', color: 'oklch(0.7227 0.1920 149.5793)' },
-	{ id: 'rose', label: 'Rose', kind: 'accent', color: 'oklch(0.455 0.188 13.697)', fg: 'oklch(0.985 0 0)' },
-	{ id: 'blue', label: 'Blue', kind: 'accent', color: 'oklch(0.49 0.22 264)', fg: 'oklch(0.985 0 0)' },
-	{ id: 'lime', label: 'Lime', kind: 'accent', color: 'oklch(0.77 0.2 131)', fg: 'oklch(0.205 0 0)' },
-	{ id: 'purple', label: 'Purple', kind: 'accent', color: 'oklch(0.56 0.25 302)', fg: 'oklch(0.985 0 0)' },
-	{ id: 'teal', label: 'Teal', kind: 'accent', color: 'oklch(0.85 0.13 181)', fg: 'oklch(0.205 0 0)' }
+	{ id: 'monochrome', label: 'Monochrome', color: 'oklch(0.985 0 0)' },
+	{ id: 'amoled', label: 'AMOLED', color: 'oklch(0 0 0)' },
+	{ id: 'catppuccin', label: 'Catppuccin', color: 'oklch(0.5547 0.2503 297.0156)' },
+	{ id: 'tokyonight', label: 'Tokyo Night', color: 'oklch(0.3593 0.0513 273.1802)' },
+	{ id: 'glassy', label: 'Glassy', color: 'oklch(0.7 0.15 220)' },
+	{ id: 'native', label: 'Native', color: 'oklch(0.58 0.18 250)' },
+	{ id: 'caffeine', label: 'Caffeine', color: 'oklch(0.4341 0.0392 41.9938)' },
+	{ id: 'neon', label: 'Neon', color: 'oklch(0.6726 0.2904 341.4084)' },
+	{ id: 'breeze', label: 'Breeze', color: 'oklch(0.7227 0.1920 149.5793)' }
 ];
+
+// A removed accent preset falls back to monochrome, carrying its colour over as a custom
+// accent so someone who had chosen Blue stays blue.
+const LEGACY_ACCENTS: Record<string, string | null> = {
+	rose: '#e11d48',
+	blue: '#2563eb',
+	lime: '#16a34a',
+	purple: '#7c3aed',
+	teal: '#0d9488'
+};
 
 /** Font stacks bundled with the app (imported in layout.css). "System" needs no download. */
 export const FONTS: { label: string; value: string }[] = [
@@ -81,8 +78,20 @@ export type Custom = {
 const KEY = 'primary-theme';
 const CUSTOM_KEY = 'custom-theme';
 const APPEARANCE_KEY = 'appearance';
-const PALETTE_CLASSES = THEMES.filter((t) => t.kind === 'palette').map((t) => `theme-${t.id}`);
-const ACCENT_VARS = ['--primary', '--primary-foreground', '--accent', '--accent-foreground'];
+const PALETTE_CLASSES = THEMES.map((t) => `theme-${t.id}`);
+const ACCENT_VARS = [
+	'--primary',
+	'--primary-foreground',
+	'--accent',
+	'--accent-foreground',
+	'--ring',
+	'--sidebar-primary',
+	'--sidebar-primary-foreground',
+	'--sidebar-accent',
+	'--sidebar-accent-foreground',
+	'--sidebar-ring',
+	'--primary-rgb'
+];
 /** Set on <html> while the artwork tint is live; the surface rules in layout.css hang off it. */
 const TINT_CLASS = 'art-tint';
 const CUSTOM_VARS = ['--hue', '--radius', '--font-sans', '--font-heading', '--font-lyrics'];
@@ -234,14 +243,29 @@ export function readBack(): void {
 	effective.fontLyrics = g('--font-lyrics');
 }
 
-/** Write the accent quartet as inline vars on <html>, foreground picked for legibility on it. */
+/** Write the accent quartet, sidebar and ring vars on <html>, foreground picked for legibility on it. */
 function setAccentVars(color: string): void {
-	const fg = isLight(color) ? ON_LIGHT : ON_DARK;
+	const fg = onAccent(color);
 	const root = document.documentElement;
 	root.style.setProperty('--primary', color);
 	root.style.setProperty('--primary-foreground', fg);
 	root.style.setProperty('--accent', color);
 	root.style.setProperty('--accent-foreground', fg);
+	root.style.setProperty('--ring', color);
+	root.style.setProperty('--sidebar-primary', color);
+	root.style.setProperty('--sidebar-primary-foreground', fg);
+	root.style.setProperty('--sidebar-accent', `color-mix(in oklab, ${color} 22%, var(--sidebar))`);
+	root.style.setProperty('--sidebar-accent-foreground', fg);
+	root.style.setProperty('--sidebar-ring', color);
+
+	if (color.startsWith('#') && color.length >= 7) {
+		const r = parseInt(color.slice(1, 3), 16);
+		const g = parseInt(color.slice(3, 5), 16);
+		const b = parseInt(color.slice(5, 7), 16);
+		if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+			root.style.setProperty('--primary-rgb', `${r}, ${g}, ${b}`);
+		}
+	}
 }
 
 let currentDesktopEnv = 'windows';
@@ -270,19 +294,11 @@ export function detectDesktopEnvironment(): void {
 function apply(): void {
 	const t = THEMES.find((x) => x.id === theme.id) ?? THEMES[0];
 	const root = document.documentElement;
-	// Reset every mechanism first, so switching between an accent and a palette (or clearing a
+	// Reset every mechanism first, so switching palettes (or clearing a
 	// custom override) never leaves the previous choice's inline vars or class behind.
 	[...ACCENT_VARS, ...CUSTOM_VARS, '--art-h'].forEach((v) => root.style.removeProperty(v));
 	root.classList.remove(...PALETTE_CLASSES, TINT_CLASS);
-
-	if (t.kind === 'accent') {
-		root.style.setProperty('--primary', t.color);
-		root.style.setProperty('--primary-foreground', t.fg);
-		root.style.setProperty('--accent', t.color);
-		root.style.setProperty('--accent-foreground', t.fg);
-	} else {
-		root.classList.add(`theme-${t.id}`);
-	}
+	root.classList.add(`theme-${t.id}`);
 
 	if (t.id === 'native') {
 		root.setAttribute('data-native-de', currentDesktopEnv);
@@ -336,6 +352,8 @@ export function applyTheme(id: ThemeId): void {
 		localStorage.setItem(PREVIOUS_KEY, previousTheme);
 	}
 	theme.id = validId;
+	custom.accent = null;
+	persist();
 	apply();
 	localStorage.setItem(KEY, theme.id);
 }
@@ -537,8 +555,18 @@ export function prewarmArtworkAccent(url: string | undefined | null): void {
 
 /** Apply the stored theme + customization on startup (defaults to monochrome, no overrides). */
 export function initTheme(): void {
-	const stored = localStorage.getItem(KEY) as ThemeId | null;
-	theme.id = stored && THEMES.some((t) => t.id === stored) ? stored : 'monochrome';
+	const stored = localStorage.getItem(KEY);
+	if (stored && stored in LEGACY_ACCENTS) {
+		const hex = LEGACY_ACCENTS[stored];
+		if (hex && !custom.accent) {
+			custom.accent = hex;
+			persist();
+		}
+		theme.id = 'monochrome';
+		localStorage.setItem(KEY, theme.id);
+	} else {
+		theme.id = stored && THEMES.some((t) => t.id === stored) ? (stored as ThemeId) : 'monochrome';
+	}
 	const storedPrev = localStorage.getItem(PREVIOUS_KEY) as ThemeId | null;
 	if (storedPrev && storedPrev !== 'glassy' && THEMES.some((t) => t.id === storedPrev)) {
 		previousTheme = storedPrev;
