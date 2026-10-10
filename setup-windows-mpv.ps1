@@ -9,11 +9,22 @@ New-Item -ItemType Directory -Force -Path $mpvDir | Out-Null
 New-Item -ItemType Directory -Force -Path $srcTauriDir | Out-Null
 
 $zipPath = Join-Path $mpvDir "mpv-dev.7z"
-$url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20260610/mpv-dev-x86_64-20260610-git-304426c.7z"
+$url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261010/mpv-dev-x86_64-20261010-git-b2c255c13e.7z"
 
 if (-not (Test-Path (Join-Path $mpvDir "libmpv-2.dll"))) {
-    Write-Host "Downloading mpv dev package..."
-    curl.exe -fsSL -o $zipPath $url
+    Write-Host "Downloading mpv dev package from $url..."
+    & curl.exe -fsSL -o $zipPath $url
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $zipPath)) {
+        Write-Host "Pinned URL returned error or was pruned. Fetching latest release from GitHub API..."
+        $headers = @{ "User-Agent" = "nocturne-build" }
+        $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest" -Headers $headers
+        $asset = $rel.assets | Where-Object { $_.name -like "mpv-dev-x86_64-*.7z" -and $_.name -notlike "*v3*" } | Select-Object -First 1
+        if (-not $asset) { throw "Could not find baseline mpv-dev-x86_64 asset in latest release" }
+        $url = $asset.browser_download_url
+        Write-Host "Downloading from latest release: $url"
+        & curl.exe -fsSL -o $zipPath $url
+        if ($LASTEXITCODE -ne 0) { throw "Failed to download $url" }
+    }
     Write-Host "Extracting..."
     tar.exe -xf $zipPath -C $mpvDir
     Remove-Item $zipPath -ErrorAction SilentlyContinue
