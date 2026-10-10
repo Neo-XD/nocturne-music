@@ -21,7 +21,7 @@
 
 <!-- Below lg: Backdrop scrim dismisses the panel -->
 <button
-	class="fixed inset-0 z-30 cursor-default bg-black/20 backdrop-blur-xs lg:hidden"
+	class="fixed inset-0 z-30 cursor-default bg-black/25 lg:hidden"
 	onclick={onClose}
 	aria-label="Close queue"
 	transition:fade={{ duration: 150 }}

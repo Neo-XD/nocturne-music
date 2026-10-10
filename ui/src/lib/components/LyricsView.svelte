@@ -364,65 +364,66 @@
 		return (currentMs - word.start_ms) / dur;
 	}
 
+	// 5th-order smootherstep for buttery smooth interpolation without abrupt starts or stops
+	function easeSwipe(t: number): number {
+		const c = Math.max(0, Math.min(1, t));
+		return c * c * c * (c * (c * 6 - 15) + 10);
+	}
+
 	function getAppleV2GraphemeBackground(progress: number): string {
-		const smooth = progress * progress * (3 - 2 * progress);
+		const smooth = easeSwipe(progress);
 		const pct = Math.min(100, Math.max(0, Math.round(smooth * 100)));
-		return `linear-gradient(90deg, #ffffff 0%, #ffffff ${pct}%, rgba(255,255,255,0.34) ${pct}%, rgba(255,255,255,0.34) 100%)`;
+		const tail = Math.min(100, pct + 4);
+		return `linear-gradient(90deg, #ffffff 0%, #ffffff ${pct}%, rgba(255,255,255,0.35) ${tail}%, rgba(255,255,255,0.35) 100%)`;
 	}
 
 	function getWordRenderInfo(word: api.LyricWord, currentMs: number, style: LyricsAnimationStyle) {
-		const progress = getWordProgress(word, currentMs);
-		const isCurrent = progress > 0 && progress < 1;
-		const isFinished = progress >= 1;
+		const rawProgress = getWordProgress(word, currentMs);
+		const isCurrent = rawProgress > 0 && rawProgress < 1;
+		const isFinished = rawProgress >= 1;
+		const progress = easeSwipe(rawProgress);
+		const pct = Math.min(100, Math.max(0, Math.round(progress * 100)));
+		const tail = Math.min(100, pct + 4);
 
 		if (style === 'wave') {
-			const pct = Math.min(100, Math.max(0, Math.round(progress * 100)));
-			const tail = Math.min(100, pct + 14);
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, color-mix(in srgb, var(--foreground) 75%, var(--primary, #6366f1)) ${Math.min(100, pct + 4)}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.05] drop-shadow-[0_0_12px_rgba(255,255,255,0.45)]' : ''
+				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, color-mix(in srgb, var(--foreground) 75%, transparent) ${Math.min(100, pct + 2)}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
+				cls: isCurrent ? 'scale-[1.04] drop-shadow-[0_0_12px_rgba(255,255,255,0.45)]' : ''
 			};
 		}
 		if (style === 'apple') {
-			const smooth = progress * progress * (3 - 2 * progress);
-			const pct = Math.round(smooth * 100);
 			return {
-				bg: `linear-gradient(90deg, #ffffff 0%, #ffffff ${pct}%, rgba(255,255,255,0.38) ${pct}%, rgba(255,255,255,0.38) 100%)`,
+				bg: `linear-gradient(90deg, #ffffff 0%, #ffffff ${pct}%, rgba(255,255,255,0.38) ${tail}%, rgba(255,255,255,0.38) 100%)`,
 				cls: isCurrent ? 'scale-[1.035] drop-shadow-[0_0_14px_rgba(255,255,255,0.6)] font-extrabold' : ''
 			};
 		}
 		if (style === 'karaoke') {
-			const pct = Math.min(100, Math.max(0, Math.round(progress * 100)));
 			return {
-				bg: `linear-gradient(90deg, var(--primary) 0%, var(--primary) ${pct}%, var(--muted-foreground) ${pct}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.03] drop-shadow-[0_0_12px_var(--primary)] font-black text-primary' : ''
+				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
+				cls: isCurrent ? 'scale-[1.03] drop-shadow-[0_0_12px_rgba(255,255,255,0.5)] font-black text-foreground' : ''
 			};
 		}
 		if (style === 'glow') {
-			const pct = Math.min(100, Math.max(0, Math.round(progress * 100)));
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--primary) ${pct}%, var(--muted-foreground) ${Math.min(100, pct + 15)}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.06] drop-shadow-[0_0_22px_var(--primary)] font-extrabold' : ''
+				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${Math.min(100, pct + 8)}%, var(--muted-foreground) 100%)`,
+				cls: isCurrent ? 'scale-[1.05] drop-shadow-[0_0_20px_rgba(255,255,255,0.7)] font-extrabold' : ''
 			};
 		}
 		if (style === 'slide') {
-			const pct = Math.min(100, Math.max(0, Math.round(progress * 100)));
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--primary) ${pct}%, var(--muted-foreground) ${pct}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.03] translate-x-0.5 drop-shadow-[0_0_12px_var(--primary)] font-extrabold' : ''
+				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
+				cls: isCurrent ? 'scale-[1.03] translate-x-0.5 drop-shadow-[0_0_12px_rgba(255,255,255,0.4)] font-extrabold' : ''
 			};
 		}
 		if (style === 'fade') {
-			const pct = Math.min(100, Math.max(0, Math.round(progress * 100)));
 			return {
 				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${Math.min(100, pct + 8)}%, var(--muted-foreground) 100%)`,
 				cls: isCurrent ? 'drop-shadow-[0_0_10px_rgba(255,255,255,0.3)] font-bold' : ''
 			};
 		}
 		if (style === 'og') {
-			const pct = Math.min(100, Math.max(0, Math.round(progress * 100)));
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) ${pct}%, var(--muted-foreground) ${pct}%)`,
+				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
 				cls: isCurrent ? 'scale-[1.03] font-bold' : ''
 			};
 		}
@@ -436,11 +437,11 @@
 
 	function getLineFallbackClass(isHighlight: boolean, style: LyricsAnimationStyle): string {
 		if (!isHighlight) return '';
-		if (style === 'wave') return 'bg-gradient-to-r from-foreground via-foreground to-primary/85 bg-clip-text text-transparent drop-shadow-[0_0_16px_rgba(var(--color-primary-rgb,99,102,241),0.4)]';
+		if (style === 'wave') return 'bg-gradient-to-r from-foreground via-foreground to-foreground/80 bg-clip-text text-transparent drop-shadow-[0_0_14px_rgba(255,255,255,0.35)]';
 		if (style === 'apple' || style === 'apple_v2') return 'text-foreground drop-shadow-[0_0_16px_rgba(255,255,255,0.35)]';
-		if (style === 'karaoke') return 'text-primary drop-shadow-[0_0_14px_rgba(var(--color-primary-rgb,99,102,241),0.5)]';
-		if (style === 'glow') return 'text-foreground drop-shadow-[0_0_24px_var(--primary)]';
-		if (style === 'slide') return 'translate-x-2 text-foreground drop-shadow-[0_0_12px_rgba(var(--color-primary-rgb,99,102,241),0.3)]';
+		if (style === 'karaoke') return 'text-foreground drop-shadow-[0_0_14px_rgba(255,255,255,0.4)]';
+		if (style === 'glow') return 'text-foreground drop-shadow-[0_0_20px_rgba(255,255,255,0.5)]';
+		if (style === 'slide') return 'translate-x-2 text-foreground drop-shadow-[0_0_12px_rgba(255,255,255,0.3)]';
 		if (style === 'fade') return 'text-foreground drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]';
 		if (style === 'og') return 'text-foreground font-bold drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]';
 		return 'text-foreground font-bold';
@@ -448,11 +449,11 @@
 
 	function getLineClasses(isHighlight: boolean, isPast: boolean, dist: number, style: LyricsAnimationStyle): string {
 		if (isHighlight) {
-			if (style === 'wave') return 'scale-[1.045] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_18px_rgba(var(--color-primary-rgb,99,102,241),0.35)]';
+			if (style === 'wave') return 'scale-[1.04] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_16px_rgba(255,255,255,0.35)]';
 			if (style === 'apple' || style === 'apple_v2') return 'scale-[1.035] -translate-y-0.5 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_20px_rgba(255,255,255,0.35)]';
-			if (style === 'karaoke') return 'scale-[1.02] translate-y-0 text-primary font-extrabold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(var(--color-primary-rgb,99,102,241),0.5)]';
-			if (style === 'glow') return 'scale-[1.04] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_24px_var(--primary)]';
-			if (style === 'slide') return 'scale-[1.02] translate-x-2 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(var(--color-primary-rgb,99,102,241),0.35)]';
+			if (style === 'karaoke') return 'scale-[1.02] translate-y-0 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(255,255,255,0.4)]';
+			if (style === 'glow') return 'scale-[1.04] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_20px_rgba(255,255,255,0.5)]';
+			if (style === 'slide') return 'scale-[1.02] translate-x-2 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(255,255,255,0.35)]';
 			if (style === 'fade') return 'scale-100 translate-y-0 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]';
 			if (style === 'og') return 'scale-[1.03] translate-y-0 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]';
 			return 'scale-100 translate-y-0 text-foreground font-bold opacity-100 blur-0';

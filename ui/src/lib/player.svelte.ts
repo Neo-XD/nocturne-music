@@ -166,15 +166,16 @@ export const prefs = $state({
 	audioStreamSource: (browser ? (localStorage.getItem('audio_stream_source') as 'ytm' | 'spotify') : null) || 'ytm',
 	listeningHistoryTarget: (browser ? (localStorage.getItem('listening_history_target') as 'both' | 'ytm' | 'spotify') : null) || 'both',
 	pcAudioRecognition: browser ? localStorage.getItem('pc_audio_recognition') !== 'false' : true,
+	onRepeatLimit: browser ? parseInt(localStorage.getItem('on_repeat_limit') || '50', 10) || 50 : 50,
 	visibleIcons: {
 		titlebar: {
 			navigation: browser ? localStorage.getItem('icon_tb_navigation') !== 'false' : true,
 			search: browser ? localStorage.getItem('icon_tb_search') !== 'false' : true,
-			openLink: browser ? localStorage.getItem('icon_tb_openLink') !== 'false' : true,
+			openLink: browser ? localStorage.getItem('icon_tb_openLink') === 'true' : false,
 			listenTogether: browser ? localStorage.getItem('icon_tb_listenTogether') !== 'false' : true,
 			discord: browser ? localStorage.getItem('icon_tb_discord') !== 'false' : true,
 			lastfm: browser ? localStorage.getItem('icon_tb_lastfm') !== 'false' : true,
-			miniPlayer: browser ? localStorage.getItem('icon_tb_miniPlayer') !== 'false' : true,
+			miniPlayer: browser ? localStorage.getItem('icon_tb_miniPlayer') === 'true' : false,
 			fullscreen: browser ? localStorage.getItem('icon_tb_fullscreen') !== 'false' : true,
 			mode: browser ? localStorage.getItem('icon_tb_mode') !== 'false' : true,
 			settings: browser ? localStorage.getItem('icon_tb_settings') !== 'false' : true,
@@ -360,6 +361,14 @@ export function setAnimatedArtwork(enabled: boolean) {
 export function setCustomizationMode(mode: 'basic' | 'extreme') {
 	prefs.customizationMode = mode;
 	if (browser) localStorage.setItem('customization_mode', mode);
+}
+
+export function setOnRepeatLimit(limit: number) {
+	prefs.onRepeatLimit = limit;
+	if (browser) {
+		localStorage.setItem('on_repeat_limit', limit.toString());
+		api.setSetting('on_repeat_limit', limit.toString()).catch(() => {});
+	}
 }
 
 export interface BlockedArtist {

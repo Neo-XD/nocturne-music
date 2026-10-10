@@ -840,9 +840,15 @@ pub fn play_counts(state: St<'_>) -> std::collections::HashMap<String, i64> {
 /// no longer parses (a `SongItem` shape change) are dropped rather than failing the whole page.
 fn on_repeat_songs(state: &Arc<AppState>) -> Vec<SongItem> {
     let since = now_secs() - ON_REPEAT_WINDOW_SECS;
+    let limit = state
+        .db
+        .get_setting("on_repeat_limit")
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(ON_REPEAT_LIMIT);
     state
         .db
-        .top_plays(since, ON_REPEAT_LIMIT)
+        .top_plays(since, limit)
         .into_iter()
         .filter_map(|(json, _plays)| serde_json::from_str(&json).ok())
         .map(shed_queue_context)

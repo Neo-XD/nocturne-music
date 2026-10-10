@@ -29,8 +29,8 @@ pub const ON_REPEAT_ID: &str = "LIMUSIC_ON_REPEAT";
 /// How far back On Repeat looks. A month is long enough to survive a quiet week and short enough
 /// that the list still turns over with what you're actually playing.
 pub const ON_REPEAT_WINDOW_SECS: i64 = 30 * 24 * 60 * 60;
-/// How many songs it holds.
-pub const ON_REPEAT_LIMIT: usize = 20;
+/// How many songs it holds by default (user-customizable in settings).
+pub const ON_REPEAT_LIMIT: usize = 50;
 
 pub struct AppState {
     pub it: InnerTube,

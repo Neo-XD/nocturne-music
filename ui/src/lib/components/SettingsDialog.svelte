@@ -60,6 +60,7 @@
 		setVisibleIcon,
 		setCustomizationMode,
 		setLyricsAnimationStyle,
+		setOnRepeatLimit,
 		LYRICS_ANIMATION_OPTIONS,
 		blockedArtists,
 		unblockArtist,
@@ -1562,6 +1563,11 @@
 									control: spotifyButton,
 									below: showSpotifyInput ? spotifyInputSnippet : undefined
 								})}
+								{@render row({
+									title: 'On Repeat track count',
+									desc: 'How many most-played songs to include in your On Repeat list (default: 50).',
+									control: onRepeatLimitSelector
+								})}
 							</div>
 						</section>
 						<section class={GROUP}>
@@ -2970,6 +2976,27 @@
 
 <!-- Controls. Split out so the rows above read as a list of settings rather than a wall of markup. -->
 {#snippet historySwitch()}<Switch checked={historyOn} onCheckedChange={setHistory} />{/snippet}
+{#snippet onRepeatLimitSelector()}
+	<Select.Root
+		type="single"
+		value={String(prefs.onRepeatLimit || 50)}
+		onValueChange={(val) => {
+			const n = parseInt(val, 10);
+			if (n > 0) setOnRepeatLimit(n);
+		}}
+	>
+		<Select.Trigger class="h-8 w-28 text-xs bg-muted/40" aria-label="On repeat song limit">
+			{prefs.onRepeatLimit || 50} songs
+		</Select.Trigger>
+		<Select.Content class="max-h-56">
+			<Select.Group>
+				{#each [20, 30, 40, 50, 75, 100, 150, 200] as lim}
+					<Select.Item value={String(lim)} label="{lim} songs" class="text-xs">{lim} songs</Select.Item>
+				{/each}
+			</Select.Group>
+		</Select.Content>
+	</Select.Root>
+{/snippet}
 {#snippet crossfadeSlider()}
 	<div class="flex items-center gap-3 w-48">
 		<Slider
