@@ -1457,7 +1457,7 @@
 <svelte:window onkeydown={recordingAction ? onKeyRecord : undefined} />
 
 <Dialog.Root bind:open={ui.settingsOpen}>
-	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 transition-all duration-200 border border-border/80 shadow-2xl {isMaximized ? 'w-[98vw] max-w-[98vw] sm:max-w-[98vw] lg:max-w-[98vw] xl:max-w-[98vw] h-[96vh] max-h-[96vh] rounded-xl' : 'w-[95vw] sm:max-w-5xl lg:max-w-6xl xl:max-w-[78rem] 2xl:max-w-[86rem] h-[min(48rem,88vh)] max-h-[88vh] rounded-2xl'}">
+	<Dialog.Content class="settings-dialog gap-0 overflow-hidden p-0 transition-all duration-200 border border-border/80 shadow-2xl {isMaximized ? 'w-[98vw] max-w-[98vw] sm:max-w-[98vw] lg:max-w-[98vw] xl:max-w-[98vw] h-[96vh] max-h-[96vh] rounded-xl' : (tab === 'themes' ? 'w-[95vw] sm:max-w-5xl lg:max-w-6xl xl:max-w-[78rem] 2xl:max-w-[86rem] h-[min(48rem,88vh)] max-h-[88vh] rounded-2xl' : 'w-[94vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-[70rem] h-[min(46rem,86vh)] max-h-[86vh] rounded-2xl')}">
 		<Dialog.Description class="sr-only">Application settings</Dialog.Description>
 
 		<!-- Maximize / Restore window button placed next to Close button -->
