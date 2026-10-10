@@ -40,7 +40,8 @@
 	let popupEl: HTMLElement | undefined = $state();
 	let popupStyle = $state('');
 	let shazamOpen = $state(false);
-	let isThin = $state(false);
+	const MIN_ALLOWED_WINDOW_WIDTH = 900;
+	let isThin = $state(typeof window !== 'undefined' ? window.innerWidth <= MIN_ALLOWED_WINDOW_WIDTH + 4 : false);
 	let spotlightOpen = $state(false);
 	let spotlightInputEl: HTMLInputElement | undefined = $state();
 
@@ -236,7 +237,7 @@
 
 	onMount(() => {
 		const checkThin = () => {
-			isThin = window.innerWidth < 800;
+			isThin = window.innerWidth <= MIN_ALLOWED_WINDOW_WIDTH + 4;
 		};
 		checkThin();
 
@@ -489,11 +490,13 @@
 {#if spotlightOpen}
 	<div {@attach toBody}>
 		<!-- Backdrop scrim with NO blur to prevent content blurring -->
-		<div
-			class="fixed inset-0 z-[100] bg-black/60"
+		<button
+			type="button"
+			aria-label="Close search"
+			class="fixed inset-0 z-[100] bg-black/60 cursor-default"
 			onclick={closeSpotlight}
 			transition:fade={{ duration: 150 }}
-		></div>
+		></button>
 
 		<!-- Centered Floating Spotlight Window -->
 		<div

@@ -207,7 +207,7 @@
 	<!-- Centered sticky search bar (or compact icon on thin windows) -->
 	{#if prefs.visibleIcons.titlebar.search}
 		<div data-tauri-drag-region class="flex flex-1 justify-center items-center mx-2 min-w-0">
-			<div class="flex justify-center items-center w-full max-w-[340px]">
+			<div data-tauri-drag-region class="flex justify-center items-center w-full max-w-[340px]">
 				<TopSearchBar />
 			</div>
 		</div>
