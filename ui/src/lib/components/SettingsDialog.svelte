@@ -759,6 +759,12 @@
 			badge: 'TTML Word Sync'
 		},
 		{
+			id: 'karaokemugen',
+			name: 'Karaoke Mugen / kara.moe',
+			description: 'Community karaoke lyrics with precise syllable timing and strong anime/game coverage.',
+			badge: 'Syllable Sync'
+		},
+		{
 			id: 'lrclib',
 			name: 'LRCLIB',
 			description: 'Open community database of synchronized and plain lyrics with wide global coverage.',
@@ -808,6 +814,7 @@
 		const defaultIds = [
 			'betterlyrics',
 			'amll',
+			'karaokemugen',
 			'lrclib',
 			'ytm',
 			'qq',
@@ -2629,6 +2636,9 @@
 												{/if}
 												{#if p.id === 'amll'}
 													<p class="mt-1 text-[10px] text-muted-foreground">Lyrics from AMLL TTML DB</p>
+												{/if}
+												{#if p.id === 'karaokemugen'}
+													<p class="mt-1 text-[10px] text-muted-foreground">Lyrics from Karaoke Mugen / kara.moe</p>
 												{/if}
 											</div>
 										</div>
