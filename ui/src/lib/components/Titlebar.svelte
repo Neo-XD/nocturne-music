@@ -53,6 +53,9 @@
 	// entries ahead of us.
 	let depth = $state(0);
 	let deepest = $state(0);
+	let innerWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1200);
+	const MIN_ALLOWED_WINDOW_WIDTH = 900;
+	const isThin = $derived(innerWidth <= MIN_ALLOWED_WINDOW_WIDTH + 4);
 	afterNavigate((nav) => {
 		if (nav.type === 'enter') depth = deepest = 0;
 		else if (nav.delta !== undefined) depth = Math.max(0, depth + nav.delta);
@@ -151,6 +154,8 @@
 	);
 </script>
 
+<svelte:window bind:innerWidth />
+
 <!-- `relative` makes this a stacking context, so the account/window dropdowns inside it are capped
      at this z — it must outrank the panels below (LyricsPanel/QueuePanel, z-30). -->
 <header
@@ -202,10 +207,14 @@
 			</a>
 		{/if}
 		{/if}
+
+		{#if prefs.visibleIcons.titlebar.search && isThin}
+			<TopSearchBar iconOnly />
+		{/if}
 	</div>
 
-	<!-- Centered sticky search bar (or compact icon on thin windows) -->
-	{#if prefs.visibleIcons.titlebar.search}
+	<!-- Centered sticky search bar (or drag region on thin windows) -->
+	{#if prefs.visibleIcons.titlebar.search && !isThin}
 		<div data-tauri-drag-region class="flex flex-1 justify-center items-center mx-2 min-w-0">
 			<div data-tauri-drag-region class="flex justify-center items-center w-full max-w-[340px]">
 				<TopSearchBar />

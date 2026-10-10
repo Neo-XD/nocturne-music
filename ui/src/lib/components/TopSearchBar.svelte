@@ -40,8 +40,10 @@
 	let popupEl: HTMLElement | undefined = $state();
 	let popupStyle = $state('');
 	let shazamOpen = $state(false);
+	let { iconOnly = false }: { iconOnly?: boolean } = $props();
 	const MIN_ALLOWED_WINDOW_WIDTH = 900;
 	let isThin = $state(typeof window !== 'undefined' ? window.innerWidth <= MIN_ALLOWED_WINDOW_WIDTH + 4 : false);
+	const showAsIcon = $derived(iconOnly || isThin);
 	let spotlightOpen = $state(false);
 	let spotlightInputEl: HTMLInputElement | undefined = $state();
 
@@ -82,7 +84,7 @@
 	$effect(() => {
 		if (spotlightOpen) {
 			registerSearchInput(spotlightInputEl);
-		} else if (isThin) {
+		} else if (showAsIcon) {
 			registerSearchInput({
 				focus() {
 					openSpotlight();
@@ -265,7 +267,7 @@
 					target.isContentEditable);
 			if (e.key === '/' && !isInput) {
 				e.preventDefault();
-				if (isThin) {
+				if (showAsIcon) {
 					openSpotlight();
 				} else {
 					inputEl?.focus();
@@ -395,16 +397,16 @@
 	</button>
 {/snippet}
 
-{#if isThin}
+{#if showAsIcon}
 	<!-- Collapsed icon search button on thin windows -->
 	<button
 		type="button"
-		class="flex h-7 w-7 items-center justify-center rounded-full text-foreground/80 transition-colors hover:bg-accent/15 hover:text-foreground cursor-pointer"
+		class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground cursor-pointer"
 		onclick={openSpotlight}
-		title="Search ({formatKey(keybindings.search)})"
+		title="Search (Ctrl+Space or /)"
 		aria-label="Search"
 	>
-		<HugeiconsIcon icon={Search01Icon} class="h-4 w-4" />
+		<HugeiconsIcon icon={Search01Icon} strokeWidth={2.2} class="h-4 w-4" />
 	</button>
 {:else}
 	<!-- Standard full search bar on wider windows -->
