@@ -4,7 +4,6 @@
 		Download01Icon,
 		CheckmarkCircle02Icon,
 		InformationCircleIcon,
-		SparklesIcon,
 		MusicNote03Icon,
 		Playlist01Icon as PlayList01Icon
 	} from '@hugeicons/core-free-icons';
@@ -32,30 +31,6 @@
 
 	const CHOICES: QualityChoice[] = [
 		{
-			id: 'LOSSLESS',
-			label: 'Lossless (FLAC)',
-			detail: '16-bit / 44.1 kHz bit-perfect FLAC audio via community addons with Lofty metadata tags.',
-			badge: 'FLAC 16-bit',
-			badgeColor: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/25',
-			source: 'addon'
-		},
-		{
-			id: 'HI_RES_LOSSLESS',
-			label: 'Hi-Res Lossless',
-			detail: '24-bit / up to 192 kHz studio master FLAC audio stream from high-fidelity source addons.',
-			badge: '24-bit Studio',
-			badgeColor: 'bg-amber-500/15 text-amber-500 border-amber-500/25',
-			source: 'addon'
-		},
-		{
-			id: 'DOLBY_ATMOS',
-			label: 'Dolby Atmos',
-			detail: 'Immersive spatial multichannel audio if supported by your connected streaming addons.',
-			badge: 'Spatial Audio',
-			badgeColor: 'bg-purple-500/15 text-purple-400 border-purple-500/25',
-			source: 'addon'
-		},
-		{
 			id: 'HIGH',
 			label: 'High Quality',
 			detail: '256 kbps AAC / 160 kbps Opus from YouTube Music. Universal device compatibility.',
@@ -73,13 +48,14 @@
 		}
 	];
 
-	let selectedQuality = $state('LOSSLESS');
+	let selectedQuality = $state('HIGH');
 	let rememberChoice = $state(false);
 	let downloading = $state(false);
 
 	$effect(() => {
 		if (ui.downloadPicker) {
-			selectedQuality = prefs.downloadQuality || 'LOSSLESS';
+			const prefQ = prefs.downloadQuality || 'HIGH';
+			selectedQuality = ['HIGH', 'LOW'].includes(prefQ) ? prefQ : 'HIGH';
 			rememberChoice = !prefs.downloadAlwaysAsk;
 			downloading = false;
 		}
@@ -88,12 +64,6 @@
 	const target = $derived(ui.downloadPicker);
 	const isPlaylist = $derived(target?.itemType === 'playlist');
 	const isOpen = $derived(target !== null);
-
-	const isAboveHigh = $derived(
-		['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(
-			selectedQuality.toUpperCase()
-		)
-	);
 
 	async function confirmDownload() {
 		if (!target || downloading) return;
@@ -213,16 +183,6 @@
 					</div>
 				</div>
 
-				<!-- Fallback Disclaimer Note -->
-				{#if isAboveHigh}
-					<div class="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 p-2.5 text-[11px] text-muted-foreground">
-						<HugeiconsIcon icon={SparklesIcon} class="h-4 w-4 shrink-0 text-primary mt-0.5" />
-						<p class="leading-relaxed">
-							Lossless FLAC resolution queries your enabled <strong>BitChord Streaming Addons</strong> first. If no addon matches the track, Nocturne automatically falls back to YouTube Music High Quality.
-						</p>
-					</div>
-				{/if}
-
 				<!-- Remember Choice Option -->
 				<label class="flex items-center gap-2.5 cursor-pointer pt-1 select-none">
 					<input
@@ -257,7 +217,7 @@
 						<span class="animate-pulse">Starting download...</span>
 					{:else}
 						<HugeiconsIcon icon={Download01Icon} class="h-3.5 w-3.5" />
-						<span>Download {isAboveHigh ? 'Lossless' : ''}</span>
+						<span>Download</span>
 					{/if}
 				</Button>
 			</div>

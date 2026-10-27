@@ -66,7 +66,10 @@
 		LYRICS_ANIMATION_OPTIONS,
 		blockedArtists,
 		unblockArtist,
-		playback
+		playback,
+		setAppLayout,
+		APP_LAYOUT_PRESETS,
+		type AppLayoutMode
 	} from '$lib/player.svelte';
 	import DiscordSettings from '$lib/components/DiscordSettings.svelte';
 	import DiscordIcon from '$lib/components/DiscordIcon.svelte';
@@ -85,6 +88,10 @@
 	} from '$lib/shortcuts.svelte';
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import Changelog from '$lib/components/Changelog.svelte';
+	import AppleIcon from '$lib/components/icons/AppleIcon.svelte';
+	import YtmIcon from '$lib/components/icons/YtmIcon.svelte';
+	import SpotifyIcon from '$lib/components/icons/SpotifyIcon.svelte';
+	import NocturneIcon from '$lib/components/icons/NocturneIcon.svelte';
 	import * as Popover from '$lib/components/ui/popover';
 	import {
 		THEMES,
@@ -889,9 +896,9 @@
 
 	const quality = $derived(settings.quality === 'VERY_HIGH' ? 'LOSSLESS' : (settings.quality ?? 'HIGH'));
 	const downloadQuality = $derived(
-		settings.download_quality === 'VERY_HIGH'
-			? 'LOSSLESS'
-			: (settings.download_quality ?? prefs.downloadQuality ?? 'LOSSLESS')
+		settings.download_quality && ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(settings.download_quality)
+			? 'HIGH'
+			: (settings.download_quality ?? (['LOW'].includes(prefs.downloadQuality) ? prefs.downloadQuality : 'HIGH'))
 	);
 	const downloadAskOn = $derived(prefs.downloadAlwaysAsk);
 	const historyOn = $derived(settings.enable_history !== 'false');
@@ -1134,6 +1141,11 @@
 		{ id: 'LOW', label: 'Low (64 kbps)' }
 	];
 
+	const DOWNLOAD_QUALITIES = [
+		{ id: 'HIGH', label: 'High (256 kbps AAC / 160 kbps Opus)' },
+		{ id: 'LOW', label: 'Low (64 kbps)' }
+	];
+
 	async function setQuality(q: string) {
 		settings.quality = q;
 		await api.setSetting('quality', q);
@@ -1143,10 +1155,11 @@
 	}
 
 	async function setDownloadQuality(q: string) {
-		settings.download_quality = q;
-		prefs.downloadQuality = q;
-		if (typeof window !== 'undefined') localStorage.setItem('download_quality', q);
-		await api.setSetting('download_quality', q);
+		const clamped = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(q.toUpperCase()) ? 'HIGH' : q;
+		settings.download_quality = clamped;
+		prefs.downloadQuality = clamped;
+		if (typeof window !== 'undefined') localStorage.setItem('download_quality', clamped);
+		await api.setSetting('download_quality', clamped);
 		toast.success('Download audio quality updated');
 	}
 
@@ -1473,6 +1486,7 @@
 	}
 
 	const APPEARANCE_SECTIONS = [
+		{ id: 'sec-app-layout', label: 'App Layout' },
 		{ id: 'sec-theme', label: 'Theme & Accent' },
 		{ id: 'sec-player', label: 'Player View' },
 		{ id: 'sec-translucency', label: 'Translucency', extremeOnly: true },
@@ -1787,6 +1801,36 @@
 						</div>
 
 						<div class="space-y-6">
+							<!-- 0. App Layout -->
+							<section id="sec-app-layout" class="{GROUP} scroll-mt-3">
+								<button
+									type="button"
+									onclick={() => (collapsedCategories['sec-app-layout'] = !collapsedCategories['sec-app-layout'])}
+									class="group/cat mb-2 flex w-full cursor-pointer items-center justify-between px-1 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:text-foreground"
+								>
+									<div class="flex items-center gap-1.5">
+										<HugeiconsIcon
+											icon={collapsedCategories['sec-app-layout'] ? ArrowRight01Icon : ArrowDown01Icon}
+											class="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover/cat:text-foreground"
+										/>
+										<span>App Layout</span>
+									</div>
+									<span class="text-[10px] font-normal lowercase tracking-normal text-muted-foreground/60 group-hover/cat:text-primary">
+										{collapsedCategories['sec-app-layout'] ? 'expand' : 'collapse'}
+									</span>
+								</button>
+								{#if !collapsedCategories['sec-app-layout']}
+									<div class={CARD}>
+										{@render row({
+											title: 'Interface Layout Style',
+											desc: 'Transform Nocturne with layout presets for Apple Music, YouTube Music, or Spotify alongside Nocturne default.',
+											below: appLayoutSelector,
+											tall: true
+										})}
+									</div>
+								{/if}
+							</section>
+
 							<!-- 1. Theme & Accent Color -->
 							<section id="sec-theme" class="{GROUP} scroll-mt-3">
 							<button
@@ -2316,9 +2360,9 @@
 								})}
 								{@render row({
 									title: 'Download audio quality',
-									badge: 'Offline FLAC',
+									badge: 'Offline Audio',
 									badgeVariant: 'info',
-									desc: 'Preferred audio resolution when saving songs and playlists to disk. Lossless FLAC, Hi-Res, and Dolby Atmos query community streaming addons first with bit-perfect Lofty metadata tags.',
+									desc: 'Preferred audio resolution when saving songs and playlists to disk.',
 									control: downloadQualityPicker
 								})}
 								{@render row({
@@ -3913,6 +3957,55 @@
 		{/each}
 	</div>
 {/snippet}
+{#snippet appLayoutSelector()}
+	<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+		{#each APP_LAYOUT_PRESETS as preset (preset.id)}
+			{@const isSelected = prefs.appLayout === preset.id}
+			<button
+				type="button"
+				onclick={() => {
+					setAppLayout(preset.id);
+					toast.success(`Switched to ${preset.name} layout`);
+				}}
+				class="group relative flex flex-col items-start p-3.5 rounded-xl border text-left transition-all cursor-pointer {isSelected
+					? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/40'
+					: 'border-border/60 bg-muted/20 hover:border-border hover:bg-muted/40'}"
+			>
+				<div class="flex items-center justify-between w-full mb-2.5">
+					<div class="flex items-center justify-center size-9 rounded-lg border border-border/50 {isSelected ? 'bg-primary/20 text-primary' : 'bg-card text-foreground group-hover:scale-105 transition-transform'}">
+						{#if preset.id === 'default'}
+							<NocturneIcon class="size-5" />
+						{:else if preset.id === 'applemusic'}
+							<AppleIcon class="size-5 text-rose-500" />
+						{:else if preset.id === 'ytm'}
+							<YtmIcon class="size-5 text-red-500" />
+						{:else if preset.id === 'spotify'}
+							<SpotifyIcon class="size-5 text-emerald-500" />
+						{/if}
+					</div>
+					{#if isSelected}
+						<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase bg-primary text-primary-foreground">
+							<HugeiconsIcon icon={Tick02Icon} size={11} strokeWidth={2.8} />
+							Active
+						</span>
+					{:else}
+						<span class="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-medium">
+							{preset.badge}
+						</span>
+					{/if}
+				</div>
+
+				<h4 class="text-xs font-semibold text-foreground tracking-tight flex items-center gap-1.5">
+					{preset.name}
+				</h4>
+				<span class="text-[11px] font-medium text-primary/80 mb-1">{preset.subtitle}</span>
+				<p class="text-[11px] leading-relaxed text-muted-foreground mt-0.5">
+					{preset.description}
+				</p>
+			</button>
+		{/each}
+	</div>
+{/snippet}
 {#snippet themeBoxes()}
 	<div class="flex flex-wrap gap-2" role="group" aria-label="Theme presets">
 		{#each THEMES as th (th.id)}
@@ -4472,10 +4565,10 @@
 		onValueChange={(v) => v && setDownloadQuality(v)}
 	>
 		<Select.Trigger class="h-8 min-w-56 text-xs bg-muted/40 cursor-pointer" aria-label="Download audio quality">
-			{QUALITIES.find((q) => q.id === downloadQuality)?.label ?? downloadQuality}
+			{DOWNLOAD_QUALITIES.find((q) => q.id === downloadQuality)?.label ?? downloadQuality}
 		</Select.Trigger>
 		<Select.Content class="max-w-80">
-			{#each QUALITIES as q (q.id)}
+			{#each DOWNLOAD_QUALITIES as q (q.id)}
 				<Select.Item value={q.id} label={q.label} class="text-xs cursor-pointer">
 					{q.label}
 				</Select.Item>

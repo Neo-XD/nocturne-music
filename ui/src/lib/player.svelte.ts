@@ -69,6 +69,47 @@ export const toggleDevicesSidebar = () => {
 
 export type FloatingSidebarMode = 'both' | 'left' | 'right' | 'none';
 
+export type AppLayoutMode = 'default' | 'applemusic' | 'ytm' | 'spotify';
+
+export interface AppLayoutPreset {
+	id: AppLayoutMode;
+	name: string;
+	subtitle: string;
+	badge: string;
+	description: string;
+}
+
+export const APP_LAYOUT_PRESETS: AppLayoutPreset[] = [
+	{
+		id: 'default',
+		name: 'Nocturne (Default)',
+		subtitle: 'Modern Glass Interface',
+		badge: 'Default',
+		description: 'Signature floating glass panels, modular sidebars, and fluid adaptive typography.'
+	},
+	{
+		id: 'applemusic',
+		name: 'Apple Music',
+		subtitle: 'Cupertino Classic',
+		badge: 'Apple Music',
+		description: 'Centered floating pill dock, clean navigation hierarchy, and minimalist Apple aesthetic.'
+	},
+	{
+		id: 'ytm',
+		name: 'YouTube Music',
+		subtitle: 'Streaming Native',
+		badge: 'YouTube Music',
+		description: 'Full-width bottom bar with edge scrubber, centered search bar, and streamlined navigation.'
+	},
+	{
+		id: 'spotify',
+		name: 'Spotify',
+		subtitle: 'Iconic Desktop',
+		badge: 'Spotify',
+		description: 'Classic 3-column player with 2-row transport, prominent circular play button, and Your Library panel.'
+	}
+];
+
 function getInitialFloatingMode(): FloatingSidebarMode {
 	if (!browser) return 'both';
 	const savedMode = localStorage.getItem('floating_sidebar_mode') as FloatingSidebarMode | null;
@@ -148,6 +189,7 @@ export const LYRICS_ANIMATION_OPTIONS: LyricsAnimationOption[] = [
 const initialMode = getInitialFloatingMode();
 
 export const prefs = $state({
+	appLayout: (browser ? (localStorage.getItem('app_layout_mode') as AppLayoutMode) : null) || 'default',
 	customizationMode: (browser ? (localStorage.getItem('customization_mode') as 'basic' | 'extreme') : null) || 'basic',
 	lyricsAnimationStyle: (browser ? (localStorage.getItem('lyrics_animation_style') as LyricsAnimationStyle) : null) || 'wave',
 	musicVideos: false,
@@ -168,7 +210,14 @@ export const prefs = $state({
 	audioStreamSource: (browser ? (localStorage.getItem('audio_stream_source') as 'ytm' | 'spotify') : null) || 'ytm',
 	listeningHistoryTarget: (browser ? (localStorage.getItem('listening_history_target') as 'both' | 'ytm' | 'spotify') : null) || 'both',
 	pcAudioRecognition: browser ? localStorage.getItem('pc_audio_recognition') !== 'false' : true,
-	downloadQuality: (browser ? localStorage.getItem('download_quality') : null) || 'LOSSLESS',
+	downloadQuality: (() => {
+		if (!browser) return 'HIGH';
+		const saved = localStorage.getItem('download_quality');
+		if (!saved || ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(saved.toUpperCase())) {
+			return 'HIGH';
+		}
+		return saved;
+	})(),
 	downloadAlwaysAsk: browser ? localStorage.getItem('download_always_ask') !== 'false' : true,
 	onRepeatLimit: browser ? parseInt(localStorage.getItem('on_repeat_limit') || '50', 10) || 50 : 50,
 	visibleIcons: {
@@ -198,6 +247,18 @@ export const prefs = $state({
 		}
 	}
 });
+
+export function setAppLayout(layout: AppLayoutMode) {
+	prefs.appLayout = layout;
+	if (browser) {
+		localStorage.setItem('app_layout_mode', layout);
+		document.documentElement.dataset.appLayout = layout;
+	}
+}
+
+if (browser) {
+	document.documentElement.dataset.appLayout = prefs.appLayout;
+}
 
 export function setFloatingSidebarLeft(enabled: boolean) {
 	prefs.floatingSidebarLeft = enabled;
@@ -274,10 +335,13 @@ export function setPcAudioRecognition(enabled: boolean) {
 }
 
 export function setDownloadQuality(quality: string) {
-	prefs.downloadQuality = quality;
+	const clamped = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(quality.toUpperCase())
+		? 'HIGH'
+		: quality;
+	prefs.downloadQuality = clamped;
 	if (browser) {
-		localStorage.setItem('download_quality', quality);
-		api.setSetting('download_quality', quality).catch(() => {});
+		localStorage.setItem('download_quality', clamped);
+		api.setSetting('download_quality', clamped).catch(() => {});
 	}
 }
 
@@ -1623,8 +1687,11 @@ export function openAddManyToPlaylist(songs: SongItem[]) {
 }
 
 export function openDownloadSongPicker(song: SongItem) {
+	const currentPref = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes((prefs.downloadQuality || '').toUpperCase())
+		? 'HIGH'
+		: (prefs.downloadQuality || 'HIGH');
 	if (!prefs.downloadAlwaysAsk) {
-		void executeDownloadSong(song, prefs.downloadQuality || 'LOSSLESS');
+		void executeDownloadSong(song, currentPref);
 		return;
 	}
 	ui.downloadPicker = {
@@ -1641,8 +1708,11 @@ export function openDownloadPlaylistPicker(options: {
 	playlistName: string;
 	thumbnail?: string;
 }) {
+	const currentPref = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes((prefs.downloadQuality || '').toUpperCase())
+		? 'HIGH'
+		: (prefs.downloadQuality || 'HIGH');
 	if (!prefs.downloadAlwaysAsk) {
-		void executeDownloadPlaylist(options.items, options.playlistName, prefs.downloadQuality || 'LOSSLESS');
+		void executeDownloadPlaylist(options.items, options.playlistName, currentPref);
 		return;
 	}
 	ui.downloadPicker = {
@@ -1661,8 +1731,10 @@ export function closeDownloadPicker() {
 
 export async function executeDownloadSong(song: SongItem, quality: string) {
 	try {
-		const isLossless = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(quality.toUpperCase());
-		toast.info(`Downloading "${song.title}"${isLossless ? ' (Lossless FLAC)' : ''}...`);
+		const effectiveQuality = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(quality.toUpperCase())
+			? 'HIGH'
+			: quality;
+		toast.info(`Downloading "${song.title}"...`);
 		const destPath = await api.downloadSong({
 			videoId: song.video_id,
 			title: song.title,
@@ -1670,7 +1742,7 @@ export async function executeDownloadSong(song: SongItem, quality: string) {
 			album: song.album,
 			duration: song.duration,
 			thumbnail: song.thumbnail,
-			quality
+			quality: effectiveQuality
 		});
 		toast.success(`Downloaded "${song.title}"`);
 		void loadDownloadedSongs(true);
@@ -1683,12 +1755,14 @@ export async function executeDownloadSong(song: SongItem, quality: string) {
 
 export async function executeDownloadPlaylist(items: SongItem[], playlistName: string, quality: string) {
 	try {
-		const isLossless = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(quality.toUpperCase());
-		toast.info(`Downloading ${items.length} tracks from "${playlistName}"${isLossless ? ' (Lossless FLAC)' : ''}...`);
+		const effectiveQuality = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(quality.toUpperCase())
+			? 'HIGH'
+			: quality;
+		toast.info(`Downloading ${items.length} tracks from "${playlistName}"...`);
 		const destPath = await api.downloadPlaylist({
 			items,
 			playlistName,
-			quality
+			quality: effectiveQuality
 		});
 		toast.success(`Downloaded ${items.length} tracks to ${destPath}`);
 		void loadDownloadedSongs(true);

@@ -31,6 +31,10 @@
 	import FolderMenu from './FolderMenu.svelte';
 	import CreatePlaylistDialog from './CreatePlaylistDialog.svelte';
 	import ListeningStatsDialog from './ListeningStatsDialog.svelte';
+	import AppleIcon from '$lib/components/icons/AppleIcon.svelte';
+	import YtmIcon from '$lib/components/icons/YtmIcon.svelte';
+	import SpotifyIcon from '$lib/components/icons/SpotifyIcon.svelte';
+	import NocturneIcon from '$lib/components/icons/NocturneIcon.svelte';
 	import {
 		prefs,
 		auth,
@@ -241,33 +245,142 @@
 		{/if}
 	</div>
 
-	{#if prefs.homeInSidebar}
-		<div class="mt-1 mb-1 shrink-0">
+	<!-- Core Navigation Links (Home, Library, Stats) -->
+	<div class="mt-1 mb-1 shrink-0 space-y-0.5">
+		{#if prefs.appLayout === 'applemusic'}
 			<a
 				href="/"
 				title="Home"
-				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {collapsed
-					? 'justify-center'
-					: 'justify-start'} {isActive('/')
-					? 'bg-primary/10 text-primary'
-					: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/') ? 'bg-primary/10 text-primary font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
 			>
-				{#if isActive('/')}
-					<span
-						transition:scale={{ duration: 200, start: 0.4 }}
-						class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary"
-					></span>
-				{/if}
-				<HugeiconsIcon
-					icon={Home01Icon}
-					class="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
-				/>
-				{#if !collapsed}
-					<span class="truncate">Home</span>
-				{/if}
+				<HugeiconsIcon icon={Home01Icon} class="h-4 w-4 shrink-0" />
+				{#if !collapsed}<span class="truncate">Home</span>{/if}
 			</a>
-		</div>
-	{/if}
+			<a
+				href="/library"
+				title="Library"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/library') ? 'bg-primary/10 text-primary font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+			>
+				<HugeiconsIcon icon={LibraryIcon} class="h-4 w-4 shrink-0" />
+				{#if !collapsed}<span class="truncate">Library</span>{/if}
+			</a>
+			{@render statsRow()}
+
+		{:else if prefs.appLayout === 'ytm'}
+			<a
+				href="/"
+				title="Home"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/') ? 'bg-red-500/10 text-red-500 font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+			>
+				<HugeiconsIcon icon={Home01Icon} class="h-4 w-4 shrink-0" />
+				{#if !collapsed}<span class="truncate">Home</span>{/if}
+			</a>
+			<a
+				href="/library"
+				title="Library"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/library') ? 'bg-red-500/10 text-red-500 font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+			>
+				<HugeiconsIcon icon={LibraryIcon} class="h-4 w-4 shrink-0" />
+				{#if !collapsed}<span class="truncate">Library</span>{/if}
+			</a>
+			{@render statsRow()}
+
+			{#if !collapsed}
+				<button
+					type="button"
+					onclick={() => {
+						playlistDialogPlatform = 'ytm';
+						playlistDialogOpen = true;
+					}}
+					class="w-full mt-2 flex items-center justify-center gap-1.5 rounded-full border border-border/80 bg-muted/40 hover:bg-muted/70 py-1.5 px-3 text-xs font-semibold text-foreground transition-colors cursor-pointer"
+				>
+					<HugeiconsIcon icon={Add01Icon} class="size-3.5" />
+					<span>New playlist</span>
+				</button>
+			{/if}
+
+		{:else if prefs.appLayout === 'spotify'}
+			<a
+				href="/"
+				title="Home"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/') ? 'bg-emerald-500/10 text-emerald-400 font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+			>
+				<HugeiconsIcon icon={Home01Icon} class="h-4 w-4 shrink-0" />
+				{#if !collapsed}<span class="truncate">Home</span>{/if}
+			</a>
+			<a
+				href="/library"
+				title="Library"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/library') ? 'bg-emerald-500/10 text-emerald-400 font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+			>
+				<HugeiconsIcon icon={LibraryIcon} class="h-4 w-4 shrink-0" />
+				{#if !collapsed}<span class="truncate">Library</span>{/if}
+			</a>
+			{@render statsRow()}
+
+			{#if !collapsed}
+				<div class="flex items-center gap-1.5 pt-1.5 overflow-x-auto scrollbar-none">
+					<button
+						type="button"
+						class="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-muted/60 hover:bg-muted text-foreground transition-colors cursor-pointer"
+						onclick={() => goto('/library')}
+					>
+						Playlists
+					</button>
+					<button
+						type="button"
+						class="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-muted/30 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+						onclick={() => goto('/library?tab=artists')}
+					>
+						Artists
+					</button>
+					<button
+						type="button"
+						class="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-muted/30 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+						onclick={() => goto('/library?tab=albums')}
+					>
+						Albums
+					</button>
+				</div>
+			{/if}
+
+		{:else}
+			{#if prefs.homeInSidebar}
+				<a
+					href="/"
+					title="Home"
+					class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {collapsed
+						? 'justify-center'
+						: 'justify-start'} {isActive('/')
+						? 'bg-primary/10 text-primary'
+						: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+				>
+					{#if isActive('/')}
+						<span
+							transition:scale={{ duration: 200, start: 0.4 }}
+							class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary"
+						></span>
+					{/if}
+					<HugeiconsIcon
+						icon={Home01Icon}
+						class="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+					/>
+					{#if !collapsed}
+						<span class="truncate">Home</span>
+					{/if}
+				</a>
+			{/if}
+			<a
+				href="/library"
+				title="Library"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/library') ? 'bg-primary/10 text-primary font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+			>
+				<HugeiconsIcon icon={LibraryIcon} class="h-4.5 w-4.5 shrink-0" />
+				{#if !collapsed}<span class="truncate">Library</span>{/if}
+			</a>
+			{@render statsRow()}
+		{/if}
+	</div>
 
 	<!-- Playlists & Folders. On the collapsed rail, shows playlist icons. On expanded, shows full names & folders. -->
 	{#if auth.account?.signedIn || playlists.length || rootFolders.length || (spotify.status.linked && (spotify.playlists.length || spotify.loadingPlaylists))}
@@ -608,47 +721,26 @@
 		</Dialog.Root>
 	{/if}
 
-	<!-- See full library button at bottom of sidebar -->
-	<div class="mt-auto pt-2 border-t border-border/60 shrink-0 flex items-center gap-1.5">
-		<a
-			href="/library"
-			title="See full library"
-			class="group relative flex flex-1 min-w-0 items-center justify-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {wide(
-				'lg:justify-start'
-			)} {isActive('/library')
-				? 'bg-primary/10 text-primary'
-				: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
-		>
-			{#if isActive('/library')}
-				<span
-					transition:scale={{ duration: 200, start: 0.4 }}
-					class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary"
-				></span>
-			{/if}
-			<HugeiconsIcon
-				icon={LibraryIcon}
-				class="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
-			/>
-			<span class="hidden {wide('lg:inline')} truncate">See full library</span>
-		</a>
-		{#if !collapsed}
-			<button
-				type="button"
-				onclick={() => (statsDialogOpen = true)}
-				title="Listening Stats"
-				aria-label="Listening Stats"
-				class="group/stats relative flex h-8.5 w-8.5 shrink-0 cursor-pointer items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-			>
-				<HugeiconsIcon
-					icon={Analytics01Icon}
-					class="h-4.5 w-4.5 transition-transform duration-200 group-hover/stats:scale-110"
-				/>
-			</button>
-		{/if}
-	</div>
-
 	<ListeningStatsDialog bind:open={statsDialogOpen} />
 </aside>
+
+{#snippet statsRow()}
+	{#if !collapsed}
+		<button
+			type="button"
+			onclick={() => (statsDialogOpen = true)}
+			title="Listening Stats"
+			aria-label="Listening Stats"
+			class="group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground cursor-pointer justify-start"
+		>
+			<HugeiconsIcon
+				icon={Analytics01Icon}
+				class="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110"
+			/>
+			<span class="truncate">Listening Stats</span>
+		</button>
+	{/if}
+{/snippet}
 
 {#snippet playlistRow(pl: BrowseItem, inFolder: boolean = false)}
 	<!-- The ⋯ is a sibling of the link, not a child: a <button> inside an <a> is invalid HTML -->

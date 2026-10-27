@@ -341,6 +341,9 @@ fn chunk_end(pos: u64, end: u64) -> u64 {
 /// Walk `pos` to `end` inclusive in bounded upstream ranges, forwarding each response's bytes into
 /// the channel. Ends when the window is done or the receiver is gone (a seek dropped the
 /// connection), which is also what cancels the in-flight upstream request.
+///
+/// If an upstream read fails or stalls mid-chunk (e.g. googlevideo closes the connection after an idle
+/// pause or network hiccups), this automatically retries and resumes from the exact byte offset reached.
 async fn pump_chunks(
     reg: Arc<Registration>,
     start: u64,
@@ -350,42 +353,99 @@ async fn pump_chunks(
     let mut pos = start;
     while pos <= end {
         let last = chunk_end(pos, end);
-        let resp = match no_stall(upstream_request(&reg, pos, last).send()).await {
-            Ok(Ok(r)) if r.status() == reqwest::StatusCode::PARTIAL_CONTENT => r,
-            Ok(Ok(r)) => {
-                let _ = tx
-                    .send(Err(io::Error::other(format!(
-                        "audio proxy: upstream status {}",
-                        r.status()
-                    ))))
-                    .await;
-                return;
-            }
-            Ok(Err(e)) => {
-                let _ = tx.send(Err(io::Error::other(e))).await;
-                return;
-            }
-            Err(e) => {
-                let _ = tx.send(Err(e)).await;
-                return;
-            }
-        };
-        pos = last + 1;
-        let mut body = resp.bytes_stream();
-        loop {
-            let item = match no_stall(body.next()).await {
-                Ok(Some(item)) => item.map_err(io::Error::other),
-                Ok(None) => break,
-                Err(e) => Err(e),
+        let mut chunk_pos = pos;
+        let mut attempts = 0;
+        const MAX_RETRIES: usize = 4;
+
+        while chunk_pos <= last {
+            let req = upstream_request(&reg, chunk_pos, last);
+            let resp = match no_stall(req.send()).await {
+                Ok(Ok(r)) if r.status() == reqwest::StatusCode::PARTIAL_CONTENT => r,
+                Ok(Ok(r)) => {
+                    let status = r.status();
+                    if attempts < MAX_RETRIES && (status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS) {
+                        attempts += 1;
+                        tokio::time::sleep(Duration::from_millis(250 * attempts as u64)).await;
+                        continue;
+                    }
+                    let _ = tx
+                        .send(Err(io::Error::other(format!(
+                            "audio proxy: upstream status {}",
+                            status
+                        ))))
+                        .await;
+                    return;
+                }
+                Ok(Err(e)) => {
+                    if attempts < MAX_RETRIES {
+                        attempts += 1;
+                        tokio::time::sleep(Duration::from_millis(250 * attempts as u64)).await;
+                        continue;
+                    }
+                    let _ = tx.send(Err(io::Error::other(e))).await;
+                    return;
+                }
+                Err(e) => {
+                    if attempts < MAX_RETRIES {
+                        attempts += 1;
+                        tokio::time::sleep(Duration::from_millis(250 * attempts as u64)).await;
+                        continue;
+                    }
+                    let _ = tx.send(Err(e)).await;
+                    return;
+                }
             };
-            let failed = item.is_err();
-            if tx.send(item).await.is_err() {
-                return; // client gone, stop pulling and drop the connection upstream
+
+            let mut body = resp.bytes_stream();
+            let mut stream_err = None;
+
+            loop {
+                match no_stall(body.next()).await {
+                    Ok(Some(Ok(bytes))) => {
+                        let len = bytes.len() as u64;
+                        if tx.send(Ok(bytes)).await.is_err() {
+                            return; // client gone, stop pulling and drop the connection upstream
+                        }
+                        chunk_pos += len;
+                        attempts = 0; // successfully received data, reset retry budget
+                        continue;
+                    }
+                    Ok(Some(Err(e))) => {
+                        stream_err = Some(io::Error::other(e));
+                        break;
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        stream_err = Some(e);
+                        break;
+                    }
+                }
             }
-            if failed {
-                return;
+
+            if let Some(err) = stream_err {
+                if chunk_pos <= last && attempts < MAX_RETRIES {
+                    attempts += 1;
+                    tracing::debug!(
+                        chunk_pos,
+                        last,
+                        attempt = attempts,
+                        error = %err,
+                        "audio proxy: upstream chunk interrupted, resuming from byte offset"
+                    );
+                    tokio::time::sleep(Duration::from_millis(200 * attempts as u64)).await;
+                    continue;
+                } else if chunk_pos <= last {
+                    let _ = tx.send(Err(err)).await;
+                    return;
+                }
+            }
+
+            if chunk_pos > last {
+                break;
             }
         }
+
+        pos = last + 1;
     }
 }
 

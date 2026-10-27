@@ -19,7 +19,9 @@
 		MusicNote01Icon,
 		InformationCircleIcon,
 		ArrowUp01Icon,
-		ArrowDown01Icon
+		ArrowDown01Icon,
+		ThumbsUpIcon,
+		ThumbsDownIcon
 	} from '@hugeicons/core-free-icons';
 	import SpeakerIcon from './SpeakerIcon.svelte';
 	import { fade } from 'svelte/transition';
@@ -45,6 +47,7 @@
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import WaveformSeekbar from './WaveformSeekbar.svelte';
+	import logo from '$lib/assets/icon.png';
 
 	let {
 		onToggleQueue,
@@ -71,6 +74,18 @@
 	function toggleLike() {
 		if (playback.rating !== 'like') justLiked = true;
 		toggleNowPlayingLike();
+	}
+
+	async function toggleDislike() {
+		const next = playback.rating === 'dislike' ? 'indifferent' : 'dislike';
+		playback.rating = next;
+		if (playback.now?.videoId) {
+			try {
+				await api.setRating(playback.now.videoId, next);
+			} catch (e) {
+				console.error('Failed to set rating:', e);
+			}
+		}
 	}
 
 	const fmt = (secs: number) => {
@@ -139,7 +154,7 @@
 	// what's left of it once it's minimised, so it's the way back in. Deliberately no pointer
 	// cursor, because this is the whole bar, not a button, and every real button keeps its own click.
 	function onBarClick(e: MouseEvent) {
-		if (pressedControl || isControl(e.target)) return;
+		if (pressedControl || isControl(e.target) || !playback.now) return;
 		np.open = !np.open;
 	}
 </script>
@@ -147,14 +162,633 @@
 <!-- The chevron button below is the keyboard equivalent of clicking the bar, so the bar itself
      stays a plain region rather than becoming a focusable control wrapping every other control. -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
+{#snippet audioQualityBadge()}
+	{#if prefs.showAudioQuality && playback.now?.audioQuality}
+		{@const raw = playback.now.audioQuality}
+		{@const rawUpper = raw.toUpperCase()}
+		{@const isAtmos = rawUpper.includes('ATMOS') || rawUpper.includes('DOLBY')}
+		{@const isHires = rawUpper.includes('HI-RES') || rawUpper.includes('HI_RES') || rawUpper.includes('HIRES')}
+		{@const isLossless = rawUpper.includes('LOSSLESS') || rawUpper.includes('FLAC')}
+		{@const isOpus = rawUpper.includes('OPUS')}
+		{@const isAac = rawUpper.includes('AAC') || rawUpper.includes('M4A')}
+		{#if prefs.appLayout === 'applemusic'}
+			{@const short = isAtmos
+				? 'ATMOS'
+				: isHires
+				? 'HIRES'
+				: isLossless
+				? 'LOSSLESS'
+				: isOpus
+				? 'OPUS'
+				: isAac
+				? 'AAC'
+				: rawUpper.split(' ')[0]}
+			<span
+				class="inline-flex items-center px-1 py-0.2 rounded text-[7.5px] font-black tracking-wider uppercase border select-none shrink-0 leading-none {isAtmos ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : isHires ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : isLossless ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : isOpus ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : isAac ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'bg-muted/60 text-muted-foreground border-border/40'}"
+				title="Playback Audio Quality: {raw}"
+			>
+				{short}
+			</span>
+		{:else}
+			<div class="flex items-center gap-1 mt-0.5" in:fade={{ duration: 150 }}>
+				<span
+					class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-semibold tracking-wide border select-none {isAtmos ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : isHires ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : isLossless ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-muted/60 text-muted-foreground/90 border-border/40 font-medium'}"
+					title="Playback Audio Quality"
+				>
+					{#if isAtmos}
+						<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-sky-300">DOLBY ATMOS</span>
+						{#if raw.replace(/DOLBY\s*ATMOS/i, '').trim()}
+							<span class="text-[9px] font-normal opacity-85">{raw.replace(/DOLBY\s*ATMOS/i, '').trim()}</span>
+						{/if}
+					{:else if isHires}
+						<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-amber-300">HI-RES LOSSLESS</span>
+						{#if raw.replace(/HI-RES\s*LOSSLESS/i, '').trim()}
+							<span class="text-[9px] font-normal opacity-90">{raw.replace(/HI-RES\s*LOSSLESS/i, '').trim()}</span>
+						{/if}
+					{:else if isLossless}
+						<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-emerald-300">LOSSLESS</span>
+						{#if raw.replace(/LOSSLESS/i, '').trim()}
+							<span class="text-[9px] font-normal opacity-90">{raw.replace(/LOSSLESS/i, '').trim()}</span>
+						{/if}
+					{:else}
+						<span>{raw}</span>
+					{/if}
+				</span>
+			</div>
+		{/if}
+	{/if}
+{/snippet}
+
 <footer
 	onpointerdown={(e) => (pressedControl = isControl(e.target))}
 	onclick={onBarClick}
-	class="flex items-center gap-2 px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3 transition-all duration-200 {prefs.floatingPlayerBar
-		? 'app-floating-panel mx-2 mb-2 rounded-2xl border border-border/70 bg-card/80 shadow-2xl backdrop-blur-xl'
-		: 'border-t border-border/60 bg-card'}"
+	class="transition-all duration-200 select-none {prefs.appLayout === 'applemusic'
+		? 'relative flex items-center justify-between gap-3 px-5 py-2.5 min-h-[58px] rounded-full border border-border/80 bg-card/85 dark:bg-[#1c1c1e]/90 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-2xl ring-1 ring-white/10 overflow-hidden w-full ' + (playback.now ? 'max-w-2xl' : 'max-w-md')
+		: prefs.appLayout === 'ytm'
+			? 'relative flex items-center justify-between gap-4 px-4 py-2 border-t border-border/60 bg-card/95 backdrop-blur-xl'
+			: prefs.appLayout === 'spotify'
+				? 'relative flex items-center justify-between gap-4 px-4 py-2.5 border-t border-border/60 bg-[#121212]/95 dark:bg-[#121212]/95 bg-card'
+				: prefs.floatingPlayerBar
+					? 'app-floating-panel mx-2 mb-2 rounded-2xl border border-border/70 bg-card/80 shadow-2xl backdrop-blur-xl flex items-center gap-2 px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3'
+					: 'border-t border-border/60 bg-card flex items-center gap-2 px-2 py-2.5 sm:gap-4 sm:px-4 sm:py-3'}"
+
+
+
 >
-	<!-- Now playing. data-ctx: right-clicking the cover or the title opens the ⋮ menu for the track
+	{#if prefs.appLayout === 'applemusic'}
+		{#if playback.now}
+			<!-- Apple Music Seekbar along the top of the pill -->
+			<div
+				class="group/applescrub absolute top-0 left-0 right-0 h-1.5 hover:h-2 cursor-pointer z-30 transition-all"
+				data-no-bar-click
+			>
+				<div class="relative h-full w-full bg-foreground/10">
+					<div
+						class="h-full bg-rose-500 transition-all duration-75 relative"
+						style="width: {playback.duration ? (shownPosition / playback.duration) * 100 : 0}%"
+					>
+						<div class="opacity-0 group-hover/applescrub:opacity-100 absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 size-3 rounded-full bg-rose-400 shadow transition-opacity"></div>
+					</div>
+				</div>
+				<input
+					type="range"
+					class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+					min="0"
+					max={playback.duration || 0}
+					value={shownPosition}
+					oninput={onSeekInput}
+					onchange={onSeekCommit}
+					aria-label="Seek"
+				/>
+			</div>
+		{/if}
+
+		<!-- Apple Music Floating Rounded Pill Dock -->
+		<div class="flex items-center justify-between gap-3 w-full" data-ctx>
+			<!-- Left: Transport Controls -->
+			<div class="flex items-center gap-1 shrink-0">
+				{#if prefs.visibleIcons.playerbar.shuffle}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						onclick={() => api.toggleShuffle()}
+						aria-label="Shuffle"
+						aria-pressed={shuffleOn}
+						class="relative text-muted-foreground hover:text-foreground h-9 w-9"
+					>
+						<HugeiconsIcon icon={ShuffleIcon} class="h-4.5 w-4.5 {shuffleOn ? 'text-rose-500' : ''}" />
+					</Button>
+				{/if}
+				<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous" class="h-9 w-9">
+					<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
+				</Button>
+				<Button
+					variant="default"
+					size="icon"
+					class="rounded-full size-10 bg-foreground text-background hover:scale-105 transition-transform"
+					onclick={() => api.togglePause()}
+					aria-label="Play/pause"
+				>
+					<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-5 w-5" />
+				</Button>
+				<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next" class="h-9 w-9">
+					<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
+				</Button>
+				{#if prefs.visibleIcons.playerbar.repeat}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						onclick={cycleRepeat}
+						aria-label="Repeat: {repeat}"
+						aria-pressed={repeat !== 'off'}
+						class="relative text-muted-foreground hover:text-foreground h-9 w-9"
+					>
+						<HugeiconsIcon
+							icon={RepeatIcon}
+							altIcon={RepeatOne01Icon}
+							showAlt={repeat === 'one'}
+							class="h-4.5 w-4.5 {repeat !== 'off' ? 'text-rose-500' : ''}"
+						/>
+					</Button>
+				{/if}
+			</div>
+
+			<!-- Center: Artwork + Metadata (single compact row with shortened quality badge) or Logo when idle -->
+			{#if playback.now}
+				<div class="flex min-w-0 max-w-sm sm:max-w-md flex-1 items-center gap-3 px-1.5">
+					{#if playback.now?.thumbnail}
+						<img
+							src={thumb(playback.now.thumbnail, 100)}
+							alt=""
+							class="h-10.5 w-10.5 shrink-0 rounded-lg object-cover shadow-md"
+						/>
+					{:else}
+						<div class="flex h-10.5 w-10.5 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground/50">
+							<HugeiconsIcon icon={MusicNote01Icon} class="h-5 w-5" />
+						</div>
+					{/if}
+					<div class="min-w-0 flex-1 flex flex-col justify-center gap-0.5">
+						<div class="flex items-center gap-1.5 min-w-0">
+							<Marquee text={playback.now?.title ?? ''} class="text-[13px] font-semibold truncate" />
+							{@render audioQualityBadge()}
+						</div>
+						<ArtistLine
+							runs={playback.now?.artistRuns}
+							text={playback.now?.artists ?? ''}
+							marquee
+							class="block truncate text-xs text-muted-foreground"
+						/>
+					</div>
+					<div class="flex items-center gap-1 shrink-0 text-[11px] font-mono text-muted-foreground tabular-nums">
+						<span>{fmt(shownPosition)}</span>
+						<span class="opacity-40">/</span>
+						<span>{fmt(playback.duration)}</span>
+					</div>
+				</div>
+			{:else}
+				<div class="flex flex-1 items-center justify-center py-1">
+					<img src={logo} alt="" class="h-6 w-6 opacity-60 pointer-events-none" />
+				</div>
+			{/if}
+
+			<!-- Right: Lyrics, Queue, Volume -->
+			<div class="flex items-center gap-1 shrink-0">
+				{#if prefs.visibleIcons.playerbar.lyrics}
+					<Button
+						variant={lyricsOpen ? 'secondary' : 'ghost'}
+						size="icon-sm"
+						onclick={onToggleLyrics}
+						aria-label="Toggle lyrics"
+						class="h-9 w-9"
+					>
+						<HugeiconsIcon icon={Mic01Icon} class="h-4.5 w-4.5" />
+					</Button>
+				{/if}
+				{#if prefs.visibleIcons.playerbar.queue}
+					<Button
+						variant={queueOpen ? 'secondary' : 'ghost'}
+						size="icon-sm"
+						onclick={onToggleQueue}
+						aria-label="Toggle queue"
+						class="h-9 w-9"
+					>
+						<HugeiconsIcon icon={Queue01Icon} class="h-4.5 w-4.5" />
+					</Button>
+				{/if}
+				{#if prefs.visibleIcons.playerbar.volume}
+					<div class="hidden items-center gap-1 sm:flex pl-1">
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							class="text-muted-foreground h-9 w-9"
+							onclick={toggleMute}
+							aria-label={playback.volume === 0 ? 'Unmute' : 'Mute'}
+						>
+							<HugeiconsIcon
+								icon={VolumeHighIcon}
+								altIcon={VolumeMute02Icon}
+								showAlt={playback.volume === 0}
+								class="h-4.5 w-4.5"
+							/>
+						</Button>
+						<input
+							type="range"
+							class="range w-20 sm:w-24 h-1.5"
+							style="--pct:{playback.volume}%"
+							min="0"
+							max="100"
+							value={playback.volume}
+							oninput={onVolume}
+							onchange={onVolumeCommit}
+							onwheel={wheelVolume}
+							aria-label="Volume"
+						/>
+					</div>
+				{/if}
+			</div>
+		</div>
+
+	{:else if prefs.appLayout === 'ytm'}
+		<!-- YouTube Music Bottom Bar with Top Edge Interactive Scrubber -->
+		<div
+			class="group/ytmscrub absolute top-0 left-0 right-0 h-1 hover:h-2 -translate-y-1/2 cursor-pointer z-40 transition-all"
+			data-no-bar-click
+		>
+			<div class="relative h-full w-full bg-muted/40">
+				<div
+					class="h-full bg-red-600 transition-all duration-75 relative"
+					style="width: {playback.duration ? (shownPosition / playback.duration) * 100 : 0}%"
+				>
+					<div class="opacity-0 group-hover/ytmscrub:opacity-100 absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 size-3 rounded-full bg-red-600 shadow-md transition-opacity"></div>
+				</div>
+			</div>
+			<input
+				type="range"
+				class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+				min="0"
+				max={playback.duration || 0}
+				value={shownPosition}
+				oninput={onSeekInput}
+				onchange={onSeekCommit}
+				aria-label="Seek"
+			/>
+		</div>
+
+		<!-- Left: Controls & Time -->
+		<div class="flex items-center gap-2 shrink-0">
+			<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous">
+				<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				class="rounded-full size-9 bg-foreground/10 hover:bg-foreground/20 text-foreground"
+				onclick={() => api.togglePause()}
+				aria-label="Play/pause"
+			>
+				<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-5 w-5" />
+			</Button>
+			<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next">
+				<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
+			</Button>
+			<span class="text-xs text-muted-foreground font-mono tabular-nums pl-1">
+				{fmt(shownPosition)} / {fmt(playback.duration)}
+			</span>
+		</div>
+
+		<!-- Center: Artwork + Title + Thumbs/Menu -->
+		<div class="flex min-w-0 max-w-md flex-1 items-center gap-3 px-2" data-ctx>
+			{#if playback.now?.thumbnail}
+				<img
+					src={thumb(playback.now.thumbnail, 90)}
+					alt=""
+					class="h-10 w-10 shrink-0 rounded object-cover shadow-sm"
+				/>
+			{:else}
+				<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted text-muted-foreground/50">
+					<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" />
+				</div>
+			{/if}
+			<div class="min-w-0 flex-1">
+				<Marquee text={playback.now?.title ?? 'Nothing playing'} class="text-xs font-semibold" />
+				<ArtistLine
+					runs={playback.now?.artistRuns}
+					text={playback.now?.artists ?? ''}
+					marquee
+					class="block truncate text-[11px] text-muted-foreground"
+				/>
+				{@render audioQualityBadge()}
+			</div>
+			<div class="flex items-center gap-0.5 shrink-0">
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					class="text-muted-foreground hover:text-foreground"
+					onclick={toggleDislike}
+					aria-label="Dislike"
+				>
+					<HugeiconsIcon
+						icon={ThumbsDownIcon}
+						class="h-4 w-4 {playback.rating === 'dislike' ? 'fill-current text-primary' : ''}"
+					/>
+				</Button>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					class="text-muted-foreground hover:text-foreground"
+					onclick={toggleLike}
+					aria-label="Like"
+				>
+					<HugeiconsIcon
+						icon={ThumbsUpIcon}
+						class="h-4 w-4 {playback.rating === 'like' ? 'fill-current text-primary' : ''}"
+					/>
+				</Button>
+				{#if currentSong}
+					<TrackMenu
+						song={currentSong}
+						linksOnly
+						onAdd={() => openAddToPlaylist(currentSong!)}
+						triggerClass="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+					/>
+				{/if}
+			</div>
+		</div>
+
+		<!-- Right: Volume + Repeat + Shuffle + Expand -->
+		<div class="flex items-center gap-1.5 shrink-0">
+			<div class="hidden items-center gap-1 md:flex pr-2">
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					class="text-muted-foreground"
+					onclick={toggleMute}
+					aria-label={playback.volume === 0 ? 'Unmute' : 'Mute'}
+				>
+					<HugeiconsIcon
+						icon={VolumeHighIcon}
+						altIcon={VolumeMute02Icon}
+						showAlt={playback.volume === 0}
+						class="h-4 w-4"
+					/>
+				</Button>
+				<input
+					type="range"
+					class="range w-24"
+					style="--pct:{playback.volume}%"
+					min="0"
+					max="100"
+					value={playback.volume}
+					oninput={onVolume}
+					onchange={onVolumeCommit}
+					onwheel={wheelVolume}
+					aria-label="Volume"
+				/>
+			</div>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={cycleRepeat}
+				aria-label="Repeat: {repeat}"
+				class="relative text-muted-foreground hover:text-foreground"
+			>
+				<HugeiconsIcon
+					icon={RepeatIcon}
+					altIcon={RepeatOne01Icon}
+					showAlt={repeat === 'one'}
+					class="h-4 w-4 {repeat !== 'off' ? 'text-primary' : ''}"
+				/>
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={() => api.toggleShuffle()}
+				aria-label="Shuffle"
+				class="relative text-muted-foreground hover:text-foreground"
+			>
+				<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4 {shuffleOn ? 'text-primary' : ''}" />
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={() => {
+					np.open = !np.open;
+					if (np.open) np.sidebarOpen = false;
+				}}
+				aria-label={np.open ? 'Minimise player' : 'Open player'}
+			>
+				<HugeiconsIcon icon={ArrowUp01Icon} altIcon={ArrowDown01Icon} showAlt={np.open} class="h-5 w-5" />
+			</Button>
+		</div>
+
+	{:else if prefs.appLayout === 'spotify'}
+		<!-- Spotify 3-Column Bottom Bar -->
+		<!-- Left: Artwork + Title + Heart -->
+		<div class="flex min-w-[200px] max-w-[30%] items-center gap-3" data-ctx>
+			{#if playback.now?.thumbnail}
+				<img
+					src={thumb(playback.now.thumbnail, 120)}
+					alt=""
+					class="h-14 w-14 shrink-0 rounded-[4px] object-cover shadow-sm"
+				/>
+			{:else}
+				<div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-[4px] bg-muted text-muted-foreground/50">
+					<HugeiconsIcon icon={MusicNote01Icon} class="h-5 w-5" />
+				</div>
+			{/if}
+			<div class="min-w-0">
+				<Marquee text={playback.now?.title ?? 'Nothing playing'} class="text-xs font-semibold hover:underline cursor-pointer" />
+				<ArtistLine
+					runs={playback.now?.artistRuns}
+					text={playback.now?.artists ?? ''}
+					marquee
+					class="block truncate text-[11px] text-muted-foreground hover:underline cursor-pointer"
+				/>
+				{@render audioQualityBadge()}
+			</div>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={toggleLike}
+				aria-label="Like"
+				class="shrink-0 text-muted-foreground hover:text-emerald-500"
+			>
+				<HugeiconsIcon
+					icon={FavouriteIcon}
+					class="h-4 w-4 {playback.rating === 'like' ? 'fill-emerald-500 text-emerald-500' : ''}"
+				/>
+			</Button>
+		</div>
+
+		<!-- Center: 2-Row Transport & Scrubber -->
+		<div class="flex flex-1 max-w-[720px] flex-col items-center gap-1.5">
+			<div class="flex items-center gap-3">
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					onclick={() => api.toggleShuffle()}
+					aria-label="Shuffle"
+					class="relative text-muted-foreground hover:text-foreground"
+				>
+					<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4 {shuffleOn ? 'text-emerald-500' : ''}" />
+					{#if shuffleOn}
+						<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-emerald-500"></span>
+					{/if}
+				</Button>
+				<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous">
+					<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
+				</Button>
+				<button
+					type="button"
+					class="size-8 rounded-full bg-white text-black hover:scale-105 active:scale-95 transition-transform flex items-center justify-center shadow-md cursor-pointer"
+					onclick={() => api.togglePause()}
+					aria-label="Play/pause"
+				>
+					<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-5 w-5 fill-current" />
+				</button>
+				<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next">
+					<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
+				</Button>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					onclick={cycleRepeat}
+					aria-label="Repeat: {repeat}"
+					class="relative text-muted-foreground hover:text-foreground"
+				>
+					<HugeiconsIcon
+						icon={RepeatIcon}
+						altIcon={RepeatOne01Icon}
+						showAlt={repeat === 'one'}
+						class="h-4 w-4 {repeat !== 'off' ? 'text-emerald-500' : ''}"
+					/>
+					{#if repeat !== 'off'}
+						<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-emerald-500"></span>
+					{/if}
+				</Button>
+			</div>
+
+			<div class="flex w-full max-w-lg items-center gap-2 text-[11px] font-mono text-muted-foreground">
+				<span class="tabular-nums">{fmt(shownPosition)}</span>
+				{#if prefs.waveformSeekbar}
+					<div class="flex-1" data-no-bar-click onclick={(e) => e.stopPropagation()} onpointerdown={(e) => e.stopPropagation()}>
+						<WaveformSeekbar
+							position={shownPosition}
+							duration={playback.duration}
+							height={16}
+							barCount={50}
+							onSeek={(v) => (seekDrag = v)}
+							onCommit={(v) => {
+								playback.position = v;
+								seekDrag = null;
+								api.seek(v);
+							}}
+						/>
+					</div>
+				{:else}
+					<input
+						type="range"
+						class="range flex-1 h-1 hover:h-1.5 transition-all"
+						style="--pct:{playback.duration ? (shownPosition / playback.duration) * 100 : 0}%"
+						min="0"
+						max={playback.duration || 0}
+						value={shownPosition}
+						oninput={onSeekInput}
+						onchange={onSeekCommit}
+						aria-label="Seek"
+					/>
+				{/if}
+				<span class="tabular-nums">{fmt(playback.duration)}</span>
+			</div>
+		</div>
+
+		<!-- Right: Icons & Volume -->
+		<div class="flex min-w-[200px] max-w-[30%] items-center justify-end gap-1 text-muted-foreground">
+			<Button
+				variant={np.sidebarOpen ? 'secondary' : 'ghost'}
+				size="icon-sm"
+				onclick={() => {
+					if (onToggleNowPlayingSidebar) onToggleNowPlayingSidebar();
+					else {
+						np.sidebarOpen = !np.sidebarOpen;
+						if (np.sidebarOpen) np.open = false;
+					}
+				}}
+				aria-label="Now playing view"
+				title="Now playing view"
+			>
+				<HugeiconsIcon icon={InformationCircleIcon} class="h-4 w-4" />
+			</Button>
+			<Button
+				variant={lyricsOpen ? 'secondary' : 'ghost'}
+				size="icon-sm"
+				onclick={onToggleLyrics}
+				aria-label="Toggle lyrics"
+			>
+				<HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" />
+			</Button>
+			<Button
+				variant={queueOpen ? 'secondary' : 'ghost'}
+				size="icon-sm"
+				onclick={onToggleQueue}
+				aria-label="Toggle queue"
+			>
+				<HugeiconsIcon icon={Queue01Icon} class="h-4 w-4" />
+			</Button>
+			{#if onToggleDevices}
+				<Button
+					variant={devicesOpen ? 'secondary' : 'ghost'}
+					size="icon-sm"
+					onclick={onToggleDevices}
+					aria-label="Connect to a device"
+					title="Connect to a device"
+				>
+					<SpeakerIcon class="h-4 w-4" />
+				</Button>
+			{/if}
+			<div class="hidden items-center gap-1 md:flex pl-1">
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					class="text-muted-foreground"
+					onclick={toggleMute}
+					aria-label={playback.volume === 0 ? 'Unmute' : 'Mute'}
+				>
+					<HugeiconsIcon
+						icon={VolumeHighIcon}
+						altIcon={VolumeMute02Icon}
+						showAlt={playback.volume === 0}
+						class="h-4 w-4"
+					/>
+				</Button>
+				<input
+					type="range"
+					class="range w-20"
+					style="--pct:{playback.volume}%"
+					min="0"
+					max="100"
+					value={playback.volume}
+					oninput={onVolume}
+					onchange={onVolumeCommit}
+					onwheel={wheelVolume}
+					aria-label="Volume"
+				/>
+			</div>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				onclick={() => {
+					np.open = !np.open;
+					if (np.open) np.sidebarOpen = false;
+				}}
+				aria-label={np.open ? 'Minimise player' : 'Open player'}
+			>
+				<HugeiconsIcon icon={ArrowUp01Icon} altIcon={ArrowDown01Icon} showAlt={np.open} class="h-4 w-4" />
+			</Button>
+		</div>
+
+	{:else}
+		<!-- Now playing. data-ctx: right-clicking the cover or the title opens the ⋮ menu for the track
 	     that's playing (not the buttons beside them — those keep their own meaning). -->
 	<div class="flex min-w-0 flex-1 items-center gap-3" data-ctx>
 		{#key playback.now?.videoId}
@@ -518,4 +1152,5 @@
 			{/if}
 		</div>
 	</div>
+	{/if}
 </footer>

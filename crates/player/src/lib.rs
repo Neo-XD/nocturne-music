@@ -52,6 +52,7 @@ pub enum PlayerEvent {
 
 /// mpv end-file reasons (from `mpv_end_file_reason`).
 const EOF: i32 = 0;
+const END_ERROR: i32 = 4;
 
 /// User-facing message for a failed track — raw mpv codes ("Raw(-13)") mean nothing to users.
 fn friendly_error(e: &libmpv2::Error) -> String {
@@ -115,13 +116,14 @@ impl Deck {
         mpv.set_property("gapless-audio", "yes")?;
         mpv.set_property("prefetch-playlist", "yes")?;
         mpv.set_property("cache", "yes")?;
-        mpv.set_property("cache-on-disk", "yes")?;
+        mpv.set_property("cache-on-disk", "no")?;
         let deck_cache = format!("{cache_dir}/deck_{id}");
         let _ = std::fs::create_dir_all(&deck_cache);
         mpv.set_property("demuxer-cache-dir", deck_cache.as_str())?;
-        mpv.set_property("demuxer-max-bytes", 16 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-max-back-bytes", 8 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-readahead-secs", 60.0_f64)?;
+        mpv.set_property("demuxer-max-bytes", 64 * 1024 * 1024_i64)?;
+        mpv.set_property("demuxer-max-back-bytes", 32 * 1024 * 1024_i64)?;
+        mpv.set_property("demuxer-readahead-secs", 360.0_f64)?;
+        let _ = mpv.set_property("network-timeout", 30_i64);
         let mpv = Arc::new(mpv);
 
         Ok(Deck { id, mpv, af: std::sync::Mutex::new(AudioFilters::default()) })
@@ -735,6 +737,10 @@ fn deck_event_loop(
                     }
                     Event::EndFile(reason) => match reason as i32 {
                         EOF => Some(InternalDeckEvent::TrackEnded { deck_id }),
+                        END_ERROR => Some(InternalDeckEvent::TrackFailed {
+                            deck_id,
+                            error: "Playback error mid-stream".into(),
+                        }),
                         _ => None,
                     },
                     _ => None,

@@ -63,7 +63,15 @@
 	// Right sidebar: only 1 right sidebar can be active at a time.
 	// Closing a sidebar cleanly closes it without resurrecting any previous sidebar.
 	type RightSidebarId = 'np' | 'queue' | 'lyrics' | 'devices';
+	const allowsNowPlayingSidebar = $derived(prefs.appLayout === 'default' || prefs.appLayout === 'spotify');
 	let activeRightSidebar = $state<RightSidebarId | null>(np.sidebarOpen ? 'np' : null);
+
+	$effect(() => {
+		if (!allowsNowPlayingSidebar && activeRightSidebar === 'np') {
+			activeRightSidebar = null;
+			np.sidebarOpen = false;
+		}
+	});
 
 	function toggleRightSidebar(id: RightSidebarId) {
 		if (tabbed && (id === 'queue' || id === 'lyrics')) {
@@ -71,6 +79,10 @@
 			return;
 		}
 		if (id === 'np') {
+			if (!allowsNowPlayingSidebar) {
+				np.open = !np.open;
+				return;
+			}
 			np.open = false;
 		}
 		if (activeRightSidebar === id) {
@@ -230,6 +242,7 @@
 	<!-- The window itself is transparent; this root paints the background and, when not maximized,
 	     rounds the corners (the compositor can't round an undecorated window for us). -->
 	<div
+		data-app-layout={prefs.appLayout}
 		class="relative flex h-screen flex-col overflow-hidden bg-background text-foreground {win.maximized ||
 		win.fullscreen
 			? ''
@@ -267,20 +280,41 @@
 		<!-- relative: the queue and lyrics panels are absolute overlays inside it (see QueuePanel). -->
 		<div class="relative z-10 flex min-h-0 flex-1">
 			<Sidebar />
+			<div class="relative flex flex-1 min-w-0 flex-col overflow-hidden">
+
 			<!-- dragScroll: dragging a card up to home's Shortcuts grid has to be possible from anywhere in
 			     the feed, so aiming at the top edge scrolls this container while the drag is in flight. -->
-			<main class="min-w-0 flex-1 overflow-y-auto" {@attach dragScroll}>
+			<main class="min-w-0 flex-1 overflow-y-auto {prefs.appLayout === 'applemusic' ? 'pb-24' : ''}" {@attach dragScroll}>
 				<!-- Remount the current page on sign-in/out or manual refresh so it refetches. -->
 				{#key `${auth.epoch}:${ui.epoch}`}
 					{@render children()}
 				{/key}
-			</main>
+				</main>
+				{#if prefs.appLayout === 'applemusic'}
+					<div
+						class="pointer-events-none absolute bottom-4 left-0 right-0 z-40 flex justify-center px-4"
+						transition:fly={{ y: 24, duration: 250, easing: cubicOut }}
+					>
+						<div class="pointer-events-auto flex justify-center w-full">
+							<PlayerBar
+								onToggleQueue={() => toggleRightSidebar('queue')}
+								queueOpen={tabbed ? np.tab === 'queue' : queueOpen}
+								onToggleLyrics={() => toggleRightSidebar('lyrics')}
+								lyricsOpen={tabbed ? np.tab === 'lyrics' : lyricsOpen}
+								onToggleDevices={() => toggleRightSidebar('devices')}
+								devicesOpen={devicesOpen}
+								onToggleNowPlayingSidebar={() => toggleRightSidebar('np')}
+							/>
+						</div>
+					</div>
+				{/if}
+			</div>
 			<!-- Always mounted, unlike the player view below it: it owns the one <video> element, which
 			     has to keep playing while the view is closed. It renders nothing but a zero-sized
 			     parking container until the view borrows the picture. -->
 			<VideoSurface />
 			{#if np.open && playback.now}<NowPlaying {queueOpen} {lyricsOpen} />{/if}
-			{#if activeRightSidebar && (activeRightSidebar !== 'np' || (playback.now && !np.open))}
+			{#if activeRightSidebar && (activeRightSidebar !== 'np' || (allowsNowPlayingSidebar && playback.now && !np.open))}
 				<div
 					class="relative z-20 flex h-full shrink-0 flex-col overflow-hidden {isResizingSidebar
 						? 'transition-none'
@@ -315,7 +349,7 @@
 				</div>
 			{/if}
 		</div>
-		{#if playback.now}
+		{#if playback.now && prefs.appLayout !== 'applemusic'}
 			<div class="relative z-30" transition:fly={{ y: 64, duration: 200, easing: cubicOut }}>
 				<PlayerBar
 					onToggleQueue={() => toggleRightSidebar('queue')}

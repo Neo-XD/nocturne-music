@@ -35,6 +35,7 @@
         isSaved,
         playback,
         openAddManyToPlaylist,
+        openDownloadPlaylistPicker,
         playFrom,
         startRadio,
         toast,
@@ -226,17 +227,11 @@
     async function downloadAlbumTracks() {
         if (!album?.items.length) return;
         menuOpen = false;
-        try {
-            const count = album.items.length;
-            toast.info(`Downloading ${count} tracks from "${album.title || 'Album'}"...`);
-            const dest = await api.downloadPlaylist({
-                items: album.items,
-                playlistName: album.title || 'Album'
-            });
-            toast.success(`Downloaded ${count} tracks to ${dest}`);
-        } catch (e) {
-            toast.error(`Album download failed: ${e}`);
-        }
+        openDownloadPlaylistPicker({
+            items: album.items,
+            playlistName: album.title || 'Album',
+            thumbnail: album.thumbnail
+        });
     }
 
     // A shelf's "See all" opens the same grid route the artist page uses.

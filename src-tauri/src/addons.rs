@@ -421,9 +421,33 @@ fn clean_title_for_search(raw: &str) -> String {
 }
 
 fn normalize_string(raw: &str) -> String {
-    let re = Regex::new(r"[\(\[].*?[\)\]]|[^a-zA-Z0-9\s]").unwrap();
-    let stripped = re.replace_all(raw, " ");
+    // Strip only promotional/video wrappers like (Official Video), [Official Audio], (Lyric Video), etc.
+    // Preserve musical version descriptions like (Travis Scott Remix), (Acoustic), (Live), (Feat. X)
+    let re_boilerplate = Regex::new(r"(?i)\s*[\(\[](official\s*(music\s*)?video|video|audio|official\s*audio|lyric\s*video|lyrics|visualizer|remaster(ed)?(\s*\d{4})?|hd|4k|explicit|clean)[\)\]]").unwrap();
+    let cleaned = re_boilerplate.replace_all(raw, " ");
+    let re_punct = Regex::new(r"[^a-zA-Z0-9\s]").unwrap();
+    let stripped = re_punct.replace_all(&cleaned, " ");
     stripped.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+fn has_version_keyword(s: &str, keyword: &str) -> bool {
+    let lower = s.to_lowercase();
+    match keyword {
+        "remix" => lower.contains("remix") || lower.contains("rmx") || lower.contains("re-mix") || lower.contains("club mix") || lower.contains("extended mix"),
+        "live" => {
+            let re = Regex::new(r"(?i)\b(live(\s+(at|from|in|version|audio|session))?)\b").unwrap();
+            re.is_match(&lower)
+        }
+        "acoustic" => lower.contains("acoustic") || lower.contains("unplugged") || lower.contains("stripped"),
+        "slowed" => lower.contains("slowed") || lower.contains("slow down"),
+        "sped_up" => lower.contains("sped up") || lower.contains("speed up") || lower.contains("nightcore"),
+        "instrumental" => lower.contains("instrumental") || lower.contains("karaoke"),
+        "cover" => {
+            let re = Regex::new(r"(?i)\b(cover|tribute)\b").unwrap();
+            re.is_match(&lower)
+        }
+        _ => false,
+    }
 }
 
 fn is_atmos_text(text: &str) -> bool {
@@ -590,9 +614,26 @@ fn parse_search_response(val: serde_json::Value) -> Vec<AddonTrack> {
     Vec::new()
 }
 
-fn parse_stream_response(val: serde_json::Value) -> Option<(String, AddonStream, HashMap<String, String>)> {
+fn parse_stream_response(val: serde_json::Value, target_title: Option<&str>) -> Option<(String, AddonStream, HashMap<String, String>)> {
+    let target_has_remix = target_title.map_or(false, |t| has_version_keyword(t, "remix"));
+
+    let is_candidate_acceptable = |c: &AddonStreamCandidate| -> bool {
+        if c.url.as_ref().map_or(true, |u| u.trim().is_empty()) {
+            return false;
+        }
+        if !target_has_remix {
+            let label = format!("{} {}", c.title.as_deref().unwrap_or_default(), c.quality.as_deref().unwrap_or_default());
+            if has_version_keyword(&label, "remix") || has_version_keyword(&label, "slowed") || has_version_keyword(&label, "sped_up") {
+                return false;
+            }
+        }
+        true
+    };
+
     if let Ok(candidates) = serde_json::from_value::<Vec<AddonStreamCandidate>>(val.clone()) {
-        if let Some(first) = candidates.into_iter().find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty())) {
+        let chosen = candidates.iter().find(|c| is_candidate_acceptable(c))
+            .or_else(|| candidates.iter().find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty())));
+        if let Some(first) = chosen {
             let url = first.url.clone().unwrap();
             let mut headers = HashMap::new();
             if let Some(bh) = &first.behavior_hints {
@@ -632,7 +673,9 @@ fn parse_stream_response(val: serde_json::Value) -> Option<(String, AddonStream,
     }
 
     if let Some(candidates) = &stream_obj.streams {
-        if let Some(first) = candidates.iter().find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty())) {
+        let chosen = candidates.iter().find(|c| is_candidate_acceptable(c))
+            .or_else(|| candidates.iter().find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty())));
+        if let Some(first) = chosen {
             let url = first.url.clone().unwrap();
             if let Some(bh) = &first.behavior_hints {
                 if let Some(req_headers) = bh.get("proxyHeaders").and_then(|p| p.get("request")).and_then(|r| r.as_object()) {
@@ -732,31 +775,69 @@ pub async fn resolve_from_addons(
                             if track.id.is_empty() && track.resolved_stream_url().is_none() {
                                 continue;
                             }
+                            let cand_raw_title = track.resolved_title();
                             let mut score = 0i32;
+
+                            // Version tag mismatch checks: NEVER replace an original track with an unwanted remix/live/acoustic/etc.
+                            let version_tags = ["remix", "live", "acoustic", "slowed", "sped_up", "instrumental", "cover"];
+                            let mut unwanted_version = false;
+                            for tag in &version_tags {
+                                let target_has = has_version_keyword(query_title, tag);
+                                let cand_has = has_version_keyword(cand_raw_title, tag);
+                                if !target_has && cand_has {
+                                    unwanted_version = true;
+                                    break;
+                                } else if target_has && cand_has {
+                                    score += 35; // Bonus for matching desired version (e.g. user specifically requested a remix)
+                                } else if target_has && !cand_has {
+                                    score -= 60; // Requested a specific version but candidate is plain
+                                }
+                            }
+                            if unwanted_version {
+                                tracing::debug!(
+                                    target = %query_title,
+                                    candidate = %cand_raw_title,
+                                    "skipping candidate due to unwanted version/remix mismatch"
+                                );
+                                continue;
+                            }
+
+                            // If target does not mention featured artists, but candidate introduces a featured artist
+                            let target_lower = format!("{} {}", query_title, artist).to_lowercase();
+                            let cand_title_lower = cand_raw_title.to_lowercase();
+                            if !target_lower.contains("feat") && !target_lower.contains("ft.") && !target_lower.contains("with") {
+                                if cand_title_lower.contains("feat.") || cand_title_lower.contains("feat ") || cand_title_lower.contains("ft.") || cand_title_lower.contains("with ") {
+                                    score -= 80;
+                                }
+                            }
 
                             // Duration comparison (±6 seconds tolerance)
                             if let (Some(target_dur), Some(cand_dur)) = (duration_secs, track.duration) {
                                 let diff = (target_dur - cand_dur).abs();
-                                if diff <= 6.0 {
-                                    score += (60.0 - diff * 7.0).round() as i32;
+                                if diff <= 3.0 {
+                                    score += 50;
+                                } else if diff <= 6.0 {
+                                    score += 30;
                                 } else if diff > 15.0 {
                                     score -= 80;
                                 }
                             }
 
                             // Title matching
-                            let norm_cand_title = normalize_string(track.resolved_title());
+                            let norm_cand_title = normalize_string(cand_raw_title);
                             if !norm_target_title.is_empty() && !norm_cand_title.is_empty() {
                                 if norm_target_title == norm_cand_title {
-                                    score += 60;
-                                } else if norm_cand_title.contains(&norm_target_title) || norm_target_title.contains(&norm_cand_title) {
+                                    score += 70;
+                                } else if norm_cand_title.starts_with(&norm_target_title) || norm_target_title.starts_with(&norm_cand_title) {
                                     score += 40;
+                                } else if norm_cand_title.contains(&norm_target_title) || norm_target_title.contains(&norm_cand_title) {
+                                    score += 25;
                                 } else {
                                     let target_words: Vec<&str> = norm_target_title.split_whitespace().collect();
                                     let cand_words: Vec<&str> = norm_cand_title.split_whitespace().collect();
                                     let shared = target_words.iter().filter(|w| cand_words.contains(w)).count();
                                     if !target_words.is_empty() {
-                                        score += ((shared as f64 / target_words.len() as f64) * 30.0) as i32;
+                                        score += ((shared as f64 / target_words.len() as f64) * 20.0) as i32;
                                     }
                                 }
                             }
@@ -765,9 +846,11 @@ pub async fn resolve_from_addons(
                             let norm_cand_artist = normalize_string(&track.resolved_artist());
                             if !norm_target_artist.is_empty() && !norm_cand_artist.is_empty() {
                                 if norm_target_artist == norm_cand_artist {
-                                    score += 40;
+                                    score += 50;
+                                } else if norm_cand_artist.starts_with(&norm_target_artist) || norm_target_artist.starts_with(&norm_cand_artist) {
+                                    score += 30;
                                 } else if norm_cand_artist.contains(&norm_target_artist) || norm_target_artist.contains(&norm_cand_artist) {
-                                    score += 25;
+                                    score += 15;
                                 }
                             }
 
@@ -778,13 +861,13 @@ pub async fn resolve_from_addons(
                                 || track.format.as_deref().map_or(false, is_atmos_text);
 
                             if quality_pref == "DOLBY_ATMOS" && is_cand_atmos {
-                                score += 50;
+                                score += 25;
                             }
 
                             let is_cand_hires = track.audio_quality.as_deref().map_or(false, is_hires_text)
                                 || track.format.as_deref().map_or(false, is_hires_text);
                             if quality_pref == "HI_RES_LOSSLESS" && is_cand_hires {
-                                score += 35;
+                                score += 20;
                             }
 
                             if score > 20 {
@@ -836,7 +919,7 @@ pub async fn resolve_from_addons(
                     if let Ok(res) = stream_res {
                         if res.status().is_success() {
                             if let Ok(val) = res.json::<serde_json::Value>().await {
-                                if let Some(resolved) = parse_stream_response(val) {
+                                if let Some(resolved) = parse_stream_response(val, Some(query_title)) {
                                     stream_result = Some(resolved);
                                     break;
                                 }
@@ -942,7 +1025,7 @@ pub async fn resolve_from_addons(
             if let Ok(r) = res {
                 if r.status().is_success() {
                     if let Ok(val) = r.json::<serde_json::Value>().await {
-                        if let Some((stream_url, addon_stream, custom_headers)) = parse_stream_response(val) {
+                        if let Some((stream_url, addon_stream, custom_headers)) = parse_stream_response(val, Some(query_title)) {
                             let combined_quality_text = format!(
                                 "{} {} {} {}",
                                 addon_stream.quality.as_deref().unwrap_or_default(),

@@ -167,6 +167,7 @@
 	<div data-tauri-drag-region class="flex h-full items-center shrink-0">
 		<!-- pointer-events-none: the logo is decoration; clicks on it should drag the window. -->
 		<img src={logo} alt="" class="pointer-events-none ml-2 mr-1 h-4 w-4" />
+
 		<!-- Bigger and heavier than the icons on the right: these are navigation, and at their
 		     weight the arrow read as decoration and got missed. -->
 		{#if prefs.visibleIcons.titlebar.navigation}
@@ -196,7 +197,7 @@
 			>
 				<HugeiconsIcon icon={Refresh03Icon} strokeWidth={2.2} class="h-4 w-4" />
 			</button>
-		{#if !prefs.homeInSidebar}
+		{#if !prefs.homeInSidebar && prefs.appLayout !== 'applemusic'}
 			<a
 				href="/"
 				class="flex h-full w-8 items-center justify-center text-foreground/80 transition-colors hover:bg-accent/10 hover:text-foreground {page.url.pathname === '/' ? 'text-primary' : ''}"
@@ -216,7 +217,7 @@
 	<!-- Centered sticky search bar (or drag region on thin windows) -->
 	{#if prefs.visibleIcons.titlebar.search && !isThin}
 		<div data-tauri-drag-region class="flex flex-1 justify-center items-center mx-2 min-w-0">
-			<div data-tauri-drag-region class="flex justify-center items-center w-full max-w-[340px]">
+			<div data-tauri-drag-region class="flex justify-center items-center w-full {prefs.appLayout === 'ytm' ? 'max-w-[480px]' : prefs.appLayout === 'spotify' ? 'max-w-[440px]' : 'max-w-[340px]'}">
 				<TopSearchBar />
 			</div>
 		</div>

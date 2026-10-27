@@ -982,6 +982,44 @@ impl AppState {
         v
     }
 
+    pub(crate) fn pick_best_search_match<'a>(
+        items: &'a [innertube::SongItem],
+        target_query: &str,
+    ) -> Option<&'a innertube::SongItem> {
+    if items.is_empty() {
+        return None;
+    }
+    let target_lower = target_query.to_lowercase();
+    let target_has_remix = target_lower.contains("remix") || target_lower.contains("rmx");
+    let target_has_live = target_lower.contains("live");
+    let target_has_acoustic = target_lower.contains("acoustic");
+
+    let clean_cand = items.iter().find(|item| {
+        let cand_lower = item.title.to_lowercase();
+        let cand_has_remix = cand_lower.contains("remix") || cand_lower.contains("rmx");
+        let cand_has_live = cand_lower.contains("live");
+        let cand_has_acoustic = cand_lower.contains("acoustic");
+        let cand_has_slowed = cand_lower.contains("slowed");
+        let cand_has_sped = cand_lower.contains("sped up") || cand_lower.contains("speed up");
+
+        if !target_has_remix && cand_has_remix {
+            return false;
+        }
+        if !target_has_live && cand_has_live {
+            return false;
+        }
+        if !target_has_acoustic && cand_has_acoustic {
+            return false;
+        }
+        if cand_has_slowed || cand_has_sped {
+            return false;
+        }
+        true
+    });
+
+    clean_cand.or_else(|| items.first())
+}
+
     /// `is_upload` comes off the queue row, never off `/player`: the response that has to be
     /// handled here (LOGIN_REQUIRED) carries no `videoDetails` to read it from. Issue #71.
     pub(crate) async fn resolve(
@@ -1020,8 +1058,8 @@ impl AppState {
             if !self.is_offline_mode() {
                 if let Some(client) = self.clients.get(innertube::METADATA_CLIENT) {
                     if let Ok(results) = self.it.search_songs(client, &query).await {
-                        if let Some(first) = results.items.first() {
-                            actual_id = first.video_id.clone();
+                        if let Some(best) = Self::pick_best_search_match(&results.items, &query) {
+                            actual_id = best.video_id.clone();
                         }
                     }
                 }
@@ -1249,8 +1287,8 @@ impl AppState {
 
             if let Some(client) = self.clients.get(innertube::METADATA_CLIENT) {
                 if let Ok(results) = self.it.search_songs(client, &query).await {
-                    if let Some(first) = results.items.first() {
-                        actual_id = first.video_id.clone();
+                    if let Some(best) = Self::pick_best_search_match(&results.items, &query) {
+                        actual_id = best.video_id.clone();
                     }
                 }
             }
@@ -1264,11 +1302,18 @@ impl AppState {
                 .map_err(|_| ResolveError::LocalMissing(path.to_owned()));
         }
 
-        let q_str = quality_override
+        let mut q_str = quality_override
             .map(|s| s.to_string())
             .or_else(|| self.db.get_setting("download_quality"))
-            .or_else(|| self.db.get_setting("quality"))
             .unwrap_or_else(|| "HIGH".to_string());
+
+        // Lossless downloads are disabled; clamp max download quality to HIGH.
+        if matches!(
+            q_str.as_str(),
+            "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH"
+        ) {
+            q_str = "HIGH".to_string();
+        }
 
         let quality_is_above_high = matches!(
             q_str.as_str(),
@@ -2122,11 +2167,13 @@ impl AppState {
         let me = self.clone();
         tauri::async_runtime::spawn(async move { me.extend_queue_radio(gen).await });
 
-        // Background cache audio for quick listening to already listened songs
+        // Background cache audio for quick listening to already listened songs.
+        // Wait 4 seconds so mpv has established its connection and buffered without bandwidth contention.
         let me_cache = self.clone();
         let cache_item = item.clone();
         let cache_data = data.clone();
         tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
             me_cache.cache_audio_if_needed(cache_item, cache_data).await;
         });
 

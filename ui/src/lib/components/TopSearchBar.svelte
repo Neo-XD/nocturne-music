@@ -430,7 +430,7 @@
 				bind:this={inputEl}
 				bind:value={query}
 				type="text"
-				placeholder="Search songs, artists, albums..."
+				placeholder={prefs.appLayout === 'ytm' ? 'Search songs, albums, artists, podcasts' : prefs.appLayout === 'spotify' ? 'What do you want to play?' : prefs.appLayout === 'applemusic' ? 'Search' : 'Search songs, artists, albums...'}
 				class="h-7 w-full rounded-full border border-border/60 bg-muted/40 pl-8 pr-20 text-xs text-foreground placeholder:text-muted-foreground/70 transition-all duration-200 ease-out focus:border-primary/60 focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/25 focus:shadow-[0_0_12px_rgba(var(--primary-rgb,59,130,246),0.15)] hover:bg-muted/60"
 				autocomplete="off"
 				spellcheck="false"
@@ -524,7 +524,7 @@
 						bind:this={spotlightInputEl}
 						bind:value={query}
 						type="text"
-						placeholder="Search songs, artists, albums..."
+						placeholder={prefs.appLayout === 'ytm' ? 'Search songs, albums, artists, podcasts' : prefs.appLayout === 'spotify' ? 'What do you want to play?' : prefs.appLayout === 'applemusic' ? 'Search' : 'Search songs, artists, albums...'}
 						class="h-9 flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
 						autocomplete="off"
 						spellcheck="false"

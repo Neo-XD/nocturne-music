@@ -1572,4 +1572,21 @@ html.theme-transition .bg-muted {
 	transform: rotate(6deg) translateY(-0.375rem);
 }
 
+/* Layout Presets */
+[data-app-layout="spotify"] {
+	--radius: 0.5rem;
+}
+[data-app-layout="applemusic"] {
+	--radius: 0.75rem;
+}
+[data-app-layout="ytm"] {
+	--radius: 0.375rem;
+}
+/*
+}
+}
+	transform: rotate(6deg) translateY(-0.375rem);
+}
 
+
+*/
