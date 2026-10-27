@@ -113,7 +113,6 @@ impl Deck {
         mpv.set_property("vid", "no")?; // audio only
         mpv.set_property("ytdl", "no")?;
         mpv.set_property("gapless-audio", "yes")?;
-        mpv.set_property("demuxer", "lavf")?;
         mpv.set_property("prefetch-playlist", "yes")?;
         mpv.set_property("cache", "yes")?;
         mpv.set_property("cache-on-disk", "yes")?;

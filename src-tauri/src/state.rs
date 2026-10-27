@@ -1033,15 +1033,21 @@ impl AppState {
             crate::download::get_downloaded_file(&self.app, &self.db, video_id)
                 .or_else(|| crate::download::get_downloaded_file(&self.app, &self.db, &actual_id))
         {
-            if std::path::Path::new(&downloaded.path).is_file() {
-                let mut data = crate::local::playback_data(video_id, &downloaded.path)
-                    .map_err(|_| ResolveError::LocalMissing(downloaded.path.clone()))?;
-                data.title = Some(downloaded.title);
-                data.artists = Some(downloaded.artist);
-                data.duration = downloaded.duration;
-                data.thumbnail = downloaded.thumbnail;
-                data.stream_client = "download".to_string();
-                return Ok(data);
+            let p = std::path::Path::new(&downloaded.path);
+            if p.is_file() {
+                if crate::cache::is_valid_audio_file(p) {
+                    let mut data = crate::local::playback_data(video_id, &downloaded.path)
+                        .map_err(|_| ResolveError::LocalMissing(downloaded.path.clone()))?;
+                    data.title = Some(downloaded.title);
+                    data.artists = Some(downloaded.artist);
+                    data.duration = downloaded.duration;
+                    data.thumbnail = downloaded.thumbnail;
+                    data.stream_client = "download".to_string();
+                    return Ok(data);
+                } else {
+                    let _ = std::fs::remove_file(p);
+                    self.db.delete_downloaded_track(video_id);
+                }
             }
         }
 
@@ -1050,9 +1056,13 @@ impl AppState {
             .or_else(|| crate::cache::get_cached_audio(&self.app, &actual_id))
         {
             let path_str = cached_path.to_string_lossy().to_string();
-            if let Ok(mut data) = crate::local::playback_data(video_id, &path_str) {
-                data.stream_client = "cache".to_string();
-                return Ok(data);
+            if crate::cache::is_valid_audio_file(&cached_path) {
+                if let Ok(mut data) = crate::local::playback_data(video_id, &path_str) {
+                    data.stream_client = "cache".to_string();
+                    return Ok(data);
+                }
+            } else {
+                let _ = std::fs::remove_file(&cached_path);
             }
         }
 
@@ -2304,17 +2314,20 @@ impl AppState {
             }
         }
 
-        let tmp_path = dir.join(format!("{clean_id}.tmp"));
-        let target_path = dir.join(format!("{clean_id}.{ext}"));
-
         let Ok(bytes) = res.bytes().await else {
-            let _ = std::fs::remove_file(&tmp_path);
             return;
         };
 
-        if bytes.len() < 1024 {
+        if !crate::cache::is_valid_audio_bytes(&bytes) || bytes.len() < 4096 {
             return;
         }
+
+        if let Some(detected) = crate::cache::detect_audio_extension_from_bytes(&bytes) {
+            ext = detected;
+        }
+
+        let tmp_path = dir.join(format!("{clean_id}.tmp"));
+        let target_path = dir.join(format!("{clean_id}.{ext}"));
 
         if std::fs::write(&tmp_path, &bytes).is_ok() {
             let _ = std::fs::rename(&tmp_path, &target_path);

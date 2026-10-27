@@ -393,6 +393,7 @@ pub async fn download_song_track(
 
     let mut downloaded_bytes: u64 = 0;
     let mut last_emit = std::time::Instant::now();
+    let mut first_bytes: Vec<u8> = Vec::new();
 
     while let Some(chunk_res) = stream.next().await {
         let chunk = match chunk_res {
@@ -417,6 +418,10 @@ pub async fn download_song_track(
                 return Err(err_msg);
             }
         };
+
+        if first_bytes.len() < 512 {
+            first_bytes.extend_from_slice(&chunk);
+        }
 
         if let Err(e) = file.write_all(&chunk) {
             drop(file);
@@ -469,7 +474,38 @@ pub async fn download_song_track(
     // Explicitly drop file handle to release Windows sharing locks before Lofty tag inspection
     drop(file);
 
-    let saved_path_str = target_path.to_string_lossy().to_string();
+    if downloaded_bytes < 4096 || !crate::cache::is_valid_audio_bytes(&first_bytes) {
+        let _ = std::fs::remove_file(&target_path);
+        let err_msg = "Downloaded file is not a valid audio stream (server returned HTML or corrupt data)".to_string();
+        let _ = app.emit(
+            "download-progress",
+            DownloadProgress {
+                video_id: video_id.clone(),
+                title: effective_title.clone(),
+                artist: effective_artist.clone(),
+                downloaded_bytes,
+                total_bytes,
+                percent: 0.0,
+                status: "error".into(),
+                path: None,
+            },
+        );
+        return Err(err_msg);
+    }
+
+    // Align file extension with detected actual audio container bytes
+    let mut final_target_path = target_path;
+    if let Some(real_ext) = crate::cache::detect_audio_extension_from_bytes(&first_bytes) {
+        if real_ext != ext {
+            let corrected_name = format!("{}_{}.{}", clean_vid, sanitize_filename(&effective_title), real_ext);
+            let corrected_path = dir.join(&corrected_name);
+            if std::fs::rename(&final_target_path, &corrected_path).is_ok() {
+                final_target_path = corrected_path;
+            }
+        }
+    }
+
+    let saved_path_str = final_target_path.to_string_lossy().to_string();
 
     // Download and save thumbnail locally for offline use
     let covers_dir = crate::local::covers_dir(&app);
@@ -499,7 +535,7 @@ pub async fn download_song_track(
 
     // Attempt to write tags using lofty
     let duration_secs = parse_duration_secs(effective_duration.as_deref());
-    if let Ok(mut tagged_file) = lofty::probe::Probe::open(&target_path).and_then(|p| p.read()) {
+    if let Ok(mut tagged_file) = lofty::probe::Probe::open(&final_target_path).and_then(|p| p.read()) {
         use lofty::tag::Accessor;
         let tag = match tagged_file.primary_tag_mut() {
             Some(t) => t,
@@ -518,7 +554,7 @@ pub async fn download_song_track(
         if let Some(ref alb) = effective_album {
             tag.set_album(alb.clone());
         }
-        let _ = tag.save_to_path(&target_path, lofty::config::WriteOptions::default());
+        let _ = tag.save_to_path(&final_target_path, lofty::config::WriteOptions::default());
     }
 
     // Save full metadata in SQLite
@@ -540,7 +576,7 @@ pub async fn download_song_track(
 
     // Register asset scope
     let scope = app.asset_protocol_scope();
-    let _ = scope.allow_file(&target_path);
+    let _ = scope.allow_file(&final_target_path);
     let _ = scope.allow_directory(&dir, true);
     if let Some(ref thumb_path) = local_thumbnail {
         if Path::new(thumb_path).is_file() {
@@ -710,8 +746,14 @@ pub fn get_downloaded_file(
     video_id: &str,
 ) -> Option<crate::db::DownloadedTrack> {
     if let Some(track) = db.get_downloaded_track(video_id) {
-        if Path::new(&track.path).is_file() {
-            return Some(track);
+        let p = Path::new(&track.path);
+        if p.is_file() {
+            if crate::cache::is_valid_audio_file(p) {
+                return Some(track);
+            } else {
+                let _ = std::fs::remove_file(p);
+                db.delete_downloaded_track(video_id);
+            }
         }
     }
 
@@ -729,10 +771,18 @@ pub fn get_downloaded_file(
         for entry in entries.flatten() {
             let p = entry.path();
             if p.is_file() {
+                if !crate::cache::is_valid_audio_file(&p) {
+                    let _ = std::fs::remove_file(&p);
+                    continue;
+                }
                 if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
                     if name.starts_with(&prefix)
+                        || name == format!("{}.flac", clean_id)
                         || name == format!("{}.m4a", clean_id)
                         || name == format!("{}.webm", clean_id)
+                        || name == format!("{}.opus", clean_id)
+                        || name == format!("{}.mp3", clean_id)
+                        || name == format!("{}.wav", clean_id)
                     {
                         let path_str = p.to_string_lossy().to_string();
                         let file_size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
@@ -782,7 +832,7 @@ pub fn scan_downloaded_songs(
 
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !path.is_file() {
+                if !path.is_file() || !crate::cache::is_valid_audio_file(&path) {
                     continue;
                 }
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();

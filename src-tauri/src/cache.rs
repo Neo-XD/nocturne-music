@@ -33,6 +33,71 @@ fn dir_size(path: &Path) -> u64 {
     total
 }
 
+pub fn is_valid_audio_bytes(bytes: &[u8]) -> bool {
+    if bytes.len() < 512 {
+        return false;
+    }
+    let len = bytes.len().min(128);
+    let prefix_lower = bytes[..len].to_ascii_lowercase();
+    if prefix_lower.starts_with(b"<!doctype")
+        || prefix_lower.starts_with(b"<html")
+        || prefix_lower.starts_with(b"<?xml")
+        || prefix_lower.starts_with(b"{\"error")
+        || prefix_lower.starts_with(b"{\"code")
+        || prefix_lower.starts_with(b"{\"status")
+        || prefix_lower.starts_with(b"error:")
+    {
+        return false;
+    }
+    true
+}
+
+pub fn detect_audio_extension_from_bytes(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.len() < 12 {
+        return None;
+    }
+    if bytes.starts_with(b"fLaC") {
+        return Some("flac");
+    }
+    if bytes.starts_with(b"OggS") {
+        return Some("opus");
+    }
+    if bytes.starts_with(b"ID3") || (bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0) {
+        return Some("mp3");
+    }
+    if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        return Some("webm");
+    }
+    if bytes.len() >= 8 && &bytes[4..8] == b"ftyp" {
+        return Some("m4a");
+    }
+    if bytes.starts_with(b"RIFF") && bytes.len() >= 12 && &bytes[8..12] == b"WAVE" {
+        return Some("wav");
+    }
+    if bytes[0] == 0xFF && (bytes[1] == 0xF1 || bytes[1] == 0xF9) {
+        return Some("aac");
+    }
+    None
+}
+
+pub fn is_valid_audio_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let Ok(meta) = fs::metadata(path) else { return false };
+    if meta.len() < 4096 {
+        return false;
+    }
+    let Ok(mut f) = fs::File::open(path) else { return false };
+    use std::io::Read;
+    let mut header = [0u8; 64];
+    let Ok(n) = f.read(&mut header) else { return false };
+    if n < 12 {
+        return false;
+    }
+    is_valid_audio_bytes(&header[..n])
+}
+
 pub fn audio_cache_dir(app: &AppHandle) -> std::path::PathBuf {
     let data_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir());
     let audio_dir = data_dir.join("audio-cache");
@@ -50,10 +115,10 @@ pub fn get_cached_audio(app: &AppHandle, video_id: &str) -> Option<std::path::Pa
     for ext in &["flac", "m4a", "webm", "opus", "mp3", "wav", "aac"] {
         let p = dir.join(format!("{clean_id}.{ext}"));
         if p.is_file() {
-            if let Ok(meta) = fs::metadata(&p) {
-                if meta.len() > 1024 {
-                    return Some(p);
-                }
+            if is_valid_audio_file(&p) {
+                return Some(p);
+            } else {
+                let _ = fs::remove_file(&p);
             }
         }
     }

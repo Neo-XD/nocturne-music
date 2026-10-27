@@ -676,7 +676,8 @@ pub fn detect_audio_quality(path: &str) -> Option<String> {
 /// directly, so playback works with no network at all. Errs when the file is gone (the user
 /// deleted it since the scan): the queue skips it like any other unplayable track.
 pub fn playback_data(video_id: &str, path: &str) -> Result<crate::orchestrator::PlaybackData, ()> {
-    if !Path::new(path).is_file() {
+    let p = Path::new(path);
+    if !p.is_file() || !crate::cache::is_valid_audio_file(p) {
         return Err(());
     }
     Ok(crate::orchestrator::PlaybackData {
