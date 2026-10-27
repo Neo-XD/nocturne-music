@@ -85,6 +85,7 @@ pub async fn download_song_track(
     duration: Option<String>,
     thumbnail: Option<String>,
     custom_dir: Option<String>,
+    quality: Option<String>,
 ) -> Result<String, String> {
     let effective_artist =
         if artist.trim().is_empty() { "Unknown Artist".to_string() } else { artist.clone() };
@@ -110,13 +111,33 @@ pub async fn download_song_track(
         }
     }
 
+    let duration_secs = parse_duration_secs(duration.as_deref());
+    let dur_f64 = if duration_secs > 0 { Some(duration_secs as f64) } else { None };
+
     // 1. Resolve audio stream (with fallback retry on cache miss/stale URL)
-    let playback_data = match state.resolve_for_download(&video_id, false).await {
+    let playback_data = match state
+        .resolve_for_download(
+            &video_id,
+            false,
+            Some(&title),
+            Some(&artist),
+            dur_f64,
+            quality.as_deref(),
+        )
+        .await
+    {
         Ok(data) => data,
         Err(e) => {
             tracing::warn!(error = ?e, "Initial resolve failed for download, attempting fresh resolve");
             state
-                .resolve_for_download(&video_id, true)
+                .resolve_for_download(
+                    &video_id,
+                    true,
+                    Some(&title),
+                    Some(&artist),
+                    dur_f64,
+                    quality.as_deref(),
+                )
                 .await
                 .map_err(|err| format!("Failed to resolve audio stream: {err}"))?
         }
@@ -196,18 +217,33 @@ pub async fn download_song_track(
         return Ok(saved_path_str);
     }
 
-    // Determine extension based on itag
-    let ext = match playback_data.itag {
-        140 => "m4a",
-        251 => "webm",
-        171 => "webm",
-        249 => "webm",
-        250 => "webm",
-        _ => "m4a",
+    // Determine extension based on itag or addon stream quality/URL
+    let mut ext = if playback_data.stream_client.starts_with("addon:") || playback_data.itag == 0 {
+        let q_lower = playback_data.audio_quality.as_deref().unwrap_or_default().to_lowercase();
+        let u_lower = playback_data.stream_url.to_lowercase();
+        if u_lower.contains(".flac") || q_lower.contains("flac") || q_lower.contains("lossless") {
+            "flac"
+        } else if u_lower.contains(".mp3") || q_lower.contains("mp3") {
+            "mp3"
+        } else if u_lower.contains(".opus") || q_lower.contains("opus") {
+            "opus"
+        } else if u_lower.contains(".wav") || q_lower.contains("wav") {
+            "wav"
+        } else if u_lower.contains(".m4a") || u_lower.contains(".mp4") || q_lower.contains("aac") {
+            "m4a"
+        } else {
+            "flac"
+        }
+    } else {
+        match playback_data.itag {
+            140 => "m4a",
+            251 => "webm",
+            171 => "webm",
+            249 => "webm",
+            250 => "webm",
+            _ => "m4a",
+        }
     };
-
-    let filename = format!("{}_{}.{}", clean_vid, sanitize_filename(&effective_title), ext);
-    let target_path = dir.join(&filename);
 
     // Initial progress event
     let _ = app.emit(
@@ -231,9 +267,13 @@ pub async fn download_song_track(
     // Try downloading; if server returns 403/410 or connection fails, evict cache and retry with fresh resolve
     for attempt in 0..2 {
         let raw_url = &current_playback.stream_url;
-        // Leverage local audioproxy for un-throttled bounded chunk streaming
-        let download_url = crate::audioproxy::register(raw_url, &current_playback.headers)
-            .unwrap_or_else(|| raw_url.clone());
+        // Leverage local audioproxy for un-throttled bounded chunk streaming only for googlevideo streams
+        let download_url = if raw_url.contains("googlevideo.com") {
+            crate::audioproxy::register(raw_url, &current_playback.headers)
+                .unwrap_or_else(|| raw_url.clone())
+        } else {
+            raw_url.clone()
+        };
 
         let mut req = client.get(&download_url);
         if download_url == *raw_url {
@@ -251,7 +291,17 @@ pub async fn download_song_track(
                 tracing::warn!(status = %res.status(), attempt, "Download request failed");
                 if attempt == 0 {
                     state.db.evict_stream(&video_id);
-                    if let Ok(fresh) = state.resolve_for_download(&video_id, true).await {
+                    if let Ok(fresh) = state
+                        .resolve_for_download(
+                            &video_id,
+                            true,
+                            Some(&title),
+                            Some(&artist),
+                            dur_f64,
+                            quality.as_deref(),
+                        )
+                        .await
+                    {
                         current_playback = fresh;
                         continue;
                     }
@@ -276,7 +326,17 @@ pub async fn download_song_track(
                 tracing::warn!(error = %e, attempt, "Download connection error");
                 if attempt == 0 {
                     state.db.evict_stream(&video_id);
-                    if let Ok(fresh) = state.resolve_for_download(&video_id, true).await {
+                    if let Ok(fresh) = state
+                        .resolve_for_download(
+                            &video_id,
+                            true,
+                            Some(&title),
+                            Some(&artist),
+                            dur_f64,
+                            quality.as_deref(),
+                        )
+                        .await
+                    {
                         current_playback = fresh;
                         continue;
                     }
@@ -304,6 +364,24 @@ pub async fn download_song_track(
         Some(r) => r,
         None => return Err("Failed to obtain download response".into()),
     };
+
+    if let Some(ct) = res.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) {
+        let ct_lower = ct.to_lowercase();
+        if ct_lower.contains("audio/flac") || ct_lower.contains("audio/x-flac") {
+            ext = "flac";
+        } else if ct_lower.contains("audio/mpeg") || ct_lower.contains("audio/mp3") {
+            ext = "mp3";
+        } else if ct_lower.contains("audio/ogg") || ct_lower.contains("audio/opus") {
+            ext = "opus";
+        } else if ct_lower.contains("audio/wav") || ct_lower.contains("audio/x-wav") {
+            ext = "wav";
+        } else if ct_lower.contains("audio/mp4") || ct_lower.contains("audio/aac") || ct_lower.contains("audio/m4a") {
+            ext = "m4a";
+        }
+    }
+
+    let filename = format!("{}_{}.{}", clean_vid, sanitize_filename(&effective_title), ext);
+    let target_path = dir.join(&filename);
 
     let total_bytes = res.content_length();
     let mut stream = res.bytes_stream();
@@ -505,6 +583,7 @@ pub async fn download_full_playlist(
     items: Vec<innertube::SongItem>,
     playlist_name: String,
     custom_dir: Option<String>,
+    quality: Option<String>,
 ) -> Result<String, String> {
     if items.is_empty() {
         return Err("Playlist has no tracks to download".into());
@@ -564,6 +643,7 @@ pub async fn download_full_playlist(
             item.duration.clone(),
             item.thumbnail.clone(),
             Some(playlist_dir_str.clone()),
+            quality.clone(),
         )
         .await
         {

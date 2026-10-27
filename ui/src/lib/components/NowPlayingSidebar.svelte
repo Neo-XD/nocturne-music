@@ -34,6 +34,7 @@
 		wheelVolume
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
+	import { getSongMotionArtwork } from '$lib/canvas';
 	import ExplicitIcon from './ExplicitIcon.svelte';
 	import ArtistLine from './ArtistLine.svelte';
 	import Marquee from './Marquee.svelte';
@@ -196,6 +197,42 @@
 		}
 	});
 
+	// --- Animated Album Art (Canvas / Motion Video) Logic ---
+	let canvasUrl = $state<string | null>(null);
+	let canvasReady = $state(false);
+	let canvasVideoEl = $state<HTMLVideoElement | null>(null);
+
+	$effect(() => {
+		const now = playback.now;
+		canvasUrl = null;
+		canvasReady = false;
+		if (!now || !prefs.animatedAlbumArt || showVideo) return;
+
+		let cancelled = false;
+		const curSong = currentSong;
+		getSongMotionArtwork(now.title, now.artists, curSong?.album ?? undefined)
+			.then((u) => {
+				if (!cancelled && u) {
+					canvasUrl = u;
+				}
+			})
+			.catch(() => {});
+
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	$effect(() => {
+		if (canvasVideoEl) {
+			if (playback.paused) {
+				canvasVideoEl.pause();
+			} else if (canvasUrl && !showVideo) {
+				canvasVideoEl.play().catch(() => {});
+			}
+		}
+	});
+
 	const sourceTitle = $derived(playback.queue.sourceName || 'Now Playing');
 </script>
 
@@ -288,8 +325,22 @@
 								alt={playback.now?.title ?? 'Album Art'}
 								class="h-full w-full object-cover transition duration-500 group-hover/art:scale-105"
 							/>
+							{#if prefs.animatedAlbumArt && canvasUrl}
+								<!-- svelte-ignore a11y_media_has_caption -->
+								<video
+									bind:this={canvasVideoEl}
+									src={canvasUrl}
+									autoplay
+									loop
+									muted
+									playsinline
+									onloadeddata={() => (canvasReady = true)}
+									oncanplay={() => (canvasReady = true)}
+									class="pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ease-out {canvasReady ? 'opacity-100' : 'opacity-0'} group-hover/art:scale-105"
+								></video>
+							{/if}
 							<div
-								class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25 opacity-0 backdrop-blur-2xs transition-opacity duration-200 group-hover/art:opacity-100"
+								class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/25 opacity-0 backdrop-blur-2xs transition-opacity duration-200 group-hover/art:opacity-100"
 							>
 								<span
 									class="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white shadow-md backdrop-blur-md"
@@ -299,11 +350,27 @@
 							</div>
 						</button>
 					{:else}
-						<img
-							src={thumb(playback.now.thumbnail, 1080)}
-							alt={playback.now?.title ?? 'Album Art'}
-							class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-						/>
+						<div class="relative h-full w-full overflow-hidden">
+							<img
+								src={thumb(playback.now.thumbnail, 1080)}
+								alt={playback.now?.title ?? 'Album Art'}
+								class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+							/>
+							{#if prefs.animatedAlbumArt && canvasUrl}
+								<!-- svelte-ignore a11y_media_has_caption -->
+								<video
+									bind:this={canvasVideoEl}
+									src={canvasUrl}
+									autoplay
+									loop
+									muted
+									playsinline
+									onloadeddata={() => (canvasReady = true)}
+									oncanplay={() => (canvasReady = true)}
+									class="pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ease-out {canvasReady ? 'opacity-100' : 'opacity-0'} group-hover:scale-105"
+								></video>
+							{/if}
+						</div>
 					{/if}
 				{:else}
 					<div class="flex h-full w-full items-center justify-center text-muted-foreground">

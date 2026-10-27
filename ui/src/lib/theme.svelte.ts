@@ -66,7 +66,7 @@ export const FONTS: { label: string; value: string }[] = [
 export type Custom = {
 	accent: string | null; // hex
 	hue: number | null; // 0–360, tints the default palette's neutrals
-	radius: number | null; // rem
+	radius: number | null; // px (e.g. 0 to 28px)
 	fontSans: string | null; // a CSS font-family value
 	fontHeading: string | null;
 	fontLyrics: string | null;
@@ -196,7 +196,7 @@ export function setAppearance(patch: Partial<typeof appearance>): void {
  */
 export const effective = $state({
 	hue: 0,
-	radius: 0.33,
+	radius: 5,
 	accent: '#ffffff',
 	fontSans: '',
 	fontHeading: '',
@@ -236,7 +236,14 @@ export function readBack(): void {
 	const cs = getComputedStyle(document.documentElement);
 	const g = (n: string) => cs.getPropertyValue(n).trim();
 	effective.hue = parseFloat(g('--hue')) || 0;
-	effective.radius = parseFloat(g('--radius')) || 0;
+	const rawRadius = g('--radius');
+	if (rawRadius.endsWith('rem')) {
+		const parsed = parseFloat(rawRadius);
+		effective.radius = Number.isNaN(parsed) ? 5 : Math.round(parsed * 16);
+	} else {
+		const parsed = parseFloat(rawRadius);
+		effective.radius = Number.isNaN(parsed) ? 5 : Math.round(parsed);
+	}
 	effective.accent = toHex(g('--primary'));
 	effective.fontSans = g('--font-sans');
 	effective.fontHeading = g('--font-heading');
@@ -331,7 +338,11 @@ function apply(): void {
 	// Last, so the artwork wins while it's on and the user's own theme is back the moment it isn't.
 	if (art) setArtVars(art);
 	if (custom.hue !== null) root.style.setProperty('--hue', String(custom.hue));
-	if (custom.radius !== null) root.style.setProperty('--radius', `${custom.radius}rem`);
+	if (custom.radius !== null) {
+		const r = Array.isArray(custom.radius) ? (custom.radius as unknown as number[])[0] : custom.radius;
+		const n = typeof r === 'number' ? r : parseFloat(String(r));
+		root.style.setProperty('--radius', `${Number.isNaN(n) ? 5 : n}px`);
+	}
 	if (custom.fontSans) root.style.setProperty('--font-sans', custom.fontSans);
 	if (custom.fontHeading) root.style.setProperty('--font-heading', custom.fontHeading);
 	if (custom.fontLyrics) root.style.setProperty('--font-lyrics', custom.fontLyrics);
@@ -370,6 +381,11 @@ export function toggleGlassyTheme(enabled: boolean): void {
 const persist = () => localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
 
 export function setCustom(patch: Partial<Custom>): void {
+	if (patch.radius !== undefined && patch.radius !== null) {
+		const r = Array.isArray(patch.radius) ? (patch.radius as unknown as number[])[0] : patch.radius;
+		const n = typeof r === 'number' ? r : parseFloat(String(r));
+		patch.radius = Number.isNaN(n) ? null : n;
+	}
 	Object.assign(custom, patch);
 	apply();
 	persist();
@@ -580,7 +596,13 @@ export function initTheme(): void {
 		for (const k of ['accent', 'fontSans', 'fontHeading', 'fontLyrics'] as const) {
 			if (typeof saved?.[k] === 'string') custom[k] = saved[k];
 		}
-		for (const k of ['hue', 'radius'] as const) {
+		if (typeof saved?.radius === 'number') {
+			custom.radius = saved.radius <= 2.0 ? Math.round(saved.radius * 16) : Math.round(saved.radius);
+		} else if (Array.isArray(saved?.radius) && typeof saved.radius[0] === 'number') {
+			const r = saved.radius[0];
+			custom.radius = r <= 2.0 ? Math.round(r * 16) : Math.round(r);
+		}
+		for (const k of ['hue'] as const) {
 			if (typeof saved?.[k] === 'number') custom[k] = saved[k];
 		}
 		if (Array.isArray(saved?.fontFiles)) {

@@ -71,7 +71,7 @@
 	--chart-3: oklch(0.65 0 0);
 	--chart-4: oklch(0.80 0 0);
 	--chart-5: oklch(0.90 0 0);
-	--radius: 0.33rem;
+	--radius: 5px;
 	--sidebar: oklch(0.97 0 0);
 	--sidebar-foreground: oklch(0.145 0 var(--hue));
 	--sidebar-primary: oklch(0.145 0 0);
@@ -170,7 +170,7 @@
 	--sidebar-accent-foreground: oklch(0.12 0 0);
 	--sidebar-border: oklch(0 0 0 / 10%);
 	--sidebar-ring: oklch(0.145 0 0);
-	--radius: 0.33rem;
+	--radius: 5px;
 	--font-sans: 'IBM Plex Sans Variable', sans-serif;
 	--font-heading: 'IBM Plex Sans Variable', sans-serif;
 }
@@ -803,7 +803,7 @@
 	--border: oklch(0.8387 0.0117 71.8792);
 	--input: oklch(0.8387 0.0117 71.8792);
 	--ring: oklch(0.4794 0.1207 266.0080);
-	--radius: 0.33rem;
+	--radius: 5px;
 	--font-sans: 'IBM Plex Sans Variable', sans-serif;
 	--font-heading: 'IBM Plex Sans Variable', sans-serif;
 }
@@ -827,7 +827,7 @@
 	--border: oklch(0.3056 0.0369 273.2268);
 	--input: oklch(0.2591 0.0249 274.4439);
 	--ring: oklch(0.7190 0.1322 264.2022);
-	--radius: 0.33rem;
+	--radius: 5px;
 	--font-sans: 'IBM Plex Sans Variable', sans-serif;
 	--font-heading: 'IBM Plex Sans Variable', sans-serif;
 }
@@ -855,7 +855,7 @@
 	--ring: oklch(0.556 0 0);
 	--sidebar: oklch(0 0 0);
 	--sidebar-foreground: oklch(0.985 0 0);
-	--radius: 0.33rem;
+	--radius: 5px;
 	--font-sans: 'Outfit Variable', sans-serif;
 	--font-heading: 'Outfit Variable', sans-serif;
 }

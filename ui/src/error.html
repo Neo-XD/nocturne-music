@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>%sveltekit.status%</title>
+		<style>
+			body {
+				font-family: monospace;
+				background: #111827;
+				color: #f87171;
+				padding: 2rem;
+				white-space: pre-wrap;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				min-height: 100vh;
+				margin: 0;
+			}
+			.card {
+				background: #1f2937;
+				border: 1px solid #374151;
+				padding: 2rem;
+				border-radius: 0.75rem;
+				max-width: 48rem;
+				width: 100%;
+			}
+			h1 { color: #f87171; margin-top: 0; font-size: 1.5rem; }
+			p { color: #e5e7eb; font-size: 1rem; }
+		</style>
+	</head>
+	<body>
+		<div class="card">
+			<h1>Error %sveltekit.status%</h1>
+			<p>%sveltekit.error.message%</p>
+		</div>
+	</body>
+</html>

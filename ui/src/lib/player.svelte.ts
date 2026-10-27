@@ -153,6 +153,8 @@ export const prefs = $state({
 	musicVideos: false,
 	filterExplicit: false,
 	animatedArtwork: true,
+	animatedAlbumArt: browser ? localStorage.getItem('animated_album_art') !== 'false' : true,
+	hideChineseTranslationsForEnglish: browser ? localStorage.getItem('hide_chinese_translations') !== 'false' : true,
 	scrobbling: true,
 	floatingSidebarMode: initialMode,
 	floatingSidebarLeft: initialMode === 'both' || initialMode === 'left',
@@ -166,6 +168,8 @@ export const prefs = $state({
 	audioStreamSource: (browser ? (localStorage.getItem('audio_stream_source') as 'ytm' | 'spotify') : null) || 'ytm',
 	listeningHistoryTarget: (browser ? (localStorage.getItem('listening_history_target') as 'both' | 'ytm' | 'spotify') : null) || 'both',
 	pcAudioRecognition: browser ? localStorage.getItem('pc_audio_recognition') !== 'false' : true,
+	downloadQuality: (browser ? localStorage.getItem('download_quality') : null) || 'LOSSLESS',
+	downloadAlwaysAsk: browser ? localStorage.getItem('download_always_ask') !== 'false' : true,
 	onRepeatLimit: browser ? parseInt(localStorage.getItem('on_repeat_limit') || '50', 10) || 50 : 50,
 	visibleIcons: {
 		titlebar: {
@@ -228,6 +232,11 @@ export function setFloatingPlayerBar(enabled: boolean) {
 	if (browser) localStorage.setItem('floating_playerbar', enabled ? 'true' : 'false');
 }
 
+export function setAnimatedAlbumArt(enabled: boolean) {
+	prefs.animatedAlbumArt = enabled;
+	if (browser) localStorage.setItem('animated_album_art', enabled ? 'true' : 'false');
+}
+
 export function setShowAudioQuality(enabled: boolean) {
 	prefs.showAudioQuality = enabled;
 	if (browser) localStorage.setItem('show_audio_quality', enabled ? 'true' : 'false');
@@ -254,9 +263,30 @@ export function setListeningHistoryTarget(target: 'both' | 'ytm' | 'spotify') {
 	}
 }
 
+export function setHideChineseTranslationsForEnglish(enabled: boolean) {
+	prefs.hideChineseTranslationsForEnglish = enabled;
+	if (browser) localStorage.setItem('hide_chinese_translations', enabled ? 'true' : 'false');
+}
+
 export function setPcAudioRecognition(enabled: boolean) {
 	prefs.pcAudioRecognition = enabled;
 	if (browser) localStorage.setItem('pc_audio_recognition', enabled ? 'true' : 'false');
+}
+
+export function setDownloadQuality(quality: string) {
+	prefs.downloadQuality = quality;
+	if (browser) {
+		localStorage.setItem('download_quality', quality);
+		api.setSetting('download_quality', quality).catch(() => {});
+	}
+}
+
+export function setDownloadAlwaysAsk(enabled: boolean) {
+	prefs.downloadAlwaysAsk = enabled;
+	if (browser) {
+		localStorage.setItem('download_always_ask', enabled ? 'true' : 'false');
+		api.setSetting('download_always_ask', enabled ? 'true' : 'false').catch(() => {});
+	}
 }
 
 // --- Spotify Store & Sync Mode -------------------------------------------------------------
@@ -1515,6 +1545,15 @@ export const ui = $state({
 	channelPickerOpen: false,
 	channelPickerRequired: false, // true while a multi-channel login is not finalized yet
 	channelIdentities: [] as AccountIdentity[],
+	downloadPicker: null as {
+		itemType: 'song' | 'playlist';
+		song?: SongItem;
+		playlistItems?: SongItem[];
+		playlistName?: string;
+		thumbnail?: string;
+		title: string;
+		subtitle?: string;
+	} | null,
 	// Manual sidebar collapse, lg and up (below that the rail is already collapsed by the
 	// breakpoint). Here rather than in Sidebar because the now-playing view and the fullscreen
 	// lyrics panel are overlays that offset themselves by the sidebar's width.
@@ -1581,6 +1620,83 @@ export function openAddToPlaylist(song: SongItem | SongItem[]) {
 /** Open the picker to add several tracks at once (e.g. a whole album). */
 export function openAddManyToPlaylist(songs: SongItem[]) {
 	ui.addSongs = songs.length ? songs : null;
+}
+
+export function openDownloadSongPicker(song: SongItem) {
+	if (!prefs.downloadAlwaysAsk) {
+		void executeDownloadSong(song, prefs.downloadQuality || 'LOSSLESS');
+		return;
+	}
+	ui.downloadPicker = {
+		itemType: 'song',
+		song,
+		title: song.title,
+		subtitle: song.artists,
+		thumbnail: song.thumbnail
+	};
+}
+
+export function openDownloadPlaylistPicker(options: {
+	items: SongItem[];
+	playlistName: string;
+	thumbnail?: string;
+}) {
+	if (!prefs.downloadAlwaysAsk) {
+		void executeDownloadPlaylist(options.items, options.playlistName, prefs.downloadQuality || 'LOSSLESS');
+		return;
+	}
+	ui.downloadPicker = {
+		itemType: 'playlist',
+		playlistItems: options.items,
+		playlistName: options.playlistName,
+		title: options.playlistName,
+		subtitle: `${options.items.length} tracks`,
+		thumbnail: options.thumbnail
+	};
+}
+
+export function closeDownloadPicker() {
+	ui.downloadPicker = null;
+}
+
+export async function executeDownloadSong(song: SongItem, quality: string) {
+	try {
+		const isLossless = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(quality.toUpperCase());
+		toast.info(`Downloading "${song.title}"${isLossless ? ' (Lossless FLAC)' : ''}...`);
+		const destPath = await api.downloadSong({
+			videoId: song.video_id,
+			title: song.title,
+			artist: song.artists,
+			album: song.album,
+			duration: song.duration,
+			thumbnail: song.thumbnail,
+			quality
+		});
+		toast.success(`Downloaded "${song.title}"`);
+		void loadDownloadedSongs(true);
+		return destPath;
+	} catch (err) {
+		toast.error(`Download failed: ${err}`);
+		throw err;
+	}
+}
+
+export async function executeDownloadPlaylist(items: SongItem[], playlistName: string, quality: string) {
+	try {
+		const isLossless = ['LOSSLESS', 'HI_RES_LOSSLESS', 'DOLBY_ATMOS', 'VERY_HIGH'].includes(quality.toUpperCase());
+		toast.info(`Downloading ${items.length} tracks from "${playlistName}"${isLossless ? ' (Lossless FLAC)' : ''}...`);
+		const destPath = await api.downloadPlaylist({
+			items,
+			playlistName,
+			quality
+		});
+		toast.success(`Downloaded ${items.length} tracks to ${destPath}`);
+		void loadDownloadedSongs(true);
+		return destPath;
+	} catch (err) {
+		toast.error(`Playlist download failed: ${err}`);
+		throw err;
+	}
 }
 
 // Last successful add-to-playlist — the open playlist page appends these optimistically.

@@ -1,5 +1,6 @@
 //! Nocturne Music Tauri app. Wires transport + player + db + orchestrator behind the command boundary.
 
+pub mod addons;
 pub mod appicon;
 mod audioproxy;
 pub mod cache;
@@ -691,6 +692,12 @@ pub fn run() {
             commands::reset_global_hotkeys,
             commands::set_app_icon,
             commands::app_icon_path,
+            commands::get_community_addons,
+            commands::add_community_addon,
+            commands::remove_community_addon,
+            commands::toggle_community_addon,
+            commands::set_community_addons_enabled,
+            commands::get_community_addons_enabled,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is

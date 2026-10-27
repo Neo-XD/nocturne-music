@@ -18,7 +18,8 @@
 		ArrowRight01Icon,
 		ComputerIcon,
 		Home01Icon,
-		FavouriteIcon
+		FavouriteIcon,
+		Analytics01Icon
 	} from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -29,6 +30,7 @@
 	import PlaylistMenu from './PlaylistMenu.svelte';
 	import FolderMenu from './FolderMenu.svelte';
 	import CreatePlaylistDialog from './CreatePlaylistDialog.svelte';
+	import ListeningStatsDialog from './ListeningStatsDialog.svelte';
 	import {
 		prefs,
 		auth,
@@ -54,6 +56,7 @@
 
 	let activePlaylistTab = $state<'ytm' | 'spotify'>('ytm');
 	let playlistDialogPlatform = $state<'ytm' | 'spotify' | undefined>(undefined);
+	let statsDialogOpen = $state(false);
 	const isSpotifyOnly = $derived(!auth.account?.signedIn && spotify.status.linked);
 	$effect(() => {
 		if (isSpotifyOnly) {
@@ -206,10 +209,6 @@
 	{#if !collapsed}
 		<!-- Resize handle on the right edge -->
 		<div
-			role="separator"
-			tabindex="0"
-			aria-orientation="vertical"
-			aria-label="Resize sidebar"
 			class="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize z-40 hover:bg-primary/25 active:bg-primary/40 transition-colors select-none"
 			onmousedown={startResize}
 		></div>
@@ -610,11 +609,11 @@
 	{/if}
 
 	<!-- See full library button at bottom of sidebar -->
-	<div class="mt-auto pt-2 border-t border-border/60 shrink-0">
+	<div class="mt-auto pt-2 border-t border-border/60 shrink-0 flex items-center gap-1.5">
 		<a
 			href="/library"
 			title="See full library"
-			class="group relative flex items-center justify-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {wide(
+			class="group relative flex flex-1 min-w-0 items-center justify-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {wide(
 				'lg:justify-start'
 			)} {isActive('/library')
 				? 'bg-primary/10 text-primary'
@@ -632,7 +631,23 @@
 			/>
 			<span class="hidden {wide('lg:inline')} truncate">See full library</span>
 		</a>
+		{#if !collapsed}
+			<button
+				type="button"
+				onclick={() => (statsDialogOpen = true)}
+				title="Listening Stats"
+				aria-label="Listening Stats"
+				class="group/stats relative flex h-8.5 w-8.5 shrink-0 cursor-pointer items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+			>
+				<HugeiconsIcon
+					icon={Analytics01Icon}
+					class="h-4.5 w-4.5 transition-transform duration-200 group-hover/stats:scale-110"
+				/>
+			</button>
+		{/if}
 	</div>
+
+	<ListeningStatsDialog bind:open={statsDialogOpen} />
 </aside>
 
 {#snippet playlistRow(pl: BrowseItem, inFolder: boolean = false)}
@@ -868,5 +883,3 @@
 		</div>
 	</a>
 {/snippet}
-
-

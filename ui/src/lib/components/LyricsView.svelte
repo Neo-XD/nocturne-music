@@ -522,6 +522,26 @@
 		}
 		return 'scale-100 translate-y-0 font-normal text-muted-foreground/55 opacity-55 blur-0 hover:opacity-85';
 	}
+	function shouldShowTranslation(mainText: string, translationText?: string | null): boolean {
+		if (!translationText || !translationText.trim()) return false;
+		if (!prefs.hideChineseTranslationsForEnglish) return true;
+
+		// Check if translation contains Chinese characters
+		const hasChineseChars = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(translationText);
+		if (!hasChineseChars) return true;
+
+		// Check if main line contains Chinese characters
+		const mainHasChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(mainText);
+		// Check if main line contains English/Latin characters
+		const mainHasLatin = /[a-zA-Z]/.test(mainText);
+
+		// Hide only if the main line is in English/Latin and has no Chinese characters
+		if (mainHasLatin && !mainHasChinese) {
+			return false;
+		}
+
+		return true;
+	}
 </script>
 
 <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -625,7 +645,7 @@
 						{/if}
 
 						<!-- Translation line rendering -->
-						{#if line.translation}
+						{#if line.translation && shouldShowTranslation(line.text, line.translation)}
 							<p
 								class="mt-1 text-sm font-normal italic tracking-wide transition-opacity {isHighlight
 									? 'text-foreground/80 opacity-90'
@@ -650,7 +670,7 @@
 					{#if line.text}
 						<div class="transition-opacity hover:opacity-100 opacity-80">
 							<p>{line.text}</p>
-							{#if line.translation}
+							{#if line.translation && shouldShowTranslation(line.text, line.translation)}
 								<p class="text-xs italic text-muted-foreground mt-1">{line.translation}</p>
 							{/if}
 						</div>

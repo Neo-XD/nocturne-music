@@ -887,10 +887,25 @@ export const downloadSong = (args: {
 	title: string;
 	artist: string;
 	album?: string;
+
+	thumbnail?: string;
+	customDir?: string;
 	duration?: string | number;
+	quality?: string;
+}) => invoke<string>('download_song', args);
+/*
+}) => invoke<string>('download_song', args);
+
+	videoId: string;
+	title: string;
+	artist: string;
+	album?: string;
+
 	thumbnail?: string;
 	customDir?: string;
 }) => invoke<string>('download_song', args);
+
+*/
 
 export interface DownloadedSong {
 	video_id: string;
@@ -936,11 +951,24 @@ export const downloadPlaylist = (args: {
 	items: SongItem[];
 	playlistName?: string;
 	customDir?: string;
+	quality?: string;
+}) => invoke<string>('download_playlist', {
+	items: args.items,
+	playlistName: args.playlistName || 'Playlist',
+	customDir: args.customDir,
+	quality: args.quality
+});
+/*
+	items: SongItem[];
+	playlistName?: string;
+	customDir?: string;
 }) => invoke<string>('download_playlist', {
 	items: args.items,
 	playlistName: args.playlistName || 'Playlist',
 	customDir: args.customDir
 });
+
+*/
 
 export const onPlaylistDownloadProgress = (
 	cb: (p: PlaylistDownloadProgress) => void
@@ -1112,6 +1140,27 @@ export const recognizeSongSignature = (signatureUri: string, sampleMs?: number) 
 
 export const capturePcAudio = (sampleMs?: number) =>
 	invoke<number[]>('capture_pc_audio', { sampleMs });
+
+// --- Community Streaming Addons -----------------------------------------------------------
+export interface CommunityAddon {
+	id: string;
+	name: string;
+	baseUrl: string;
+	enabled: boolean;
+}
+
+export const getCommunityAddons = () =>
+	invoke<CommunityAddon[]>('get_community_addons');
+export const addCommunityAddon = (url: string) =>
+	invoke<CommunityAddon>('add_community_addon', { url });
+export const removeCommunityAddon = (id: string) =>
+	invoke<void>('remove_community_addon', { id });
+export const toggleCommunityAddon = (id: string, enabled: boolean) =>
+	invoke<void>('toggle_community_addon', { id, enabled });
+export const setCommunityAddonsEnabled = (enabled: boolean) =>
+	invoke<void>('set_community_addons_enabled', { enabled });
+export const getCommunityAddonsEnabled = () =>
+	invoke<boolean>('get_community_addons_enabled');
 
 
 

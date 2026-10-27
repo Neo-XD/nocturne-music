@@ -5,21 +5,17 @@ import { invoke } from '@tauri-apps/api/core';
 export const win = $state({ maximized: false, fullscreen: false });
 
 let started = false;
-// Set while our own setFullscreen call is in flight, so the resize it causes is not mistaken for the user leaving fullscreen.
 let applying = false;
 let wasMaximized = false;
-// Bumped when a transition settles, so an isFullscreen read that straddled one is dropped instead of overwriting win.fullscreen.
 let transitions = 0;
 let pending: Promise<void> = Promise.resolve();
 let exitHandler: (() => void) | null = null;
 
-// The overlay is closed from here rather than from a component, because the OS can leave fullscreen without anything in the UI asking.
 export function onFullscreenExit(cb: () => void): void {
 	exitHandler = cb;
 }
 
 export async function setWindowFullscreen(on: boolean): Promise<void> {
-	// Serialized: a track change can re-enter this mid-transition, and two overlapping runs lose the state to restore.
 	pending = pending.then(() => applyFullscreen(on)).catch(() => {});
 	return pending;
 }
@@ -36,22 +32,49 @@ async function applyFullscreen(on: boolean): Promise<void> {
 	try {
 		if (on) {
 			wasMaximized = await w.isMaximized().catch(() => false);
-			// Going maximized -> fullscreen leaves WRY_WEBVIEW at the old working-area height, so the taskbar shows through the transparent window; restoring first gives the webview a resize it follows.
-			if (wasMaximized) await w.unmaximize().catch(() => {});
-		}
-		await w.setFullscreen(on);
-		win.fullscreen = on;
-		if (!on && wasMaximized) {
-			// Consumed here, so a later exit that never entered fullscreen cannot re-maximize the window.
-			wasMaximized = false;
-			await w.maximize().catch(() => {});
+			// Going maximized -> fullscreen: unmaximize first so the webview gets a proper resize,
+			// avoiding taskbar and half-maximized glitch states on Windows borderless windows.
+			if (wasMaximized) {
+				await w.unmaximize().catch(() => {});
+				for (let i = 0; i < 20; i++) {
+					const isMax = await w.isMaximized().catch(() => false);
+					if (!isMax) break;
+					await new Promise((r) => setTimeout(r, 20));
+				}
+				await new Promise((r) => setTimeout(r, 50));
+			}
+			await w.setFullscreen(true);
+			win.fullscreen = true;
+			win.maximized = false;
+		} else {
+			win.fullscreen = false;
+			await w.setFullscreen(false);
+			if (wasMaximized) {
+				wasMaximized = false;
+				for (let i = 0; i < 20; i++) {
+					const isFull = await w.isFullscreen().catch(() => false);
+					if (!isFull) break;
+					await new Promise((r) => setTimeout(r, 20));
+				}
+				await new Promise((r) => setTimeout(r, 50));
+				await w.maximize().catch(() => {});
+				win.maximized = true;
+			} else {
+				win.maximized = await w.isMaximized().catch(() => false);
+			}
 		}
 	} catch (e) {
 		console.error('setFullscreen failed', e);
-		win.fullscreen = await w.isFullscreen().catch(() => false);
 	} finally {
-		applying = false;
-		transitions++;
+		setTimeout(async () => {
+			applying = false;
+			transitions++;
+			try {
+				const f = await w.isFullscreen();
+				win.fullscreen = f;
+				win.maximized = f ? false : await w.isMaximized();
+			} catch {}
+		}, 350);
 	}
 }
 
@@ -62,29 +85,24 @@ export function initWin(): () => void {
 		const w = getCurrentWindow();
 		invoke<boolean>('show_main').catch(() => w.show().catch(() => {}));
 		const sync = () => {
-			w.isMaximized()
-				.then((m) => (win.maximized = m))
-				.catch(() => {});
-			const seen = transitions;
-			w.isFullscreen()
-				.then((f) => {
-					if (applying || seen !== transitions) return;
-					const left = win.fullscreen && !f;
+			if (applying) return;
+			Promise.all([w.isMaximized().catch(() => false), w.isFullscreen().catch(() => false)])
+				.then(([m, f]) => {
+					if (applying) return;
+					const wasFull = win.fullscreen;
 					win.fullscreen = f;
-					if (left) {
-						// Restored here, not via setWindowFullscreen: this path has already cleared win.fullscreen, so applyFullscreen would match the target and return.
-						if (wasMaximized) {
-							wasMaximized = false;
-							w.maximize().catch(() => {});
-						}
-						exitHandler?.();
+					win.maximized = f ? false : m;
+					if (wasFull && !f && exitHandler) {
+						exitHandler();
 					}
 				})
 				.catch(() => {});
 		};
 		sync();
 		const un = w.onResized(sync);
-		return () => { un.then((u) => u()).catch(() => {}); };
+		return () => {
+			un.then((u) => u()).catch(() => {});
+		};
 	} catch {
 		return () => {};
 	}

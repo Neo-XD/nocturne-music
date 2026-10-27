@@ -346,6 +346,7 @@ pub fn set_icons(window: &tauri::WebviewWindow, img: &tauri::image::Image<'_>) {
 }
 
 /// The size the notification area draws at, for [`crate::tray`].
+#[allow(dead_code)]
 pub fn tray_icon_size() -> u32 {
     metric(SM_CXSMICON, SM_CYSMICON).0 as u32
 }

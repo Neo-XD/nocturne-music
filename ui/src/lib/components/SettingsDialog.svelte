@@ -61,6 +61,8 @@
 		setCustomizationMode,
 		setLyricsAnimationStyle,
 		setOnRepeatLimit,
+		setAnimatedAlbumArt,
+		setHideChineseTranslationsForEnglish,
 		LYRICS_ANIMATION_OPTIONS,
 		blockedArtists,
 		unblockArtist,
@@ -117,11 +119,12 @@
 	} from '$lib/updater.svelte';
 	import { getVersion } from '@tauri-apps/api/app';
 
-	type TabId = 'general' | 'themes' | 'playback' | 'discord' | 'scrobbling' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
+	type TabId = 'general' | 'themes' | 'playback' | 'addons' | 'discord' | 'scrobbling' | 'sync' | 'performance' | 'lyrics' | 'keybindings' | 'data' | 'about';
 	const TABS: { id: TabId; label: string; hint: string; icon?: typeof Settings02Icon; customIcon?: any }[] = [
 		{ id: 'general', label: 'General', hint: 'History, integrations and how the app starts.', icon: Settings02Icon },
 		{ id: 'themes', label: 'Appearance', hint: 'Colors, fonts and the player view.', icon: PaintBoardIcon },
 		{ id: 'playback', label: 'Playback', hint: 'Quality, queue behaviour and stream clients.', icon: PlayCircleIcon },
+		{ id: 'addons', label: 'Streaming Addons', hint: 'Community extensions to resolve FLAC, Hi-Res, and Dolby Atmos audio.', icon: Link04Icon },
 		{ id: 'discord', label: 'Discord RPC', hint: 'Rich presence, custom activity text and live preview.', customIcon: DiscordIcon },
 		{ id: 'scrobbling', label: 'Scrobbling', hint: 'What Last.fm gets, timing rules and edits.', customIcon: LastFmIcon },
 		{ id: 'sync', label: 'Nocturne Sync', hint: 'Pair and control playback across PC and mobile devices.', icon: Wifi01Icon },
@@ -314,7 +317,7 @@
 			accentFg: '#ffffff',
 			text: '#e6fffa',
 			mutedText: '#6ee7b7',
-			border: 'rgba(16,185,129,0.25)',
+			border: 'rgba(168,185,129,0.25)',
 			artGradient: 'linear-gradient(135deg, #059669, #34d399)'
 		},
 		glassy: {
@@ -616,7 +619,7 @@
 			} else {
 				eqBands = EQ_FREQUENCIES.map((freq) => ({ freq, gain: 0, q: 1.4 }));
 			}
-			await Promise.all([loadCustomProviders(), loadCacheStats()]);
+			await Promise.all([loadCustomProviders(), loadCacheStats(), loadCommunityAddons()]);
 		} catch (e) {
 			toast.error(String(e));
 		}
@@ -884,7 +887,13 @@
 		saveLyricsProviders();
 	}
 
-	const quality = $derived(settings.quality ?? 'HIGH');
+	const quality = $derived(settings.quality === 'VERY_HIGH' ? 'LOSSLESS' : (settings.quality ?? 'HIGH'));
+	const downloadQuality = $derived(
+		settings.download_quality === 'VERY_HIGH'
+			? 'LOSSLESS'
+			: (settings.download_quality ?? prefs.downloadQuality ?? 'LOSSLESS')
+	);
+	const downloadAskOn = $derived(prefs.downloadAlwaysAsk);
 	const historyOn = $derived(settings.enable_history !== 'false');
 	const autoplayOn = $derived(settings.autoplay !== 'false');
 	const hideVideosOn = $derived(settings.hide_videos === 'true');
@@ -1049,11 +1058,80 @@
 		)
 	);
 
+	let communityAddonsEnabled = $state(false);
+	let communityAddons = $state<api.CommunityAddon[]>([]);
+	let showAddAddon = $state(false);
+	let newAddonUrl = $state('');
+	let addingAddon = $state(false);
+
+	async function loadCommunityAddons() {
+		try {
+			const [enabled, addons] = await Promise.all([
+				api.getCommunityAddonsEnabled(),
+				api.getCommunityAddons()
+			]);
+			communityAddonsEnabled = enabled;
+			communityAddons = addons;
+		} catch (e) {
+			console.error('Failed to load community addons', e);
+		}
+	}
+
+	async function toggleCommunityAddonsEnabled(on: boolean) {
+		communityAddonsEnabled = on;
+		try {
+			await api.setCommunityAddonsEnabled(on);
+			toast.success(on ? 'Community addons enabled' : 'Community addons disabled');
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	async function handleAddAddon() {
+		if (!newAddonUrl.trim()) {
+			toast.error('Addon manifest or server URL is required');
+			return;
+		}
+		addingAddon = true;
+		try {
+			const added = await api.addCommunityAddon(newAddonUrl.trim());
+			communityAddons = await api.getCommunityAddons();
+			newAddonUrl = '';
+			showAddAddon = false;
+			toast.success(`Added addon: ${added.name}`);
+		} catch (e) {
+			toast.error(`Failed to add addon: ${e}`);
+		} finally {
+			addingAddon = false;
+		}
+	}
+
+	async function handleToggleAddon(id: string, on: boolean) {
+		try {
+			await api.toggleCommunityAddon(id, on);
+			communityAddons = await api.getCommunityAddons();
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
+	async function handleRemoveAddon(id: string) {
+		try {
+			await api.removeCommunityAddon(id);
+			communityAddons = await api.getCommunityAddons();
+			toast.success('Addon removed');
+		} catch (e) {
+			toast.error(String(e));
+		}
+	}
+
 	const QUALITIES = [
-		{ id: 'LOW', label: 'Low' },
-		{ id: 'AUTO', label: 'Auto' },
-		{ id: 'HIGH', label: 'High' },
-		{ id: 'VERY_HIGH', label: 'Very High' }
+		{ id: 'DOLBY_ATMOS', label: 'Dolby Atmos' },
+		{ id: 'HI_RES_LOSSLESS', label: 'Hi-Res Lossless (24-bit / up to 192 kHz)' },
+		{ id: 'LOSSLESS', label: 'Lossless (16-bit / 44.1 kHz)' },
+		{ id: 'HIGH', label: 'High (256 kbps AAC / 160 kbps Opus)' },
+		{ id: 'AUTO', label: 'Auto (Adaptive)' },
+		{ id: 'LOW', label: 'Low (64 kbps)' }
 	];
 
 	async function setQuality(q: string) {
@@ -1062,6 +1140,20 @@
 		// Cached URLs are keyed by video only, so clear them to apply the new quality everywhere.
 		await api.clearCaches();
 		toast.success('Audio quality updated');
+	}
+
+	async function setDownloadQuality(q: string) {
+		settings.download_quality = q;
+		prefs.downloadQuality = q;
+		if (typeof window !== 'undefined') localStorage.setItem('download_quality', q);
+		await api.setSetting('download_quality', q);
+		toast.success('Download audio quality updated');
+	}
+
+	async function setDownloadAlwaysAsk(on: boolean) {
+		prefs.downloadAlwaysAsk = on;
+		if (typeof window !== 'undefined') localStorage.setItem('download_always_ask', on ? 'true' : 'false');
+		await api.setSetting('download_always_ask', on ? 'true' : 'false');
 	}
 
 	async function setHistory(on: boolean) {
@@ -1519,6 +1611,7 @@
 			     (a long font name, a long path) widens the pane and pushes every tab off the modal. -->
 			<div class="settings-content-pane relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
 				<!-- Header with generous top padding matching desired.png and no dividing border -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<header
 					class="shrink-0 px-8 pt-8 pb-3 pr-24 cursor-default select-none"
 					ondblclick={toggleMaximize}
@@ -1548,7 +1641,10 @@
 							Open the keyboard shortcuts with <kbd class="font-mono font-medium">{MOD}H</kbd>
 						</button>
 						<section class={GROUP}>
-							<h3 class={LABEL}>Activity</h3>
+							<h3 class={LABEL}>
+								Activity
+							</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Watch history',
@@ -1577,8 +1673,12 @@
 								})}
 							</div>
 						</section>
+
 						<section class={GROUP}>
-							<h3 class={LABEL}>System</h3>
+							<h3 class={LABEL}>
+								System
+							</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Close to tray',
@@ -1604,6 +1704,7 @@
 								})}
 							</div>
 						</section>
+
 					{:else if tab === 'themes'}
 						<div class="flex min-h-0 min-w-0 flex-1 overflow-hidden">
 							<!-- Left column: Scrollable customization options list -->
@@ -1625,7 +1726,7 @@
 										}
 									}}
 								>
-									<!-- Customization Mode Segmented Switch -->
+						<!-- Customization Mode Segmented Switch -->
 						<div class="mb-4 flex items-center justify-between rounded-xl border border-border/80 bg-card/60 p-3 backdrop-blur-md">
 							<div>
 								<div class="text-xs font-semibold uppercase tracking-wider text-foreground">Customization Mode</div>
@@ -1732,7 +1833,7 @@
 									})}
 									{@render row({
 										title: 'Roundness',
-										desc: 'Corner radius of cards, buttons and artwork.',
+										desc: 'Corner radius in pixels (px) of cards, buttons and artwork.',
 										control: radiusSlider
 									})}
 									{@render row({
@@ -1745,7 +1846,7 @@
 							{/if}
 						</section>
 
-						<!-- 2. Player View & Effects -->
+							<!-- 2. Player View & Effects -->
 						<section id="sec-player" class="{GROUP} scroll-mt-3">
 							<button
 								type="button"
@@ -1791,6 +1892,14 @@
 										badgeVariant: 'performance',
 										desc: 'Display real-time fluid GPU shaders and domain-warped blur behind the fullscreen player.',
 										control: animatedArtworkSwitch,
+										tall: true
+									})}
+									{@render row({
+										title: 'Animated Album Art (Canvases)',
+										badge: 'Motion Video',
+										badgeVariant: 'performance',
+										desc: 'Play looping motion artwork and video covers from Tidal, Nocturne & streaming providers in the Now Playing sidebar and theater player.',
+										control: animatedAlbumArtSwitch,
 										tall: true
 									})}
 									{@render row({
@@ -2179,6 +2288,7 @@
 					{:else if tab === 'playback'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Audio</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Crossfade',
@@ -2196,13 +2306,32 @@
 									title: 'Audio quality',
 									badge: 'Network & CPU',
 									badgeVariant: 'info',
-									desc: 'Preferred stream quality when resolving a track. Lower qualities use less data and CPU.',
+									desc: 'Preferred stream quality when resolving a track. If the selected resolution is unavailable, the next highest resolution will be picked.',
 									control: qualityPicker
 								})}
 								{@render row({
 									title: 'Audio quality indicator',
 									desc: 'Show an audio codec and bitrate badge below the artist name in the bottom player bar.',
 									control: showAudioQualitySwitch
+								})}
+								{@render row({
+									title: 'Download audio quality',
+									badge: 'Offline FLAC',
+									badgeVariant: 'info',
+									desc: 'Preferred audio resolution when saving songs and playlists to disk. Lossless FLAC, Hi-Res, and Dolby Atmos query community streaming addons first with bit-perfect Lofty metadata tags.',
+									control: downloadQualityPicker
+								})}
+								{@render row({
+									title: 'Always ask download quality',
+									desc: 'Prompt with the quality picker dialog each time you download a song or playlist.',
+									control: downloadAskSwitch
+								})}
+								{@render row({
+									title: 'Streaming addons',
+									badge: communityAddonsEnabled ? 'Active' : 'Disabled',
+									badgeVariant: communityAddonsEnabled ? 'info' : 'default',
+									desc: 'Connect BitChord-compatible community extensions to stream lossless FLAC, 24-bit Hi-Res, and Dolby Atmos audio.',
+									control: openAddonsTabButton
 								})}
 								{@render row({
 									title: 'Music recognition (PC audio Shazam)',
@@ -2228,17 +2357,10 @@
 								})}
 							</div>
 						</section>
+
 						<section class={GROUP}>
-							<div class="mb-2 flex items-center justify-between px-1">
-								<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Equalizer</h3>
-								<div class="flex items-center gap-2">
-									{#if eqEnabled}
-										<span class="text-[11px] font-medium text-primary">Active</span>
-									{:else}
-										<span class="text-[11px] text-muted-foreground">Disabled</span>
-									{/if}
-								</div>
-							</div>
+							<h3 class={LABEL}>Equalizer</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Parametric equalizer',
@@ -2340,6 +2462,7 @@
 										<!-- 10 Band Vertical Sliders -->
 										<div class="grid grid-cols-10 gap-1 sm:gap-2 pt-1">
 											{#each eqBands as band, i}
+												<!-- svelte-ignore a11y_no_static_element_interactions -->
 												<div
 													class="group flex flex-col items-center gap-1.5 rounded-lg p-1 transition-colors hover:bg-muted/30"
 													ondblclick={() => setEqBandGain(i, 0)}
@@ -2374,8 +2497,10 @@
 								{/if}
 							</div>
 						</section>
+
 						<section class={GROUP}>
 							<h3 class={LABEL}>Blocked Artists</h3>
+
 							<div class={CARD}>
 								{#if blockedArtists.length === 0}
 									<p class="px-3 py-3 text-xs text-muted-foreground">
@@ -2405,8 +2530,10 @@
 								{/if}
 							</div>
 						</section>
+
 						<section class={GROUP}>
 							<h3 class={LABEL}>Video</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Play music videos',
@@ -2424,12 +2551,142 @@
 								})}
 							</div>
 						</section>
+
 						<section class={GROUP}>
 							<h3 class={LABEL}>Advanced</h3>
+
 							<div class={CARD}>
 								{@render row({ title: 'Stream clients', below: clientList })}
 							</div>
 						</section>
+
+					{:else if tab === 'addons'}
+						<section class={GROUP}>
+							<h3 class={LABEL}>Community Streaming Addons</h3>
+
+							<div class={CARD}>
+								{@render row({
+									title: 'Enable Community Addons',
+									badge: 'Lossless Audio',
+									badgeVariant: 'info',
+									desc: 'Resolve high-resolution FLAC / Hi-Res audio streams from BitChord-compatible community streaming addons while retaining YouTube Music recommendations and search.',
+									control: communityAddonsMasterSwitch
+								})}
+								{#if communityAddonsEnabled}
+									<div class="p-4 space-y-3">
+										<div class="flex items-center justify-between">
+											<div>
+												<p class="text-xs font-medium text-foreground">Configured Addons</p>
+												<p class="text-[11px] text-muted-foreground">Addons are queried in order to resolve lossless audio streams.</p>
+											</div>
+											<Button
+												variant="outline"
+												size="sm"
+												class="h-8 gap-1.5 text-xs font-medium cursor-pointer"
+												onclick={() => (showAddAddon = true)}
+											>
+												+ Add Community Addon
+											</Button>
+										</div>
+
+										{#if showAddAddon}
+											<div class="rounded-lg border border-border/80 bg-muted/40 p-3 space-y-2.5">
+												<div class="flex items-center justify-between">
+													<span class="text-xs font-semibold text-foreground">Add Streaming Addon</span>
+													<button
+														type="button"
+														class="text-muted-foreground hover:text-foreground cursor-pointer text-xs"
+														onclick={() => (showAddAddon = false)}
+													>
+														✕
+													</button>
+												</div>
+												<p class="text-[11px] text-muted-foreground">
+													Enter the base URL or manifest URL of a BitChord-compatible addon server (e.g. <code>http://localhost:3000</code> or <code>https://addon.example.com/manifest.json</code>).
+												</p>
+												<div class="flex gap-2">
+													<Input
+														bind:value={newAddonUrl}
+														placeholder="https://..."
+														class="text-xs h-8 flex-1"
+														onkeydown={(e) => e.key === 'Enter' && handleAddAddon()}
+													/>
+													<Button
+														size="sm"
+														class="h-8 text-xs cursor-pointer"
+														onclick={handleAddAddon}
+														disabled={addingAddon || !newAddonUrl.trim()}
+													>
+														{addingAddon ? 'Verifying…' : 'Verify & Add'}
+													</Button>
+												</div>
+											</div>
+										{/if}
+
+										{#if communityAddons.length === 0}
+											<div class="rounded-lg border border-dashed border-border/70 p-4 text-center">
+												<p class="text-xs text-muted-foreground">No community streaming addons configured.</p>
+												<p class="text-[11px] text-muted-foreground/70 mt-0.5">Click "Add Community Addon" to connect a lossless audio server.</p>
+											</div>
+										{:else}
+											<div class="space-y-1.5">
+												{#each communityAddons as addon (addon.id)}
+													<div class="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+														<div class="min-w-0 pr-3">
+															<div class="flex items-center gap-2">
+																<p class="truncate text-xs font-semibold text-foreground">{addon.name}</p>
+																<span class="rounded px-1.5 py-0.2 text-[9px] font-bold tracking-wider uppercase bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+																	LOSSLESS
+																</span>
+															</div>
+															<p class="truncate font-mono text-[10px] text-muted-foreground/80 mt-0.5">{addon.baseUrl}</p>
+														</div>
+														<div class="flex items-center gap-3 shrink-0">
+															<Switch
+																checked={addon.enabled}
+																onCheckedChange={(val) => handleToggleAddon(addon.id, val)}
+															/>
+															<button
+																type="button"
+																class="cursor-pointer text-muted-foreground hover:text-destructive p-1 rounded transition-colors"
+																title="Remove addon"
+																onclick={() => handleRemoveAddon(addon.id)}
+															>
+																<HugeiconsIcon icon={Delete02Icon} size={14} />
+															</button>
+														</div>
+													</div>
+												{/each}
+											</div>
+										{/if}
+									</div>
+								{/if}
+							</div>
+						</section>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>BitChord Protocol & Resolution Order</h3>
+
+							<div class="{CARD} p-4 text-xs text-muted-foreground space-y-2.5 leading-relaxed">
+								<div class="flex items-center gap-2 text-foreground font-semibold">
+									<HugeiconsIcon icon={FlashIcon} size={15} class="text-amber-500" />
+									<span>Playback Quality Escalation</span>
+								</div>
+								<p>
+									• <strong>Quality above High:</strong> When you set Audio Quality to <em>Dolby Atmos</em>, <em>Hi-Res Lossless</em>, or <em>Lossless</em>, Nocturne queries your enabled community addons first.
+								</p>
+								<p>
+									• <strong>Resolution Cascading:</strong> If the selected high resolution is not returned by the addon for this track, the next highest available resolution is used.
+								</p>
+								<p>
+									• <strong>Quality High or lower:</strong> When set to <em>High</em>, <em>Auto</em>, or <em>Low</em>, Nocturne streams directly through the standard YouTube Music stack.
+								</p>
+								<p>
+									• <strong>Clean Fallback:</strong> If no addon candidate matches the song or if an addon server is unreachable, playback cleanly falls back to standard YouTube audio.
+								</p>
+							</div>
+						</section>
+
 					{:else if tab === 'discord'}
 						<DiscordSettings {settings} />
 					{:else if tab === 'scrobbling'}
@@ -2437,6 +2694,7 @@
 					{:else if tab === 'sync'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Nocturne Sync (Tailscale / Local Wi-Fi)</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Mobile Sync Server',
@@ -2446,9 +2704,11 @@
 								})}
 							</div>
 						</section>
+
 					{:else if tab === 'performance'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Quick Presets</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Performance profiles',
@@ -2460,6 +2720,7 @@
 
 						<section class={GROUP}>
 							<h3 class={LABEL}>Optimization & Battery Saving</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Aggressive Memory Trimming (Experimental - Linux)',
@@ -2490,6 +2751,7 @@
 
 						<section class={GROUP}>
 							<h3 class={LABEL}>Resource Impact Settings</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Animated Fullscreen Background',
@@ -2533,16 +2795,16 @@
 								})}
 							</div>
 						</section>
+
 					{:else if tab === 'lyrics'}
 						<section class={GROUP}>
-							<div class="flex items-center justify-between px-1 mb-2">
-								<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-									Lyrics Animation Style
-								</h3>
-								<span class="text-[11px] text-muted-foreground">
-									{LYRICS_ANIMATION_OPTIONS.find((o) => o.id === (prefs.lyricsAnimationStyle || 'wave'))?.label}
+							<div class="mb-3 px-1">
+								<h3 class={LABEL}>Lyrics Animation Style</h3>
+								<span class="text-xs text-muted-foreground">
+									Current style: <strong>{LYRICS_ANIMATION_OPTIONS.find((o) => o.id === (prefs.lyricsAnimationStyle || 'wave'))?.label}</strong>
 								</span>
 							</div>
+
 							<div class="{CARD} divide-y divide-border/40">
 								<div class="p-3 bg-muted/20 text-xs text-muted-foreground">
 									Choose your preferred lyrics visual physics, line transitions, and word sweep animation. Select <strong>OG Nocturne</strong> to return to the original classic desktop animation.
@@ -2584,7 +2846,28 @@
 						</section>
 
 						<section class={GROUP}>
-							<div class="flex items-center justify-between px-1 mb-2">
+							<h3 class={LABEL}>Translations</h3>
+
+							<div class={CARD}>
+								<div class="px-4 py-3.5 flex items-center justify-between gap-6">
+									<div class="min-w-0">
+										<span class="text-sm font-medium">Hide Chinese translations on English lyrics</span>
+										<p class="mt-1 max-w-prose text-xs leading-relaxed text-muted-foreground">
+											Hides Chinese translation subtitles displayed under English song lyrics by providers such as Netease, QQ, Kugou, and AMLL.
+										</p>
+									</div>
+									<div class="shrink-0">
+										<Switch
+											checked={prefs.hideChineseTranslationsForEnglish}
+											onCheckedChange={(on) => setHideChineseTranslationsForEnglish(on)}
+										/>
+									</div>
+								</div>
+							</div>
+						</section>
+
+						<section class={GROUP}>
+							<div class="mb-2 flex items-center justify-between px-1">
 								<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
 									Lyrics Providers & Priority
 								</h3>
@@ -2596,6 +2879,7 @@
 									Reset priority
 								</button>
 							</div>
+
 							<div class={CARD}>
 								<div class="p-3 bg-muted/20 border-b border-border/40 text-xs text-muted-foreground">
 									Nocturne queries lyrics providers in order from top to bottom. Use the arrows to set your preferred priority, and toggle any source on or off.
@@ -2680,10 +2964,10 @@
 						</section>
 
 						<section class={GROUP}>
-							<div class="flex items-center justify-between px-1 mb-2">
+							<div class="mb-4 flex items-center justify-between gap-4 px-1">
 								<div>
-									<h3 class="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-										Custom Lyric Providers
+									<h3 class="text-xs font-medium text-foreground">
+										Your providers
 									</h3>
 									<p class="text-xs text-muted-foreground mt-0.5">
 										Add external APIs with URL templates like <code>{'{title}'}</code>, <code>{'{artist}'}</code>, <code>{'{duration}'}</code>, <code>{'{videoId}'}</code>.
@@ -2704,16 +2988,20 @@
 									<h4 class="text-xs font-semibold text-foreground">New Custom Lyric Provider</h4>
 									<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 										<div>
-											<label class="text-[11px] text-muted-foreground block mb-1">Provider Name</label>
+											<!-- svelte-ignore a11y_label_has_associated_control -->
+											<label for="custom-lyric-provider-name" class="text-[11px] text-muted-foreground block mb-1">Provider Name</label>
 											<Input
+												id="custom-lyric-provider-name"
 												placeholder="e.g. My Lyrics API"
 												bind:value={newCustomName}
 												class="text-xs"
 											/>
 										</div>
 										<div>
-											<label class="text-[11px] text-muted-foreground block mb-1">Response Format</label>
+											<!-- svelte-ignore a11y_label_has_associated_control -->
+											<label for="custom-lyric-provider-format" class="text-[11px] text-muted-foreground block mb-1">Response Format</label>
 											<select
+												id="custom-lyric-provider-format"
 												bind:value={newCustomFormat}
 												class="w-full h-9 rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
 											>
@@ -2725,10 +3013,12 @@
 										</div>
 									</div>
 									<div>
-										<label class="text-[11px] text-muted-foreground block mb-1">
+										<!-- svelte-ignore a11y_label_has_associated_control -->
+										<label for="custom-lyric-provider-url" class="text-[11px] text-muted-foreground block mb-1">
 											URL Template (supports <code>{'{title}'}</code>, <code>{'{artist}'}</code>, <code>{'{duration}'}</code>, <code>{'{videoId}'}</code>)
 										</label>
 										<Input
+											id="custom-lyric-provider-url"
 											placeholder={'https://example.com/api/lyrics?title={title}&artist={artist}&duration={duration}'}
 											bind:value={newCustomUrl}
 											class="text-xs font-mono"
@@ -2781,6 +3071,7 @@
 								{/if}
 							</div>
 						</section>
+
 					{:else if tab === 'keybindings'}
 						<div class="mb-5 flex items-center justify-between px-1">
 							<div>
@@ -2832,7 +3123,9 @@
 							{@const groupDefs = SHORTCUT_DEFINITIONS.filter((d) => d.group === groupName)}
 							{#if groupDefs.length}
 								<section class={GROUP}>
-									<h3 class={LABEL}>{groupName}</h3>
+									<h3 class={LABEL}>
+										{groupName}
+									</h3>
 									<div class={CARD}>
 										{#each groupDefs as def (def.id)}
 											{@const currentKey = keybindings[def.id]}
@@ -2897,6 +3190,7 @@
 					{:else if tab === 'data'}
 						<section class={GROUP}>
 							<h3 class={LABEL}>Network</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Proxy',
@@ -2905,8 +3199,10 @@
 								})}
 							</div>
 						</section>
+
 						<section class={GROUP}>
 							<h3 class={LABEL}>Storage & Cache Management</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Cache Usage',
@@ -2923,6 +3219,7 @@
 								})}
 							</div>
 						</section>
+
 					{:else if tab === 'about'}
 						<div
 							class="mb-7 rounded-xl border border-border/60 bg-gradient-to-br from-primary/10 via-card/75 to-card/45 backdrop-blur-md px-4 py-4"
@@ -2945,6 +3242,7 @@
 
 						<section class={GROUP}>
 							<h3 class={LABEL}>Updates</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Updates',
@@ -2967,6 +3265,7 @@
 
 						<section class={GROUP}>
 							<h3 class={LABEL}>What's new</h3>
+
 							<div class={CARD}>
 								{@render row({
 									title: 'Release notes',
@@ -2977,8 +3276,6 @@
 						</section>
 					{/if}
 				</div>
-
-
 			</div>
 		</div>
 	</Dialog.Content>
@@ -3009,8 +3306,8 @@
 {/snippet}
 {#snippet crossfadeSlider()}
 	<div class="flex items-center gap-3 w-48">
-		<Slider
-			type="single"
+		<input
+			type="range"
 			min={0}
 			max={12}
 			step={1}
@@ -3430,6 +3727,7 @@
 									class="flex items-center gap-1.5 flex-1 min-w-0"
 									onsubmit={(e) => { e.preventDefault(); saveRename(device.id); }}
 								>
+									<!-- svelte-ignore a11y_autofocus -->
 									<input
 										type="text"
 										bind:value={editingDeviceName}
@@ -3650,6 +3948,7 @@
 	/>{/snippet}
 {#snippet musicVideoSwitch()}<Switch checked={musicVideosOn} onCheckedChange={setMusicVideos} />{/snippet}
 {#snippet animatedArtworkSwitch()}<Switch checked={animatedArtworkOn} onCheckedChange={setAnimatedArtwork} />{/snippet}
+{#snippet animatedAlbumArtSwitch()}<Switch checked={prefs.animatedAlbumArt} onCheckedChange={setAnimatedAlbumArt} />{/snippet}
 {#snippet hideVideoSwitch()}<Switch checked={hideVideosOn} onCheckedChange={setHideVideos} />{/snippet}
 {#snippet boiduSwitch()}<Switch checked={boiduOn} onCheckedChange={setBoidu} />{/snippet}
 {#snippet bannerSwitch()}<Switch checked={updateBannerOn} onCheckedChange={setUpdateBanner} />{/snippet}
@@ -3705,7 +4004,6 @@
 		</Button>
 	</div>
 {/snippet}
-
 {#snippet glassyThemeSwitch()}<Switch
 		checked={theme.id === 'glassy'}
 		onCheckedChange={(on) => toggleGlassyTheme(on)}
@@ -4035,16 +4333,22 @@
 
 {#snippet radiusSlider()}
 	<div class="flex w-44 shrink-0 items-center gap-3">
-		<Slider
-			type="single"
-			aria-label="Roundness"
-			max={1.5}
-			step={0.05}
+		<input
+			type="range"
+			class="range flex-1 cursor-pointer"
+			style="--pct:{(effective.radius / 28) * 100}%"
+			aria-label="Corner radius in pixels"
+			min={0}
+			max={28}
+			step={1}
 			value={effective.radius}
-			onValueChange={(radius) => setCustom({ radius })}
+			oninput={(e) => {
+				const val = parseInt(e.currentTarget.value, 10);
+				setCustom({ radius: Number.isNaN(val) ? 0 : val });
+			}}
 		/>
 		<span class="w-10 shrink-0 text-right font-mono text-xs text-muted-foreground">
-			{effective.radius.toFixed(2)}
+			{Math.round(effective.radius)}px
 		</span>
 	</div>
 {/snippet}
@@ -4142,23 +4446,62 @@
 	</Button>
 {/snippet}
 
-<!-- Segmented, not three buttons: the options are one exclusive choice and should look like it. -->
 {#snippet qualityPicker()}
-	<div class="flex rounded-lg bg-muted p-0.5">
-		{#each QUALITIES as q (q.id)}
-			<button
-				type="button"
-				onclick={() => setQuality(q.id)}
-				aria-pressed={quality === q.id}
-				class="cursor-pointer rounded-md px-3.5 py-1.5 text-xs font-medium transition-colors {quality ===
-				q.id
-					? 'bg-background text-foreground shadow-sm'
-					: 'text-muted-foreground hover:text-foreground'}"
-			>
-				{q.label}
-			</button>
-		{/each}
-	</div>
+	<Select.Root
+		type="single"
+		value={quality}
+		onValueChange={(v) => v && setQuality(v)}
+	>
+		<Select.Trigger class="h-8 min-w-56 text-xs bg-muted/40 cursor-pointer" aria-label="Audio quality">
+			{QUALITIES.find((q) => q.id === quality)?.label ?? quality}
+		</Select.Trigger>
+		<Select.Content class="max-w-80">
+			{#each QUALITIES as q (q.id)}
+				<Select.Item value={q.id} label={q.label} class="text-xs cursor-pointer">
+					{q.label}
+				</Select.Item>
+			{/each}
+		</Select.Content>
+	</Select.Root>
+{/snippet}
+
+{#snippet downloadQualityPicker()}
+	<Select.Root
+		type="single"
+		value={downloadQuality}
+		onValueChange={(v) => v && setDownloadQuality(v)}
+	>
+		<Select.Trigger class="h-8 min-w-56 text-xs bg-muted/40 cursor-pointer" aria-label="Download audio quality">
+			{QUALITIES.find((q) => q.id === downloadQuality)?.label ?? downloadQuality}
+		</Select.Trigger>
+		<Select.Content class="max-w-80">
+			{#each QUALITIES as q (q.id)}
+				<Select.Item value={q.id} label={q.label} class="text-xs cursor-pointer">
+					{q.label}
+				</Select.Item>
+			{/each}
+		</Select.Content>
+	</Select.Root>
+{/snippet}
+
+{#snippet downloadAskSwitch()}<Switch checked={downloadAskOn} onCheckedChange={setDownloadAlwaysAsk} />{/snippet}
+
+{#snippet openAddonsTabButton()}
+	<Button
+		variant="outline"
+		size="sm"
+		class="h-8 text-xs cursor-pointer gap-1"
+		onclick={() => (tab = 'addons')}
+	>
+		Configure Addons →
+	</Button>
+{/snippet}
+
+{#snippet communityAddonsMasterSwitch()}
+	<Switch
+		checked={communityAddonsEnabled}
+		onCheckedChange={toggleCommunityAddonsEnabled}
+	/>
 {/snippet}
 
 {#snippet clientList()}

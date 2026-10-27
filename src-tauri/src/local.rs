@@ -600,6 +600,78 @@ fn fmt_duration(secs: i64) -> String {
     }
 }
 
+/// Inspects an audio file on disk to determine its exact audio quality, codec, bit depth,
+/// and sample rate for badges in the UI.
+pub fn detect_audio_quality(path: &str) -> Option<String> {
+    let p = Path::new(path);
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+
+    let (bit_depth, sample_rate, bitrate) = if let Ok(probe) = lofty::probe::Probe::open(p) {
+        if let Ok(tagged) = probe.read() {
+            let props = tagged.properties();
+            (props.bit_depth(), props.sample_rate(), props.audio_bitrate())
+        } else {
+            (None, None, None)
+        }
+    } else {
+        (None, None, None)
+    };
+
+    match ext.as_str() {
+        "flac" | "wav" | "alac" | "aiff" | "aif" => {
+            let upper = ext.to_uppercase();
+            let is_hires = bit_depth.map_or(false, |b| b > 16)
+                || sample_rate.map_or(false, |sr| sr > 48000);
+            let prefix = if is_hires { "HI-RES LOSSLESS" } else { "LOSSLESS" };
+
+            let mut specs = Vec::new();
+            specs.push(upper);
+            if let Some(bits) = bit_depth {
+                specs.push(format!("{}-bit", bits));
+            }
+            if let Some(sr) = sample_rate {
+                if sr % 1000 == 0 {
+                    specs.push(format!("{} kHz", sr / 1000));
+                } else {
+                    specs.push(format!("{:.1} kHz", sr as f64 / 1000.0));
+                }
+            }
+            if let Some(br) = bitrate {
+                specs.push(format!("{} kbps", br));
+            }
+            Some(format!("{} ({})", prefix, specs.join(" ")))
+        }
+        "m4a" | "aac" | "mp4" => {
+            if let Some(br) = bitrate {
+                Some(format!("AAC {} kbps", br))
+            } else {
+                Some("AAC".to_string())
+            }
+        }
+        "opus" | "webm" => {
+            if let Some(br) = bitrate {
+                Some(format!("OPUS {} kbps", br))
+            } else {
+                Some("OPUS".to_string())
+            }
+        }
+        "mp3" => {
+            if let Some(br) = bitrate {
+                Some(format!("MP3 {} kbps", br))
+            } else {
+                Some("MP3".to_string())
+            }
+        }
+        _ => {
+            if !ext.is_empty() {
+                Some(ext.to_uppercase())
+            } else {
+                None
+            }
+        }
+    }
+}
+
 /// Everything the player needs for a local file. The "stream url" is just the path — mpv opens it
 /// directly, so playback works with no network at all. Errs when the file is gone (the user
 /// deleted it since the scan): the queue skips it like any other unplayable track.
@@ -624,14 +696,7 @@ pub fn playback_data(video_id: &str, path: &str) -> Result<crate::orchestrator::
         // A file on disk has no `musicVideoType`, and video mode skips local ids anyway.
         is_video: None,
         stream_client: "local".to_owned(),
-        audio_quality: Path::new(path).extension().and_then(|e| e.to_str()).map(|ext| {
-            let upper = ext.to_uppercase();
-            if upper == "FLAC" || upper == "WAV" || upper == "ALAC" || upper == "AIFF" {
-                format!("{upper} Lossless")
-            } else {
-                upper
-            }
-        }),
+        audio_quality: detect_audio_quality(path),
     })
 }
 

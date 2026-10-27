@@ -33,6 +33,33 @@ fn dir_size(path: &Path) -> u64 {
     total
 }
 
+pub fn audio_cache_dir(app: &AppHandle) -> std::path::PathBuf {
+    let data_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let audio_dir = data_dir.join("audio-cache");
+    let _ = fs::create_dir_all(&audio_dir);
+    audio_dir
+}
+
+pub fn get_cached_audio(app: &AppHandle, video_id: &str) -> Option<std::path::PathBuf> {
+    let dir = audio_cache_dir(app);
+    let clean_id = video_id
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>();
+
+    for ext in &["flac", "m4a", "webm", "opus", "mp3", "wav", "aac"] {
+        let p = dir.join(format!("{clean_id}.{ext}"));
+        if p.is_file() {
+            if let Ok(meta) = fs::metadata(&p) {
+                if meta.len() > 1024 {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn get_cache_stats(app: &AppHandle, db: &Db) -> CacheStats {
     let data_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir());
     let audio_dir = data_dir.join("audio-cache");

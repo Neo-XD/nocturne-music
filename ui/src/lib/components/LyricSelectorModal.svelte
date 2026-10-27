@@ -139,9 +139,9 @@
 		onclick={(e) => {
 			if (e.target === e.currentTarget) closeModal();
 		}}
-		role="dialog"
-		aria-modal="true"
 	>
+
+
 		<div
 			class="relative flex flex-col w-full max-w-3xl max-h-[85vh] rounded-2xl bg-card border border-border shadow-2xl overflow-hidden"
 			onclick={(e) => e.stopPropagation()}

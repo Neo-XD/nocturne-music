@@ -1805,6 +1805,21 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
+    let v100_note = ReleaseNote {
+        version: "1.0.0".to_string(),
+        date: "2026-10-27".to_string(),
+        body: r#"### Nocturne Music v1.0.0
+
+#### 🚀 Milestones & Major Highlights
+- **Nocturne Music v1.0 Official Release**: Complete desktop music client featuring dual-deck gapless audio, community addons, and local library integration.
+- **Instant Audio Caching for Repeat Listening**: Background audio caching automatically caches listened songs locally into high-speed audio buffers, enabling instant 0ms startup without network latency or buffering delays when re-listening.
+- **Lossless & Hi-Res Playback Engine**: Seamless playback for downloaded FLAC, ALAC, WAV, and high-bitrate AAC/OPUS files with native Windows libmpv file routing and audioproxy bypass for external lossless CDNs.
+- **Accurate Audio Quality Inspection**: Real-time Lofty file inspection accurately reads bit depth, sample rate, and bitrate, presenting dynamic LOSSLESS and HI-RES badges in the bottom player bar.
+- **Community Streaming Addons**: Direct BitChord and Stremio streaming addon integration with FLAC, Hi-Res 24-bit/96kHz, and Dolby Atmos resolution.
+- **Parametric 10-Band Equalizer**: Studio-grade parametric EQ with custom preamp controls, real-time gain adjustment, and persistent profiles.
+- **Expanded Sidebar Listening Stats**: Listening stats shortcut cleanly integrates into the expanded sidebar alongside the library view."#.to_string(),
+    };
+
     let v090_note = ReleaseNote {
         version: "0.9.0".to_string(),
         date: "2026-10-10".to_string(),
@@ -2123,7 +2138,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v090_note, v087_note, v086_note, v085_note, v084_note, v083_note, v082_note, v081_note,
+        v100_note, v090_note, v087_note, v086_note, v085_note, v084_note, v083_note, v082_note, v081_note,
         v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note,
         v063_note, v062_note, v061_note, v06_note,
     ];
@@ -2132,6 +2147,9 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "1.0.0".to_string(),
+            "1.0".to_string(),
+            "0.9.1".to_string(),
             "0.9.0".to_string(),
             "0.9".to_string(),
             "0.8.7".to_string(),
@@ -4015,6 +4033,7 @@ pub async fn download_song(
     duration: Option<serde_json::Value>,
     thumbnail: Option<String>,
     custom_dir: Option<String>,
+    quality: Option<String>,
 ) -> Result<String, String> {
     let duration_str = duration.and_then(|v| match v {
         serde_json::Value::String(s) => Some(s),
@@ -4045,6 +4064,7 @@ pub async fn download_song(
         duration_str,
         thumbnail,
         custom_dir,
+        quality,
     )
     .await
 }
@@ -4099,6 +4119,7 @@ pub async fn download_playlist(
     items: Vec<innertube::SongItem>,
     playlist_name: String,
     custom_dir: Option<String>,
+    quality: Option<String>,
 ) -> Result<String, String> {
     crate::download::download_full_playlist(
         app,
@@ -4106,6 +4127,7 @@ pub async fn download_playlist(
         items,
         playlist_name,
         custom_dir,
+        quality,
     )
     .await
 }
@@ -4306,6 +4328,66 @@ pub async fn reset_global_hotkeys(
     let result = hotkeys.apply_config(&app, default_config);
     crate::hotkeys::save_config(&state.db, &result.config);
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_community_addons(state: St<'_>) -> Result<Vec<crate::addons::CommunityAddon>, String> {
+    Ok(crate::addons::get_addons(&state.db))
+}
+
+#[tauri::command]
+pub async fn add_community_addon(state: St<'_>, url: String) -> Result<crate::addons::CommunityAddon, String> {
+    let manifest = crate::addons::test_addon_manifest(&url).await?;
+    let mut addons = crate::addons::get_addons(&state.db);
+    let base_url = crate::addons::normalize_base_url(&url);
+
+    if let Some(existing) = addons.iter_mut().find(|a| a.id == manifest.id || a.base_url == base_url) {
+        existing.name = if !manifest.name.is_empty() { manifest.name } else { manifest.id.clone() };
+        existing.base_url = base_url;
+        existing.enabled = true;
+        let ret = existing.clone();
+        crate::addons::save_addons(&state.db, &addons);
+        return Ok(ret);
+    }
+
+    let new_addon = crate::addons::CommunityAddon {
+        id: manifest.id.clone(),
+        name: if !manifest.name.is_empty() { manifest.name } else { manifest.id },
+        base_url,
+        enabled: true,
+    };
+    addons.push(new_addon.clone());
+    crate::addons::save_addons(&state.db, &addons);
+    Ok(new_addon)
+}
+
+#[tauri::command]
+pub async fn remove_community_addon(state: St<'_>, id: String) -> Result<(), String> {
+    let mut addons = crate::addons::get_addons(&state.db);
+    addons.retain(|a| a.id != id);
+    crate::addons::save_addons(&state.db, &addons);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn toggle_community_addon(state: St<'_>, id: String, enabled: bool) -> Result<(), String> {
+    let mut addons = crate::addons::get_addons(&state.db);
+    if let Some(a) = addons.iter_mut().find(|a| a.id == id) {
+        a.enabled = enabled;
+        crate::addons::save_addons(&state.db, &addons);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_community_addons_enabled(state: St<'_>, enabled: bool) -> Result<(), String> {
+    crate::addons::set_addons_enabled(&state.db, enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_community_addons_enabled(state: St<'_>) -> Result<bool, String> {
+    Ok(crate::addons::is_addons_enabled(&state.db))
 }
 
 #[cfg(test)]

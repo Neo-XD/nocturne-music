@@ -40,7 +40,7 @@
 	style:--sidebar-accent-foreground={fg}
 	style:--sidebar-ring={overrides.accent}
 	style:--hue={overrides.hue === null ? null : String(overrides.hue)}
-	style:--radius={overrides.radius === null ? '0.33rem' : `${overrides.radius}rem`}
+	style:--radius={overrides.radius === null ? '6px' : `${overrides.radius}px`}
 	style:--font-sans={overrides.fontSans}
 	style:--font-heading={overrides.fontHeading}
 	aria-hidden="true"

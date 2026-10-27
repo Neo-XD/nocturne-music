@@ -31,12 +31,14 @@
 	import ListenTogether from '$lib/components/ListenTogether.svelte';
 	import ListenTogetherRequestDialog from '$lib/components/ListenTogetherRequestDialog.svelte';
 	import LinkDialog from '$lib/components/LinkDialog.svelte';
+	import DownloadQualityDialog from '$lib/components/DownloadQualityDialog.svelte';
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
 	import NowPlayingSidebar from '$lib/components/NowPlayingSidebar.svelte';
 	import DevicesSidebar from '$lib/components/DevicesSidebar.svelte';
 	import FullscreenPlayer from '$lib/components/FullscreenPlayer.svelte';
 	import AnimatedArtwork from '$lib/components/AnimatedArtwork.svelte';
+
 	import VideoSurface from '$lib/components/VideoSurface.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
@@ -337,6 +339,7 @@
 	<ListenTogether />
 	<ListenTogetherRequestDialog />
 	<LinkDialog />
+	<DownloadQualityDialog />
 	{#if lyricSelector.request}
 		{@const request = lyricSelector.request}
 		<LyricSelectorModal

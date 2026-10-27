@@ -333,7 +333,7 @@ impl Player {
             af.eq_bands = shared.eq_bands.clone();
         }
         active.apply_af()?;
-        active.mpv.command("loadfile", &[&quoted(url), "replace"])?;
+        active.mpv.command("loadfile", &[url, "replace"])?;
         Ok(())
     }
 
@@ -354,7 +354,7 @@ impl Player {
         if xf <= 0.0 {
             // Gapless single deck
             self.active_deck().apply_headers(headers)?;
-            self.active_deck().mpv.command("loadfile", &[&quoted(url), "append"])?;
+            self.active_deck().mpv.command("loadfile", &[url, "append"])?;
             self.primed_deck.store(-1, Ordering::SeqCst);
             return Ok(());
         }
@@ -379,7 +379,7 @@ impl Player {
         standby.apply_af()?;
         // Pre-load paused so it buffers and is ready to start playing instantly with 0 latency
         standby.mpv.set_property("pause", true)?;
-        standby.mpv.command("loadfile", &[&quoted(url), "replace"])?;
+        standby.mpv.command("loadfile", &[url, "replace"])?;
 
         self.primed_deck.store(standby_id as i8, Ordering::SeqCst);
 
@@ -830,6 +830,7 @@ fn arbitrate_events(
 }
 
 /// Quote a filename/URL for mpv's command parser.
+#[allow(dead_code)]
 fn quoted(arg: &str) -> String {
     format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\""))
 }

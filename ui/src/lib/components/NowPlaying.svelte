@@ -22,6 +22,7 @@
 	import { canVideo, claimVideo, parkVideo, showVideo, video } from '$lib/video.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
+	import { getSongMotionArtwork } from '$lib/canvas';
 	import QueueList from './QueueList.svelte';
 	import LyricsView from './LyricsView.svelte';
 
@@ -94,6 +95,42 @@
 			? (prefs.floatingSidebarLeft ? 80 : 64)
 			: (ui.sidebarWidth + (prefs.floatingSidebarLeft ? 16 : 0))
 	);
+
+	// Motion Artwork (Canvases / Animated Album Art)
+	let canvasUrl = $state<string | null>(null);
+	let canvasReady = $state(false);
+	let canvasVideoEl = $state<HTMLVideoElement | null>(null);
+
+	$effect(() => {
+		const now = playback.now;
+		canvasUrl = null;
+		canvasReady = false;
+		if (!now || !prefs.animatedAlbumArt || showVideo()) return;
+
+		let cancelled = false;
+		const curSong = playback.queue.items[playback.queue.currentIndex];
+		getSongMotionArtwork(now.title, now.artists, curSong?.album ?? undefined)
+			.then((u) => {
+				if (!cancelled && u) {
+					canvasUrl = u;
+				}
+			})
+			.catch(() => {});
+
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	$effect(() => {
+		if (canvasVideoEl) {
+			if (playback.paused) {
+				canvasVideoEl.pause();
+			} else if (canvasUrl && !showVideo()) {
+				canvasVideoEl.play().catch(() => {});
+			}
+		}
+	});
 </script>
 
 <!-- Covers the full window including behind the top bar, bottom player bar, and floating left sidebar,
@@ -223,13 +260,29 @@
 							     paints on the frame the track changes. Without it an <img> keeps showing the
 							     *previous* track's picture for as long as this one's fetch takes (#77): 720 is
 							     a size nothing else in the app asks for, so it is always a cold request. -->
-							<img
-								{src}
-								alt=""
-								onerror={imgFailed}
-								style={srcs[2] ? `background-image:url(${srcs[2]})` : undefined}
-								class="aspect-square w-full rounded-2xl bg-cover object-cover shadow-2xl"
-							/>
+							<div class="relative aspect-square w-full overflow-hidden rounded-2xl shadow-2xl">
+								<img
+									{src}
+									alt=""
+									onerror={imgFailed}
+									style={srcs[2] ? `background-image:url(${srcs[2]})` : undefined}
+									class="h-full w-full bg-cover object-cover"
+								/>
+								{#if prefs.animatedAlbumArt && canvasUrl}
+									<!-- svelte-ignore a11y_media_has_caption -->
+									<video
+										bind:this={canvasVideoEl}
+										src={canvasUrl}
+										autoplay
+										loop
+										muted
+										playsinline
+										onloadeddata={() => (canvasReady = true)}
+										oncanplay={() => (canvasReady = true)}
+										class="pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ease-out {canvasReady ? 'opacity-100' : 'opacity-0'}"
+									></video>
+								{/if}
+							</div>
 						{:else if !showVideo()}
 							<div
 								class="flex aspect-square w-full items-center justify-center rounded-2xl bg-muted text-muted-foreground/40"

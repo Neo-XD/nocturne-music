@@ -292,7 +292,10 @@ export function initShortcuts() {
 		}
 
 		// 2. Fullscreen toggle
-		if (matchesCombo(e, keybindings.fullscreen)) {
+		if (
+			matchesCombo(e, keybindings.fullscreen) ||
+			(!typingNow && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f')
+		) {
 			if (!playback.now) return;
 			np.fullscreenOpen = !np.fullscreenOpen;
 			e.preventDefault();

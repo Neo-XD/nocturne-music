@@ -37,7 +37,8 @@
 		togglePin,
 		toggleSaved,
 		toggleItemLibrary,
-		findPlaylistFolder
+		findPlaylistFolder,
+		openDownloadPlaylistPicker
 	} from '$lib/player.svelte';
 	import AddToFolderDialog from './AddToFolderDialog.svelte';
 
@@ -132,12 +133,11 @@
 				toast.error('No downloadable tracks found');
 				return;
 			}
-			toast.info(`Downloading ${tracks.length} tracks from "${item.title}"...`);
-			const dest = await api.downloadPlaylist({
+			openDownloadPlaylistPicker({
 				items: tracks,
-				playlistName: item.title
+				playlistName: item.title,
+				thumbnail: item.thumbnail
 			});
-			toast.success(`Downloaded ${tracks.length} tracks to ${dest}`);
 		} catch (e) {
 			toast.error(`Playlist download failed: ${e}`);
 		}

@@ -221,10 +221,27 @@
 			{#if prefs.showAudioQuality && playback.now?.audioQuality}
 				<div class="flex items-center gap-1 mt-0.5" in:fade={{ duration: 150 }}>
 					<span
-						class="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] tracking-tight font-medium bg-muted/60 text-muted-foreground/90 border border-border/40 select-none"
+						class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-semibold tracking-wide border select-none {playback.now.audioQuality.includes('ATMOS') || playback.now.audioQuality.includes('DOLBY') ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : playback.now.audioQuality.includes('HI-RES') || playback.now.audioQuality.includes('HI_RES') ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : playback.now.audioQuality.includes('LOSSLESS') ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-muted/60 text-muted-foreground/90 border-border/40 font-medium'}"
 						title="Playback Audio Quality"
 					>
-						{playback.now.audioQuality}
+						{#if playback.now.audioQuality.includes('ATMOS') || playback.now.audioQuality.includes('DOLBY')}
+							<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-sky-300">DOLBY ATMOS</span>
+							{#if playback.now.audioQuality.replace(/DOLBY\s*ATMOS/i, '').trim()}
+								<span class="text-[9px] font-normal opacity-85">{playback.now.audioQuality.replace(/DOLBY\s*ATMOS/i, '').trim()}</span>
+							{/if}
+						{:else if playback.now.audioQuality.includes('HI-RES') || playback.now.audioQuality.includes('HI_RES')}
+							<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-amber-300">HI-RES LOSSLESS</span>
+							{#if playback.now.audioQuality.replace(/HI-RES\s*LOSSLESS/i, '').trim()}
+								<span class="text-[9px] font-normal opacity-90">{playback.now.audioQuality.replace(/HI-RES\s*LOSSLESS/i, '').trim()}</span>
+							{/if}
+						{:else if playback.now.audioQuality.includes('LOSSLESS')}
+							<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-emerald-300">LOSSLESS</span>
+							{#if playback.now.audioQuality.replace(/LOSSLESS/i, '').trim()}
+								<span class="text-[9px] font-normal opacity-90">{playback.now.audioQuality.replace(/LOSSLESS/i, '').trim()}</span>
+							{/if}
+						{:else}
+							<span>{playback.now.audioQuality}</span>
+						{/if}
 					</span>
 				</div>
 			{/if}

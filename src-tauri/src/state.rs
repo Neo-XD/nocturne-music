@@ -433,7 +433,7 @@ impl AppState {
         match self.db.get_setting("quality").as_deref() {
             Some("LOW") => AudioQuality::Low,
             Some("AUTO") => AudioQuality::Auto,
-            Some("VERY_HIGH") => AudioQuality::VeryHigh,
+            Some("VERY_HIGH") | Some("LOSSLESS") | Some("HI_RES_LOSSLESS") | Some("DOLBY_ATMOS") => AudioQuality::VeryHigh,
             _ => AudioQuality::High,
         }
     }
@@ -1041,7 +1041,17 @@ impl AppState {
                 data.duration = downloaded.duration;
                 data.thumbnail = downloaded.thumbnail;
                 data.stream_client = "download".to_string();
-                data.audio_quality = Some("Offline Cache".to_string());
+                return Ok(data);
+            }
+        }
+
+        // If cached on disk from previous listening, play directly from local audio cache (zero network, instant startup).
+        if let Some(cached_path) = crate::cache::get_cached_audio(&self.app, video_id)
+            .or_else(|| crate::cache::get_cached_audio(&self.app, &actual_id))
+        {
+            let path_str = cached_path.to_string_lossy().to_string();
+            if let Ok(mut data) = crate::local::playback_data(video_id, &path_str) {
+                data.stream_client = "cache".to_string();
                 return Ok(data);
             }
         }
@@ -1065,6 +1075,47 @@ impl AppState {
             return Err(ResolveError::OfflineMode(video_id.to_owned()));
         }
 
+        // Community Streaming Addons: resolve lossless streams first if quality is above High
+        let q_str = self.db.get_setting("quality").unwrap_or_else(|| "HIGH".to_string());
+        let quality_is_above_high = matches!(
+            q_str.as_str(),
+            "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH"
+        );
+        if quality_is_above_high && !is_upload && crate::addons::is_addons_enabled(&self.db) {
+            let track_meta = {
+                let q = self.queue.lock().await;
+                q.items.iter().find(|i| i.video_id == video_id).map(|i| {
+                    let dur_secs = i.duration.as_deref().and_then(|d| {
+                        let parts: Vec<&str> = d.split(':').collect();
+                        if parts.len() == 2 {
+                            let m: f64 = parts[0].parse().ok()?;
+                            let s: f64 = parts[1].parse().ok()?;
+                            Some(m * 60.0 + s)
+                        } else if parts.len() == 3 {
+                            let h: f64 = parts[0].parse().ok()?;
+                            let m: f64 = parts[1].parse().ok()?;
+                            let s: f64 = parts[2].parse().ok()?;
+                            Some(h * 3600.0 + m * 60.0 + s)
+                        } else {
+                            d.parse().ok()
+                        }
+                    });
+                    (i.title.clone(), i.artists.clone(), dur_secs)
+                })
+            };
+
+            let (t, a, d) = match track_meta {
+                Some((t, a, d)) => (t, a, d),
+                None => (String::new(), String::new(), None),
+            };
+
+            if !t.trim().is_empty() || !video_id.is_empty() {
+                if let Some(mut addon_data) = crate::addons::resolve_from_addons(&self.db, &t, &a, d, &q_str, Some(video_id)).await {
+                    addon_data.video_id = video_id.to_owned();
+                    return Ok(addon_data);
+                }
+            }
+        }
         // Latency cache first (context/11) — honor expiry, never a source of truth.
         // 60s safety margin: a URL that expires mid-load/mid-buffer fails as Raw(-13).
         let now = now_secs();
@@ -1153,6 +1204,10 @@ impl AppState {
         &self,
         video_id: &str,
         bypass_cache: bool,
+        title: Option<&str>,
+        artist: Option<&str>,
+        duration_secs: Option<f64>,
+        quality_override: Option<&str>,
     ) -> Result<PlaybackData, ResolveError> {
         let mut actual_id = video_id.to_string();
         if let Some(sp_info) = video_id.strip_prefix("SP:") {
@@ -1199,6 +1254,30 @@ impl AppState {
                 .map_err(|_| ResolveError::LocalMissing(path.to_owned()));
         }
 
+        let q_str = quality_override
+            .map(|s| s.to_string())
+            .or_else(|| self.db.get_setting("download_quality"))
+            .or_else(|| self.db.get_setting("quality"))
+            .unwrap_or_else(|| "HIGH".to_string());
+
+        let quality_is_above_high = matches!(
+            q_str.as_str(),
+            "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH"
+        );
+
+        if quality_is_above_high && crate::addons::is_addons_enabled(&self.db) {
+            let t = title.unwrap_or_default();
+            let a = artist.unwrap_or_default();
+            if !t.trim().is_empty() || !video_id.is_empty() {
+                tracing::info!(video_id, title = t, quality = %q_str, "Querying community streaming addons for lossless download");
+                if let Some(mut addon_data) = crate::addons::resolve_from_addons(&self.db, t, a, duration_secs, &q_str, Some(video_id)).await {
+                    addon_data.video_id = video_id.to_owned();
+                    return Ok(addon_data);
+                }
+                tracing::info!(video_id, "No lossless addon match found for download; falling back to YouTube Music stack");
+            }
+        }
+
         let now = now_secs();
         if !bypass_cache {
             if let Some(c) = self.db.get_stream(video_id, now + 60) {
@@ -1233,12 +1312,18 @@ impl AppState {
 
         let custom_priority = self.stream_client_priority();
         let auto_rank = self.stream_client_auto_rank();
+        let target_quality = match q_str.as_str() {
+            "LOW" => AudioQuality::Low,
+            "AUTO" => AudioQuality::Auto,
+            "VERY_HIGH" | "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" => AudioQuality::VeryHigh,
+            _ => AudioQuality::High,
+        };
         let data = self
             .orchestrator
             .resolve(
                 video_id,
                 false,
-                self.quality(),
+                target_quality,
                 &self.disabled_clients(),
                 custom_priority.as_deref(),
                 auto_rank,
@@ -2026,6 +2111,15 @@ impl AppState {
         // no-op for almost every track start. Detached — never on the caller's path.
         let me = self.clone();
         tauri::async_runtime::spawn(async move { me.extend_queue_radio(gen).await });
+
+        // Background cache audio for quick listening to already listened songs
+        let me_cache = self.clone();
+        let cache_item = item.clone();
+        let cache_data = data.clone();
+        tauri::async_runtime::spawn(async move {
+            me_cache.cache_audio_if_needed(cache_item, cache_data).await;
+        });
+
         true
     }
 
@@ -2134,6 +2228,102 @@ impl AppState {
             backfill_metadata(qi, data.duration.as_deref(), data.artists.as_deref(), data.is_video);
         }
         tracing::debug!(index = next_idx, "gapless lookahead primed");
+    }
+
+    /// Background cache audio bytes for quick listening to already listened songs.
+    async fn cache_audio_if_needed(
+        self: &std::sync::Arc<Self>,
+        item: innertube::SongItem,
+        playback: crate::orchestrator::PlaybackData,
+    ) {
+        if playback.stream_client == "local"
+            || playback.stream_client == "download"
+            || playback.stream_client == "cache"
+        {
+            return;
+        }
+        let video_id = &item.video_id;
+        if crate::local::is_local_song(video_id) {
+            return;
+        }
+        if crate::cache::get_cached_audio(&self.app, video_id).is_some()
+            || crate::download::get_downloaded_file(&self.app, &self.db, video_id).is_some()
+        {
+            return;
+        }
+
+        let dir = crate::cache::audio_cache_dir(&self.app);
+        let clean_id = video_id
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect::<String>();
+
+        let raw_url = &playback.stream_url;
+        let stream_url = if raw_url.contains("googlevideo.com") {
+            crate::audioproxy::register(raw_url, &playback.headers).unwrap_or_else(|| raw_url.clone())
+        } else {
+            raw_url.clone()
+        };
+
+        let client = crate::http::client();
+        let mut req = client.get(&stream_url);
+        if stream_url == *raw_url {
+            for (k, v) in &playback.headers {
+                req = req.header(k, v);
+            }
+        }
+
+        let Ok(res) = req.send().await else { return };
+        if !res.status().is_success() {
+            return;
+        }
+
+        let mut ext = "m4a";
+        let q_lower = playback.audio_quality.as_deref().unwrap_or_default().to_lowercase();
+        let u_lower = raw_url.to_lowercase();
+        if u_lower.contains(".flac") || q_lower.contains("flac") || q_lower.contains("lossless") {
+            ext = "flac";
+        } else if u_lower.contains(".opus") || q_lower.contains("opus") || playback.itag == 251 {
+            ext = "opus";
+        } else if u_lower.contains(".webm") || playback.itag == 250 || playback.itag == 249 {
+            ext = "webm";
+        } else if u_lower.contains(".mp3") || q_lower.contains("mp3") {
+            ext = "mp3";
+        }
+
+        if let Some(ct) = res.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) {
+            let ct_lower = ct.to_lowercase();
+            if ct_lower.contains("audio/flac") || ct_lower.contains("audio/x-flac") {
+                ext = "flac";
+            } else if ct_lower.contains("audio/mpeg") || ct_lower.contains("audio/mp3") {
+                ext = "mp3";
+            } else if ct_lower.contains("audio/ogg") || ct_lower.contains("audio/opus") {
+                ext = "opus";
+            } else if ct_lower.contains("audio/mp4") || ct_lower.contains("audio/aac") || ct_lower.contains("audio/m4a") {
+                ext = "m4a";
+            }
+        }
+
+        let tmp_path = dir.join(format!("{clean_id}.tmp"));
+        let target_path = dir.join(format!("{clean_id}.{ext}"));
+
+        let Ok(bytes) = res.bytes().await else {
+            let _ = std::fs::remove_file(&tmp_path);
+            return;
+        };
+
+        if bytes.len() < 1024 {
+            return;
+        }
+
+        if std::fs::write(&tmp_path, &bytes).is_ok() {
+            let _ = std::fs::rename(&tmp_path, &target_path);
+            let _ = self.app.asset_protocol_scope().allow_file(&target_path);
+
+            if let Some(limit_mb) = self.db.get_setting("cache_limit_mb").and_then(|s| s.parse::<u64>().ok()).filter(|&lim| lim > 0) {
+                let _ = crate::cache::prune_cache_to_limit(&self.app, limit_mb * 1024 * 1024);
+            }
+        }
     }
 
     async fn current_item(&self) -> Option<SongItem> {
@@ -3965,7 +4155,7 @@ fn mpv_stream_url(data: &PlaybackData) -> String {
         return data.stream_url.clone();
     }
     let http = data.stream_url.starts_with("http://") || data.stream_url.starts_with("https://");
-    if http {
+    if http && data.stream_url.contains("googlevideo.com") {
         if let Some(url) = crate::audioproxy::register(&data.stream_url, &data.headers) {
             return url;
         }

@@ -44,7 +44,8 @@
 		toggleRating,
 		toast,
 		isSongDownloaded,
-		deleteDownloadedSong
+		deleteDownloadedSong,
+		openDownloadSongPicker
 	} from '$lib/player.svelte';
 	import { openLyricSelector } from '$lib/lyric-selector.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
@@ -93,21 +94,8 @@
 		return values.reduce((total, part) => total * 60 + part, 0);
 	}
 
-	async function startDownload() {
-		try {
-			toast.info(`Downloading "${song.title}"...`);
-			const destPath = await api.downloadSong({
-				videoId: song.video_id,
-				title: song.title,
-				artist: song.artists,
-				album: song.album,
-				duration: song.duration,
-				thumbnail: song.thumbnail
-			});
-			toast.success(`Downloaded "${song.title}"`);
-		} catch (err) {
-			toast.error(`Download failed: ${err}`);
-		}
+	function startDownload() {
+		openDownloadSongPicker(song);
 	}
 
 	// Click on the ⋯ opens under the button; right-click on the host row opens at the pointer.

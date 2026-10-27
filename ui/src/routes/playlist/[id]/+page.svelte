@@ -65,7 +65,8 @@
 		noteUnsavedFrom,
 		patchLibraryPlaylist,
 		lastPlaylistAdd,
-		loadSpotifyPlaylists
+		loadSpotifyPlaylists,
+		openDownloadPlaylistPicker
 	} from '$lib/player.svelte';
 
 	// `$state.raw`, not `$state`: a deep proxy makes every read of a row go through a trap and
@@ -454,7 +455,7 @@
 				cacheCurrent();
 				if (pl.items.every((t) => t.set_video_id)) return;
 			} catch {
-				/* retry on the next pass */
+				// retry on the next pass
 			}
 		}
 	}
@@ -716,13 +717,11 @@
 				toast.info(`Fetching all tracks for "${pl.title}"...`);
 				await loadAll();
 			}
-			const count = pl.items.length;
-			toast.info(`Downloading ${count} tracks from "${pl.title || 'Playlist'}"...`);
-			const dest = await api.downloadPlaylist({
+			openDownloadPlaylistPicker({
 				items: pl.items,
-				playlistName: pl.title || 'Playlist'
+				playlistName: pl.title ?? 'Playlist',
+				thumbnail: pl.cover ?? pl.thumbnail ?? fallbackImage ?? undefined
 			});
-			toast.success(`Downloaded ${count} tracks to ${dest}`);
 		} catch (e) {
 			toast.error(`Playlist download failed: ${e}`);
 		}
