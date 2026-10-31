@@ -363,7 +363,9 @@ async fn pump_chunks(
                 Ok(Ok(r)) if r.status() == reqwest::StatusCode::PARTIAL_CONTENT => r,
                 Ok(Ok(r)) => {
                     let status = r.status();
-                    if attempts < MAX_RETRIES && (status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS) {
+                    if attempts < MAX_RETRIES
+                        && (status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS)
+                    {
                         attempts += 1;
                         tokio::time::sleep(Duration::from_millis(250 * attempts as u64)).await;
                         continue;

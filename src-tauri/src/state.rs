@@ -986,39 +986,39 @@ impl AppState {
         items: &'a [innertube::SongItem],
         target_query: &str,
     ) -> Option<&'a innertube::SongItem> {
-    if items.is_empty() {
-        return None;
+        if items.is_empty() {
+            return None;
+        }
+        let target_lower = target_query.to_lowercase();
+        let target_has_remix = target_lower.contains("remix") || target_lower.contains("rmx");
+        let target_has_live = target_lower.contains("live");
+        let target_has_acoustic = target_lower.contains("acoustic");
+
+        let clean_cand = items.iter().find(|item| {
+            let cand_lower = item.title.to_lowercase();
+            let cand_has_remix = cand_lower.contains("remix") || cand_lower.contains("rmx");
+            let cand_has_live = cand_lower.contains("live");
+            let cand_has_acoustic = cand_lower.contains("acoustic");
+            let cand_has_slowed = cand_lower.contains("slowed");
+            let cand_has_sped = cand_lower.contains("sped up") || cand_lower.contains("speed up");
+
+            if !target_has_remix && cand_has_remix {
+                return false;
+            }
+            if !target_has_live && cand_has_live {
+                return false;
+            }
+            if !target_has_acoustic && cand_has_acoustic {
+                return false;
+            }
+            if cand_has_slowed || cand_has_sped {
+                return false;
+            }
+            true
+        });
+
+        clean_cand.or_else(|| items.first())
     }
-    let target_lower = target_query.to_lowercase();
-    let target_has_remix = target_lower.contains("remix") || target_lower.contains("rmx");
-    let target_has_live = target_lower.contains("live");
-    let target_has_acoustic = target_lower.contains("acoustic");
-
-    let clean_cand = items.iter().find(|item| {
-        let cand_lower = item.title.to_lowercase();
-        let cand_has_remix = cand_lower.contains("remix") || cand_lower.contains("rmx");
-        let cand_has_live = cand_lower.contains("live");
-        let cand_has_acoustic = cand_lower.contains("acoustic");
-        let cand_has_slowed = cand_lower.contains("slowed");
-        let cand_has_sped = cand_lower.contains("sped up") || cand_lower.contains("speed up");
-
-        if !target_has_remix && cand_has_remix {
-            return false;
-        }
-        if !target_has_live && cand_has_live {
-            return false;
-        }
-        if !target_has_acoustic && cand_has_acoustic {
-            return false;
-        }
-        if cand_has_slowed || cand_has_sped {
-            return false;
-        }
-        true
-    });
-
-    clean_cand.or_else(|| items.first())
-}
 
     /// `is_upload` comes off the queue row, never off `/player`: the response that has to be
     /// handled here (LOGIN_REQUIRED) carries no `videoDetails` to read it from. Issue #71.
@@ -1158,7 +1158,16 @@ impl AppState {
             };
 
             if !t.trim().is_empty() || !video_id.is_empty() {
-                if let Some(mut addon_data) = crate::addons::resolve_from_addons(&self.db, &t, &a, d, &q_str, Some(video_id)).await {
+                if let Some(mut addon_data) = crate::addons::resolve_from_addons(
+                    &self.db,
+                    &t,
+                    &a,
+                    d,
+                    &q_str,
+                    Some(video_id),
+                )
+                .await
+                {
                     addon_data.video_id = video_id.to_owned();
                     return Ok(addon_data);
                 }
@@ -1324,12 +1333,29 @@ impl AppState {
             let t = title.unwrap_or_default();
             let a = artist.unwrap_or_default();
             if !t.trim().is_empty() || !video_id.is_empty() {
-                tracing::info!(video_id, title = t, quality = %q_str, "Querying community streaming addons for lossless download");
-                if let Some(mut addon_data) = crate::addons::resolve_from_addons(&self.db, t, a, duration_secs, &q_str, Some(video_id)).await {
+                tracing::info!(
+                    video_id,
+                    title = t,
+                    quality = %q_str,
+                    "Querying community streaming addons for lossless download"
+                );
+                if let Some(mut addon_data) = crate::addons::resolve_from_addons(
+                    &self.db,
+                    t,
+                    a,
+                    duration_secs,
+                    &q_str,
+                    Some(video_id),
+                )
+                .await
+                {
                     addon_data.video_id = video_id.to_owned();
                     return Ok(addon_data);
                 }
-                tracing::info!(video_id, "No lossless addon match found for download; falling back to YouTube Music stack");
+                tracing::info!(
+                    video_id,
+                    "No lossless addon match found for download; falling back to YouTube Music stack"
+                );
             }
         }
 

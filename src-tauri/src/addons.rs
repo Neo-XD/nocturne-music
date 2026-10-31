@@ -27,13 +27,20 @@ pub const ADDONS_ENABLED_KEY: &str = "streaming_addons_enabled";
 pub const BROWSER_UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
 
-pub fn browser_request(client: &reqwest::Client, url: &str, timeout_ms: u64) -> reqwest::RequestBuilder {
+pub fn browser_request(
+    client: &reqwest::Client,
+    url: &str,
+    timeout_ms: u64,
+) -> reqwest::RequestBuilder {
     client
         .get(url)
         .header("User-Agent", BROWSER_UA)
         .header("Accept", "application/json, text/plain, */*")
         .header("Accept-Language", "en-US,en;q=0.9")
-        .header("Sec-Ch-Ua", "\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"133\", \"Chromium\";v=\"133\"")
+        .header(
+            "Sec-Ch-Ua",
+            "\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"133\", \"Chromium\";v=\"133\"",
+        )
         .header("Sec-Ch-Ua-Mobile", "?0")
         .header("Sec-Ch-Ua-Platform", "\"Windows\"")
         .header("Sec-Fetch-Dest", "empty")
@@ -415,7 +422,10 @@ pub fn set_addons_enabled(db: &Db, enabled: bool) {
 }
 
 fn clean_title_for_search(raw: &str) -> String {
-    let re = Regex::new(r"(?i)\s*[\(\[](official\s*(music\s*)?video|video|audio|official\s*audio|lyric\s*video|lyrics|visualizer|remaster(ed)?|hd|4k)[\)\]]").unwrap();
+    let re = Regex::new(
+        r"(?i)\s*[\(\[](official\s*(music\s*)?video|video|audio|official\s*audio|lyric\s*video|lyrics|visualizer|remaster(ed)?|hd|4k)[\)\]]",
+    )
+    .unwrap();
     let cleaned = re.replace_all(raw, "");
     cleaned.trim().to_string()
 }
@@ -423,7 +433,10 @@ fn clean_title_for_search(raw: &str) -> String {
 fn normalize_string(raw: &str) -> String {
     // Strip only promotional/video wrappers like (Official Video), [Official Audio], (Lyric Video), etc.
     // Preserve musical version descriptions like (Travis Scott Remix), (Acoustic), (Live), (Feat. X)
-    let re_boilerplate = Regex::new(r"(?i)\s*[\(\[](official\s*(music\s*)?video|video|audio|official\s*audio|lyric\s*video|lyrics|visualizer|remaster(ed)?(\s*\d{4})?|hd|4k|explicit|clean)[\)\]]").unwrap();
+    let re_boilerplate = Regex::new(
+        r"(?i)\s*[\(\[](official\s*(music\s*)?video|video|audio|official\s*audio|lyric\s*video|lyrics|visualizer|remaster(ed)?(\s*\d{4})?|hd|4k|explicit|clean)[\)\]]",
+    )
+    .unwrap();
     let cleaned = re_boilerplate.replace_all(raw, " ");
     let re_punct = Regex::new(r"[^a-zA-Z0-9\s]").unwrap();
     let stripped = re_punct.replace_all(&cleaned, " ");
@@ -433,14 +446,24 @@ fn normalize_string(raw: &str) -> String {
 fn has_version_keyword(s: &str, keyword: &str) -> bool {
     let lower = s.to_lowercase();
     match keyword {
-        "remix" => lower.contains("remix") || lower.contains("rmx") || lower.contains("re-mix") || lower.contains("club mix") || lower.contains("extended mix"),
+        "remix" => {
+            lower.contains("remix")
+                || lower.contains("rmx")
+                || lower.contains("re-mix")
+                || lower.contains("club mix")
+                || lower.contains("extended mix")
+        }
         "live" => {
             let re = Regex::new(r"(?i)\b(live(\s+(at|from|in|version|audio|session))?)\b").unwrap();
             re.is_match(&lower)
         }
-        "acoustic" => lower.contains("acoustic") || lower.contains("unplugged") || lower.contains("stripped"),
+        "acoustic" => {
+            lower.contains("acoustic") || lower.contains("unplugged") || lower.contains("stripped")
+        }
         "slowed" => lower.contains("slowed") || lower.contains("slow down"),
-        "sped_up" => lower.contains("sped up") || lower.contains("speed up") || lower.contains("nightcore"),
+        "sped_up" => {
+            lower.contains("sped up") || lower.contains("speed up") || lower.contains("nightcore")
+        }
         "instrumental" => lower.contains("instrumental") || lower.contains("karaoke"),
         "cover" => {
             let re = Regex::new(r"(?i)\b(cover|tribute)\b").unwrap();
@@ -614,7 +637,10 @@ fn parse_search_response(val: serde_json::Value) -> Vec<AddonTrack> {
     Vec::new()
 }
 
-fn parse_stream_response(val: serde_json::Value, target_title: Option<&str>) -> Option<(String, AddonStream, HashMap<String, String>)> {
+fn parse_stream_response(
+    val: serde_json::Value,
+    target_title: Option<&str>,
+) -> Option<(String, AddonStream, HashMap<String, String>)> {
     let target_has_remix = target_title.map_or(false, |t| has_version_keyword(t, "remix"));
 
     let is_candidate_acceptable = |c: &AddonStreamCandidate| -> bool {
@@ -622,8 +648,15 @@ fn parse_stream_response(val: serde_json::Value, target_title: Option<&str>) -> 
             return false;
         }
         if !target_has_remix {
-            let label = format!("{} {}", c.title.as_deref().unwrap_or_default(), c.quality.as_deref().unwrap_or_default());
-            if has_version_keyword(&label, "remix") || has_version_keyword(&label, "slowed") || has_version_keyword(&label, "sped_up") {
+            let label = format!(
+                "{} {}",
+                c.title.as_deref().unwrap_or_default(),
+                c.quality.as_deref().unwrap_or_default()
+            );
+            if has_version_keyword(&label, "remix")
+                || has_version_keyword(&label, "slowed")
+                || has_version_keyword(&label, "sped_up")
+            {
                 return false;
             }
         }
@@ -631,13 +664,20 @@ fn parse_stream_response(val: serde_json::Value, target_title: Option<&str>) -> 
     };
 
     if let Ok(candidates) = serde_json::from_value::<Vec<AddonStreamCandidate>>(val.clone()) {
-        let chosen = candidates.iter().find(|c| is_candidate_acceptable(c))
-            .or_else(|| candidates.iter().find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty())));
+        let chosen = candidates.iter().find(|c| is_candidate_acceptable(c)).or_else(|| {
+            candidates
+                .iter()
+                .find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty()))
+        });
         if let Some(first) = chosen {
             let url = first.url.clone().unwrap();
             let mut headers = HashMap::new();
             if let Some(bh) = &first.behavior_hints {
-                if let Some(req_headers) = bh.get("proxyHeaders").and_then(|p| p.get("request")).and_then(|r| r.as_object()) {
+                if let Some(req_headers) = bh
+                    .get("proxyHeaders")
+                    .and_then(|p| p.get("request"))
+                    .and_then(|r| r.as_object())
+                {
                     for (k, v) in req_headers {
                         if let Some(vs) = v.as_str() {
                             headers.insert(k.clone(), vs.to_string());
@@ -673,12 +713,19 @@ fn parse_stream_response(val: serde_json::Value, target_title: Option<&str>) -> 
     }
 
     if let Some(candidates) = &stream_obj.streams {
-        let chosen = candidates.iter().find(|c| is_candidate_acceptable(c))
-            .or_else(|| candidates.iter().find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty())));
+        let chosen = candidates.iter().find(|c| is_candidate_acceptable(c)).or_else(|| {
+            candidates
+                .iter()
+                .find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty()))
+        });
         if let Some(first) = chosen {
             let url = first.url.clone().unwrap();
             if let Some(bh) = &first.behavior_hints {
-                if let Some(req_headers) = bh.get("proxyHeaders").and_then(|p| p.get("request")).and_then(|r| r.as_object()) {
+                if let Some(req_headers) = bh
+                    .get("proxyHeaders")
+                    .and_then(|p| p.get("request"))
+                    .and_then(|r| r.as_object())
+                {
                     for (k, v) in req_headers {
                         if let Some(vs) = v.as_str() {
                             custom_headers.insert(k.clone(), vs.to_string());
@@ -739,7 +786,10 @@ pub async fn resolve_from_addons(
         "LOW" => "low",
         _ => "lossless",
     };
-    let atmos_param = if quality_pref == "DOLBY_ATMOS" || quality_pref == "HI_RES_LOSSLESS" || quality_pref == "LOSSLESS" {
+    let atmos_param = if quality_pref == "DOLBY_ATMOS"
+        || quality_pref == "HI_RES_LOSSLESS"
+        || quality_pref == "LOSSLESS"
+    {
         "auto"
     } else {
         "none"
@@ -779,7 +829,15 @@ pub async fn resolve_from_addons(
                             let mut score = 0i32;
 
                             // Version tag mismatch checks: NEVER replace an original track with an unwanted remix/live/acoustic/etc.
-                            let version_tags = ["remix", "live", "acoustic", "slowed", "sped_up", "instrumental", "cover"];
+                            let version_tags = [
+                                "remix",
+                                "live",
+                                "acoustic",
+                                "slowed",
+                                "sped_up",
+                                "instrumental",
+                                "cover",
+                            ];
                             let mut unwanted_version = false;
                             for tag in &version_tags {
                                 let target_has = has_version_keyword(query_title, tag);
@@ -805,8 +863,15 @@ pub async fn resolve_from_addons(
                             // If target does not mention featured artists, but candidate introduces a featured artist
                             let target_lower = format!("{} {}", query_title, artist).to_lowercase();
                             let cand_title_lower = cand_raw_title.to_lowercase();
-                            if !target_lower.contains("feat") && !target_lower.contains("ft.") && !target_lower.contains("with") {
-                                if cand_title_lower.contains("feat.") || cand_title_lower.contains("feat ") || cand_title_lower.contains("ft.") || cand_title_lower.contains("with ") {
+                            if !target_lower.contains("feat")
+                                && !target_lower.contains("ft.")
+                                && !target_lower.contains("with")
+                            {
+                                if cand_title_lower.contains("feat.")
+                                    || cand_title_lower.contains("feat ")
+                                    || cand_title_lower.contains("ft.")
+                                    || cand_title_lower.contains("with ")
+                                {
                                     score -= 80;
                                 }
                             }
@@ -828,9 +893,13 @@ pub async fn resolve_from_addons(
                             if !norm_target_title.is_empty() && !norm_cand_title.is_empty() {
                                 if norm_target_title == norm_cand_title {
                                     score += 70;
-                                } else if norm_cand_title.starts_with(&norm_target_title) || norm_target_title.starts_with(&norm_cand_title) {
+                                } else if norm_cand_title.starts_with(&norm_target_title)
+                                    || norm_target_title.starts_with(&norm_cand_title)
+                                {
                                     score += 40;
-                                } else if norm_cand_title.contains(&norm_target_title) || norm_target_title.contains(&norm_cand_title) {
+                                } else if norm_cand_title.contains(&norm_target_title)
+                                    || norm_target_title.contains(&norm_cand_title)
+                                {
                                     score += 25;
                                 } else {
                                     let target_words: Vec<&str> = norm_target_title.split_whitespace().collect();
@@ -847,9 +916,13 @@ pub async fn resolve_from_addons(
                             if !norm_target_artist.is_empty() && !norm_cand_artist.is_empty() {
                                 if norm_target_artist == norm_cand_artist {
                                     score += 50;
-                                } else if norm_cand_artist.starts_with(&norm_target_artist) || norm_target_artist.starts_with(&norm_cand_artist) {
+                                } else if norm_cand_artist.starts_with(&norm_target_artist)
+                                    || norm_target_artist.starts_with(&norm_cand_artist)
+                                {
                                     score += 30;
-                                } else if norm_cand_artist.contains(&norm_target_artist) || norm_target_artist.contains(&norm_cand_artist) {
+                                } else if norm_cand_artist.contains(&norm_target_artist)
+                                    || norm_target_artist.contains(&norm_cand_artist)
+                                {
                                     score += 15;
                                 }
                             }
@@ -887,52 +960,69 @@ pub async fn resolve_from_addons(
             let candidate_artist = candidate.resolved_artist();
             let candidate_artwork = candidate.resolved_artwork();
 
-            let (stream_url, addon_stream, custom_headers) = if let Some(direct_url) = candidate.resolved_stream_url() {
-                if !direct_url.trim().is_empty() {
-                    (
-                        direct_url.clone(),
-                        AddonStream {
-                            url: Some(direct_url),
-                            format: candidate.format.clone(),
-                            audio_quality: candidate.audio_quality.clone(),
-                            audio_mode: candidate.audio_mode.clone(),
-                            audio_modes: candidate.audio_modes.clone(),
-                            atmos: candidate.atmos,
-                            ..Default::default()
-                        },
-                        HashMap::new(),
-                    )
+            let (stream_url, addon_stream, custom_headers) =
+                if let Some(direct_url) = candidate.resolved_stream_url() {
+                    if !direct_url.trim().is_empty() {
+                        (
+                            direct_url.clone(),
+                            AddonStream {
+                                url: Some(direct_url),
+                                format: candidate.format.clone(),
+                                audio_quality: candidate.audio_quality.clone(),
+                                audio_mode: candidate.audio_mode.clone(),
+                                audio_modes: candidate.audio_modes.clone(),
+                                atmos: candidate.atmos,
+                                ..Default::default()
+                            },
+                            HashMap::new(),
+                        )
+                    } else {
+                        continue;
+                    }
                 } else {
-                    continue;
-                }
-            } else {
-                let mut stream_result = None;
-                let stream_endpoints = [
-                    format!("{}/stream/{}?quality={}&atmos={}", base_url, urlencoding::encode(&candidate.id), tier, atmos_param),
-                    format!("{}/stream/music/{}.json", base_url, urlencoding::encode(&candidate.id)),
-                    format!("{}/stream/track/{}.json", base_url, urlencoding::encode(&candidate.id)),
-                    format!("{}/stream/{}.json", base_url, urlencoding::encode(&candidate.id)),
-                ];
+                    let mut stream_result = None;
+                    let stream_endpoints = [
+                        format!(
+                            "{}/stream/{}?quality={}&atmos={}",
+                            base_url,
+                            urlencoding::encode(&candidate.id),
+                            tier,
+                            atmos_param
+                        ),
+                        format!(
+                            "{}/stream/music/{}.json",
+                            base_url,
+                            urlencoding::encode(&candidate.id)
+                        ),
+                        format!(
+                            "{}/stream/track/{}.json",
+                            base_url,
+                            urlencoding::encode(&candidate.id)
+                        ),
+                        format!("{}/stream/{}.json", base_url, urlencoding::encode(&candidate.id)),
+                    ];
 
-                for ep in &stream_endpoints {
-                    let stream_res = browser_request(&client, ep, 5000).send().await;
-                    if let Ok(res) = stream_res {
-                        if res.status().is_success() {
-                            if let Ok(val) = res.json::<serde_json::Value>().await {
-                                if let Some(resolved) = parse_stream_response(val, Some(query_title)) {
-                                    stream_result = Some(resolved);
-                                    break;
+                    for ep in &stream_endpoints {
+                        let stream_res = browser_request(&client, ep, 5000).send().await;
+                        if let Ok(res) = stream_res {
+                            if res.status().is_success() {
+                                if let Ok(val) = res.json::<serde_json::Value>().await {
+                                    if let Some(resolved) =
+                                        parse_stream_response(val, Some(query_title))
+                                    {
+                                        stream_result = Some(resolved);
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                match stream_result {
-                    Some(r) => r,
-                    None => continue,
-                }
-            };
+                    match stream_result {
+                        Some(r) => r,
+                        None => continue,
+                    }
+                };
 
             let combined_quality_text = format!(
                 "{} {} {} {} {}",
@@ -986,15 +1076,27 @@ pub async fn resolve_from_addons(
             );
 
             return Some(PlaybackData {
-                video_id: if !candidate.id.is_empty() { candidate.id } else { video_id.unwrap_or_default().to_string() },
+                video_id: if !candidate.id.is_empty() {
+                    candidate.id
+                } else {
+                    video_id.unwrap_or_default().to_string()
+                },
                 stream_url,
                 itag: 0,
                 headers: final_headers,
                 expires_in_seconds: 7200,
                 loudness_db: None,
                 playback_ping: None,
-                title: if !candidate_title.is_empty() { Some(candidate_title) } else { Some(title.to_string()) },
-                artists: if !candidate_artist.is_empty() { Some(candidate_artist) } else { Some(artist.to_string()) },
+                title: if !candidate_title.is_empty() {
+                    Some(candidate_title)
+                } else {
+                    Some(title.to_string())
+                },
+                artists: if !candidate_artist.is_empty() {
+                    Some(candidate_artist)
+                } else {
+                    Some(artist.to_string())
+                },
                 duration: cand_dur_str,
                 thumbnail: candidate_artwork,
                 is_video: Some(false),
@@ -1007,17 +1109,56 @@ pub async fn resolve_from_addons(
         let mut direct_endpoints = Vec::new();
         if let Some(vid) = video_id {
             if !vid.is_empty() {
-                direct_endpoints.push(format!("{}/stream/music/{}.json", base_url, urlencoding::encode(vid)));
-                direct_endpoints.push(format!("{}/stream/track/{}.json", base_url, urlencoding::encode(vid)));
-                direct_endpoints.push(format!("{}/stream/{}.json", base_url, urlencoding::encode(vid)));
-                direct_endpoints.push(format!("{}/stream/{}?quality={}&atmos={}", base_url, urlencoding::encode(vid), tier, atmos_param));
-                direct_endpoints.push(format!("{}/stream/music/{}.json", base_url, urlencoding::encode(&format!("yt:{}", vid))));
-                direct_endpoints.push(format!("{}/stream/{}.json", base_url, urlencoding::encode(&format!("yt:{}", vid))));
+                direct_endpoints.push(format!(
+                    "{}/stream/music/{}.json",
+                    base_url,
+                    urlencoding::encode(vid)
+                ));
+                direct_endpoints.push(format!(
+                    "{}/stream/track/{}.json",
+                    base_url,
+                    urlencoding::encode(vid)
+                ));
+                direct_endpoints.push(format!(
+                    "{}/stream/{}.json",
+                    base_url,
+                    urlencoding::encode(vid)
+                ));
+                direct_endpoints.push(format!(
+                    "{}/stream/{}?quality={}&atmos={}",
+                    base_url,
+                    urlencoding::encode(vid),
+                    tier,
+                    atmos_param
+                ));
+                direct_endpoints.push(format!(
+                    "{}/stream/music/{}.json",
+                    base_url,
+                    urlencoding::encode(&format!("yt:{}", vid))
+                ));
+                direct_endpoints.push(format!(
+                    "{}/stream/{}.json",
+                    base_url,
+                    urlencoding::encode(&format!("yt:{}", vid))
+                ));
             }
         }
         if !query.trim().is_empty() {
-            direct_endpoints.push(format!("{}/stream?q={}&quality={}&atmos={}", base_url, urlencoding::encode(&query), tier, atmos_param));
-            direct_endpoints.push(format!("{}/stream?title={}&artist={}&quality={}&atmos={}", base_url, urlencoding::encode(query_title), urlencoding::encode(artist), tier, atmos_param));
+            direct_endpoints.push(format!(
+                "{}/stream?q={}&quality={}&atmos={}",
+                base_url,
+                urlencoding::encode(&query),
+                tier,
+                atmos_param
+            ));
+            direct_endpoints.push(format!(
+                "{}/stream?title={}&artist={}&quality={}&atmos={}",
+                base_url,
+                urlencoding::encode(query_title),
+                urlencoding::encode(artist),
+                tier,
+                atmos_param
+            ));
         }
 
         for ep in direct_endpoints {
@@ -1025,7 +1166,9 @@ pub async fn resolve_from_addons(
             if let Ok(r) = res {
                 if r.status().is_success() {
                     if let Ok(val) = r.json::<serde_json::Value>().await {
-                        if let Some((stream_url, addon_stream, custom_headers)) = parse_stream_response(val, Some(query_title)) {
+                        if let Some((stream_url, addon_stream, custom_headers)) =
+                            parse_stream_response(val, Some(query_title))
+                        {
                             let combined_quality_text = format!(
                                 "{} {} {} {}",
                                 addon_stream.quality.as_deref().unwrap_or_default(),
