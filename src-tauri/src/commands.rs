@@ -2139,9 +2139,9 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v100_note, v090_note, v087_note, v086_note, v085_note, v084_note, v083_note, v082_note, v081_note,
-        v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note, v064_note,
-        v063_note, v062_note, v061_note, v06_note,
+        v100_note, v090_note, v087_note, v086_note, v085_note, v084_note, v083_note, v082_note,
+        v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note,
+        v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
@@ -4350,8 +4350,7 @@ pub async fn add_community_addon(
     if let Some(existing) =
         addons.iter_mut().find(|a| a.id == manifest.id || a.base_url == base_url)
     {
-        existing.name =
-            if !manifest.name.is_empty() { manifest.name } else { manifest.id.clone() };
+        existing.name = if !manifest.name.is_empty() { manifest.name } else { manifest.id.clone() };
         existing.base_url = base_url;
         existing.enabled = true;
         let ret = existing.clone();
@@ -4376,10 +4375,8 @@ pub async fn reverify_community_addon(
     id: String,
 ) -> Result<crate::addons::CommunityAddon, String> {
     let mut addons = crate::addons::get_addons(&state.db);
-    let addon = addons
-        .iter_mut()
-        .find(|a| a.id == id)
-        .ok_or_else(|| "Addon not found".to_string())?;
+    let addon =
+        addons.iter_mut().find(|a| a.id == id).ok_or_else(|| "Addon not found".to_string())?;
 
     let manifest = crate::addons::test_addon_manifest(&addon.base_url).await?;
     if !manifest.name.is_empty() {

@@ -433,7 +433,10 @@ impl AppState {
         match self.db.get_setting("quality").as_deref() {
             Some("LOW") => AudioQuality::Low,
             Some("AUTO") => AudioQuality::Auto,
-            Some("VERY_HIGH") | Some("LOSSLESS") | Some("HI_RES_LOSSLESS") | Some("DOLBY_ATMOS") => AudioQuality::VeryHigh,
+            Some("VERY_HIGH")
+            | Some("LOSSLESS")
+            | Some("HI_RES_LOSSLESS")
+            | Some("DOLBY_ATMOS") => AudioQuality::VeryHigh,
             _ => AudioQuality::High,
         }
     }
@@ -1125,10 +1128,8 @@ impl AppState {
 
         // Community Streaming Addons: resolve lossless streams first if quality is above High
         let q_str = self.db.get_setting("quality").unwrap_or_else(|| "HIGH".to_string());
-        let quality_is_above_high = matches!(
-            q_str.as_str(),
-            "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH"
-        );
+        let quality_is_above_high =
+            matches!(q_str.as_str(), "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH");
         if quality_is_above_high && !is_upload && crate::addons::is_addons_enabled(&self.db) {
             let track_meta = {
                 let q = self.queue.lock().await;
@@ -1158,15 +1159,9 @@ impl AppState {
             };
 
             if !t.trim().is_empty() || !video_id.is_empty() {
-                if let Some(mut addon_data) = crate::addons::resolve_from_addons(
-                    &self.db,
-                    &t,
-                    &a,
-                    d,
-                    &q_str,
-                    Some(video_id),
-                )
-                .await
+                if let Some(mut addon_data) =
+                    crate::addons::resolve_from_addons(&self.db, &t, &a, d, &q_str, Some(video_id))
+                        .await
                 {
                     addon_data.video_id = video_id.to_owned();
                     return Ok(addon_data);
@@ -1317,17 +1312,12 @@ impl AppState {
             .unwrap_or_else(|| "HIGH".to_string());
 
         // Lossless downloads are disabled; clamp max download quality to HIGH.
-        if matches!(
-            q_str.as_str(),
-            "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH"
-        ) {
+        if matches!(q_str.as_str(), "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH") {
             q_str = "HIGH".to_string();
         }
 
-        let quality_is_above_high = matches!(
-            q_str.as_str(),
-            "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH"
-        );
+        let quality_is_above_high =
+            matches!(q_str.as_str(), "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH");
 
         if quality_is_above_high && crate::addons::is_addons_enabled(&self.db) {
             let t = title.unwrap_or_default();
@@ -2349,7 +2339,8 @@ impl AppState {
 
         let raw_url = &playback.stream_url;
         let stream_url = if raw_url.contains("googlevideo.com") {
-            crate::audioproxy::register(raw_url, &playback.headers).unwrap_or_else(|| raw_url.clone())
+            crate::audioproxy::register(raw_url, &playback.headers)
+                .unwrap_or_else(|| raw_url.clone())
         } else {
             raw_url.clone()
         };
@@ -2380,7 +2371,9 @@ impl AppState {
             ext = "mp3";
         }
 
-        if let Some(ct) = res.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) {
+        if let Some(ct) =
+            res.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok())
+        {
             let ct_lower = ct.to_lowercase();
             if ct_lower.contains("audio/flac") || ct_lower.contains("audio/x-flac") {
                 ext = "flac";
@@ -2388,7 +2381,10 @@ impl AppState {
                 ext = "mp3";
             } else if ct_lower.contains("audio/ogg") || ct_lower.contains("audio/opus") {
                 ext = "opus";
-            } else if ct_lower.contains("audio/mp4") || ct_lower.contains("audio/aac") || ct_lower.contains("audio/m4a") {
+            } else if ct_lower.contains("audio/mp4")
+                || ct_lower.contains("audio/aac")
+                || ct_lower.contains("audio/m4a")
+            {
                 ext = "m4a";
             }
         }
@@ -3178,11 +3174,8 @@ impl AppState {
         }
         self.emit_queue().await;
 
-        let resume_on_startup = self
-            .db
-            .get_setting("resume_playback_on_startup")
-            .map(|s| s == "true")
-            .unwrap_or(false);
+        let resume_on_startup =
+            self.db.get_setting("resume_playback_on_startup").map(|s| s == "true").unwrap_or(false);
 
         if resume_on_startup {
             let st = self.clone();

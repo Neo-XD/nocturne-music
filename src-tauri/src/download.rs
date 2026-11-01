@@ -365,7 +365,8 @@ pub async fn download_song_track(
         None => return Err("Failed to obtain download response".into()),
     };
 
-    if let Some(ct) = res.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) {
+    if let Some(ct) = res.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok())
+    {
         let ct_lower = ct.to_lowercase();
         if ct_lower.contains("audio/flac") || ct_lower.contains("audio/x-flac") {
             ext = "flac";
@@ -375,7 +376,10 @@ pub async fn download_song_track(
             ext = "opus";
         } else if ct_lower.contains("audio/wav") || ct_lower.contains("audio/x-wav") {
             ext = "wav";
-        } else if ct_lower.contains("audio/mp4") || ct_lower.contains("audio/aac") || ct_lower.contains("audio/m4a") {
+        } else if ct_lower.contains("audio/mp4")
+            || ct_lower.contains("audio/aac")
+            || ct_lower.contains("audio/m4a")
+        {
             ext = "m4a";
         }
     }
@@ -476,7 +480,9 @@ pub async fn download_song_track(
 
     if downloaded_bytes < 4096 || !crate::cache::is_valid_audio_bytes(&first_bytes) {
         let _ = std::fs::remove_file(&target_path);
-        let err_msg = "Downloaded file is not a valid audio stream (server returned HTML or corrupt data)".to_string();
+        let err_msg =
+            "Downloaded file is not a valid audio stream (server returned HTML or corrupt data)"
+                .to_string();
         let _ = app.emit(
             "download-progress",
             DownloadProgress {
@@ -497,7 +503,8 @@ pub async fn download_song_track(
     let mut final_target_path = target_path;
     if let Some(real_ext) = crate::cache::detect_audio_extension_from_bytes(&first_bytes) {
         if real_ext != ext {
-            let corrected_name = format!("{}_{}.{}", clean_vid, sanitize_filename(&effective_title), real_ext);
+            let corrected_name =
+                format!("{}_{}.{}", clean_vid, sanitize_filename(&effective_title), real_ext);
             let corrected_path = dir.join(&corrected_name);
             if std::fs::rename(&final_target_path, &corrected_path).is_ok() {
                 final_target_path = corrected_path;
@@ -535,7 +542,9 @@ pub async fn download_song_track(
 
     // Attempt to write tags using lofty
     let duration_secs = parse_duration_secs(effective_duration.as_deref());
-    if let Ok(mut tagged_file) = lofty::probe::Probe::open(&final_target_path).and_then(|p| p.read()) {
+    if let Ok(mut tagged_file) =
+        lofty::probe::Probe::open(&final_target_path).and_then(|p| p.read())
+    {
         use lofty::tag::Accessor;
         let tag = match tagged_file.primary_tag_mut() {
             Some(t) => t,

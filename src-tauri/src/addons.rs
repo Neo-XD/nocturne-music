@@ -13,10 +13,10 @@
 //!   - Direct ID / query: `GET /stream/{videoId}?quality={tier}&atmos={atmos}`
 //!   - Supports BitChord direct `{ url, format, ... }` and Stremio `{ streams: [ { url, title, ... } ] }`
 
-use std::collections::HashMap;
-use std::time::Duration;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::Duration;
 
 use crate::db::Db;
 use crate::orchestrator::PlaybackData;
@@ -190,7 +190,8 @@ impl AddonTrack {
     }
 
     pub fn resolved_artwork(&self) -> Option<String> {
-        self.artwork_url.clone()
+        self.artwork_url
+            .clone()
             .or_else(|| self.album_artwork_url.clone())
             .or_else(|| self.poster.clone())
             .or_else(|| self.thumbnail.clone())
@@ -273,11 +274,7 @@ pub fn normalize_base_url(raw: &str) -> String {
 }
 
 fn parse_manifest_json(val: serde_json::Value, base_url: &str) -> Result<AddonManifest, String> {
-    let target_val = if let Some(m) = val.get("manifest") {
-        m.clone()
-    } else {
-        val
-    };
+    let target_val = if let Some(m) = val.get("manifest") { m.clone() } else { val };
 
     let mut manifest: AddonManifest = serde_json::from_value(target_val)
         .map_err(|e| format!("Failed to parse manifest JSON: {}", e))?;
@@ -412,9 +409,7 @@ pub fn save_addons(db: &Db, addons: &[CommunityAddon]) {
 }
 
 pub fn is_addons_enabled(db: &Db) -> bool {
-    db.get_setting(ADDONS_ENABLED_KEY)
-        .map(|v| v != "false")
-        .unwrap_or(true)
+    db.get_setting(ADDONS_ENABLED_KEY).map(|v| v != "false").unwrap_or(true)
 }
 
 pub fn set_addons_enabled(db: &Db, enabled: bool) {
@@ -585,11 +580,8 @@ fn format_quality_label(
                 specs.push(format!("{:.1} kHz", sr as f64 / 1000.0));
             }
         }
-        let spec_str = if !specs.is_empty() {
-            format!(" {}", specs.join(" / "))
-        } else {
-            "".to_string()
-        };
+        let spec_str =
+            if !specs.is_empty() { format!(" {}", specs.join(" / ")) } else { "".to_string() };
         let br_str = bitrate.map_or("".to_string(), |br| format!(" · {} kbps", br));
         return format!("HI-RES LOSSLESS{}{}", spec_str, br_str);
     }
@@ -665,9 +657,7 @@ fn parse_stream_response(
 
     if let Ok(candidates) = serde_json::from_value::<Vec<AddonStreamCandidate>>(val.clone()) {
         let chosen = candidates.iter().find(|c| is_candidate_acceptable(c)).or_else(|| {
-            candidates
-                .iter()
-                .find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty()))
+            candidates.iter().find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty()))
         });
         if let Some(first) = chosen {
             let url = first.url.clone().unwrap();
@@ -714,9 +704,7 @@ fn parse_stream_response(
 
     if let Some(candidates) = &stream_obj.streams {
         let chosen = candidates.iter().find(|c| is_candidate_acceptable(c)).or_else(|| {
-            candidates
-                .iter()
-                .find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty()))
+            candidates.iter().find(|c| c.url.as_ref().map_or(false, |u| !u.trim().is_empty()))
         });
         if let Some(first) = chosen {
             let url = first.url.clone().unwrap();
@@ -877,7 +865,9 @@ pub async fn resolve_from_addons(
                             }
 
                             // Duration comparison (±6 seconds tolerance)
-                            if let (Some(target_dur), Some(cand_dur)) = (duration_secs, track.duration) {
+                            if let (Some(target_dur), Some(cand_dur)) =
+                                (duration_secs, track.duration)
+                            {
                                 let diff = (target_dur - cand_dur).abs();
                                 if diff <= 3.0 {
                                     score += 50;
@@ -902,11 +892,18 @@ pub async fn resolve_from_addons(
                                 {
                                     score += 25;
                                 } else {
-                                    let target_words: Vec<&str> = norm_target_title.split_whitespace().collect();
-                                    let cand_words: Vec<&str> = norm_cand_title.split_whitespace().collect();
-                                    let shared = target_words.iter().filter(|w| cand_words.contains(w)).count();
+                                    let target_words: Vec<&str> =
+                                        norm_target_title.split_whitespace().collect();
+                                    let cand_words: Vec<&str> =
+                                        norm_cand_title.split_whitespace().collect();
+                                    let shared = target_words
+                                        .iter()
+                                        .filter(|w| cand_words.contains(w))
+                                        .count();
                                     if !target_words.is_empty() {
-                                        score += ((shared as f64 / target_words.len() as f64) * 20.0) as i32;
+                                        score += ((shared as f64 / target_words.len() as f64)
+                                            * 20.0)
+                                            as i32;
                                     }
                                 }
                             }
@@ -937,8 +934,9 @@ pub async fn resolve_from_addons(
                                 score += 25;
                             }
 
-                            let is_cand_hires = track.audio_quality.as_deref().map_or(false, is_hires_text)
-                                || track.format.as_deref().map_or(false, is_hires_text);
+                            let is_cand_hires =
+                                track.audio_quality.as_deref().map_or(false, is_hires_text)
+                                    || track.format.as_deref().map_or(false, is_hires_text);
                             if quality_pref == "HI_RES_LOSSLESS" && is_cand_hires {
                                 score += 20;
                             }
@@ -1039,7 +1037,9 @@ pub async fn resolve_from_addons(
                 || candidate.audio_modes.iter().any(|m| is_atmos_text(m))
                 || is_atmos_text(&combined_quality_text);
 
-            let codec = addon_stream.codec.as_deref()
+            let codec = addon_stream
+                .codec
+                .as_deref()
                 .or(addon_stream.file_codec.as_deref())
                 .or(addon_stream.format.as_deref())
                 .or(candidate.format.as_deref());
@@ -1181,13 +1181,18 @@ pub async fn resolve_from_addons(
                                 || addon_stream.audio_modes.iter().any(|m| is_atmos_text(m))
                                 || is_atmos_text(&combined_quality_text);
 
-                            let codec = addon_stream.codec.as_deref()
+                            let codec = addon_stream
+                                .codec
+                                .as_deref()
                                 .or(addon_stream.file_codec.as_deref())
                                 .or(addon_stream.format.as_deref());
 
-                            let sample_rate = parse_sample_rate(addon_stream.sample_rate, &combined_quality_text);
-                            let bit_depth = parse_bit_depth(addon_stream.bit_depth, &combined_quality_text);
-                            let bitrate = parse_bitrate_kbps(addon_stream.bitrate, &combined_quality_text);
+                            let sample_rate =
+                                parse_sample_rate(addon_stream.sample_rate, &combined_quality_text);
+                            let bit_depth =
+                                parse_bit_depth(addon_stream.bit_depth, &combined_quality_text);
+                            let bitrate =
+                                parse_bitrate_kbps(addon_stream.bitrate, &combined_quality_text);
 
                             let quality_label = format_quality_label(
                                 codec,

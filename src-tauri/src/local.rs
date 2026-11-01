@@ -620,8 +620,8 @@ pub fn detect_audio_quality(path: &str) -> Option<String> {
     match ext.as_str() {
         "flac" | "wav" | "alac" | "aiff" | "aif" => {
             let upper = ext.to_uppercase();
-            let is_hires = bit_depth.map_or(false, |b| b > 16)
-                || sample_rate.map_or(false, |sr| sr > 48000);
+            let is_hires =
+                bit_depth.map_or(false, |b| b > 16) || sample_rate.map_or(false, |sr| sr > 48000);
             let prefix = if is_hires { "HI-RES LOSSLESS" } else { "LOSSLESS" };
 
             let mut specs = Vec::new();
