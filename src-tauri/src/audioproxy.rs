@@ -342,8 +342,9 @@ fn chunk_end(pos: u64, end: u64) -> u64 {
 /// the channel. Ends when the window is done or the receiver is gone (a seek dropped the
 /// connection), which is also what cancels the in-flight upstream request.
 ///
-/// If an upstream read fails or stalls mid-chunk (e.g. googlevideo closes the connection after an idle
-/// pause or network hiccups), this automatically retries and resumes from the exact byte offset reached.
+/// If an upstream read fails or stalls mid-chunk (e.g. googlevideo closes the connection
+/// after an idle pause or network hiccups), this automatically retries and resumes from
+/// the exact byte offset reached.
 async fn pump_chunks(
     reg: Arc<Registration>,
     start: u64,

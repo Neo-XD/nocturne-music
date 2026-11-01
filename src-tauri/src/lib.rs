@@ -833,12 +833,10 @@ fn spawn_event_pump(
                 PlayerEvent::Duration(d) => {
                     let _ = app.emit("duration", serde_json::json!({ "duration": d }));
                     state.on_duration(d).await;
-                    if let Some(rs) =
-                        app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
-                    {
+                    if let Some(rs) = app.try_state::<Arc<remotesync::RemoteSyncController>>() {
                         if rs.has_connected_clients() {
                             let snapshot = state.playback_snapshot().await;
-                            let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+                            let st = remotesync::room_state_from_snapshot(&snapshot);
                             rs.broadcast_state(st);
                         }
                     }
@@ -858,12 +856,10 @@ fn spawn_event_pump(
                     tray::set_playing(&app, playing);
                     state.lt_on_play_state(playing).await; // Listen Together host → broadcast
 
-                    if let Some(rs) =
-                        app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
-                    {
+                    if let Some(rs) = app.try_state::<Arc<remotesync::RemoteSyncController>>() {
                         if rs.has_connected_clients() {
                             let snapshot = state.playback_snapshot().await;
-                            let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+                            let st = remotesync::room_state_from_snapshot(&snapshot);
                             rs.broadcast_state(st);
                         }
                     }

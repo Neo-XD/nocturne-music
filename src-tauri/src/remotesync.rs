@@ -223,16 +223,8 @@ impl RemoteSyncController {
                                 let gate_ref = pairing_gate.clone();
                                 tokio::spawn(async move {
                                     handle_connection(
-                                        stream,
-                                        peer_addr,
-                                        b_tx,
-                                        b_rx,
-                                        st_ref,
-                                        clients_ref,
-                                        count_ref,
-                                        paired_ref,
-                                        pin_ref,
-                                        gate_ref,
+                                        stream, peer_addr, b_tx, b_rx, st_ref, clients_ref,
+                                        count_ref, paired_ref, pin_ref, gate_ref,
                                     )
                                     .await;
                                 });
@@ -328,7 +320,8 @@ fn refusal_message(refusal: &Refusal) -> &'static str {
     }
 }
 
-/// The persisted pairing PIN, generating a six-digit one when absent or unusable, because a constant default would ship every install the same PIN.
+/// The persisted pairing PIN, generating a six-digit one when absent or unusable, because a
+/// constant default would ship every install the same PIN.
 pub fn ensure_pairing_pin(db: &crate::db::Db) -> String {
     match db.get_setting("remote_sync_pin").filter(|p| is_valid_pin(p)) {
         Some(pin) => pin,

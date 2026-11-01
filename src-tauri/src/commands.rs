@@ -4350,7 +4350,8 @@ pub async fn add_community_addon(
     if let Some(existing) =
         addons.iter_mut().find(|a| a.id == manifest.id || a.base_url == base_url)
     {
-        existing.name = if !manifest.name.is_empty() { manifest.name } else { manifest.id.clone() };
+        existing.name =
+            if !manifest.name.is_empty() { manifest.name } else { manifest.id.clone() };
         existing.base_url = base_url;
         existing.enabled = true;
         let ret = existing.clone();

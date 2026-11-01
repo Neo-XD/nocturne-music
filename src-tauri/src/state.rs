@@ -2408,11 +2408,8 @@ impl AppState {
         let tmp_path = dir.join(format!("{clean_id}.tmp"));
         let target_path = dir.join(format!("{clean_id}.{ext}"));
         let app_handle = self.app.clone();
-        let limit_mb = self
-            .db
-            .get_setting("cache_limit_mb")
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&lim| lim > 0);
+        let limit_mb = self.db.get_setting("cache_limit_mb");
+        let limit_mb = limit_mb.and_then(|s| s.parse::<u64>().ok()).filter(|&lim| lim > 0);
 
         tokio::task::spawn_blocking(move || {
             if std::fs::write(&tmp_path, &bytes).is_ok() {
