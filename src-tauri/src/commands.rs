@@ -293,6 +293,7 @@ const UI_SETTINGS: &[&str] = &[
     "discord_rpc_button_label",
     "discord_rpc_show_pause",
     "discord_rpc_show_time",
+    "resume_playback_on_startup",
 ];
 
 /// Resolve the music video for `video_id` and hand back a proxy URL the player view
@@ -4331,18 +4332,26 @@ pub async fn reset_global_hotkeys(
 }
 
 #[tauri::command]
-pub async fn get_community_addons(state: St<'_>) -> Result<Vec<crate::addons::CommunityAddon>, String> {
+pub async fn get_community_addons(
+    state: St<'_>,
+) -> Result<Vec<crate::addons::CommunityAddon>, String> {
     Ok(crate::addons::get_addons(&state.db))
 }
 
 #[tauri::command]
-pub async fn add_community_addon(state: St<'_>, url: String) -> Result<crate::addons::CommunityAddon, String> {
+pub async fn add_community_addon(
+    state: St<'_>,
+    url: String,
+) -> Result<crate::addons::CommunityAddon, String> {
     let manifest = crate::addons::test_addon_manifest(&url).await?;
     let mut addons = crate::addons::get_addons(&state.db);
     let base_url = crate::addons::normalize_base_url(&url);
 
-    if let Some(existing) = addons.iter_mut().find(|a| a.id == manifest.id || a.base_url == base_url) {
-        existing.name = if !manifest.name.is_empty() { manifest.name } else { manifest.id.clone() };
+    if let Some(existing) =
+        addons.iter_mut().find(|a| a.id == manifest.id || a.base_url == base_url)
+    {
+        existing.name =
+            if !manifest.name.is_empty() { manifest.name } else { manifest.id.clone() };
         existing.base_url = base_url;
         existing.enabled = true;
         let ret = existing.clone();
@@ -4362,6 +4371,26 @@ pub async fn add_community_addon(state: St<'_>, url: String) -> Result<crate::ad
 }
 
 #[tauri::command]
+pub async fn reverify_community_addon(
+    state: St<'_>,
+    id: String,
+) -> Result<crate::addons::CommunityAddon, String> {
+    let mut addons = crate::addons::get_addons(&state.db);
+    let addon = addons
+        .iter_mut()
+        .find(|a| a.id == id)
+        .ok_or_else(|| "Addon not found".to_string())?;
+
+    let manifest = crate::addons::test_addon_manifest(&addon.base_url).await?;
+    if !manifest.name.is_empty() {
+        addon.name = manifest.name;
+    }
+    let updated = addon.clone();
+    crate::addons::save_addons(&state.db, &addons);
+    Ok(updated)
+}
+
+#[tauri::command]
 pub async fn remove_community_addon(state: St<'_>, id: String) -> Result<(), String> {
     let mut addons = crate::addons::get_addons(&state.db);
     addons.retain(|a| a.id != id);
@@ -4370,7 +4399,11 @@ pub async fn remove_community_addon(state: St<'_>, id: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn toggle_community_addon(state: St<'_>, id: String, enabled: bool) -> Result<(), String> {
+pub async fn toggle_community_addon(
+    state: St<'_>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
     let mut addons = crate::addons::get_addons(&state.db);
     if let Some(a) = addons.iter_mut().find(|a| a.id == id) {
         a.enabled = enabled;

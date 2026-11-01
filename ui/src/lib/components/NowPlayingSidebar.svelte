@@ -250,6 +250,8 @@
 		: 'h-full border-l border-border/70 bg-card/90 shadow-2xl backdrop-blur-2xl rounded-none m-0'}"
 >
 	<!-- Draggable left edge resize handle -->
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="absolute left-0 top-0 bottom-0 w-1.5 hover:w-2 hover:bg-primary/50 cursor-col-resize z-30 transition-all select-none"
 		onmousedown={startResize}

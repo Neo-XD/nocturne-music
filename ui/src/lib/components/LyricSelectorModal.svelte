@@ -135,16 +135,22 @@
 
 {#if open}
 	<div
-		class="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
-		onclick={(e) => {
-			if (e.target === e.currentTarget) closeModal();
-		}}
+		class="fixed inset-0 z-[95] flex items-center justify-center p-4 animate-in fade-in duration-200"
 	>
+		<button
+			type="button"
+			class="fixed inset-0 bg-black/60 backdrop-blur-sm cursor-default"
+			onclick={closeModal}
+			aria-label="Close modal"
+		></button>
+
+
+
 
 
 		<div
-			class="relative flex flex-col w-full max-w-3xl max-h-[85vh] rounded-2xl bg-card border border-border shadow-2xl overflow-hidden"
-			onclick={(e) => e.stopPropagation()}
+			class="relative flex flex-col w-full max-w-3xl max-h-[85vh] rounded-2xl bg-card border border-border shadow-2xl overflow-hidden z-10"
+
 		>
 			<!-- Header -->
 			<div class="flex items-center justify-between px-6 py-4 border-b border-border/40">

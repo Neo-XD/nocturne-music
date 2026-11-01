@@ -1153,6 +1153,8 @@ export const getCommunityAddons = () =>
 	invoke<CommunityAddon[]>('get_community_addons');
 export const addCommunityAddon = (url: string) =>
 	invoke<CommunityAddon>('add_community_addon', { url });
+export const reverifyCommunityAddon = (id: string) =>
+	invoke<CommunityAddon>('reverify_community_addon', { id });
 export const removeCommunityAddon = (id: string) =>
 	invoke<void>('remove_community_addon', { id });
 export const toggleCommunityAddon = (id: string, enabled: boolean) =>

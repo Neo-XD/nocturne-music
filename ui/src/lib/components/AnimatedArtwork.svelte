@@ -21,6 +21,18 @@
 	let canvasEl: HTMLCanvasElement | undefined = $state();
 	let gl: WebGLRenderingContext | null = null;
 	let program: WebGLProgram | null = null;
+	let uniformLocs: {
+		u_time: WebGLUniformLocation | null;
+		u_speed: WebGLUniformLocation | null;
+		u_intensity: WebGLUniformLocation | null;
+		u_mix: WebGLUniformLocation | null;
+		u_has_image: WebGLUniformLocation | null;
+		u_image: WebGLUniformLocation | null;
+		u_next_image: WebGLUniformLocation | null;
+	} | null = null;
+	let canvasWidth = 0;
+	let canvasHeight = 0;
+	let needsResize = false;
 	let currentTexture: WebGLTexture | null = null;
 	let nextTexture: WebGLTexture | null = null;
 	let dummyTexture: WebGLTexture | null = null;
@@ -155,7 +167,7 @@
 
 	function initGL(canvas: HTMLCanvasElement): boolean {
 		try {
-			gl = canvas.getContext('webgl', { alpha: false, antialias: true, powerPreference: 'low-power' });
+			gl = canvas.getContext('webgl', { alpha: false, antialias: false, powerPreference: 'low-power' });
 			if (!gl) return false;
 
 			const vs = createShader(gl, gl.VERTEX_SHADER, VS_SOURCE);
@@ -188,6 +200,15 @@
 			gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
 			dummyTexture = createDummyTexture(gl);
+			uniformLocs = {
+				u_time: gl.getUniformLocation(program, 'u_time'),
+				u_speed: gl.getUniformLocation(program, 'u_speed'),
+				u_intensity: gl.getUniformLocation(program, 'u_intensity'),
+				u_mix: gl.getUniformLocation(program, 'u_mix'),
+				u_has_image: gl.getUniformLocation(program, 'u_has_image'),
+				u_image: gl.getUniformLocation(program, 'u_image'),
+				u_next_image: gl.getUniformLocation(program, 'u_next_image')
+			};
 			return true;
 		} catch (e) {
 			console.error('Failed to init WebGL:', e);
@@ -295,16 +316,13 @@
 	}
 
 	function render() {
-		if (!gl || !program || !canvasEl || !isVisible) return;
+		if (!gl || !program || !uniformLocs || !canvasEl || !isVisible) return;
 
-		const dpr = Math.min(window.devicePixelRatio || 1, 2);
-		const width = Math.floor(canvasEl.clientWidth * dpr);
-		const height = Math.floor(canvasEl.clientHeight * dpr);
-
-		if (canvasEl.width !== width || canvasEl.height !== height) {
-			canvasEl.width = width;
-			canvasEl.height = height;
-			gl.viewport(0, 0, width, height);
+		if (needsResize) {
+			canvasEl.width = canvasWidth;
+			canvasEl.height = canvasHeight;
+			gl.viewport(0, 0, canvasWidth, canvasHeight);
+			needsResize = false;
 		}
 
 		if (textureMix < 1.0) {
@@ -320,15 +338,15 @@
 		const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
 		lastFrameTime = now;
 
-		const stepRate = playback.paused ? speed * 0.6 : speed;
+		const stepRate = playback.paused ? speed * 0.5 : speed;
 		accumulatedTime += dt * stepRate;
 
-		gl.uniform1f(gl.getUniformLocation(program, 'u_time'), accumulatedTime);
-		gl.uniform1f(gl.getUniformLocation(program, 'u_speed'), 1.0);
-		gl.uniform1f(gl.getUniformLocation(program, 'u_intensity'), intensity);
-		gl.uniform1f(gl.getUniformLocation(program, 'u_mix'), textureMix);
+		gl.uniform1f(uniformLocs.u_time, accumulatedTime);
+		gl.uniform1f(uniformLocs.u_speed, 1.0);
+		gl.uniform1f(uniformLocs.u_intensity, intensity);
+		gl.uniform1f(uniformLocs.u_mix, textureMix);
 		const hasImage = currentTexture ? 1.0 : 0.0;
-		gl.uniform1f(gl.getUniformLocation(program, 'u_has_image'), hasImage);
+		gl.uniform1f(uniformLocs.u_has_image, hasImage);
 
 		const activeTex = currentTexture ?? dummyTexture;
 		const secondTex = nextTexture ?? dummyTexture;
@@ -336,13 +354,13 @@
 		if (activeTex) {
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, activeTex);
-			gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+			gl.uniform1i(uniformLocs.u_image, 0);
 		}
 
 		if (secondTex) {
 			gl.activeTexture(gl.TEXTURE1);
 			gl.bindTexture(gl.TEXTURE_2D, secondTex);
-			gl.uniform1i(gl.getUniformLocation(program, 'u_next_image'), 1);
+			gl.uniform1i(uniformLocs.u_next_image, 1);
 		}
 
 		gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -396,6 +414,36 @@
 			return;
 		}
 
+		const initialRect = canvasEl.getBoundingClientRect();
+		const initW = initialRect.width || canvasEl.clientWidth || 300;
+		const initH = initialRect.height || canvasEl.clientHeight || 300;
+		const initDpr = Math.min(window.devicePixelRatio || 1, 1.25);
+		const maxDim = 512;
+		const maxMeasured = Math.max(initW, initH);
+		const initialScale = Math.min(initDpr, maxDim / maxMeasured);
+		canvasWidth = Math.max(32, Math.floor(initW * initialScale));
+		canvasHeight = Math.max(32, Math.floor(initH * initialScale));
+		needsResize = true;
+
+		const resizeObs = new ResizeObserver((entries) => {
+			const entry = entries[0];
+			if (!entry) return;
+			const { width, height } = entry.contentRect;
+			if (width > 0 && height > 0) {
+				const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+				const measured = Math.max(width, height);
+				const s = Math.min(dpr, 512 / measured);
+				const newW = Math.max(32, Math.floor(width * s));
+				const newH = Math.max(32, Math.floor(height * s));
+				if (newW !== canvasWidth || newH !== canvasHeight) {
+					canvasWidth = newW;
+					canvasHeight = newH;
+					needsResize = true;
+				}
+			}
+		});
+		resizeObs.observe(canvasEl);
+
 		const obs = new IntersectionObserver((entries) => {
 			const entry = entries[0];
 			isVisible = entry ? entry.isIntersecting : true;
@@ -424,6 +472,7 @@
 		return () => {
 			document.removeEventListener('visibilitychange', onVisibility);
 			obs.disconnect();
+			resizeObs.disconnect();
 			cancelAnimationFrame(animId);
 			if (gl) {
 				if (currentTexture) gl.deleteTexture(currentTexture);

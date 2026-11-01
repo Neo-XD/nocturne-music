@@ -212,6 +212,7 @@
 >
 	{#if !collapsed}
 		<!-- Resize handle on the right edge -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize z-40 hover:bg-primary/25 active:bg-primary/40 transition-colors select-none"
 			onmousedown={startResize}
@@ -573,6 +574,7 @@
 						{#each rootFolders as folder (folder.id)}
 							{@const folderPlaylists = playlists.filter((p) => folder.playlistIds.includes(p.id))}
 							{@const isDragTarget = dragOverFolderId === folder.id}
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<div
 								class="group/folder rounded-lg transition-all {isDragTarget
 									? 'bg-primary/15 ring-1 ring-primary/50'
@@ -638,6 +640,7 @@
 						{/each}
 
 						<!-- Top Level / Unfiled Playlists Drop Zone & List -->
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
 							class="rounded-lg transition-colors {dragOverRoot ? 'bg-primary/10 ring-1 ring-primary/40' : ''}"
 							ondragover={(e) => {
@@ -744,6 +747,7 @@
 
 {#snippet playlistRow(pl: BrowseItem, inFolder: boolean = false)}
 	<!-- The ⋯ is a sibling of the link, not a child: a <button> inside an <a> is invalid HTML -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="group/row relative"
 		data-ctx
@@ -805,6 +809,7 @@
 {/snippet}
 
 {#snippet collapsedPlaylistButton(pl: BrowseItem)}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="group/cpl relative flex items-center justify-center"
 		data-ctx

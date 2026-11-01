@@ -4,7 +4,7 @@
 //! discover, pair, and control desktop playback with instant bidirectional state syncing.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -59,6 +59,7 @@ pub struct RemoteSyncController {
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
     shutdown_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
+    connected_client_count: Arc<AtomicUsize>,
     paired_devices: Arc<RwLock<Vec<PairedDevice>>>,
     current_port: Arc<RwLock<u16>>,
     pairing_pin: Arc<RwLock<String>>,
@@ -74,6 +75,7 @@ impl RemoteSyncController {
             state_ref: Arc::new(RwLock::new(None)),
             shutdown_tx: Arc::new(Mutex::new(None)),
             connected_clients: Arc::new(RwLock::new(Vec::new())),
+            connected_client_count: Arc::new(AtomicUsize::new(0)),
             paired_devices: Arc::new(RwLock::new(Vec::new())),
             current_port: Arc::new(RwLock::new(8080)),
             pairing_pin: Arc::new(RwLock::new(String::new())),
@@ -89,6 +91,10 @@ impl RemoteSyncController {
         }
         let mut w = self.state_ref.write().await;
         *w = Some(app_state);
+    }
+
+    pub fn has_connected_clients(&self) -> bool {
+        self.is_running() && self.connected_client_count.load(Ordering::Relaxed) > 0
     }
 
     pub fn is_running(&self) -> bool {
@@ -186,6 +192,7 @@ impl RemoteSyncController {
         let broadcast_tx = self.broadcast_tx.clone();
         let state_ref = self.state_ref.clone();
         let connected_clients = self.connected_clients.clone();
+        let client_count = self.connected_client_count.clone();
         let paired_devices = self.paired_devices.clone();
         let pairing_pin = self.pairing_pin.clone();
         let pairing_gate = self.pairing_gate.clone();
@@ -210,11 +217,24 @@ impl RemoteSyncController {
                                 let b_rx = broadcast_tx.subscribe();
                                 let st_ref = state_ref.clone();
                                 let clients_ref = connected_clients.clone();
+                                let count_ref = client_count.clone();
                                 let paired_ref = paired_devices.clone();
                                 let pin_ref = pairing_pin.clone();
                                 let gate_ref = pairing_gate.clone();
                                 tokio::spawn(async move {
-                                    handle_connection(stream, peer_addr, b_tx, b_rx, st_ref, clients_ref, paired_ref, pin_ref, gate_ref).await;
+                                    handle_connection(
+                                        stream,
+                                        peer_addr,
+                                        b_tx,
+                                        b_rx,
+                                        st_ref,
+                                        clients_ref,
+                                        count_ref,
+                                        paired_ref,
+                                        pin_ref,
+                                        gate_ref,
+                                    )
+                                    .await;
                                 });
                             }
                             Err(e) => {
@@ -236,11 +256,12 @@ impl RemoteSyncController {
             let _ = tx.send(());
         }
         self.connected_clients.write().await.clear();
+        self.connected_client_count.store(0, Ordering::Relaxed);
         self.running.store(false, Ordering::SeqCst);
     }
 
     pub fn broadcast_state(&self, state: RoomState) {
-        if !self.is_running() {
+        if !self.has_connected_clients() {
             return;
         }
         let msg = SyncWireMessage::SyncState { state };
@@ -326,6 +347,7 @@ async fn handle_connection(
     mut b_rx: broadcast::Receiver<String>,
     state_ref: Arc<RwLock<Option<Arc<AppState>>>>,
     connected_clients: Arc<RwLock<Vec<ConnectedClient>>>,
+    connected_client_count: Arc<AtomicUsize>,
     paired_devices: Arc<RwLock<Vec<PairedDevice>>>,
     pairing_pin: Arc<RwLock<String>>,
     pairing_gate: Arc<PairingGate>,
@@ -465,6 +487,7 @@ async fn handle_connection(
     }
 
     client_info.name = assigned_name;
+    connected_client_count.fetch_add(1, Ordering::Relaxed);
     {
         let mut clients = connected_clients.write().await;
         clients.push(client_info.clone());
@@ -529,6 +552,7 @@ async fn handle_connection(
     }
 
     // Cleanup client on disconnect
+    connected_client_count.fetch_sub(1, Ordering::Relaxed);
     {
         let mut clients = connected_clients.write().await;
         clients.retain(|c| c.id != client_id);

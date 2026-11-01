@@ -671,7 +671,9 @@
 			<div class="flex w-full max-w-lg items-center gap-2 text-[11px] font-mono text-muted-foreground">
 				<span class="tabular-nums">{fmt(shownPosition)}</span>
 				{#if prefs.waveformSeekbar}
-					<div class="flex-1" data-no-bar-click onclick={(e) => e.stopPropagation()} onpointerdown={(e) => e.stopPropagation()}>
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="flex-1" data-no-bar-click onclick={(e) => e.stopPropagation()} onpointerdown={(e) => e.stopPropagation()}>
 						<WaveformSeekbar
 							position={shownPosition}
 							duration={playback.duration}
@@ -1007,6 +1009,8 @@
 		<div class="flex w-full max-w-md items-center gap-2 text-xs text-muted-foreground">
 			<span class="tabular-nums">{fmt(shownPosition)}</span>
 			{#if prefs.waveformSeekbar}
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="flex-1" data-no-bar-click onclick={(e) => e.stopPropagation()} onpointerdown={(e) => e.stopPropagation()}>
 					<WaveformSeekbar
 						position={shownPosition}

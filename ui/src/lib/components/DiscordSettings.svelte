@@ -14,7 +14,15 @@
 	let { settings }: { settings: Record<string, string> } = $props();
 
 	// Preserved card layout: a single JSON blob rather than a settings row per field.
-	let cfg = $state<DiscordConfig>(parseDiscordConfig(settings.discord_rpc_config));
+	let cfg = $state<DiscordConfig>(DISCORD_DEFAULTS);
+	let initialized = false;
+
+	$effect(() => {
+		if (!initialized && settings.discord_rpc_config !== undefined) {
+			cfg = parseDiscordConfig(settings.discord_rpc_config);
+			initialized = true;
+		}
+	});
 
 	// Enabled flag matches titlebar toggle
 	const enabled = $derived(prefs.visibleIcons.titlebar.discord);

@@ -694,6 +694,7 @@ pub fn run() {
             commands::app_icon_path,
             commands::get_community_addons,
             commands::add_community_addon,
+            commands::reverify_community_addon,
             commands::remove_community_addon,
             commands::toggle_community_addon,
             commands::set_community_addons_enabled,
@@ -768,6 +769,11 @@ pub fn run() {
             } = &event
             {
                 if label == "main" {
+                    for (name, win) in handle.webview_windows() {
+                        if name != "main" {
+                            let _ = win.destroy();
+                        }
+                    }
                     handle.exit(0);
                 }
             }
@@ -821,15 +827,6 @@ fn spawn_event_pump(
                 PlayerEvent::Position(p) => {
                     if throttle.should_emit(p, std::time::Instant::now()) {
                         let _ = app.emit("position", serde_json::json!({ "position": p }));
-                        if let Some(rs) = app
-                            .try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
-                        {
-                            if rs.is_running() {
-                                let snapshot = state.playback_snapshot().await;
-                                let st = crate::remotesync::room_state_from_snapshot(&snapshot);
-                                rs.broadcast_state(st);
-                            }
-                        }
                     }
                     state.on_position(p).await;
                 }
@@ -839,7 +836,7 @@ fn spawn_event_pump(
                     if let Some(rs) =
                         app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
                     {
-                        if rs.is_running() {
+                        if rs.has_connected_clients() {
                             let snapshot = state.playback_snapshot().await;
                             let st = crate::remotesync::room_state_from_snapshot(&snapshot);
                             rs.broadcast_state(st);
@@ -864,7 +861,7 @@ fn spawn_event_pump(
                     if let Some(rs) =
                         app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
                     {
-                        if rs.is_running() {
+                        if rs.has_connected_clients() {
                             let snapshot = state.playback_snapshot().await;
                             let st = crate::remotesync::room_state_from_snapshot(&snapshot);
                             rs.broadcast_state(st);

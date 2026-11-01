@@ -507,7 +507,6 @@
 		>
 			<div
 				class="overflow-hidden rounded-2xl border border-border/80 bg-card/95 shadow-2xl backdrop-blur-2xl ring-1 ring-white/10"
-				onclick={(e) => e.stopPropagation()}
 			>
 				<!-- Spotlight Input Bar -->
 				<form

@@ -2200,7 +2200,9 @@ impl AppState {
         let cache_data = data.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(4)).await;
-            me_cache.cache_audio_if_needed(cache_item, cache_data).await;
+            if me_cache.generation.load(Ordering::SeqCst) == gen {
+                me_cache.cache_audio_if_needed(gen, cache_item, cache_data).await;
+            }
         });
 
         true
@@ -2316,9 +2318,13 @@ impl AppState {
     /// Background cache audio bytes for quick listening to already listened songs.
     async fn cache_audio_if_needed(
         self: &std::sync::Arc<Self>,
+        gen: u64,
         item: innertube::SongItem,
         playback: crate::orchestrator::PlaybackData,
     ) {
+        if self.generation.load(Ordering::SeqCst) != gen {
+            return;
+        }
         if playback.stream_client == "local"
             || playback.stream_client == "download"
             || playback.stream_client == "cache"
@@ -2391,6 +2397,10 @@ impl AppState {
             return;
         };
 
+        if self.generation.load(Ordering::SeqCst) != gen {
+            return;
+        }
+
         if !crate::cache::is_valid_audio_bytes(&bytes) || bytes.len() < 4096 {
             return;
         }
@@ -2401,15 +2411,23 @@ impl AppState {
 
         let tmp_path = dir.join(format!("{clean_id}.tmp"));
         let target_path = dir.join(format!("{clean_id}.{ext}"));
+        let app_handle = self.app.clone();
+        let limit_mb = self
+            .db
+            .get_setting("cache_limit_mb")
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&lim| lim > 0);
 
-        if std::fs::write(&tmp_path, &bytes).is_ok() {
-            let _ = std::fs::rename(&tmp_path, &target_path);
-            let _ = self.app.asset_protocol_scope().allow_file(&target_path);
+        tokio::task::spawn_blocking(move || {
+            if std::fs::write(&tmp_path, &bytes).is_ok() {
+                let _ = std::fs::rename(&tmp_path, &target_path);
+                let _ = app_handle.asset_protocol_scope().allow_file(&target_path);
 
-            if let Some(limit_mb) = self.db.get_setting("cache_limit_mb").and_then(|s| s.parse::<u64>().ok()).filter(|&lim| lim > 0) {
-                let _ = crate::cache::prune_cache_to_limit(&self.app, limit_mb * 1024 * 1024);
+                if let Some(lim) = limit_mb {
+                    let _ = crate::cache::prune_cache_to_limit(&app_handle, lim * 1024 * 1024);
+                }
             }
-        }
+        });
     }
 
     async fn current_item(&self) -> Option<SongItem> {
@@ -3159,6 +3177,20 @@ impl AppState {
             let _ = self.app.emit("playback-state", "paused");
         }
         self.emit_queue().await;
+
+        let resume_on_startup = self
+            .db
+            .get_setting("resume_playback_on_startup")
+            .map(|s| s == "true")
+            .unwrap_or(false);
+
+        if resume_on_startup {
+            let st = self.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                st.resume_or_toggle().await;
+            });
+        }
     }
 
     /// Throttled position persistence for resume-on-restart. Records the latest position always

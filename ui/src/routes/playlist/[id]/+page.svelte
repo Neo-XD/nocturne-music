@@ -506,6 +506,15 @@
 		rowWindow(sc.scrollTop - sc.offsetPx, sc.viewportPx, shown.length, sc.rowPx)
 	);
 
+	let scrollContainer = $state<HTMLDivElement | null>(null);
+	const nowPlayingIndex = $derived(nowId ? shown.findIndex((t) => t.video_id === nowId) : -1);
+
+	function scrollToNowPlaying() {
+		if (nowPlayingIndex < 0 || !scrollContainer) return;
+		const targetY = sc.offsetPx + nowPlayingIndex * sc.rowPx - 80;
+		scrollContainer.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+	}
+
 	// One page per approach to the bottom: the observer only fires when the sentinel *enters* view,
 	// so an appended page that pushes it back out is required before the next fetch. rootMargin
 	// starts the fetch early enough that the rows are usually there by the time you reach them.
@@ -749,7 +758,7 @@
 	{:else if pl}
 		<!-- One scroller for the whole page: the header scrolls away above the rows, same as the
 		     album page. -->
-		<div class="content-in min-h-0 flex-1 overflow-y-auto" {@attach sc.attach}>
+		<div class="content-in min-h-0 flex-1 overflow-y-auto" bind:this={scrollContainer} {@attach sc.attach}>
 			<div class="relative flex min-h-[38vh] shrink-0 items-end gap-6 overflow-hidden p-6 pt-8">
 				{#if motionArtworkUrl}
 					<div
@@ -865,6 +874,17 @@
 								<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
 								{preparing || resorting ? 'Sorting…' : 'Play'}
 							</Button>
+							{#if nowPlayingIndex >= 0}
+								<Button
+									variant="outline"
+									size="sm"
+									class="gap-1.5 text-xs text-primary border-primary/30 hover:bg-primary/10 cursor-pointer"
+									onclick={scrollToNowPlaying}
+								>
+									<HugeiconsIcon icon={PlayIcon} class="h-3.5 w-3.5 animate-pulse" />
+									Now playing
+								</Button>
+							{/if}
 							{#if confirmingDelete}
 								<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
 									<span class="text-xs text-muted-foreground">Delete this playlist?</span>

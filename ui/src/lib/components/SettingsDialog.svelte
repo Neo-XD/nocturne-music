@@ -903,6 +903,7 @@
 	const downloadAskOn = $derived(prefs.downloadAlwaysAsk);
 	const historyOn = $derived(settings.enable_history !== 'false');
 	const autoplayOn = $derived(settings.autoplay !== 'false');
+	const resumePlaybackOnStartupOn = $derived(settings.resume_playback_on_startup === 'true');
 	const hideVideosOn = $derived(settings.hide_videos === 'true');
 	// Off until the setting is turned on: still experimental, so nobody gets video they didn't ask
 	// for. Same test in `player.svelte.ts`, which hydrates `prefs` at launch.
@@ -1070,6 +1071,8 @@
 	let showAddAddon = $state(false);
 	let newAddonUrl = $state('');
 	let addingAddon = $state(false);
+	let verifyingAddonId = $state<string | null>(null);
+	let verifyingAll = $state(false);
 
 	async function loadCommunityAddons() {
 		try {
@@ -1110,6 +1113,41 @@
 			toast.error(`Failed to add addon: ${e}`);
 		} finally {
 			addingAddon = false;
+		}
+	}
+
+	async function handleReverifyAddon(id: string) {
+		verifyingAddonId = id;
+		try {
+			const updated = await api.reverifyCommunityAddon(id);
+			communityAddons = await api.getCommunityAddons();
+			toast.success(`Addon "${updated.name}" re-verified (Online)`);
+		} catch (e) {
+			toast.error(`Verification failed: ${e}`);
+		} finally {
+			verifyingAddonId = null;
+		}
+	}
+
+	async function handleReverifyAllAddons() {
+		if (communityAddons.length === 0) return;
+		verifyingAll = true;
+		let successCount = 0;
+		let failCount = 0;
+		for (const addon of communityAddons) {
+			try {
+				await api.reverifyCommunityAddon(addon.id);
+				successCount++;
+			} catch {
+				failCount++;
+			}
+		}
+		communityAddons = await api.getCommunityAddons();
+		verifyingAll = false;
+		if (failCount === 0) {
+			toast.success(`All ${successCount} addon(s) verified successfully`);
+		} else {
+			toast(`${successCount} verified, ${failCount} unreachable or failed verification`);
 		}
 	}
 
@@ -1177,6 +1215,11 @@
 	async function setAutoplay(on: boolean) {
 		settings.autoplay = on ? 'true' : 'false';
 		await api.setSetting('autoplay', settings.autoplay);
+	}
+
+	async function setResumePlaybackOnStartup(on: boolean) {
+		settings.resume_playback_on_startup = on ? 'true' : 'false';
+		await api.setSetting('resume_playback_on_startup', settings.resume_playback_on_startup);
 	}
 
 	async function setFilterExplicit(on: boolean) {
@@ -2388,6 +2431,12 @@
 									control: autoplaySwitch
 								})}
 								{@render row({
+									title: 'Resume playback on startup',
+									desc: 'Automatically resume playing the restored queue when Nocturne starts.',
+									control: resumePlaybackOnStartupSwitch,
+									tall: true
+								})}
+								{@render row({
 									title: 'Prevent duplicate tracks in queue',
 									desc: "Adding a track that's already in the queue moves it from its old position instead of adding a second copy.",
 									control: dupSwitch,
@@ -2623,14 +2672,31 @@
 												<p class="text-xs font-medium text-foreground">Configured Addons</p>
 												<p class="text-[11px] text-muted-foreground">Addons are queried in order to resolve lossless audio streams.</p>
 											</div>
-											<Button
-												variant="outline"
-												size="sm"
-												class="h-8 gap-1.5 text-xs font-medium cursor-pointer"
-												onclick={() => (showAddAddon = true)}
-											>
-												+ Add Community Addon
-											</Button>
+											<div class="flex items-center gap-2">
+												{#if communityAddons.length > 0}
+													<Button
+														variant="ghost"
+														size="sm"
+														class="h-8 gap-1.5 text-xs font-medium cursor-pointer"
+														disabled={verifyingAll || verifyingAddonId !== null}
+														onclick={handleReverifyAllAddons}
+													>
+														<HugeiconsIcon
+															icon={Refresh01Icon}
+															class="h-3.5 w-3.5 {verifyingAll ? 'animate-spin text-primary' : ''}"
+														/>
+														{verifyingAll ? 'Verifying…' : 'Re-verify All'}
+													</Button>
+												{/if}
+												<Button
+													variant="outline"
+													size="sm"
+													class="h-8 gap-1.5 text-xs font-medium cursor-pointer"
+													onclick={() => (showAddAddon = true)}
+												>
+													+ Add Community Addon
+												</Button>
+											</div>
 										</div>
 
 										{#if showAddAddon}
@@ -2685,7 +2751,19 @@
 															</div>
 															<p class="truncate font-mono text-[10px] text-muted-foreground/80 mt-0.5">{addon.baseUrl}</p>
 														</div>
-														<div class="flex items-center gap-3 shrink-0">
+														<div class="flex items-center gap-2 shrink-0">
+															<button
+																type="button"
+																class="cursor-pointer text-muted-foreground hover:text-foreground p-1 rounded transition-colors disabled:opacity-40"
+																title="Re-verify addon connection"
+																disabled={verifyingAddonId === addon.id || verifyingAll}
+																onclick={() => handleReverifyAddon(addon.id)}
+															>
+																<HugeiconsIcon
+																	icon={Refresh01Icon}
+																	class="h-3.5 w-3.5 {verifyingAddonId === addon.id ? 'animate-spin text-primary' : ''}"
+																/>
+															</button>
 															<Switch
 																checked={addon.enabled}
 																onCheckedChange={(val) => handleToggleAddon(addon.id, val)}
@@ -3841,6 +3919,7 @@
 {#snippet startMinimizedSwitch()}<Switch checked={startMinimizedOn} onCheckedChange={setStartMinimized} />{/snippet}
 {#snippet trackNotificationsSwitch()}<Switch checked={trackNotificationsOn} onCheckedChange={setTrackNotifications} />{/snippet}
 {#snippet autoplaySwitch()}<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />{/snippet}
+{#snippet resumePlaybackOnStartupSwitch()}<Switch checked={resumePlaybackOnStartupOn} onCheckedChange={setResumePlaybackOnStartup} />{/snippet}
 {#snippet normalizeSwitch()}<Switch checked={normalizeOn} onCheckedChange={setNormalize} />{/snippet}
 {#snippet showAudioQualitySwitch()}<Switch checked={prefs.showAudioQuality} onCheckedChange={setShowAudioQuality} />{/snippet}
 {#snippet seekbarStyleSelector()}
