@@ -3,19 +3,19 @@
 //! Protocol specifications & Compatibility:
 //! - BitChord & Stremio manifests:
 //!   - `GET /manifest.json` (or `/`): { id, name, version, resources, ... }
-//!   - Supports polymorphic resources (strings e.g. ["stream", "search"] or objects e.g. [{ name: "stream" }])
+//!   - Supports polymorphic resources (strings or objects)
 //! - BitChord search & Stremio catalog:
 //!   - `GET /search?q={query}&quality={tier}&atmos={atmos}`
 //!   - Supports `{ tracks: [...] }`, `{ results: [...] }`, `{ metas: [...] }`, or direct `[...]`
 //! - Stream endpoints:
 //!   - BitChord stream: `GET /stream/{id}?quality={tier}&atmos={atmos}`
-//!   - Stremio stream: `GET /stream/music/{id}.json`, `GET /stream/track/{id}.json`, `GET /stream/{id}.json`
+//!   - Stremio stream: `GET /stream/music/{id}.json`, `GET /stream/{id}.json`
 //!   - Direct ID / query: `GET /stream/{videoId}?quality={tier}&atmos={atmos}`
-//!   - Supports BitChord direct `{ url, format, ... }` and Stremio `{ streams: [ { url, title, ... } ] }`
+//!   - Supports BitChord direct `{ url, format }` and Stremio `{ streams: [...] }`
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 use crate::db::Db;
@@ -23,9 +23,16 @@ use crate::orchestrator::PlaybackData;
 
 pub const ADDONS_KEY: &str = "streaming_addons";
 pub const ADDONS_ENABLED_KEY: &str = "streaming_addons_enabled";
+pub const ADDON_TIMEOUT_MS: u64 = 1000;
 
-pub const BROWSER_UA: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
+/// BitChord addon user-agent header. Addons strictly verifying BitChord compatibility
+/// expect this user-agent to avoid rejecting third-party hosts.
+pub const ADDON_UA: &str = "BitChord/v1.9.0 Nocturne/v1.0.0";
+pub const BROWSER_UA: &str = concat!(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
+    "AppleWebKit/537.36 (KHTML, like Gecko) ",
+    "Chrome/133.0.0.0 Safari/537.36"
+);
 
 pub fn browser_request(
     client: &reqwest::Client,
@@ -34,18 +41,9 @@ pub fn browser_request(
 ) -> reqwest::RequestBuilder {
     client
         .get(url)
-        .header("User-Agent", BROWSER_UA)
+        .header("User-Agent", ADDON_UA)
         .header("Accept", "application/json, text/plain, */*")
         .header("Accept-Language", "en-US,en;q=0.9")
-        .header(
-            "Sec-Ch-Ua",
-            "\"Not(A:Brand\";v=\"99\", \"Google Chrome\";v=\"133\", \"Chromium\";v=\"133\"",
-        )
-        .header("Sec-Ch-Ua-Mobile", "?0")
-        .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-        .header("Sec-Fetch-Dest", "empty")
-        .header("Sec-Fetch-Mode", "cors")
-        .header("Sec-Fetch-Site", "cross-site")
         .timeout(Duration::from_millis(timeout_ms))
 }
 
@@ -416,26 +414,373 @@ pub fn set_addons_enabled(db: &Db, enabled: bool) {
     db.set_setting(ADDONS_ENABLED_KEY, if enabled { "true" } else { "false" });
 }
 
-fn clean_title_for_search(raw: &str) -> String {
+// ── BitChord-Grade High-Accuracy Track Matcher ────────────────────────────────
+
+const VERSION_WORDS: &[&str] = &[
+    "remix", "remixes", "rmx", "refix", "flip", "bootleg", "mashup", "medley",
+    "live", "concert", "unplugged", "acoustic", "instrumental", "karaoke",
+    "vocals", "vocal", "acapella", "acappella", "backing", "stems", "stem",
+    "cover", "demo", "reprise", "remake", "rework", "extended", "edit",
+    "version", "mix", "dub", "vip", "session", "sessions",
+    "sped", "slowed", "reverb", "nightcore", "lofi", "orchestral", "symphonic",
+    "part", "pt", "chapter",
+];
+
+const NEUTRAL_SEGMENTS: &[&str] = &[
+    "albumversion", "originalversion", "originalmix", "singleversion",
+    "radioversion", "radioedit", "stereoversion", "monoversion",
+    "studioversion", "fullversion", "standardversion", "explicitversion",
+    "deluxeversion", "originaltrack",
+];
+
+const TRAILING_NOISE: &[&str] = &[
+    "song", "songs", "video", "audio", "lyrics", "lyric", "lyrical",
+    "official", "full", "hd", "hq", "4k", "mp3", "ost", "soundtrack",
+];
+
+const TRAILING_TAKES: &[&str] = &[
+    "instrumental", "karaoke", "acapella", "acappella", "remix", "rmx", "nightcore",
+];
+
+const NOISE_WORDS: &[&str] = &[
+    "official", "video", "audio", "lyrics", "lyric", "lyrical", "visualizer",
+    "song", "songs", "full", "music", "the", "and", "from", "feat", "ft",
+    "featuring", "with", "new", "latest", "free", "download", "remaster",
+    "remastered", "explicit", "clean", "bonus", "track", "deluxe", "original",
+    "album", "single", "hd", "hq", "4k", "mp3",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitleParts {
+    pub words: Vec<String>,
+    pub core: String,
+    pub versions: BTreeSet<String>,
+    pub context: BTreeSet<String>,
+}
+
+fn normalize_raw(text: &str) -> String {
+    let lower = text.to_lowercase().replace('&', " and ");
+    let mut out = String::with_capacity(lower.len());
+    for c in lower.chars() {
+        match c {
+            '「' | '『' | '【' | '〈' | '《' | '〔' | '［' | '｛' => out.push('('),
+            '」' | '』' | '】' | '〉' | '》' | '〕' | '］' | '｝' => out.push(')'),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+fn classify_segment(
+    segment: &str,
+    versions: &mut BTreeSet<String>,
+    context: &mut BTreeSet<String>,
+) {
+    let re_punct = Regex::new(r"[^\p{L}\p{N}\s]").unwrap();
+    let cleaned = re_punct.replace_all(segment, " ");
+    let words: Vec<String> = cleaned
+        .split_whitespace()
+        .map(|w| w.to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    if words.is_empty() {
+        return;
+    }
+    let combined = words.join("");
+    if NEUTRAL_SEGMENTS.contains(&combined.as_str()) {
+        return;
+    }
+
+    let mut found_version = false;
+    for w in &words {
+        if VERSION_WORDS.contains(&w.as_str()) {
+            versions.insert(w.clone());
+            found_version = true;
+        }
+    }
+    if !found_version {
+        for w in words {
+            if w.len() > 2 && !NOISE_WORDS.contains(&w.as_str()) {
+                context.insert(w);
+            }
+        }
+    }
+}
+
+pub fn parse_title(raw: &str, artist: &str) -> TitleParts {
+    let mut versions = BTreeSet::new();
+    let mut context = BTreeSet::new();
+    let mut text = normalize_raw(raw);
+
+    // 1. Bracketed asides
+    let re_bracket = Regex::new(r"[(\[]([^()\[\]]*)[)\]]").unwrap();
+    for _ in 0..3 {
+        if !re_bracket.is_match(&text) {
+            break;
+        }
+        text = re_bracket
+            .replace_all(&text, |caps: &regex::Captures| {
+                if let Some(m) = caps.get(1) {
+                    classify_segment(m.as_str(), &mut versions, &mut context);
+                }
+                " "
+            })
+            .to_string();
+    }
+
+    // 2. Unbalanced brackets
+    if let Some(open) = text.find(|c| c == '(' || c == '[') {
+        classify_segment(&text[open..], &mut versions, &mut context);
+        text.truncate(open);
+    }
+
+    // 3. Dash- and pipe-separated tails
+    let re_dash = Regex::new(r"\s+[-–—|]+\s+").unwrap();
+    for _ in 0..3 {
+        if let Some(mat) = re_dash.find(&text) {
+            let head = text[..mat.start()].trim().to_string();
+            let tail = text[mat.end()..].trim().to_string();
+            let norm_artist = normalize_raw(artist);
+            if !norm_artist.is_empty() && head.contains(&norm_artist) {
+                classify_segment(&head, &mut versions, &mut context);
+                text = tail;
+            } else {
+                classify_segment(&tail, &mut versions, &mut context);
+                text = head;
+            }
+        } else {
+            break;
+        }
+    }
+
+    // 4. Feat tail removal
+    let re_feat = Regex::new(r"(?i)\b(feat|ft|featuring|with)\b.*").unwrap();
+    text = re_feat.replace_all(&text, " ").to_string();
+
+    // 5. Word tokenization
+    let re_punct = Regex::new(r"[^\p{L}\p{N}\s]").unwrap();
+    let cleaned = re_punct.replace_all(&text, " ");
+    let mut words: Vec<String> = cleaned
+        .split_whitespace()
+        .map(|w| w.to_lowercase())
+        .filter(|w| !w.is_empty() && w != "and")
+        .collect();
+
+    // 6. Trailing takes and noise
+    while words.len() > 1 {
+        let last = words.last().unwrap().as_str();
+        if TRAILING_NOISE.contains(&last) {
+            words.pop();
+        } else if TRAILING_TAKES.contains(&last) {
+            versions.insert(last.to_string());
+            words.pop();
+        } else {
+            break;
+        }
+    }
+
+    let core = words.join("");
+    TitleParts { words, core, versions, context }
+}
+
+pub fn primary_artist(artist: &str) -> String {
+    let re_sep = Regex::new(
+        r"(?i)\s*(?:[,&/;·|、，×]|\band\b|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b)\s*",
+    )
+    .unwrap();
+    let first = re_sep.split(artist).next().unwrap_or(artist).trim();
+    let re_punct = Regex::new(r"[^\p{L}\p{N}\s]").unwrap();
+    let cleaned = re_punct.replace_all(first, " ");
+    let words: Vec<_> = cleaned.split_whitespace().collect();
+    words.join(" ").to_lowercase()
+}
+
+pub fn artist_names(artist: &str) -> Vec<Vec<String>> {
+    let re_sep = Regex::new(
+        r"(?i)\s*(?:[,&/;·|、，×]|\band\b|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b)\s*",
+    )
+    .unwrap();
+    let re_punct = Regex::new(r"[^\p{L}\p{N}\s]").unwrap();
+    re_sep
+        .split(artist)
+        .filter_map(|name| {
+            let cleaned = re_punct.replace_all(name, " ");
+            let tokens: Vec<String> = cleaned
+                .split_whitespace()
+                .map(|t| t.to_lowercase())
+                .filter(|t| t.len() > 1)
+                .collect();
+            if tokens.is_empty() { None } else { Some(tokens) }
+        })
+        .collect()
+}
+
+pub fn shares_artist(wanted: &str, got: &str) -> bool {
+    let want = artist_names(wanted);
+    let have = artist_names(got);
+    if want.is_empty() || have.is_empty() {
+        return false;
+    }
+    for w in &want {
+        for h in &have {
+            // subslice containment
+            let w_match = h.windows(w.len()).any(|win| win == w.as_slice());
+            let h_match = w.windows(h.len()).any(|win| win == h.as_slice());
+            if w_match || h_match {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn normalize_string(raw: &str) -> String {
+    let re_punct = Regex::new(r"[^\p{L}\p{N}\s]").unwrap();
+    let stripped = re_punct.replace_all(raw, " ");
+    stripped.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+pub fn clean_title_for_search(raw: &str) -> String {
     let re = Regex::new(
         r"(?i)\s*[\(\[](official\s*(music\s*)?video|video|audio|official\s*audio|lyric\s*video|lyrics|visualizer|remaster(ed)?|hd|4k)[\)\]]",
     )
     .unwrap();
-    let cleaned = re.replace_all(raw, "");
-    cleaned.trim().to_string()
+    re.replace_all(raw, "").trim().to_string()
 }
 
-fn normalize_string(raw: &str) -> String {
-    // Strip only promotional/video wrappers like (Official Video), [Official Audio], (Lyric Video), etc.
-    // Preserve musical version descriptions like (Travis Scott Remix), (Acoustic), (Live), (Feat. X)
-    let re_boilerplate = Regex::new(
-        r"(?i)\s*[\(\[](official\s*(music\s*)?video|video|audio|official\s*audio|lyric\s*video|lyrics|visualizer|remaster(ed)?(\s*\d{4})?|hd|4k|explicit|clean)[\)\]]",
+pub fn searchable_title(title: &str, artist: &str) -> String {
+    let parts = parse_title(title, artist);
+    let mut words = parts.words;
+    for v in parts.versions {
+        words.push(v);
+    }
+    words.join(" ")
+}
+
+pub fn evaluate_track_match(
+    target_title: &str,
+    target_artist: &str,
+    target_dur: Option<f64>,
+    target_album: Option<&str>,
+    cand_title: &str,
+    cand_artist: &str,
+    cand_dur: Option<f64>,
+    cand_album: Option<&str>,
+    is_video: bool,
+) -> Result<i32, &'static str> {
+    let wanted = parse_title(target_title, target_artist);
+    let got = parse_title(cand_title, cand_artist);
+
+    if wanted.core.is_empty() || got.core.is_empty() {
+        return Err("empty core title after normalization");
+    }
+
+    // 1. Core Title Match
+    let (is_title_match, exact_title) = if wanted.core == got.core {
+        (true, true)
+    } else {
+        // Multi-word wanted title cannot match a single-word candidate
+        if wanted.words.len() > 1 && got.words.len() <= 1 {
+            return Err("multi-word wanted title cannot match single-word candidate");
+        }
+        let min_len = wanted.core.len().min(got.core.len());
+        let max_len = wanted.core.len().max(got.core.len());
+        let ratio = (min_len as f64) / (max_len as f64);
+
+        if ratio >= 0.70 && (wanted.core.contains(&got.core) || got.core.contains(&wanted.core)) {
+            if !shares_artist(target_artist, cand_artist) {
+                return Err("partial title match rejected: artists do not match");
+            }
+            (true, false)
+        } else {
+            return Err("core title mismatch");
+        }
+    };
+
+    if !is_title_match {
+        return Err("title mismatch");
+    }
+
+    // 2. Strict Version Match (rejects unwanted remixes, live, acoustic, etc.)
+    if wanted.versions != got.versions {
+        return Err("version markers mismatch");
+    }
+
+    // 3. Artist Match
+    let shared_artist = shares_artist(target_artist, cand_artist);
+    let artist_score = if shared_artist {
+        let norm_w = normalize_string(target_artist);
+        let norm_g = normalize_string(cand_artist);
+        if !norm_w.is_empty() && norm_w == norm_g {
+            30
+        } else {
+            15
+        }
+    } else if let (Some(t_d), Some(c_d)) = (target_dur, cand_dur) {
+        // BitChord Credit Disagree: exact runtime within 2s permits
+        // soundtrack composer / singer discrepancy on non-video tracks.
+        if !is_video && (t_d - c_d).abs() <= 2.0 && exact_title {
+            -30
+        } else {
+            return Err("different artist and runtime diff exceeds 2s");
+        }
+    } else {
+        return Err("artist mismatch without runtime verification");
+    };
+
+    // 4. Duration Match
+    let mut dur_score = 0;
+    if let (Some(t_d), Some(c_d)) = (target_dur, cand_dur) {
+        let diff = (t_d - c_d).abs();
+        if diff > 30.0 {
+            return Err("duration difference exceeds 30 seconds");
+        } else if diff <= 2.0 {
+            dur_score = 40;
+        } else if diff <= 5.0 {
+            dur_score = 25;
+        } else if diff <= 15.0 {
+            dur_score = 10;
+        }
+    }
+
+    // 5. Album Match
+    let mut album_score = 0;
+    if let (Some(t_a), Some(c_a)) = (target_album, cand_album) {
+        let nw = normalize_string(t_a);
+        let ng = normalize_string(c_a);
+        if !nw.is_empty() && nw == ng {
+            album_score = 35;
+        }
+    }
+
+    let title_bonus = if exact_title { 50 } else { 10 };
+    Ok(100 + title_bonus + artist_score + dur_score + album_score)
+}
+
+pub fn score_track_match(
+    target_title: &str,
+    target_artist: &str,
+    target_dur: Option<f64>,
+    target_album: Option<&str>,
+    cand_title: &str,
+    cand_artist: &str,
+    cand_dur: Option<f64>,
+    cand_album: Option<&str>,
+    is_video: bool,
+) -> Option<i32> {
+    evaluate_track_match(
+        target_title,
+        target_artist,
+        target_dur,
+        target_album,
+        cand_title,
+        cand_artist,
+        cand_dur,
+        cand_album,
+        is_video,
     )
-    .unwrap();
-    let cleaned = re_boilerplate.replace_all(raw, " ");
-    let re_punct = Regex::new(r"[^a-zA-Z0-9\s]").unwrap();
-    let stripped = re_punct.replace_all(&cleaned, " ");
-    stripped.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    .ok()
 }
 
 fn has_version_keyword(s: &str, keyword: &str) -> bool {
@@ -597,7 +942,6 @@ fn format_quality_label(
         return format!("LOSSLESS {}-bit / {}{}", bits, sr_str, br_str);
     }
 
-    // Lossy audio format
     let codec_name = codec_hint.map(str::to_uppercase).unwrap_or_else(|| {
         if raw_quality_text.to_lowercase().contains("aac") {
             "AAC".to_string()
@@ -738,34 +1082,19 @@ fn parse_stream_response(
     None
 }
 
-pub async fn resolve_from_addons(
-    db: &Db,
-    title: &str,
+/// Query a single addon with strict matching and latency guard.
+async fn resolve_candidate_from_addon(
+    client: &reqwest::Client,
+    addon: &CommunityAddon,
+    query_title: &str,
     artist: &str,
+    album: Option<&str>,
     duration_secs: Option<f64>,
     quality_pref: &str,
     video_id: Option<&str>,
-) -> Option<PlaybackData> {
-    if !is_addons_enabled(db) {
-        return None;
-    }
-
-    let addons = get_addons(db);
-    let active_addons: Vec<_> = addons.into_iter().filter(|a| a.enabled).collect();
-    if active_addons.is_empty() {
-        return None;
-    }
-
-    let clean_title = clean_title_for_search(title);
-    let query_title = if !clean_title.is_empty() { &clean_title } else { title };
-    let query = if !artist.trim().is_empty() && !query_title.trim().is_empty() {
-        format!("{} {}", artist.trim(), query_title)
-    } else if !query_title.trim().is_empty() {
-        query_title.to_string()
-    } else {
-        artist.trim().to_string()
-    };
-
+) -> Option<(i32, i32, PlaybackData)> {
+    let addon_start = std::time::Instant::now();
+    let base_url = normalize_base_url(&addon.base_url);
     let tier = match quality_pref {
         "DOLBY_ATMOS" => "lossless",
         "HI_RES_LOSSLESS" => "hires",
@@ -783,299 +1112,301 @@ pub async fn resolve_from_addons(
         "none"
     };
 
-    let client = crate::http::client();
-    let norm_target_title = normalize_string(query_title);
-    let norm_target_artist = normalize_string(artist);
+    let p_artist = primary_artist(artist);
+    let s_title = searchable_title(query_title, artist);
 
-    for addon in active_addons {
-        let base_url = normalize_base_url(&addon.base_url);
+    // BitChord query convention: Title FIRST, artist SECOND!
+    let primary_query = if !p_artist.is_empty() && !s_title.is_empty() {
+        format!("{} {}", s_title, p_artist)
+    } else if !s_title.is_empty() {
+        s_title.clone()
+    } else {
+        p_artist.clone()
+    };
 
-        // 1. Try search catalog if query is available
-        let mut candidates_to_check = Vec::new();
+    let mut queries = vec![primary_query];
+    if !s_title.is_empty() && !queries.contains(&s_title) {
+        queries.push(s_title);
+    }
 
-        if !query.trim().is_empty() {
-            let search_url = format!(
-                "{}/search?q={}&quality={}&atmos={}",
-                base_url,
-                urlencoding::encode(&query),
-                tier,
-                atmos_param
+    let mut found_tracks = Vec::new();
+
+    for q in queries {
+        let search_url = format!(
+            "{}/search?q={}&quality={}&atmos={}",
+            base_url,
+            urlencoding::encode(&q),
+            tier,
+            atmos_param
+        );
+
+        eprintln!(
+            "[addon] [{}] Searching: \"{}\" (tier: {}, atmos: {})",
+            addon.name, q, tier, atmos_param
+        );
+
+        let search_start = std::time::Instant::now();
+        if let Ok(res) = browser_request(client, &search_url, ADDON_TIMEOUT_MS).send().await {
+            let elapsed = search_start.elapsed().as_millis();
+            if res.status().is_success() {
+                if let Ok(val) = res.json::<serde_json::Value>().await {
+                    let tracks = parse_search_response(val);
+                    eprintln!(
+                        "[addon] [{}] Search completed in {}ms: {} candidate(s)",
+                        addon.name,
+                        elapsed,
+                        tracks.len()
+                    );
+                    if !tracks.is_empty() {
+                        found_tracks = tracks;
+                        break;
+                    }
+                }
+            } else {
+                eprintln!(
+                    "[addon] [{}] Search failed with HTTP {} in {}ms",
+                    addon.name,
+                    res.status(),
+                    elapsed
+                );
+            }
+        } else {
+            eprintln!(
+                "[addon] [{}] Search timed out (>{}ms)",
+                addon.name, ADDON_TIMEOUT_MS
             );
+        }
+    }
 
-            tracing::info!(addon = %addon.name, query = %query, "searching community addon");
-            let search_res = browser_request(&client, &search_url, 5000).send().await;
+    let mut scored_candidates = Vec::new();
 
-            if let Ok(res) = search_res {
-                if res.status().is_success() {
-                    if let Ok(val) = res.json::<serde_json::Value>().await {
-                        let tracks = parse_search_response(val);
-                        for track in tracks {
-                            if track.id.is_empty() && track.resolved_stream_url().is_none() {
-                                continue;
-                            }
-                            let cand_raw_title = track.resolved_title();
-                            let mut score = 0i32;
+    for track in found_tracks {
+        if track.id.is_empty() && track.resolved_stream_url().is_none() {
+            continue;
+        }
+        let cand_raw_title = track.resolved_title();
+        let cand_raw_artist = track.resolved_artist();
 
-                            // Version tag mismatch checks: NEVER replace an original track with an unwanted remix/live/acoustic/etc.
-                            let version_tags = [
-                                "remix",
-                                "live",
-                                "acoustic",
-                                "slowed",
-                                "sped_up",
-                                "instrumental",
-                                "cover",
-                            ];
-                            let mut unwanted_version = false;
-                            for tag in &version_tags {
-                                let target_has = has_version_keyword(query_title, tag);
-                                let cand_has = has_version_keyword(cand_raw_title, tag);
-                                if !target_has && cand_has {
-                                    unwanted_version = true;
-                                    break;
-                                } else if target_has && cand_has {
-                                    score += 35; // Bonus for matching desired version (e.g. user specifically requested a remix)
-                                } else if target_has && !cand_has {
-                                    score -= 60; // Requested a specific version but candidate is plain
-                                }
-                            }
-                            if unwanted_version {
-                                tracing::debug!(
-                                    target = %query_title,
-                                    candidate = %cand_raw_title,
-                                    "skipping candidate due to unwanted version/remix mismatch"
+        match evaluate_track_match(
+            query_title,
+            artist,
+            duration_secs,
+            album,
+            cand_raw_title,
+            &cand_raw_artist,
+            track.duration,
+            Some(&track.album),
+            false,
+        ) {
+            Ok(score) => {
+                eprintln!(
+                    "[addon] [{}] Match accepted: \"{}\" by \"{}\" ({:?}) -> SCORE: {}",
+                    addon.name,
+                    cand_raw_title,
+                    cand_raw_artist,
+                    track.duration,
+                    score
+                );
+                scored_candidates.push((score, track));
+            }
+            Err(reason) => {
+                eprintln!(
+                    "[addon] [{}] Candidate \"{}\" by \"{}\" rejected: {}",
+                    addon.name, cand_raw_title, cand_raw_artist, reason
+                );
+            }
+        }
+    }
+
+    if scored_candidates.is_empty() {
+        eprintln!(
+            "[addon] [{}] No candidate passed match criteria for \"{}\"",
+            addon.name, query_title
+        );
+    } else {
+        // BitChord rule: if any candidate matches credited artist, retain only credited artist rows
+        let has_artist_match = scored_candidates
+            .iter()
+            .any(|(_, c)| shares_artist(artist, &c.resolved_artist()));
+        if has_artist_match {
+            scored_candidates.retain(|(_, c)| shares_artist(artist, &c.resolved_artist()));
+        }
+
+        scored_candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    }
+
+    // Evaluate top candidate for stream
+    for (score, candidate) in scored_candidates.into_iter().take(1) {
+        let candidate_title = candidate.resolved_title().to_string();
+        let candidate_artist = candidate.resolved_artist();
+        let candidate_artwork = candidate.resolved_artwork();
+
+        let (stream_url, addon_stream, custom_headers) =
+            if let Some(direct_url) = candidate.resolved_stream_url() {
+                if !direct_url.trim().is_empty() {
+                    eprintln!(
+                        "[addon] [{}] Using search result streamURL directly",
+                        addon.name
+                    );
+                    (
+                        direct_url.clone(),
+                        AddonStream {
+                            url: Some(direct_url),
+                            format: candidate.format.clone(),
+                            audio_quality: candidate.audio_quality.clone(),
+                            audio_mode: candidate.audio_mode.clone(),
+                            audio_modes: candidate.audio_modes.clone(),
+                            atmos: candidate.atmos,
+                            ..Default::default()
+                        },
+                        HashMap::new(),
+                    )
+                } else {
+                    continue;
+                }
+            } else {
+                let stream_ep = format!(
+                    "{}/stream/{}?quality={}&atmos={}",
+                    base_url,
+                    urlencoding::encode(&candidate.id),
+                    tier,
+                    atmos_param
+                );
+
+                eprintln!(
+                    "[addon] [{}] Requesting stream: id=\"{}\" ...",
+                    addon.name, candidate.id
+                );
+
+                let stream_start = std::time::Instant::now();
+                let mut stream_res = None;
+
+                if let Ok(res) = browser_request(client, &stream_ep, ADDON_TIMEOUT_MS).send().await {
+                    let elapsed = stream_start.elapsed().as_millis();
+                    if res.status().is_success() {
+                        if let Ok(val) = res.json::<serde_json::Value>().await {
+                            if let Some(resolved) = parse_stream_response(val, Some(query_title)) {
+                                eprintln!(
+                                    "[addon] [{}] Stream endpoint OK in {}ms",
+                                    addon.name, elapsed
                                 );
-                                continue;
+                                stream_res = Some(resolved);
                             }
+                        }
+                    } else {
+                        eprintln!(
+                            "[addon] [{}] Stream endpoint returned HTTP {} in {}ms",
+                            addon.name,
+                            res.status(),
+                            elapsed
+                        );
+                    }
+                } else {
+                    eprintln!(
+                        "[addon] [{}] Stream endpoint timed out (>{}ms)",
+                        addon.name, ADDON_TIMEOUT_MS
+                    );
+                }
 
-                            // If target does not mention featured artists, but candidate introduces a featured artist
-                            let target_lower = format!("{} {}", query_title, artist).to_lowercase();
-                            let cand_title_lower = cand_raw_title.to_lowercase();
-                            if !target_lower.contains("feat")
-                                && !target_lower.contains("ft.")
-                                && !target_lower.contains("with")
-                            {
-                                if cand_title_lower.contains("feat.")
-                                    || cand_title_lower.contains("feat ")
-                                    || cand_title_lower.contains("ft.")
-                                    || cand_title_lower.contains("with ")
-                                {
-                                    score -= 80;
-                                }
-                            }
-
-                            // Duration comparison (±6 seconds tolerance)
-                            if let (Some(target_dur), Some(cand_dur)) =
-                                (duration_secs, track.duration)
-                            {
-                                let diff = (target_dur - cand_dur).abs();
-                                if diff <= 3.0 {
-                                    score += 50;
-                                } else if diff <= 6.0 {
-                                    score += 30;
-                                } else if diff > 15.0 {
-                                    score -= 80;
-                                }
-                            }
-
-                            // Title matching
-                            let norm_cand_title = normalize_string(cand_raw_title);
-                            if !norm_target_title.is_empty() && !norm_cand_title.is_empty() {
-                                if norm_target_title == norm_cand_title {
-                                    score += 70;
-                                } else if norm_cand_title.starts_with(&norm_target_title)
-                                    || norm_target_title.starts_with(&norm_cand_title)
-                                {
-                                    score += 40;
-                                } else if norm_cand_title.contains(&norm_target_title)
-                                    || norm_target_title.contains(&norm_cand_title)
-                                {
-                                    score += 25;
-                                } else {
-                                    let target_words: Vec<&str> =
-                                        norm_target_title.split_whitespace().collect();
-                                    let cand_words: Vec<&str> =
-                                        norm_cand_title.split_whitespace().collect();
-                                    let shared = target_words
-                                        .iter()
-                                        .filter(|w| cand_words.contains(w))
-                                        .count();
-                                    if !target_words.is_empty() {
-                                        score += ((shared as f64 / target_words.len() as f64)
-                                            * 20.0)
-                                            as i32;
-                                    }
-                                }
-                            }
-
-                            // Artist matching
-                            let norm_cand_artist = normalize_string(&track.resolved_artist());
-                            if !norm_target_artist.is_empty() && !norm_cand_artist.is_empty() {
-                                if norm_target_artist == norm_cand_artist {
-                                    score += 50;
-                                } else if norm_cand_artist.starts_with(&norm_target_artist)
-                                    || norm_target_artist.starts_with(&norm_cand_artist)
-                                {
-                                    score += 30;
-                                } else if norm_cand_artist.contains(&norm_target_artist)
-                                    || norm_target_artist.contains(&norm_cand_artist)
-                                {
-                                    score += 15;
-                                }
-                            }
-
-                            let is_cand_atmos = track.atmos == Some(true)
-                                || track.audio_modes.iter().any(|m| is_atmos_text(m))
-                                || track.audio_mode.as_deref().map_or(false, is_atmos_text)
-                                || track.audio_quality.as_deref().map_or(false, is_atmos_text)
-                                || track.format.as_deref().map_or(false, is_atmos_text);
-
-                            if quality_pref == "DOLBY_ATMOS" && is_cand_atmos {
-                                score += 25;
-                            }
-
-                            let is_cand_hires =
-                                track.audio_quality.as_deref().map_or(false, is_hires_text)
-                                    || track.format.as_deref().map_or(false, is_hires_text);
-                            if quality_pref == "HI_RES_LOSSLESS" && is_cand_hires {
-                                score += 20;
-                            }
-
-                            if score > 20 {
-                                candidates_to_check.push((score, track));
+                // Stremio ID fallback
+                if stream_res.is_none()
+                    && (candidate.id.starts_with("tt") || candidate.id.starts_with("yt_id:"))
+                {
+                    let stremio_ep = format!(
+                        "{}/stream/music/{}.json",
+                        base_url,
+                        urlencoding::encode(&candidate.id)
+                    );
+                    let req = browser_request(client, &stremio_ep, ADDON_TIMEOUT_MS);
+                    if let Ok(res) = req.send().await {
+                        if res.status().is_success() {
+                            if let Ok(val) = res.json::<serde_json::Value>().await {
+                                stream_res = parse_stream_response(val, Some(query_title));
                             }
                         }
                     }
                 }
-            }
-        }
 
-        candidates_to_check.sort_by(|a, b| b.0.cmp(&a.0));
-
-        // Try scored candidates from search
-        for (_, candidate) in candidates_to_check.into_iter().take(3) {
-            let candidate_title = candidate.resolved_title().to_string();
-            let candidate_artist = candidate.resolved_artist();
-            let candidate_artwork = candidate.resolved_artwork();
-
-            let (stream_url, addon_stream, custom_headers) =
-                if let Some(direct_url) = candidate.resolved_stream_url() {
-                    if !direct_url.trim().is_empty() {
-                        (
-                            direct_url.clone(),
-                            AddonStream {
-                                url: Some(direct_url),
-                                format: candidate.format.clone(),
-                                audio_quality: candidate.audio_quality.clone(),
-                                audio_mode: candidate.audio_mode.clone(),
-                                audio_modes: candidate.audio_modes.clone(),
-                                atmos: candidate.atmos,
-                                ..Default::default()
-                            },
-                            HashMap::new(),
-                        )
-                    } else {
+                match stream_res {
+                    Some(r) => r,
+                    None => {
+                        eprintln!(
+                            "[addon] [{}] Stream unavailable for id=\"{}\"",
+                            addon.name, candidate.id
+                        );
                         continue;
                     }
-                } else {
-                    let mut stream_result = None;
-                    let stream_endpoints = [
-                        format!(
-                            "{}/stream/{}?quality={}&atmos={}",
-                            base_url,
-                            urlencoding::encode(&candidate.id),
-                            tier,
-                            atmos_param
-                        ),
-                        format!(
-                            "{}/stream/music/{}.json",
-                            base_url,
-                            urlencoding::encode(&candidate.id)
-                        ),
-                        format!(
-                            "{}/stream/track/{}.json",
-                            base_url,
-                            urlencoding::encode(&candidate.id)
-                        ),
-                        format!("{}/stream/{}.json", base_url, urlencoding::encode(&candidate.id)),
-                    ];
+                }
+            };
 
-                    for ep in &stream_endpoints {
-                        let stream_res = browser_request(&client, ep, 5000).send().await;
-                        if let Ok(res) = stream_res {
-                            if res.status().is_success() {
-                                if let Ok(val) = res.json::<serde_json::Value>().await {
-                                    if let Some(resolved) =
-                                        parse_stream_response(val, Some(query_title))
-                                    {
-                                        stream_result = Some(resolved);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
+        let combined_quality_text = format!(
+            "{} {} {} {} {}",
+            addon_stream.quality.as_deref().unwrap_or_default(),
+            addon_stream.stream_quality.as_deref().unwrap_or_default(),
+            addon_stream.audio_quality.as_deref().unwrap_or_default(),
+            addon_stream.format.as_deref().unwrap_or_default(),
+            candidate.audio_quality.as_deref().unwrap_or_default()
+        );
 
-                    match stream_result {
-                        Some(r) => r,
-                        None => continue,
-                    }
-                };
+        let is_atmos = addon_stream.atmos == Some(true)
+            || candidate.atmos == Some(true)
+            || addon_stream.audio_modes.iter().any(|m| is_atmos_text(m))
+            || candidate.audio_modes.iter().any(|m| is_atmos_text(m))
+            || is_atmos_text(&combined_quality_text);
 
-            let combined_quality_text = format!(
-                "{} {} {} {} {}",
-                addon_stream.quality.as_deref().unwrap_or_default(),
-                addon_stream.stream_quality.as_deref().unwrap_or_default(),
-                addon_stream.audio_quality.as_deref().unwrap_or_default(),
-                addon_stream.format.as_deref().unwrap_or_default(),
-                candidate.audio_quality.as_deref().unwrap_or_default()
-            );
+        let codec = addon_stream
+            .codec
+            .as_deref()
+            .or(addon_stream.file_codec.as_deref())
+            .or(addon_stream.format.as_deref())
+            .or(candidate.format.as_deref());
 
-            let is_atmos = addon_stream.atmos == Some(true)
-                || candidate.atmos == Some(true)
-                || addon_stream.audio_modes.iter().any(|m| is_atmos_text(m))
-                || candidate.audio_modes.iter().any(|m| is_atmos_text(m))
-                || is_atmos_text(&combined_quality_text);
+        let sample_rate = parse_sample_rate(addon_stream.sample_rate, &combined_quality_text);
+        let bit_depth = parse_bit_depth(addon_stream.bit_depth, &combined_quality_text);
+        let bitrate = parse_bitrate_kbps(addon_stream.bitrate, &combined_quality_text);
 
-            let codec = addon_stream
-                .codec
-                .as_deref()
-                .or(addon_stream.file_codec.as_deref())
-                .or(addon_stream.format.as_deref())
-                .or(candidate.format.as_deref());
+        let quality_label = format_quality_label(
+            codec,
+            sample_rate,
+            bit_depth,
+            bitrate,
+            is_atmos,
+            &combined_quality_text,
+        );
 
-            let sample_rate = parse_sample_rate(addon_stream.sample_rate, &combined_quality_text);
-            let bit_depth = parse_bit_depth(addon_stream.bit_depth, &combined_quality_text);
-            let bitrate = parse_bitrate_kbps(addon_stream.bitrate, &combined_quality_text);
+        eprintln!(
+            "[addon] [{}] Quality resolved: {} (codec: {:?}) in {}ms total",
+            addon.name,
+            quality_label,
+            codec,
+            addon_start.elapsed().as_millis()
+        );
 
-            let quality_label = format_quality_label(
-                codec,
-                sample_rate,
-                bit_depth,
-                bitrate,
-                is_atmos,
-                &combined_quality_text,
-            );
+        let mut final_headers = HashMap::new();
+        final_headers.insert("User-Agent".to_string(), ADDON_UA.to_string());
+        for (k, v) in custom_headers {
+            final_headers.insert(k, v);
+        }
 
-            let mut final_headers = HashMap::new();
-            final_headers.insert("User-Agent".to_string(), BROWSER_UA.to_string());
-            for (k, v) in custom_headers {
-                final_headers.insert(k, v);
-            }
+        let cand_dur_str = candidate.duration.map(|d| {
+            let sec = d.round() as u64;
+            format!("{}:{:02}", sec / 60, sec % 60)
+        });
 
-            let cand_dur_str = candidate.duration.map(|d| {
-                let sec = d.round() as u64;
-                format!("{}:{:02}", sec / 60, sec % 60)
-            });
+        let quality_tier_rank = if is_atmos {
+            3
+        } else if quality_label.contains("HI-RES") {
+            2
+        } else if quality_label.contains("LOSSLESS") {
+            1
+        } else {
+            0
+        };
 
-            tracing::info!(
-                addon = %addon.name,
-                title = %candidate_title,
-                quality = %quality_label,
-                "successfully resolved lossless stream from community addon"
-            );
-
-            return Some(PlaybackData {
+        return Some((
+            quality_tier_rank,
+            score,
+            PlaybackData {
                 video_id: if !candidate.id.is_empty() {
                     candidate.id
                 } else {
@@ -1090,7 +1421,7 @@ pub async fn resolve_from_addons(
                 title: if !candidate_title.is_empty() {
                     Some(candidate_title)
                 } else {
-                    Some(title.to_string())
+                    Some(query_title.to_string())
                 },
                 artists: if !candidate_artist.is_empty() {
                     Some(candidate_artist)
@@ -1102,139 +1433,61 @@ pub async fn resolve_from_addons(
                 is_video: Some(false),
                 stream_client: format!("addon:{}", addon.name),
                 audio_quality: Some(quality_label),
-            });
-        }
+            },
+        ));
+    }
 
-        // 2. Fallback: Direct stream queries (for stream-only addons like GGLOS / BitChord stream plugins)
-        let mut direct_endpoints = Vec::new();
-        if let Some(vid) = video_id {
-            if !vid.is_empty() {
-                direct_endpoints.push(format!(
-                    "{}/stream/music/{}.json",
-                    base_url,
-                    urlencoding::encode(vid)
-                ));
-                direct_endpoints.push(format!(
-                    "{}/stream/track/{}.json",
-                    base_url,
-                    urlencoding::encode(vid)
-                ));
-                direct_endpoints.push(format!(
-                    "{}/stream/{}.json",
-                    base_url,
-                    urlencoding::encode(vid)
-                ));
-                direct_endpoints.push(format!(
-                    "{}/stream/{}?quality={}&atmos={}",
-                    base_url,
-                    urlencoding::encode(vid),
-                    tier,
-                    atmos_param
-                ));
-                direct_endpoints.push(format!(
-                    "{}/stream/music/{}.json",
-                    base_url,
-                    urlencoding::encode(&format!("yt:{}", vid))
-                ));
-                direct_endpoints.push(format!(
-                    "{}/stream/{}.json",
-                    base_url,
-                    urlencoding::encode(&format!("yt:{}", vid))
-                ));
-            }
-        }
-        if !query.trim().is_empty() {
-            direct_endpoints.push(format!(
-                "{}/stream?q={}&quality={}&atmos={}",
+    // Direct stream endpoint for video plugins
+    if let Some(vid) = video_id {
+        if !vid.is_empty() {
+            let ep = format!(
+                "{}/stream/{}?quality={}&atmos={}",
                 base_url,
-                urlencoding::encode(&query),
+                urlencoding::encode(vid),
                 tier,
                 atmos_param
-            ));
-            direct_endpoints.push(format!(
-                "{}/stream?title={}&artist={}&quality={}&atmos={}",
-                base_url,
-                urlencoding::encode(query_title),
-                urlencoding::encode(artist),
-                tier,
-                atmos_param
-            ));
-        }
-
-        for ep in direct_endpoints {
-            let res = browser_request(&client, &ep, 5000).send().await;
-            if let Ok(r) = res {
-                if r.status().is_success() {
-                    if let Ok(val) = r.json::<serde_json::Value>().await {
+            );
+            if let Ok(res) = browser_request(client, &ep, ADDON_TIMEOUT_MS).send().await {
+                if res.status().is_success() {
+                    if let Ok(val) = res.json::<serde_json::Value>().await {
                         if let Some((stream_url, addon_stream, custom_headers)) =
                             parse_stream_response(val, Some(query_title))
                         {
-                            let combined_quality_text = format!(
-                                "{} {} {} {}",
-                                addon_stream.quality.as_deref().unwrap_or_default(),
-                                addon_stream.stream_quality.as_deref().unwrap_or_default(),
-                                addon_stream.audio_quality.as_deref().unwrap_or_default(),
-                                addon_stream.format.as_deref().unwrap_or_default()
-                            );
-
-                            let is_atmos = addon_stream.atmos == Some(true)
-                                || addon_stream.audio_modes.iter().any(|m| is_atmos_text(m))
-                                || is_atmos_text(&combined_quality_text);
-
-                            let codec = addon_stream
-                                .codec
-                                .as_deref()
-                                .or(addon_stream.file_codec.as_deref())
-                                .or(addon_stream.format.as_deref());
-
-                            let sample_rate =
-                                parse_sample_rate(addon_stream.sample_rate, &combined_quality_text);
-                            let bit_depth =
-                                parse_bit_depth(addon_stream.bit_depth, &combined_quality_text);
-                            let bitrate =
-                                parse_bitrate_kbps(addon_stream.bitrate, &combined_quality_text);
-
-                            let quality_label = format_quality_label(
-                                codec,
-                                sample_rate,
-                                bit_depth,
-                                bitrate,
-                                is_atmos,
-                                &combined_quality_text,
-                            );
-
                             let mut final_headers = HashMap::new();
-                            final_headers.insert("User-Agent".to_string(), BROWSER_UA.to_string());
+                            final_headers.insert("User-Agent".to_string(), ADDON_UA.to_string());
                             for (k, v) in custom_headers {
                                 final_headers.insert(k, v);
                             }
-
-                            tracing::info!(
-                                addon = %addon.name,
-                                endpoint = %ep,
-                                quality = %quality_label,
-                                "successfully resolved stream via direct addon query"
+                            let quality_label = addon_stream
+                                .quality
+                                .unwrap_or_else(|| "LOSSLESS 16-bit / 44.1 kHz".to_string());
+                            eprintln!(
+                                "[addon] [{}] Direct stream resolved for video_id=\"{}\": {}",
+                                addon.name, vid, quality_label
                             );
-
-                            return Some(PlaybackData {
-                                video_id: video_id.unwrap_or_default().to_string(),
-                                stream_url,
-                                itag: 0,
-                                headers: final_headers,
-                                expires_in_seconds: 7200,
-                                loudness_db: None,
-                                playback_ping: None,
-                                title: Some(title.to_string()),
-                                artists: Some(artist.to_string()),
-                                duration: duration_secs.map(|d| {
-                                    let sec = d.round() as u64;
-                                    format!("{}:{:02}", sec / 60, sec % 60)
-                                }),
-                                thumbnail: None,
-                                is_video: Some(false),
-                                stream_client: format!("addon:{}", addon.name),
-                                audio_quality: Some(quality_label),
-                            });
+                            return Some((
+                                1,
+                                100,
+                                PlaybackData {
+                                    video_id: vid.to_string(),
+                                    stream_url,
+                                    itag: 0,
+                                    headers: final_headers,
+                                    expires_in_seconds: 7200,
+                                    loudness_db: None,
+                                    playback_ping: None,
+                                    title: Some(query_title.to_string()),
+                                    artists: Some(artist.to_string()),
+                                    duration: duration_secs.map(|d| {
+                                        let sec = d.round() as u64;
+                                        format!("{}:{:02}", sec / 60, sec % 60)
+                                    }),
+                                    thumbnail: None,
+                                    is_video: Some(false),
+                                    stream_client: format!("addon:{}", addon.name),
+                                    audio_quality: Some(quality_label),
+                                },
+                            ));
                         }
                     }
                 }
@@ -1243,4 +1496,193 @@ pub async fn resolve_from_addons(
     }
 
     None
+}
+
+/// Simultaneously queries all enabled addons.
+/// If any addon yields a high-accuracy match, the top stream is returned immediately.
+/// If no addon yields an acceptable candidate, immediately snaps to None so the player
+/// falls back to YouTube Music with zero perceptible delay.
+pub async fn resolve_from_addons(
+    db: &Db,
+    title: &str,
+    artist: &str,
+    album: Option<&str>,
+    duration_secs: Option<f64>,
+    quality_pref: &str,
+    video_id: Option<&str>,
+) -> Option<PlaybackData> {
+    if !is_addons_enabled(db) {
+        return None;
+    }
+
+    let addons = get_addons(db);
+    let active_addons: Vec<_> = addons.into_iter().filter(|a| a.enabled).collect();
+    if active_addons.is_empty() {
+        return None;
+    }
+
+    let clean_title = clean_title_for_search(title);
+    let query_title = if !clean_title.is_empty() { &clean_title } else { title };
+    if query_title.trim().is_empty() && video_id.unwrap_or_default().is_empty() {
+        return None;
+    }
+
+    let start_total = std::time::Instant::now();
+    eprintln!(
+        "[addon] ════════════════════════════════════════════════════════════════"
+    );
+    eprintln!(
+        "[addon] Resolving: \"{}\" by \"{}\" (tier: {}, dur: {:?}s) across {} addon(s)",
+        query_title,
+        artist,
+        quality_pref,
+        duration_secs,
+        active_addons.len()
+    );
+
+    let client = crate::http::client();
+
+    let futures: Vec<_> = active_addons
+        .iter()
+        .map(|addon| {
+            let client = client.clone();
+            let addon = addon.clone();
+            let query_title = query_title.to_string();
+            let artist = artist.to_string();
+            let album = album.map(|s| s.to_string());
+            let quality_pref = quality_pref.to_string();
+            let video_id = video_id.map(|s| s.to_string());
+            async move {
+                resolve_candidate_from_addon(
+                    &client,
+                    &addon,
+                    &query_title,
+                    &artist,
+                    album.as_deref(),
+                    duration_secs,
+                    &quality_pref,
+                    video_id.as_deref(),
+                )
+                .await
+            }
+        })
+        .collect();
+
+    let results = futures_util::future::join_all(futures).await;
+    let mut best: Option<(i32, i32, PlaybackData)> = None;
+
+    for candidate in results.into_iter().flatten() {
+        let is_better = match &best {
+            None => true,
+            Some((held_rank, held_score, _)) => {
+                if candidate.0 != *held_rank {
+                    candidate.0 > *held_rank
+                } else {
+                    candidate.1 > *held_score
+                }
+            }
+        };
+        if is_better {
+            best = Some(candidate);
+        }
+    }
+
+    let total_elapsed = start_total.elapsed().as_millis();
+    if let Some((_, _, ref data)) = best {
+        eprintln!(
+            "[addon] ── OK: Selected \"{}\" from {} in {}ms ──",
+            data.audio_quality.as_deref().unwrap_or("Lossless"),
+            data.stream_client,
+            total_elapsed
+        );
+        eprintln!(
+            "[addon] ════════════════════════════════════════════════════════════════"
+        );
+    } else {
+        eprintln!(
+            "[addon] ── No addon matched for \"{}\" in {}ms. Snapping to YouTube Music. ──",
+            query_title, total_elapsed
+        );
+        eprintln!(
+            "[addon] ════════════════════════════════════════════════════════════════"
+        );
+    }
+
+    best.map(|(_, _, data)| data)
+}
+
+/// Waterfall HQ resolver: attempts the requested tier (e.g. DOLBY_ATMOS)
+/// and cascades down gracefully to HI_RES_LOSSLESS and LOSSLESS.
+pub async fn resolve_from_addons_waterfall(
+    db: &Db,
+    title: &str,
+    artist: &str,
+    album: Option<&str>,
+    duration_secs: Option<f64>,
+    target_tier: &str,
+    video_id: Option<&str>,
+) -> Option<PlaybackData> {
+    if !is_addons_enabled(db) {
+        return None;
+    }
+
+    match target_tier {
+        "DOLBY_ATMOS" => {
+            if let Some(res) = resolve_from_addons(
+                db,
+                title,
+                artist,
+                album,
+                duration_secs,
+                "DOLBY_ATMOS",
+                video_id,
+            )
+            .await
+            {
+                let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
+                if q_upper.contains("ATMOS") || q_upper.contains("DOLBY") {
+                    return Some(res);
+                }
+            }
+            if let Some(res) = resolve_from_addons(
+                db,
+                title,
+                artist,
+                album,
+                duration_secs,
+                "HI_RES_LOSSLESS",
+                video_id,
+            )
+            .await
+            {
+                let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
+                if q_upper.contains("HI-RES") || q_upper.contains("LOSSLESS") {
+                    return Some(res);
+                }
+            }
+            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
+        }
+        "HI_RES_LOSSLESS" => {
+            if let Some(res) = resolve_from_addons(
+                db,
+                title,
+                artist,
+                album,
+                duration_secs,
+                "HI_RES_LOSSLESS",
+                video_id,
+            )
+            .await
+            {
+                let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
+                if q_upper.contains("HI-RES") || q_upper.contains("LOSSLESS") {
+                    return Some(res);
+                }
+            }
+            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
+        }
+        _ => {
+            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
+        }
+    }
 }

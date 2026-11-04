@@ -371,15 +371,6 @@
 					{/if}
 				</a>
 			{/if}
-			<a
-				href="/library"
-				title="Library"
-				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/library') ? 'bg-primary/10 text-primary font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
-			>
-				<HugeiconsIcon icon={LibraryIcon} class="h-4.5 w-4.5 shrink-0" />
-				{#if !collapsed}<span class="truncate">Library</span>{/if}
-			</a>
-			{@render statsRow()}
 		{/if}
 	</div>
 
@@ -724,25 +715,57 @@
 		</Dialog.Root>
 	{/if}
 
+	{#if !['applemusic', 'ytm', 'spotify'].includes(prefs.appLayout)}
+		<!-- Bottom Navigation for Nocturne Theme (Library & Stats) -->
+		<div class="mt-auto shrink-0 pt-2 border-t border-border/40 space-y-0.5">
+			<a
+				href="/library"
+				title="Library"
+				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {collapsed
+					? 'justify-center'
+					: 'justify-start'} {isActive('/library')
+					? 'bg-primary/10 text-primary font-semibold'
+					: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
+			>
+				{#if isActive('/library')}
+					<span
+						transition:scale={{ duration: 200, start: 0.4 }}
+						class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary"
+					></span>
+				{/if}
+				<HugeiconsIcon
+					icon={LibraryIcon}
+					class="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+				/>
+				{#if !collapsed}
+					<span class="truncate">Library</span>
+				{/if}
+			</a>
+			{@render statsRow()}
+		</div>
+	{/if}
+
 	<ListeningStatsDialog bind:open={statsDialogOpen} />
 </aside>
 
 {#snippet statsRow()}
-	{#if !collapsed}
-		<button
-			type="button"
-			onclick={() => (statsDialogOpen = true)}
-			title="Listening Stats"
-			aria-label="Listening Stats"
-			class="group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground cursor-pointer justify-start"
-		>
-			<HugeiconsIcon
-				icon={Analytics01Icon}
-				class="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110"
-			/>
+	<button
+		type="button"
+		onclick={() => (statsDialogOpen = true)}
+		title="Listening Stats"
+		aria-label="Listening Stats"
+		class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground cursor-pointer {collapsed
+			? 'justify-center w-full'
+			: 'justify-start w-full'}"
+	>
+		<HugeiconsIcon
+			icon={Analytics01Icon}
+			class="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
+		/>
+		{#if !collapsed}
 			<span class="truncate">Listening Stats</span>
-		</button>
-	{/if}
+		{/if}
+	</button>
 {/snippet}
 
 {#snippet playlistRow(pl: BrowseItem, inFolder: boolean = false)}
