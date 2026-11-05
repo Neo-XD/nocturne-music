@@ -44,30 +44,32 @@ use orchestrator::Orchestrator;
 use potoken::PoTokenGenerator;
 use state::AppState;
 
-/// Hand freed-but-retained heap back to the OS every few minutes if enabled in settings.
-fn spawn_heap_trimmer(db: Arc<Db>) {
+/// Hand freed-but-retained heap back to the OS.
+pub fn trim_memory() {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        libc::malloc_trim(0);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        extern "system" {
+            fn GetCurrentProcess() -> isize;
+            fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize) -> i32;
+        }
+        unsafe {
+            let proc = GetCurrentProcess();
+            SetProcessWorkingSetSize(proc, usize::MAX, usize::MAX);
+        }
+    }
+}
+
+/// Periodically hand freed heap back to the OS to keep idle RAM usage minimal.
+fn spawn_heap_trimmer(_db: Arc<Db>) {
     tauri::async_runtime::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(180)).await;
-            if db.get_setting("aggressive_memory_trimming").as_deref() == Some("true") {
-                #[cfg(target_os = "linux")]
-                unsafe {
-                    libc::malloc_trim(0)
-                };
-
-                #[cfg(target_os = "windows")]
-                {
-                    extern "system" {
-                        fn GetCurrentProcess() -> isize;
-                        fn SetProcessWorkingSetSize(hProcess: isize, min: usize, max: usize)
-                            -> i32;
-                    }
-                    unsafe {
-                        let proc = GetCurrentProcess();
-                        SetProcessWorkingSetSize(proc, usize::MAX, usize::MAX);
-                    }
-                }
-            }
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            trim_memory();
         }
     });
 }
@@ -170,8 +172,10 @@ pub fn run() {
         if std::env::var_os("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_none() {
             std::env::set_var(
                 "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-                "--enable-features=ResourceSuspension,ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes,CanvasOOMHandling \
-                 --disable-background-networking --disable-component-update --disable-features=TranslateUI",
+                "--disable-features=CalculateNativeWinOcclusion,ResourceSuspension,TranslateUI \
+                 --enable-features=ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes,CanvasOOMHandling \
+                 --enable-gpu-rasterization --disable-backgrounding-occluded-windows \
+                 --disable-background-networking --disable-component-update",
             );
         }
     }
@@ -285,6 +289,8 @@ pub fn run() {
                     let _ = player.set_crossfade(secs);
                 }
             }
+            let automix_enabled = db.get_setting("automix").as_deref() == Some("true");
+            let _ = player.set_automix(automix_enabled);
             let eq_enabled = db.get_setting("equalizer_enabled").as_deref() == Some("true");
             let preamp = db
                 .get_setting("equalizer_preamp")
@@ -699,6 +705,15 @@ pub fn run() {
             commands::toggle_community_addon,
             commands::set_community_addons_enabled,
             commands::get_community_addons_enabled,
+            commands::upgrade_playback_quality,
+            commands::get_comments,
+            commands::get_comment_replies,
+            commands::perform_comment_action,
+            commands::create_comment,
+            commands::create_comment_reply,
+            commands::get_local_stats,
+            commands::lastfm_stats,
+            commands::fetch_image_data_url,
         ])
         .on_window_event(|window, event| {
             // Close-to-tray: ✕ hides the main window and playback keeps running; real quit is
@@ -866,6 +881,9 @@ fn spawn_event_pump(
                 }
                 PlayerEvent::TrackEnded => {
                     state.on_track_ended().await;
+                }
+                PlayerEvent::CrossfadeCompleted => {
+                    state.on_crossfade_completed().await;
                 }
                 PlayerEvent::TrackFailed(msg) => {
                     // The track died (dead/403 URL etc). on_track_failed records a WEB_REMIX 403

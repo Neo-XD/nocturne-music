@@ -1164,5 +1164,118 @@ export const setCommunityAddonsEnabled = (enabled: boolean) =>
 export const getCommunityAddonsEnabled = () =>
 	invoke<boolean>('get_community_addons_enabled');
 
+export const upgradePlaybackQuality = (targetTier: string) =>
+	invoke<string>('upgrade_playback_quality', { targetTier });
+
+// --- YouTube Comments ---------------------------------------------------------------------
+export interface CommentItem {
+	id: string;
+	author: string;
+	authorAvatar?: string;
+	authorChannelId?: string;
+	text: string;
+	publishedTime?: string;
+	likeCount?: string;
+	replyCount: number;
+	isPinned: boolean;
+	isChannelOwner: boolean;
+	isLiked: boolean;
+	repliesToken?: string;
+	likeAction?: string;
+	unlikeAction?: string;
+	replyAction?: string;
+}
+
+export interface CommentsPage {
+	comments: CommentItem[];
+	continuation?: string;
+	totalCount?: string;
+	sortTokenTop?: string;
+	sortTokenNewest?: string;
+	createParams?: string;
+}
+
+export interface CommentRepliesResult {
+	replies: CommentItem[];
+	continuation?: string;
+}
+
+export const getComments = (videoId: string, continuation?: string) =>
+	invoke<CommentsPage>('get_comments', { videoId, continuation });
+
+export const getCommentReplies = (continuation: string) =>
+	invoke<CommentRepliesResult>('get_comment_replies', { continuation });
+
+export const performCommentAction = (action: string) =>
+	invoke<void>('perform_comment_action', { action });
+
+export const createComment = (createParams: string, text: string) =>
+	invoke<CommentItem | null>('create_comment', { createParams, text });
+
+export const createCommentReply = (replyParams: string, text: string) =>
+	invoke<CommentItem | null>('create_comment_reply', { replyParams, text });
+
+// --- Listening Stats (Local & Last.fm) -----------------------------------------------------
+
+export interface TopSongStat {
+	song: SongItem;
+	playCount: number;
+}
+
+export interface TopArtistStat {
+	name: string;
+	playCount: number;
+}
+
+export interface TopAlbumStat {
+	name: string;
+	artist: string;
+	thumbnail?: string;
+	playCount: number;
+}
+
+export interface RecentPlayItem {
+	playedAt: number;
+	song: SongItem;
+}
+
+export interface LocalStats {
+	totalPlays: number;
+	totalDurationSecs: number;
+	uniqueTracks: number;
+	uniqueArtists: number;
+	topSongs: TopSongStat[];
+	topArtists: TopArtistStat[];
+	topAlbums: TopAlbumStat[];
+	hourlyPlays: number[];
+	recentPlays: RecentPlayItem[];
+}
+
+export interface LastfmStatItem {
+	name: string;
+	artist?: string;
+	playCount: number;
+	url?: string;
+	image?: string;
+}
+
+export interface LastfmStats {
+	username: string;
+	profile?: LastfmProfile;
+	topArtists: LastfmStatItem[];
+	topTracks: LastfmStatItem[];
+	topAlbums: LastfmStatItem[];
+}
+
+export const getLocalStats = (days?: number) =>
+	invoke<LocalStats>('get_local_stats', { days });
+
+export const getLastfmStats = (period?: string) =>
+	invoke<LastfmStats | null>('lastfm_stats', { period });
+
+export const fetchImageDataUrl = (url: string) =>
+	invoke<string>('fetch_image_data_url', { url });
+
+
 
 

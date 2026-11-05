@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use innertube::{
-    AlbumPage, ArtistPage, BrowseItem, HomePage, PlaylistContinuation, PlaylistPage, PlaylistSort,
+    AlbumPage, ArtistPage, BrowseItem, CommentItem, CommentRepliesResult, CommentsPage,
+    HomePage, PlaylistContinuation, PlaylistPage, PlaylistSort,
     Rating, SearchResults, SongItem,
 };
 use tauri::{Emitter, State};
@@ -282,6 +283,7 @@ const UI_SETTINGS: &[&str] = &[
     "hardware_acceleration",
     "audio_device",
     "crossfade_seconds",
+    "automix",
     "equalizer_enabled",
     "equalizer_preamp",
     "equalizer_bands",
@@ -373,6 +375,9 @@ pub async fn set_setting(
         if let Ok(secs) = value.parse::<f64>() {
             let _ = state.player.set_crossfade(secs);
         }
+    }
+    if key == "automix" {
+        let _ = state.player.set_automix(value == "true");
     }
     if key == "equalizer_enabled" || key == "equalizer_preamp" || key == "equalizer_bands" {
         let enabled = state.db.get_setting("equalizer_enabled").as_deref() == Some("true");
@@ -1806,13 +1811,28 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         return Ok(cached.clone());
     }
 
-    let v100_note = ReleaseNote {
-        version: "1.0.0".to_string(),
+    let v100_beta2_note = ReleaseNote {
+        version: "1.0.0-beta.2".to_string(),
+        date: "2026-11-05".to_string(),
+        body: r#"### Nocturne Music v1.0.0-beta.2
+
+#### 🚀 Graphics & Blur Engine Fixes
+- **WebView2 DirectComposition & Blur Shader Rendering**: Tuned Chromium compositor flags (`--enable-gpu-rasterization`, `--disable-backgrounding-occluded-windows`) and disabled `ResourceSuspension` and `CalculateNativeWinOcclusion` to eliminate graphics freezing and ensure smooth backdrop and filter blurs in installed release builds.
+- **CORS Bypass for WebGL Fluid Art Blurs**: Added local data URL streaming for remote artwork, preventing WebGL cross-origin security errors under `https://tauri.localhost`.
+
+#### 🎧 Audio & Community Addon Enhancements
+- **BitChord Dolby Atmos Protocol Compatibility**: Updated community streaming addon requests to use `&atmos=auto` with support for EAC-3, JOC, and spatial audio codecs.
+- **Multi-Candidate Catalog Resolution**: Increased candidate evaluation budget and Atmos prioritization so separate Tidal Atmos track IDs are resolved without falling back to stereo.
+- **Waterfall Quality Hierarchy**: Enforced clean cascading: Dolby Atmos → Hi-Res Lossless → Lossless → High (YouTube Music)."#.to_string(),
+    };
+
+    let v100_beta1_note = ReleaseNote {
+        version: "1.0.0-beta.1".to_string(),
         date: "2026-10-27".to_string(),
-        body: r#"### Nocturne Music v1.0.0
+        body: r#"### Nocturne Music v1.0.0-beta.1
 
 #### 🚀 Milestones & Major Highlights
-- **Nocturne Music v1.0 Official Release**: Complete desktop music client featuring dual-deck gapless audio, community addons, and local library integration.
+- **Nocturne Music v1.0 Beta 1 Release**: Complete desktop music client featuring dual-deck gapless audio, community addons, and local library integration.
 - **Instant Audio Caching for Repeat Listening**: Background audio caching automatically caches listened songs locally into high-speed audio buffers, enabling instant 0ms startup without network latency or buffering delays when re-listening.
 - **Lossless & Hi-Res Playback Engine**: Seamless playback for downloaded FLAC, ALAC, WAV, and high-bitrate AAC/OPUS files with native Windows libmpv file routing and audioproxy bypass for external lossless CDNs.
 - **Accurate Audio Quality Inspection**: Real-time Lofty file inspection accurately reads bit depth, sample rate, and bitrate, presenting dynamic LOSSLESS and HI-RES badges in the bottom player bar.
@@ -2139,7 +2159,7 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v100_note, v090_note, v087_note, v086_note, v085_note, v084_note, v083_note, v082_note,
+        v100_beta2_note, v100_beta1_note, v090_note, v087_note, v086_note, v085_note, v084_note, v083_note, v082_note,
         v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note,
         v064_note, v063_note, v062_note, v061_note, v06_note,
     ];
@@ -2148,6 +2168,9 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
         .iter()
         .map(|n| n.version.clone())
         .chain([
+            "1.0.0-beta.2".to_string(),
+            "1.0.0-beta.1".to_string(),
+            "1.0.0-alpha.1".to_string(),
             "1.0.0".to_string(),
             "1.0".to_string(),
             "0.9.1".to_string(),
@@ -2274,6 +2297,175 @@ pub async fn lastfm_status(state: St<'_>) -> Result<serde_json::Value, String> {
 #[tauri::command]
 pub async fn lastfm_profile(state: St<'_>) -> Result<Option<crate::lastfm::Profile>, String> {
     Ok(crate::lastfm::profile(&state).await)
+}
+
+#[tauri::command]
+pub async fn lastfm_stats(
+    state: St<'_>,
+    period: Option<String>,
+) -> Result<Option<crate::lastfm::LastfmStats>, String> {
+    Ok(crate::lastfm::stats(&state, period.as_deref()).await)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalStats {
+    pub total_plays: u64,
+    pub total_duration_secs: u64,
+    pub unique_tracks: usize,
+    pub unique_artists: usize,
+    pub top_songs: Vec<TopSongStat>,
+    pub top_artists: Vec<TopArtistStat>,
+    pub top_albums: Vec<TopAlbumStat>,
+    pub hourly_plays: Vec<u64>,
+    pub recent_plays: Vec<RecentPlayItem>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopSongStat {
+    pub song: innertube::SongItem,
+    pub play_count: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopArtistStat {
+    pub name: String,
+    pub play_count: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopAlbumStat {
+    pub name: String,
+    pub artist: String,
+    pub thumbnail: Option<String>,
+    pub play_count: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentPlayItem {
+    pub played_at: i64,
+    pub song: innertube::SongItem,
+}
+
+#[tauri::command]
+pub async fn get_local_stats(state: St<'_>, days: Option<u32>) -> Result<LocalStats, String> {
+    let now = now_secs();
+    let window_secs = match days {
+        Some(d) if d > 0 => d as i64 * 86400,
+        _ => ON_REPEAT_WINDOW_SECS,
+    };
+    let since = now - window_secs;
+    let rows = state.db.raw_plays(since);
+
+    let mut total_plays = 0u64;
+    let mut total_duration_secs = 0u64;
+    let mut hourly_plays = vec![0u64; 24];
+    let mut song_counts: std::collections::HashMap<String, (innertube::SongItem, u64)> =
+        std::collections::HashMap::new();
+    let mut artist_counts: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
+    let mut album_counts: std::collections::HashMap<String, (String, Option<String>, u64)> =
+        std::collections::HashMap::new();
+    let mut recent_plays = Vec::new();
+
+    for (played_at, song_json) in rows {
+        let Ok(song) = serde_json::from_str::<innertube::SongItem>(&song_json) else {
+            continue;
+        };
+        let clean_song = shed_queue_context(song);
+        total_plays += 1;
+
+        let dur = clean_song.duration.as_deref().and_then(|d| {
+            let parts: Vec<&str> = d.split(':').collect();
+            if parts.len() == 2 {
+                let m: u64 = parts[0].parse().ok()?;
+                let s: u64 = parts[1].parse().ok()?;
+                Some(m * 60 + s)
+            } else if parts.len() == 3 {
+                let h: u64 = parts[0].parse().ok()?;
+                let m: u64 = parts[1].parse().ok()?;
+                let s: u64 = parts[2].parse().ok()?;
+                Some(h * 3600 + m * 60 + s)
+            } else {
+                None
+            }
+        }).unwrap_or(180);
+        total_duration_secs += dur;
+
+        let hour = ((played_at % 86400) / 3600).clamp(0, 23) as usize;
+        hourly_plays[hour] += 1;
+
+        song_counts
+            .entry(clean_song.video_id.clone())
+            .and_modify(|(_, c)| *c += 1)
+            .or_insert((clean_song.clone(), 1));
+
+        for a in clean_song.artists.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            *artist_counts.entry(a.to_owned()).or_insert(0) += 1;
+        }
+
+        if let Some(alb) = &clean_song.album {
+            if !alb.trim().is_empty() {
+                album_counts
+                    .entry(alb.clone())
+                    .and_modify(|(_, _, c)| *c += 1)
+                    .or_insert((
+                        clean_song.artists.clone(),
+                        clean_song.thumbnail.clone(),
+                        1,
+                    ));
+            }
+        }
+
+        if recent_plays.len() < 30 {
+            recent_plays.push(RecentPlayItem {
+                played_at,
+                song: clean_song,
+            });
+        }
+    }
+
+    let unique_tracks = song_counts.len();
+    let unique_artists = artist_counts.len();
+
+    let mut top_songs: Vec<_> = song_counts
+        .into_values()
+        .map(|(song, play_count)| TopSongStat { song, play_count })
+        .collect();
+    top_songs.sort_by(|a, b| b.play_count.cmp(&a.play_count));
+    top_songs.truncate(50);
+
+    let mut top_artists: Vec<_> = artist_counts
+        .into_iter()
+        .map(|(name, play_count)| TopArtistStat { name, play_count })
+        .collect();
+    top_artists.sort_by(|a, b| b.play_count.cmp(&a.play_count));
+    top_artists.truncate(30);
+
+    let mut top_albums: Vec<_> = album_counts
+        .into_iter()
+        .map(|(name, (artist, thumbnail, play_count))| {
+            TopAlbumStat { name, artist, thumbnail, play_count }
+        })
+        .collect();
+    top_albums.sort_by(|a, b| b.play_count.cmp(&a.play_count));
+    top_albums.truncate(30);
+
+    Ok(LocalStats {
+        total_plays,
+        total_duration_secs,
+        unique_tracks,
+        unique_artists,
+        top_songs,
+        top_artists,
+        top_albums,
+        hourly_plays,
+        recent_plays,
+    })
 }
 
 /// What `track` would scrobble as under `config` (the Scrobbling tab's unsaved state, as JSON).
@@ -4418,6 +4610,106 @@ pub async fn set_community_addons_enabled(state: St<'_>, enabled: bool) -> Resul
 #[tauri::command]
 pub async fn get_community_addons_enabled(state: St<'_>) -> Result<bool, String> {
     Ok(crate::addons::is_addons_enabled(&state.db))
+}
+
+#[tauri::command]
+pub async fn upgrade_playback_quality(
+    state: St<'_>,
+    target_tier: String,
+) -> Result<String, String> {
+    state.upgrade_playback_quality(&target_tier).await
+}
+
+fn comments_client<'a>(state: &'a St<'_>) -> Result<&'a innertube::YouTubeClient, String> {
+    state
+        .clients
+        .get(innertube::COMMENTS_CLIENT)
+        .or_else(|| state.clients.get(innertube::METADATA_CLIENT))
+        .ok_or_else(|| "comments client missing".into())
+}
+
+#[tauri::command]
+pub async fn get_comments(
+    state: St<'_>,
+    video_id: String,
+    continuation: Option<String>,
+) -> Result<CommentsPage, String> {
+    let client = comments_client(&state)?;
+    state
+        .it
+        .comments(client, &video_id, continuation.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_comment_replies(
+    state: St<'_>,
+    continuation: String,
+) -> Result<CommentRepliesResult, String> {
+    let client = comments_client(&state)?;
+    state
+        .it
+        .comment_replies(client, &continuation)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn perform_comment_action(state: St<'_>, action: String) -> Result<(), String> {
+    let client = comments_client(&state)?;
+    state
+        .it
+        .perform_comment_action(client, &action)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_comment(
+    state: St<'_>,
+    create_params: String,
+    text: String,
+) -> Result<Option<CommentItem>, String> {
+    let client = comments_client(&state)?;
+    state
+        .it
+        .create_comment(client, &create_params, &text)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_comment_reply(
+    state: St<'_>,
+    reply_params: String,
+    text: String,
+) -> Result<Option<CommentItem>, String> {
+    let client = comments_client(&state)?;
+    state
+        .it
+        .create_comment_reply(client, &reply_params, &text)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn fetch_image_data_url(url: String) -> Result<String, String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Invalid URL".to_string());
+    }
+    let client = crate::http::client();
+    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let content_type = res
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_string();
+    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", content_type, b64))
 }
 
 #[cfg(test)]

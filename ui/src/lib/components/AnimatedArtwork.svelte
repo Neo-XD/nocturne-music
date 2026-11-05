@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { playback, prefs } from '$lib/player.svelte';
+	import { fetchImageDataUrl } from '$lib/api';
 
 	let {
 		src,
@@ -257,48 +258,61 @@
 
 		try {
 			let newTex: WebGLTexture | null = null;
-			let fetchUrl = newSrc;
+			let resolvedSrc = newSrc;
+
 			if (/^https?:\/\//i.test(newSrc) && !newSrc.includes('asset.localhost')) {
-				fetchUrl = newSrc.includes('?') ? `${newSrc}&cors=1` : `${newSrc}?cors=1`;
+				try {
+					resolvedSrc = await fetchImageDataUrl(newSrc);
+				} catch {}
 			}
 
-			try {
-				const res = await fetch(fetchUrl);
-				if (res.ok) {
-					const blob = await res.blob();
-					if (typeof createImageBitmap === 'function') {
-						const bitmap = await createImageBitmap(blob);
-						if (!gl || !program || currentSrc !== reqSrc) return;
-						newTex = uploadTex(gl, bitmap);
-					} else {
-						const blobUrl = URL.createObjectURL(blob);
-						const img = new Image();
-						await new Promise((resolve, reject) => {
-							img.onload = resolve;
-							img.onerror = reject;
-							img.src = blobUrl;
-						});
-						URL.revokeObjectURL(blobUrl);
-						if (!gl || !program || currentSrc !== reqSrc) return;
-						newTex = uploadTex(gl, img);
-					}
-				}
-			} catch {
-				// fetch fallback
-			}
-
-			if (!newTex) {
+			if (resolvedSrc.startsWith('data:')) {
 				const img = new Image();
-				if (/^https?:\/\//i.test(newSrc) && !newSrc.includes('asset.localhost')) {
-					img.crossOrigin = 'anonymous';
-				}
 				await new Promise((resolve, reject) => {
 					img.onload = resolve;
 					img.onerror = reject;
-					img.src = newSrc;
+					img.src = resolvedSrc;
 				});
 				if (!gl || !program || currentSrc !== reqSrc) return;
 				newTex = uploadTex(gl, img);
+			} else {
+				let fetchUrl = newSrc;
+				try {
+					const res = await fetch(fetchUrl);
+					if (res.ok) {
+						const blob = await res.blob();
+						if (typeof createImageBitmap === 'function') {
+							const bitmap = await createImageBitmap(blob);
+							if (!gl || !program || currentSrc !== reqSrc) return;
+							newTex = uploadTex(gl, bitmap);
+						} else {
+							const blobUrl = URL.createObjectURL(blob);
+							const img = new Image();
+							await new Promise((resolve, reject) => {
+								img.onload = resolve;
+								img.onerror = reject;
+								img.src = blobUrl;
+							});
+							URL.revokeObjectURL(blobUrl);
+							if (!gl || !program || currentSrc !== reqSrc) return;
+							newTex = uploadTex(gl, img);
+						}
+					}
+				} catch {}
+
+				if (!newTex) {
+					const img = new Image();
+					if (/^https?:\/\//i.test(newSrc) && !newSrc.includes('asset.localhost')) {
+						img.crossOrigin = 'anonymous';
+					}
+					await new Promise((resolve, reject) => {
+						img.onload = resolve;
+						img.onerror = reject;
+						img.src = newSrc;
+					});
+					if (!gl || !program || currentSrc !== reqSrc) return;
+					newTex = uploadTex(gl, img);
+				}
 			}
 
 			if (newTex) {

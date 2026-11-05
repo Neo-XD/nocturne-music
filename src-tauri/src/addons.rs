@@ -16,10 +16,39 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::db::Db;
 use crate::orchestrator::PlaybackData;
+
+type CacheMap = HashMap<String, (Instant, PlaybackData)>;
+static ADDON_STREAM_CACHE: OnceLock<Mutex<CacheMap>> = OnceLock::new();
+
+fn get_addon_cache() -> &'static Mutex<CacheMap> {
+    ADDON_STREAM_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn get_cached_addon_stream(key: &str) -> Option<PlaybackData> {
+    let mut cache = get_addon_cache().lock().ok()?;
+    if let Some((instant, data)) = cache.get(key) {
+        if instant.elapsed() < Duration::from_secs(7200) {
+            return Some(data.clone());
+        } else {
+            cache.remove(key);
+        }
+    }
+    None
+}
+
+fn cache_addon_stream(key: String, data: PlaybackData) {
+    if let Ok(mut cache) = get_addon_cache().lock() {
+        if cache.len() >= 500 {
+            cache.retain(|_, (t, _)| t.elapsed() < Duration::from_secs(7200));
+        }
+        cache.insert(key, (Instant::now(), data));
+    }
+}
 
 pub const ADDONS_KEY: &str = "streaming_addons";
 pub const ADDONS_ENABLED_KEY: &str = "streaming_addons_enabled";
@@ -144,7 +173,36 @@ pub struct AddonTrack {
     pub url: Option<String>,
 }
 
+pub fn is_atmos_text(text: &str) -> bool {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?i)atmos|dolby|e-?ac-?3|ec-?3|dd\+|ddp|ddplus|spatial|joc").unwrap()
+    });
+    re.is_match(text)
+}
+
 impl AddonTrack {
+    pub fn is_dolby_atmos(&self) -> bool {
+        if self.atmos == Some(true) {
+            return true;
+        }
+        if let Some(am) = &self.audio_mode {
+            if is_atmos_text(am) {
+                return true;
+            }
+        }
+        if self.audio_modes.iter().any(|m| is_atmos_text(m)) {
+            return true;
+        }
+        let text = format!(
+            "{} {} {}",
+            self.audio_quality.as_deref().unwrap_or_default(),
+            self.format.as_deref().unwrap_or_default(),
+            self.audio_mode.as_deref().unwrap_or_default(),
+        );
+        is_atmos_text(&text)
+    }
+
     pub fn resolved_title(&self) -> &str {
         if !self.title.trim().is_empty() {
             &self.title
@@ -258,6 +316,33 @@ pub struct AddonStream {
     pub headers: Option<HashMap<String, String>>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+impl AddonStream {
+    pub fn is_dolby_atmos(&self) -> bool {
+        if self.atmos == Some(true) {
+            return true;
+        }
+        if let Some(am) = &self.audio_mode {
+            if is_atmos_text(am) {
+                return true;
+            }
+        }
+        if self.audio_modes.iter().any(|m| is_atmos_text(m)) {
+            return true;
+        }
+        let text = format!(
+            "{} {} {} {} {} {} {}",
+            self.quality.as_deref().unwrap_or_default(),
+            self.stream_quality.as_deref().unwrap_or_default(),
+            self.audio_quality.as_deref().unwrap_or_default(),
+            self.format.as_deref().unwrap_or_default(),
+            self.codec.as_deref().unwrap_or_default(),
+            self.file_codec.as_deref().unwrap_or_default(),
+            self.audio_mode.as_deref().unwrap_or_default(),
+        );
+        is_atmos_text(&text)
+    }
 }
 
 pub fn normalize_base_url(raw: &str) -> String {
@@ -813,10 +898,6 @@ fn has_version_keyword(s: &str, keyword: &str) -> bool {
     }
 }
 
-fn is_atmos_text(text: &str) -> bool {
-    let re = Regex::new(r"(?i)atmos|dolby|eac3[_-]?joc|ec-?3").unwrap();
-    re.is_match(text)
-}
 
 fn is_hires_text(text: &str) -> bool {
     let re = Regex::new(r"(?i)hi[-_ ]?res|24[-_ ]?bit|96\s*khz|192\s*khz").unwrap();
@@ -883,6 +964,20 @@ fn format_quality_label(
     raw_quality_text: &str,
 ) -> String {
     if is_atmos {
+        let raw_lower = raw_quality_text.to_lowercase();
+        let is_ddp = (raw_lower.contains("plus")
+            || raw_lower.contains("dd+")
+            || raw_lower.contains("ddp")
+            || raw_lower.contains("eac3")
+            || raw_lower.contains("e-ac-3"))
+            && !raw_lower.contains("atmos");
+
+        let prefix = if is_ddp {
+            "DOLBY DIGITAL PLUS"
+        } else {
+            "DOLBY ATMOS"
+        };
+
         let mut parts = Vec::new();
         if let Some(sr) = sample_rate {
             if sr % 1000 == 0 {
@@ -895,9 +990,9 @@ fn format_quality_label(
             parts.push(format!("{} kbps", kbps));
         }
         if parts.is_empty() {
-            return "DOLBY ATMOS".to_string();
+            return prefix.to_string();
         } else {
-            return format!("DOLBY ATMOS · {}", parts.join(" · "));
+            return format!("{} · {}", prefix, parts.join(" · "));
         }
     }
 
@@ -1095,22 +1190,17 @@ async fn resolve_candidate_from_addon(
 ) -> Option<(i32, i32, PlaybackData)> {
     let addon_start = std::time::Instant::now();
     let base_url = normalize_base_url(&addon.base_url);
-    let tier = match quality_pref {
-        "DOLBY_ATMOS" => "lossless",
-        "HI_RES_LOSSLESS" => "hires",
-        "LOSSLESS" | "VERY_HIGH" => "lossless",
-        "HIGH" => "high",
-        "LOW" => "low",
-        _ => "lossless",
+    let (tier, maybe_atmos) = match quality_pref {
+        "DOLBY_ATMOS" => ("lossless", Some("auto")),
+        "HI_RES_LOSSLESS" => ("hires", None),
+        "LOSSLESS" | "VERY_HIGH" => ("lossless", None),
+        "HIGH" => ("high", None),
+        "LOW" => ("low", None),
+        _ => ("lossless", None),
     };
-    let atmos_param = if quality_pref == "DOLBY_ATMOS"
-        || quality_pref == "HI_RES_LOSSLESS"
-        || quality_pref == "LOSSLESS"
-    {
-        "auto"
-    } else {
-        "none"
-    };
+    let atmos_query = maybe_atmos
+        .map(|a| format!("&atmos={}", a))
+        .unwrap_or_default();
 
     let p_artist = primary_artist(artist);
     let s_title = searchable_title(query_title, artist);
@@ -1133,16 +1223,16 @@ async fn resolve_candidate_from_addon(
 
     for q in queries {
         let search_url = format!(
-            "{}/search?q={}&quality={}&atmos={}",
+            "{}/search?q={}&quality={}{}",
             base_url,
             urlencoding::encode(&q),
             tier,
-            atmos_param
+            atmos_query
         );
 
         eprintln!(
-            "[addon] [{}] Searching: \"{}\" (tier: {}, atmos: {})",
-            addon.name, q, tier, atmos_param
+            "[addon] [{}] Searching: \"{}\" (tier: {}, atmos: {:?})",
+            addon.name, q, tier, maybe_atmos
         );
 
         let search_start = std::time::Instant::now();
@@ -1232,11 +1322,23 @@ async fn resolve_candidate_from_addon(
             scored_candidates.retain(|(_, c)| shares_artist(artist, &c.resolved_artist()));
         }
 
-        scored_candidates.sort_by(|a, b| b.0.cmp(&a.0));
+        if quality_pref == "DOLBY_ATMOS" {
+            scored_candidates.sort_by(|a, b| {
+                let a_atmos = a.1.is_dolby_atmos();
+                let b_atmos = b.1.is_dolby_atmos();
+                if a_atmos != b_atmos {
+                    b_atmos.cmp(&a_atmos)
+                } else {
+                    b.0.cmp(&a.0)
+                }
+            });
+        } else {
+            scored_candidates.sort_by(|a, b| b.0.cmp(&a.0));
+        }
     }
 
-    // Evaluate top candidate for stream
-    for (score, candidate) in scored_candidates.into_iter().take(1) {
+    // Evaluate top candidates for stream (up to 3)
+    for (score, candidate) in scored_candidates.into_iter().take(3) {
         let candidate_title = candidate.resolved_title().to_string();
         let candidate_artist = candidate.resolved_artist();
         let candidate_artwork = candidate.resolved_artwork();
@@ -1266,11 +1368,11 @@ async fn resolve_candidate_from_addon(
                 }
             } else {
                 let stream_ep = format!(
-                    "{}/stream/{}?quality={}&atmos={}",
+                    "{}/stream/{}?quality={}{}",
                     base_url,
                     urlencoding::encode(&candidate.id),
                     tier,
-                    atmos_param
+                    atmos_query
                 );
 
                 eprintln!(
@@ -1340,19 +1442,32 @@ async fn resolve_candidate_from_addon(
             };
 
         let combined_quality_text = format!(
-            "{} {} {} {} {}",
+            "{} {} {} {} {} {} {} {}",
             addon_stream.quality.as_deref().unwrap_or_default(),
             addon_stream.stream_quality.as_deref().unwrap_or_default(),
             addon_stream.audio_quality.as_deref().unwrap_or_default(),
             addon_stream.format.as_deref().unwrap_or_default(),
-            candidate.audio_quality.as_deref().unwrap_or_default()
+            addon_stream.codec.as_deref().unwrap_or_default(),
+            candidate.audio_quality.as_deref().unwrap_or_default(),
+            candidate.format.as_deref().unwrap_or_default(),
+            addon_stream.audio_mode.as_deref().unwrap_or_default()
         );
 
-        let is_atmos = addon_stream.atmos == Some(true)
-            || candidate.atmos == Some(true)
-            || addon_stream.audio_modes.iter().any(|m| is_atmos_text(m))
-            || candidate.audio_modes.iter().any(|m| is_atmos_text(m))
-            || is_atmos_text(&combined_quality_text);
+        let is_atmos = addon_stream.is_dolby_atmos() || candidate.is_dolby_atmos();
+
+        // If Hi-Res Lossless or Lossless is requested, do not consider Dolby Atmos at all
+        if quality_pref != "DOLBY_ATMOS" && is_atmos {
+            continue;
+        }
+
+        // If Dolby Atmos is requested, prefer Atmos tracks
+        if quality_pref == "DOLBY_ATMOS" && !is_atmos {
+            eprintln!(
+                "[addon] [{}] Candidate \"{}\" was not Atmos; trying next candidate",
+                addon.name, candidate_title
+            );
+            continue;
+        }
 
         let codec = addon_stream
             .codec
@@ -1393,7 +1508,7 @@ async fn resolve_candidate_from_addon(
             format!("{}:{:02}", sec / 60, sec % 60)
         });
 
-        let quality_tier_rank = if is_atmos {
+        let quality_tier_rank = if is_atmos && quality_pref == "DOLBY_ATMOS" {
             3
         } else if quality_label.contains("HI-RES") {
             2
@@ -1441,11 +1556,11 @@ async fn resolve_candidate_from_addon(
     if let Some(vid) = video_id {
         if !vid.is_empty() {
             let ep = format!(
-                "{}/stream/{}?quality={}&atmos={}",
+                "{}/stream/{}?quality={}{}",
                 base_url,
                 urlencoding::encode(vid),
                 tier,
-                atmos_param
+                atmos_query
             );
             if let Ok(res) = browser_request(client, &ep, ADDON_TIMEOUT_MS).send().await {
                 if res.status().is_success() {
@@ -1458,15 +1573,56 @@ async fn resolve_candidate_from_addon(
                             for (k, v) in custom_headers {
                                 final_headers.insert(k, v);
                             }
-                            let quality_label = addon_stream
-                                .quality
-                                .unwrap_or_else(|| "LOSSLESS 16-bit / 44.1 kHz".to_string());
+                            let is_atmos = addon_stream.is_dolby_atmos();
+                            if quality_pref != "DOLBY_ATMOS" && is_atmos {
+                                return None;
+                            }
+                            if quality_pref == "DOLBY_ATMOS" && !is_atmos {
+                                return None;
+                            }
+                            let combined_quality_text = format!(
+                                "{} {} {} {} {} {}",
+                                addon_stream.quality.as_deref().unwrap_or_default(),
+                                addon_stream.stream_quality.as_deref().unwrap_or_default(),
+                                addon_stream.audio_quality.as_deref().unwrap_or_default(),
+                                addon_stream.format.as_deref().unwrap_or_default(),
+                                addon_stream.codec.as_deref().unwrap_or_default(),
+                                addon_stream.audio_mode.as_deref().unwrap_or_default()
+                            );
+                            let codec = addon_stream
+                                .codec
+                                .as_deref()
+                                .or(addon_stream.file_codec.as_deref())
+                                .or(addon_stream.format.as_deref());
+                            let sample_rate =
+                                parse_sample_rate(addon_stream.sample_rate, &combined_quality_text);
+                            let bit_depth =
+                                parse_bit_depth(addon_stream.bit_depth, &combined_quality_text);
+                            let bitrate =
+                                parse_bitrate_kbps(addon_stream.bitrate, &combined_quality_text);
+                            let quality_label = format_quality_label(
+                                codec,
+                                sample_rate,
+                                bit_depth,
+                                bitrate,
+                                is_atmos,
+                                &combined_quality_text,
+                            );
+                            let quality_tier_rank = if is_atmos && quality_pref == "DOLBY_ATMOS" {
+                                3
+                            } else if quality_label.contains("HI-RES") {
+                                2
+                            } else if quality_label.contains("LOSSLESS") {
+                                1
+                            } else {
+                                0
+                            };
                             eprintln!(
                                 "[addon] [{}] Direct stream resolved for video_id=\"{}\": {}",
                                 addon.name, vid, quality_label
                             );
                             return Some((
-                                1,
+                                quality_tier_rank,
                                 100,
                                 PlaybackData {
                                     video_id: vid.to_string(),
@@ -1525,6 +1681,21 @@ pub async fn resolve_from_addons(
     let query_title = if !clean_title.is_empty() { &clean_title } else { title };
     if query_title.trim().is_empty() && video_id.unwrap_or_default().is_empty() {
         return None;
+    }
+
+    let cache_key = format!(
+        "{}:{}:{}:{}",
+        query_title.to_lowercase(),
+        artist.to_lowercase(),
+        quality_pref,
+        video_id.unwrap_or_default()
+    );
+    if let Some(cached) = get_cached_addon_stream(&cache_key) {
+        eprintln!(
+            "[addon] ── In-memory cache hit for \"{}\" [{}] ──",
+            query_title, quality_pref
+        );
+        return Some(cached);
     }
 
     let start_total = std::time::Instant::now();
@@ -1598,6 +1769,7 @@ pub async fn resolve_from_addons(
         eprintln!(
             "[addon] ════════════════════════════════════════════════════════════════"
         );
+        cache_addon_stream(cache_key, data.clone());
     } else {
         eprintln!(
             "[addon] ── No addon matched for \"{}\" in {}ms. Snapping to YouTube Music. ──",
@@ -1628,6 +1800,7 @@ pub async fn resolve_from_addons_waterfall(
 
     match target_tier {
         "DOLBY_ATMOS" => {
+            // Waterfall tree: 1. Atmos -> 2. Hi-Res -> 3. Lossless -> 4. High
             if let Some(res) = resolve_from_addons(
                 db,
                 title,
@@ -1640,7 +1813,7 @@ pub async fn resolve_from_addons_waterfall(
             .await
             {
                 let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
-                if q_upper.contains("ATMOS") || q_upper.contains("DOLBY") {
+                if is_atmos_text(&q_upper) {
                     return Some(res);
                 }
             }
@@ -1656,13 +1829,23 @@ pub async fn resolve_from_addons_waterfall(
             .await
             {
                 let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
-                if q_upper.contains("HI-RES") || q_upper.contains("LOSSLESS") {
+                if q_upper.contains("HI-RES") {
                     return Some(res);
                 }
             }
-            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
+            resolve_from_addons(
+                db,
+                title,
+                artist,
+                album,
+                duration_secs,
+                "LOSSLESS",
+                video_id,
+            )
+            .await
         }
         "HI_RES_LOSSLESS" => {
+            // If Hi-Res, do not think about Dolby at all: Hi-Res -> Lossless -> High
             if let Some(res) = resolve_from_addons(
                 db,
                 title,
@@ -1675,14 +1858,44 @@ pub async fn resolve_from_addons_waterfall(
             .await
             {
                 let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
-                if q_upper.contains("HI-RES") || q_upper.contains("LOSSLESS") {
+                if q_upper.contains("HI-RES") {
                     return Some(res);
                 }
             }
-            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
+            resolve_from_addons(
+                db,
+                title,
+                artist,
+                album,
+                duration_secs,
+                "LOSSLESS",
+                video_id,
+            )
+            .await
+        }
+        "LOSSLESS" | "VERY_HIGH" => {
+            resolve_from_addons(
+                db,
+                title,
+                artist,
+                album,
+                duration_secs,
+                "LOSSLESS",
+                video_id,
+            )
+            .await
         }
         _ => {
-            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
+            resolve_from_addons(
+                db,
+                title,
+                artist,
+                album,
+                duration_secs,
+                target_tier,
+                video_id,
+            )
+            .await
         }
     }
 }
