@@ -92,6 +92,7 @@
 	import AppleIcon from '$lib/components/icons/AppleIcon.svelte';
 	import YtmIcon from '$lib/components/icons/YtmIcon.svelte';
 	import SpotifyIcon from '$lib/components/icons/SpotifyIcon.svelte';
+	import SpotifyConnectSettings from '$lib/components/SpotifyConnectSettings.svelte';
 	import NocturneIcon from '$lib/components/icons/NocturneIcon.svelte';
 	import * as Popover from '$lib/components/ui/popover';
 	import {
@@ -1755,6 +1756,22 @@
 									control: spotifyButton,
 									below: showSpotifyInput ? spotifyInputSnippet : undefined
 								})}
+							</div>
+						</section>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>
+								Spotify Connect & Scrobbling
+							</h3>
+							<SpotifyConnectSettings />
+						</section>
+
+						<section class={GROUP}>
+							<h3 class={LABEL}>
+								Library
+							</h3>
+
+							<div class={CARD}>
 								{@render row({
 									title: 'On Repeat track count',
 									desc: 'How many most-played songs to include in your On Repeat list (default: 50).',

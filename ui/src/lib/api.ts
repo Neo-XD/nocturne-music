@@ -1125,6 +1125,51 @@ export const spotifyGetSyncMode = () =>
 export const spotifySetSyncMode = (mode: SpotifyPlaylistSyncMode) =>
 	invoke<void>('spotify_set_sync_mode', { mode });
 
+// --- Spotify Connect Receiver & Scrobbler ----------------------------------------------------
+export interface SpotifyConnectStatus {
+	enabled: boolean;
+	device_name: string;
+	device_id: string;
+	active: boolean;
+	scrobble_enabled: boolean;
+	total_scrobbles: number;
+}
+
+export interface SpotifyScrobbleRecord {
+	id: number;
+	title: string;
+	artist: string;
+	album: string | null;
+	spotify_id: string | null;
+	scrobbled_at: number;
+}
+
+export interface SpotifyConnectStateEvent {
+	active: boolean;
+	is_playing: boolean;
+	title: string | null;
+	artist: string | null;
+	album: string | null;
+	cover_url: string | null;
+	duration_ms: number;
+	position_ms: number;
+}
+
+export const spotifyConnectStatus = () =>
+	invoke<SpotifyConnectStatus>('spotify_connect_status');
+export const spotifyConnectSetEnabled = (enabled: boolean) =>
+	invoke<void>('spotify_connect_set_enabled', { enabled });
+export const spotifyConnectSetDeviceName = (name: string) =>
+	invoke<void>('spotify_connect_set_device_name', { name });
+export const spotifyConnectSetScrobbleEnabled = (enabled: boolean) =>
+	invoke<void>('spotify_connect_set_scrobble_enabled', { enabled });
+export const spotifyConnectGetScrobbles = (limit?: number) =>
+	invoke<SpotifyScrobbleRecord[]>('spotify_connect_get_scrobbles', { limit });
+export const onSpotifyConnectState = (cb: (event: SpotifyConnectStateEvent) => void) =>
+	listen<SpotifyConnectStateEvent>('spotify-connect-state', (e) => cb(e.payload));
+export const onSpotifyScrobbled = (cb: (event: SpotifyScrobbleRecord) => void) =>
+	listen<SpotifyScrobbleRecord>('spotify-scrobbled', (e) => cb(e.payload));
+
 // --- PC Audio Music Recognition (Shazam / SongRec) ------------------------------------------
 export interface RecognizedSong {
 	found: boolean;
