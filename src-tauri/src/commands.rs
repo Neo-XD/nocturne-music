@@ -4300,6 +4300,380 @@ pub async fn spotify_connect_get_scrobbles(
         .map_err(|e| format!("Failed to read Spotify scrobbles: {e}"))
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct SpotifyDevice {
+    pub id: Option<String>,
+    pub is_active: bool,
+    pub is_private_session: bool,
+    pub is_restricted: bool,
+    pub name: String,
+    pub device_type: String,
+    pub volume_percent: Option<u32>,
+    pub supports_volume: bool,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct SpotifyPlaybackTrack {
+    pub id: Option<String>,
+    pub name: String,
+    pub artists: String,
+    pub album_name: Option<String>,
+    pub album_cover_url: Option<String>,
+    pub duration_ms: u64,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct SpotifyPlaybackState {
+    pub is_playing: bool,
+    pub progress_ms: Option<u64>,
+    pub device: Option<SpotifyDevice>,
+    pub item: Option<SpotifyPlaybackTrack>,
+    pub shuffle_state: bool,
+    pub repeat_state: String,
+}
+
+#[tauri::command]
+pub async fn spotify_get_devices(state: St<'_>) -> Result<Vec<SpotifyDevice>, String> {
+    let mut devices = Vec::new();
+
+    if let Ok(token) = get_spotify_token(&state).await {
+        let client = crate::http::client();
+        let mut res = client
+            .get("https://api.spotify.com/v1/me/player/devices")
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await;
+
+        if let Ok(r) = &res {
+            if r.status() == reqwest::StatusCode::UNAUTHORIZED {
+                if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+                    res = client
+                        .get("https://api.spotify.com/v1/me/player/devices")
+                        .header("Authorization", format!("Bearer {new_token}"))
+                        .send()
+                        .await;
+                }
+            }
+        }
+
+        if let Ok(r) = res {
+            if r.status().is_success() {
+                if let Ok(json) = r.json::<serde_json::Value>().await {
+                    if let Some(devs) = json["devices"].as_array() {
+                        for d in devs {
+                            devices.push(SpotifyDevice {
+                                id: d["id"].as_str().map(String::from),
+                                is_active: d["is_active"].as_bool().unwrap_or(false),
+                                is_private_session: d["is_private_session"]
+                                    .as_bool()
+                                    .unwrap_or(false),
+                                is_restricted: d["is_restricted"].as_bool().unwrap_or(false),
+                                name: d["name"].as_str().unwrap_or("Unknown").to_string(),
+                                device_type: d["type"].as_str().unwrap_or("Speaker").to_string(),
+                                volume_percent: d["volume_percent"].as_u64().map(|v| v as u32),
+                                supports_volume: d["supports_volume"].as_bool().unwrap_or(true),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let local_name = state
+        .db
+        .get_setting("spotify_connect_device_name")
+        .unwrap_or_else(|| "Nocturne".to_string());
+    let local_id = state.db.get_setting("spotify_connect_device_id");
+    let is_active = state.spotify_connect.is_active();
+
+    let has_local = devices
+        .iter()
+        .any(|d| d.name.eq_ignore_ascii_case(&local_name) || (d.id.is_some() && d.id == local_id));
+
+    if !has_local {
+        let enabled = state.db.get_setting("spotify_connect_enabled").as_deref() != Some("false");
+        if enabled || is_active {
+            devices.insert(
+                0,
+                SpotifyDevice {
+                    id: local_id,
+                    is_active,
+                    is_private_session: false,
+                    is_restricted: false,
+                    name: format!("{local_name} (This PC)"),
+                    device_type: "Computer".to_string(),
+                    volume_percent: Some(100),
+                    supports_volume: true,
+                },
+            );
+        }
+    }
+
+    Ok(devices)
+}
+
+#[tauri::command]
+pub async fn spotify_get_playback(state: St<'_>) -> Result<Option<SpotifyPlaybackState>, String> {
+    if let Ok(token) = get_spotify_token(&state).await {
+        let client = crate::http::client();
+        let mut res = client
+            .get("https://api.spotify.com/v1/me/player")
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await;
+
+        if let Ok(r) = &res {
+            if r.status() == reqwest::StatusCode::UNAUTHORIZED {
+                if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+                    res = client
+                        .get("https://api.spotify.com/v1/me/player")
+                        .header("Authorization", format!("Bearer {new_token}"))
+                        .send()
+                        .await;
+                }
+            }
+        }
+
+        if let Ok(r) = res {
+            if r.status() == reqwest::StatusCode::OK {
+                if let Ok(json) = r.json::<serde_json::Value>().await {
+                    let is_playing = json["is_playing"].as_bool().unwrap_or(false);
+                    let progress_ms = json["progress_ms"].as_u64();
+                    let shuffle_state = json["shuffle_state"].as_bool().unwrap_or(false);
+                    let repeat_state = json["repeat_state"].as_str().unwrap_or("off").to_string();
+
+                    let device = if json["device"].is_object() {
+                        let d = &json["device"];
+                        Some(SpotifyDevice {
+                            id: d["id"].as_str().map(String::from),
+                            is_active: d["is_active"].as_bool().unwrap_or(false),
+                            is_private_session: d["is_private_session"].as_bool().unwrap_or(false),
+                            is_restricted: d["is_restricted"].as_bool().unwrap_or(false),
+                            name: d["name"].as_str().unwrap_or("Unknown").to_string(),
+                            device_type: d["type"].as_str().unwrap_or("Speaker").to_string(),
+                            volume_percent: d["volume_percent"].as_u64().map(|v| v as u32),
+                            supports_volume: d["supports_volume"].as_bool().unwrap_or(true),
+                        })
+                    } else {
+                        None
+                    };
+
+                    let item = if json["item"].is_object() {
+                        let it = &json["item"];
+                        let artists = it["artists"]
+                            .as_array()
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|a| a["name"].as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
+                            .unwrap_or_default();
+
+                        let cover_url = it["album"]["images"]
+                            .as_array()
+                            .and_then(|imgs| imgs.first())
+                            .and_then(|img| img["url"].as_str())
+                            .map(String::from);
+
+                        Some(SpotifyPlaybackTrack {
+                            id: it["id"].as_str().map(String::from),
+                            name: it["name"].as_str().unwrap_or("Unknown Track").to_string(),
+                            artists,
+                            album_name: it["album"]["name"].as_str().map(String::from),
+                            album_cover_url: cover_url,
+                            duration_ms: it["duration_ms"].as_u64().unwrap_or(0),
+                        })
+                    } else {
+                        None
+                    };
+
+                    return Ok(Some(SpotifyPlaybackState {
+                        is_playing,
+                        progress_ms,
+                        device,
+                        item,
+                        shuffle_state,
+                        repeat_state,
+                    }));
+                }
+            }
+        }
+    }
+
+    if let Some(connect_state) = state.spotify_connect.get_current_state() {
+        if connect_state.active {
+            let local_name = state
+                .db
+                .get_setting("spotify_connect_device_name")
+                .unwrap_or_else(|| "Nocturne".to_string());
+            let local_id = state.db.get_setting("spotify_connect_device_id");
+
+            return Ok(Some(SpotifyPlaybackState {
+                is_playing: connect_state.is_playing,
+                progress_ms: Some(connect_state.position_ms),
+                device: Some(SpotifyDevice {
+                    id: local_id,
+                    is_active: true,
+                    is_private_session: false,
+                    is_restricted: false,
+                    name: format!("{local_name} (This PC)"),
+                    device_type: "Computer".to_string(),
+                    volume_percent: Some(100),
+                    supports_volume: true,
+                }),
+                item: connect_state.title.map(|t| SpotifyPlaybackTrack {
+                    id: None,
+                    name: t,
+                    artists: connect_state.artist.unwrap_or_default(),
+                    album_name: connect_state.album,
+                    album_cover_url: connect_state.cover_url,
+                    duration_ms: connect_state.duration_ms,
+                }),
+                shuffle_state: false,
+                repeat_state: "off".to_string(),
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
+#[tauri::command]
+pub async fn spotify_transfer_playback(
+    state: St<'_>,
+    device_id: String,
+    play: Option<bool>,
+) -> Result<(), String> {
+    let token = get_spotify_token(&state).await?;
+    let client = crate::http::client();
+    let body = serde_json::json!({
+        "device_ids": [device_id],
+        "play": play.unwrap_or(true),
+    });
+
+    let mut res = client
+        .put("https://api.spotify.com/v1/me/player")
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Spotify transfer error: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+            res = client
+                .put("https://api.spotify.com/v1/me/player")
+                .header("Authorization", format!("Bearer {new_token}"))
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("Spotify transfer error: {e}"))?;
+        }
+    }
+
+    if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        Ok(())
+    } else {
+        Err(format!("Spotify transfer failed: status {}", res.status()))
+    }
+}
+
+#[tauri::command]
+pub async fn spotify_play_pause(state: St<'_>, play: bool) -> Result<(), String> {
+    let token = get_spotify_token(&state).await?;
+    let client = crate::http::client();
+    let endpoint = if play { "play" } else { "pause" };
+    let url = format!("https://api.spotify.com/v1/me/player/{endpoint}");
+
+    let mut res = client
+        .put(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Spotify play/pause error: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+            res = client
+                .put(&url)
+                .header("Authorization", format!("Bearer {new_token}"))
+                .send()
+                .await
+                .map_err(|e| format!("Spotify play/pause error: {e}"))?;
+        }
+    }
+
+    if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        Ok(())
+    } else {
+        Err(format!("Spotify control error: status {}", res.status()))
+    }
+}
+
+#[tauri::command]
+pub async fn spotify_next_track(state: St<'_>) -> Result<(), String> {
+    let token = get_spotify_token(&state).await?;
+    let client = crate::http::client();
+    let url = "https://api.spotify.com/v1/me/player/next";
+
+    let mut res = client
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Spotify next track error: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+            res = client
+                .post(url)
+                .header("Authorization", format!("Bearer {new_token}"))
+                .send()
+                .await
+                .map_err(|e| format!("Spotify next track error: {e}"))?;
+        }
+    }
+
+    if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        Ok(())
+    } else {
+        Err(format!("Spotify next error: status {}", res.status()))
+    }
+}
+
+#[tauri::command]
+pub async fn spotify_previous_track(state: St<'_>) -> Result<(), String> {
+    let token = get_spotify_token(&state).await?;
+    let client = crate::http::client();
+    let url = "https://api.spotify.com/v1/me/player/previous";
+
+    let mut res = client
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Spotify previous track error: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+            res = client
+                .post(url)
+                .header("Authorization", format!("Bearer {new_token}"))
+                .send()
+                .await
+                .map_err(|e| format!("Spotify previous track error: {e}"))?;
+        }
+    }
+
+    if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        Ok(())
+    } else {
+        Err(format!("Spotify previous error: status {}", res.status()))
+    }
+}
+
 // --- Song downloader ------------------------------------------------------------------------
 
 #[tauri::command]

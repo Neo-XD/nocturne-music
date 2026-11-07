@@ -86,6 +86,7 @@ enum ConnectMsg {
 pub struct SpotifyConnectHandle {
     tx: UnboundedSender<ConnectMsg>,
     active: Arc<AtomicBool>,
+    current_state: Arc<std::sync::Mutex<Option<SpotifyConnectStateEvent>>>,
 }
 
 impl SpotifyConnectHandle {
@@ -116,11 +117,16 @@ impl SpotifyConnectHandle {
     pub fn is_active(&self) -> bool {
         self.active.load(Ordering::Relaxed)
     }
+
+    pub fn get_current_state(&self) -> Option<SpotifyConnectStateEvent> {
+        self.current_state.lock().ok().and_then(|g| g.clone())
+    }
 }
 
 pub fn spawn(db: &Arc<crate::db::Db>, app: AppHandle) -> SpotifyConnectHandle {
     let (tx, mut rx) = unbounded_channel();
     let active = Arc::new(AtomicBool::new(false));
+    let current_state = Arc::new(std::sync::Mutex::new(None));
 
     let mut enabled = db.get_setting("spotify_connect_enabled").as_deref() != Some("false");
     let mut scrobble_enabled =
@@ -149,6 +155,7 @@ pub fn spawn(db: &Arc<crate::db::Db>, app: AppHandle) -> SpotifyConnectHandle {
     let db_clone = db.clone();
     let app_clone = app.clone();
     let active_clone = active.clone();
+    let cur_state_clone = current_state.clone();
 
     tauri::async_runtime::spawn(async move {
         let mut cur_track: Option<Box<TrackItem>> = None;
@@ -206,6 +213,9 @@ pub fn spawn(db: &Arc<crate::db::Db>, app: AppHandle) -> SpotifyConnectHandle {
                                     let _ = tx.send(());
                                 }
                                 active_clone.store(false, Ordering::Relaxed);
+                                if let Ok(mut lk) = cur_state_clone.lock() {
+                                    *lk = None;
+                                }
                             }
                         }
                         ConnectMsg::SetDeviceName(name) => {
@@ -245,6 +255,7 @@ pub fn spawn(db: &Arc<crate::db::Db>, app: AppHandle) -> SpotifyConnectHandle {
                     let dev_name = device_name.clone();
                     let app_h = app_clone.clone();
                     let act = active_clone.clone();
+                    let cs = cur_state_clone.clone();
 
                     tauri::async_runtime::spawn(async move {
                         if let Err(e) = run_connect_session(
@@ -253,6 +264,7 @@ pub fn spawn(db: &Arc<crate::db::Db>, app: AppHandle) -> SpotifyConnectHandle {
                             creds,
                             app_h,
                             act,
+                            cs,
                             shutdown_rx,
                         )
                         .await
@@ -266,7 +278,7 @@ pub fn spawn(db: &Arc<crate::db::Db>, app: AppHandle) -> SpotifyConnectHandle {
         }
     });
 
-    SpotifyConnectHandle { tx, active }
+    SpotifyConnectHandle { tx, active, current_state }
 }
 
 fn start_discovery(device_id: &str, client_id: &str, device_name: &str) -> Option<Discovery> {
@@ -292,6 +304,7 @@ async fn run_connect_session(
     creds: Credentials,
     app: AppHandle,
     active: Arc<AtomicBool>,
+    current_state: Arc<std::sync::Mutex<Option<SpotifyConnectStateEvent>>>,
     mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), String> {
     let session_config = SessionConfig { device_id: device_id.clone(), ..Default::default() };
@@ -326,23 +339,25 @@ async fn run_connect_session(
             .map_err(|e| format!("Failed to initialize Spirc: {e}"))?;
 
     active.store(true, Ordering::Relaxed);
-    let _ = app.emit(
-        "spotify-connect-state",
-        SpotifyConnectStateEvent {
-            active: true,
-            is_playing: false,
-            title: None,
-            artist: None,
-            album: None,
-            cover_url: None,
-            duration_ms: 0,
-            position_ms: 0,
-        },
-    );
+    let initial_ev = SpotifyConnectStateEvent {
+        active: true,
+        is_playing: false,
+        title: None,
+        artist: None,
+        album: None,
+        cover_url: None,
+        duration_ms: 0,
+        position_ms: 0,
+    };
+    if let Ok(mut lk) = current_state.lock() {
+        *lk = Some(initial_ev.clone());
+    }
+    let _ = app.emit("spotify-connect-state", initial_ev);
 
     let mut event_rx = player.get_player_event_channel();
     let session_clone = session.clone();
     let app_clone = app.clone();
+    let cur_state_clone = current_state.clone();
 
     let event_loop = async move {
         while let Some(event) = event_rx.recv().await {
@@ -366,49 +381,52 @@ async fn run_connect_session(
                         );
                     }
 
-                    let _ = app_clone.emit(
-                        "spotify-connect-state",
-                        SpotifyConnectStateEvent {
-                            active: true,
-                            is_playing: true,
-                            title,
-                            artist,
-                            album,
-                            cover_url: None,
-                            duration_ms,
-                            position_ms: position_ms as u64,
-                        },
-                    );
+                    let ev = SpotifyConnectStateEvent {
+                        active: true,
+                        is_playing: true,
+                        title,
+                        artist,
+                        album,
+                        cover_url: None,
+                        duration_ms,
+                        position_ms: position_ms as u64,
+                    };
+                    if let Ok(mut lk) = cur_state_clone.lock() {
+                        *lk = Some(ev.clone());
+                    }
+                    let _ = app_clone.emit("spotify-connect-state", ev);
                 }
                 PlayerEvent::Paused { position_ms, .. } => {
-                    let _ = app_clone.emit(
-                        "spotify-connect-state",
-                        SpotifyConnectStateEvent {
-                            active: true,
-                            is_playing: false,
-                            title: None,
-                            artist: None,
-                            album: None,
-                            cover_url: None,
-                            duration_ms: 0,
-                            position_ms: position_ms as u64,
-                        },
-                    );
+                    let ev = SpotifyConnectStateEvent {
+                        active: true,
+                        is_playing: false,
+                        title: None,
+                        artist: None,
+                        album: None,
+                        cover_url: None,
+                        duration_ms: 0,
+                        position_ms: position_ms as u64,
+                    };
+                    if let Ok(mut lk) = cur_state_clone.lock() {
+                        *lk = Some(ev.clone());
+                    }
+                    let _ = app_clone.emit("spotify-connect-state", ev);
                 }
                 PlayerEvent::Stopped { .. } => {
-                    let _ = app_clone.emit(
-                        "spotify-connect-state",
-                        SpotifyConnectStateEvent {
-                            active: true,
-                            is_playing: false,
-                            title: None,
-                            artist: None,
-                            album: None,
-                            cover_url: None,
-                            duration_ms: 0,
-                            position_ms: 0,
-                        },
-                    );
+                    let ev = SpotifyConnectStateEvent {
+                        active: true,
+                        is_playing: false,
+                        title: None,
+                        artist: None,
+                        album: None,
+                        cover_url: None,
+                        duration_ms: 0,
+                        position_ms: 0,
+                    };
+                    if let Ok(mut lk) = cur_state_clone.lock() {
+                        *lk = Some(ev.clone());
+                    }
+                    let _ = app_clone.emit("spotify-connect-state", ev);
                 }
                 _ => {}
             }
@@ -422,6 +440,9 @@ async fn run_connect_session(
     }
 
     active.store(false, Ordering::Relaxed);
+    if let Ok(mut lk) = current_state.lock() {
+        *lk = None;
+    }
     let _ = app.emit(
         "spotify-connect-state",
         SpotifyConnectStateEvent {
