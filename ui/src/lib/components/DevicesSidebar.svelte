@@ -18,7 +18,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as api from '$lib/api';
 	import type { RemoteSyncInfo, AudioDeviceInfo, SpotifyDevice, SpotifyPlaybackState, SpotifyConnectStateEvent } from '$lib/api';
-	import { prefs, toast, spotify, ui } from '$lib/player.svelte';
+	import { prefs, toast, spotify, ui, playSong } from '$lib/player.svelte';
 
 	let {
 		onClose
@@ -110,11 +110,37 @@
 			toast.info(`Selected ${device.name}`);
 			return;
 		}
+		const isNocturne =
+			device.name.toLowerCase().includes('nocturne') ||
+			device.name.toLowerCase().includes('this pc') ||
+			device.device_type.toLowerCase() === 'computer';
 		try {
 			toast.info(`Transferring playback to ${device.name}...`);
 			await api.spotifyTransferPlayback(device.id, true);
 			setTimeout(fetchSpotify, 500);
 		} catch (e) {
+			if (isNocturne && spotifyPlayback?.item?.name) {
+				try {
+					toast.info('Transferring track to Nocturne...');
+					await api.spotifyPlayPause(false).catch(() => {});
+					const query = `${spotifyPlayback.item.name} ${spotifyPlayback.item.artists || ''}`.trim();
+					const searchResults = await api.search(query);
+					if (searchResults && searchResults.length > 0) {
+						await playSong(searchResults[0]);
+						const seekSecs = Math.floor((spotifyPlayback.progress_ms || 0) / 1000);
+						if (seekSecs > 1) {
+							setTimeout(() => {
+								api.seek(seekSecs).catch(() => {});
+							}, 600);
+						}
+						toast.success(`Playing "${spotifyPlayback.item.name}" on Nocturne`);
+						setTimeout(fetchSpotify, 500);
+						return;
+					}
+				} catch (fallbackErr) {
+					console.error('Failed to hand off Spotify track to Nocturne:', fallbackErr);
+				}
+			}
 			toast.error(`Could not transfer playback: ${e}`);
 		}
 	}

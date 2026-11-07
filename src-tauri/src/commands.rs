@@ -4547,9 +4547,40 @@ pub async fn spotify_transfer_playback(
     play: Option<bool>,
 ) -> Result<(), String> {
     let token = get_spotify_token(&state).await?;
+    let local_id = state.db.get_setting("spotify_connect_device_id");
+    let is_local = local_id.as_deref() == Some(&device_id);
+
+    if is_local && !state.spotify_connect.is_active() {
+        state.spotify_connect.start_with_token(token.clone());
+        for _ in 0..15 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if state.spotify_connect.is_active() {
+                break;
+            }
+        }
+    }
+
+    let mut target_id = device_id;
+    if is_local {
+        let local_name = state
+            .db
+            .get_setting("spotify_connect_device_name")
+            .unwrap_or_else(|| "Nocturne".to_string());
+        if let Ok(devs) = spotify_get_devices(state.clone()).await {
+            if let Some(matched) = devs
+                .iter()
+                .find(|d| d.is_active && (d.name.contains(&local_name) || d.id == local_id))
+            {
+                if let Some(ref mid) = matched.id {
+                    target_id = mid.clone();
+                }
+            }
+        }
+    }
+
     let client = crate::http::client();
     let body = serde_json::json!({
-        "device_ids": [device_id],
+        "device_ids": [target_id],
         "play": play.unwrap_or(true),
     });
 

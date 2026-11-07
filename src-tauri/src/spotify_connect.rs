@@ -80,6 +80,7 @@ enum ConnectMsg {
     SetEnabled(bool),
     SetDeviceName(String),
     SetScrobbleEnabled(bool),
+    StartWithToken(String),
 }
 
 #[derive(Clone)]
@@ -118,6 +119,10 @@ impl SpotifyConnectHandle {
 
     pub fn set_scrobble_enabled(&self, enabled: bool) {
         let _ = self.tx.send(ConnectMsg::SetScrobbleEnabled(enabled));
+    }
+
+    pub fn start_with_token(&self, token: String) {
+        let _ = self.tx.send(ConnectMsg::StartWithToken(token));
     }
 
     pub fn is_active(&self) -> bool {
@@ -254,6 +259,39 @@ pub fn spawn(db: &Arc<crate::db::Db>, app: AppHandle) -> SpotifyConnectHandle {
                             scrobble_enabled = on;
                             db_clone.set_setting("spotify_scrobble_enabled", if on { "true" } else { "false" });
                         }
+                        ConnectMsg::StartWithToken(token) => {
+                            if !active_clone.load(Ordering::Relaxed) {
+                                if let Some(tx) = spirc_shutdown_tx.take() {
+                                    let _ = tx.send(());
+                                }
+
+                                let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+                                spirc_shutdown_tx = Some(shutdown_tx);
+
+                                let dev_id = device_id.clone();
+                                let dev_name = device_name.clone();
+                                let app_h = app_clone.clone();
+                                let act = active_clone.clone();
+                                let cs = cur_state_clone.clone();
+                                let creds = Credentials::with_access_token(token);
+
+                                tauri::async_runtime::spawn(async move {
+                                    if let Err(e) = run_connect_session(
+                                        dev_id,
+                                        dev_name,
+                                        creds,
+                                        app_h,
+                                        act,
+                                        cs,
+                                        shutdown_rx,
+                                    )
+                                    .await
+                                    {
+                                        tracing::warn!("Spotify Connect session terminated: {e}");
+                                    }
+                                });
+                            }
+                        }
                     }
                 }
                 Some(creds) = async {
@@ -294,6 +332,15 @@ pub fn spawn(db: &Arc<crate::db::Db>, app: AppHandle) -> SpotifyConnectHandle {
                 }
                 else => break,
             }
+        }
+    });
+
+    let db_token = db.clone();
+    let tx_token = tx.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        if let Ok(token) = crate::commands::get_spotify_token_from_db(&db_token).await {
+            let _ = tx_token.send(ConnectMsg::StartWithToken(token));
         }
     });
 
