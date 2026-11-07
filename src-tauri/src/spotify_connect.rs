@@ -323,7 +323,7 @@ async fn run_connect_session(
     creds: Credentials,
     app: AppHandle,
     active: Arc<AtomicBool>,
-    current_state: Arc<std::sync::Mutex<Option<SpotifyConnectStateEvent>>>,
+    current_state: Arc<std::sync::Mutex<Option<InternalConnectState>>>,
     mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), String> {
     let session_config = SessionConfig { device_id: device_id.clone(), ..Default::default() };
