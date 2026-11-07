@@ -132,18 +132,41 @@
 		else if (e.key === 'ArrowLeft') onCommit?.(Math.max(0, position - 5));
 	}}
 >
-	<!-- Bars container -->
-	<div class="flex h-full w-full items-center justify-between gap-[2px]">
-		{#each waveformBars as bar, i}
-			{@const barRatio = i / (waveformBars.length - 1)}
-			{@const isPlayed = barRatio <= progressRatio}
-			{@const isHoveredPast = isHovering && barRatio <= hoverRatio && !isPlayed}
+	<!-- Background (Unplayed) Bars Track -->
+	<div class="flex h-full w-full items-center justify-between gap-[2px] opacity-35">
+		{#each waveformBars as bar, i (i)}
 			<div
-				class="w-full flex-1 rounded-[var(--radius,2px)] transition-all duration-75 {isPlayed
-					? 'bg-primary shadow-[0_0_8px_rgba(var(--primary-rgb),0.35)]'
-					: isHoveredPast
-						? 'bg-primary/50'
-						: 'bg-muted-foreground/25 hover:bg-muted-foreground/40'}"
+				class="w-full flex-1 rounded-[var(--radius,2px)] bg-muted-foreground transition-[height] duration-200"
+				style="height: {Math.max(3, bar * height)}px; min-width: 1.5px; max-width: 4px;"
+			></div>
+		{/each}
+	</div>
+
+	<!-- Hover Preview Bars Track -->
+	{#if isHovering}
+		<div
+			class="pointer-events-none absolute inset-0 flex h-full w-full items-center justify-between gap-[2px]"
+			style="clip-path: inset(0 calc(100% - {hoverRatio * 100}%) 0 0);"
+		>
+			{#each waveformBars as bar, i (i)}
+				<div
+					class="w-full flex-1 rounded-[var(--radius,2px)] bg-primary/40 transition-[height] duration-200"
+					style="height: {Math.max(3, bar * height)}px; min-width: 1.5px; max-width: 4px;"
+				></div>
+			{/each}
+		</div>
+	{/if}
+
+	<!-- Active (Played) Bars Track - Continuous smooth clip-path fill -->
+	<div
+		class="pointer-events-none absolute inset-0 flex h-full w-full items-center justify-between gap-[2px] {isDragging
+			? ''
+			: 'transition-[clip-path] duration-150 ease-linear'}"
+		style="clip-path: inset(0 calc(100% - {progressRatio * 100}%) 0 0);"
+	>
+		{#each waveformBars as bar, i (i)}
+			<div
+				class="w-full flex-1 rounded-[var(--radius,2px)] bg-primary shadow-[0_0_8px_rgba(var(--primary-rgb,225,29,72),0.45)] transition-[height] duration-200"
 				style="height: {Math.max(3, bar * height)}px; min-width: 1.5px; max-width: 4px;"
 			></div>
 		{/each}

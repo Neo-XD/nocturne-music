@@ -12,13 +12,14 @@ pub mod rustypipe_fallback;
 pub mod transport;
 
 pub use clients::{
-    Clients, YouTubeClient, LYRICS_TIMED_CLIENT, MAIN_CLIENT, METADATA_CLIENT,
+    Clients, YouTubeClient, COMMENTS_CLIENT, LYRICS_TIMED_CLIENT, MAIN_CLIENT, METADATA_CLIENT,
     STREAM_FALLBACK_ORDER, UPLOAD_FALLBACK_ORDER,
 };
 pub use models::browse::{
     AlbumPage, ArtistCarousel, ArtistPage, BrowseItem, HomePage, Mood, MoodSection,
     PlaylistContinuation, PlaylistPage, PlaylistSort, SearchResults, Section, SortMenu,
 };
+pub use models::comments::{CommentItem, CommentRepliesResult, CommentsPage};
 pub use models::context::Locale;
 pub use models::lyrics::{PlainLyrics, TimedLyricLine};
 pub use models::metadata::{

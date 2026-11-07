@@ -54,6 +54,7 @@
 		setFloatingSidebarRight,
 		setFloatingPlayerBar,
 		setShowAudioQuality,
+		setDolbyAtmos,
 		setWaveformSeekbar,
 		setPcAudioRecognition,
 		setHomeInSidebar,
@@ -914,6 +915,7 @@
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const crossfadeSecs = $derived(parseInt(settings.crossfade_seconds || '0', 10) || 0);
+	const automixOn = $derived(settings.automix === 'true');
 	const normalizeOn = $derived(settings.normalize_volume !== 'false');
 
 	async function setNormalize(on: boolean) {
@@ -924,6 +926,11 @@
 	async function setCrossfade(secs: number) {
 		settings.crossfade_seconds = secs.toString();
 		await api.setSetting('crossfade_seconds', secs.toString());
+	}
+
+	async function setAutomix(on: boolean) {
+		settings.automix = on ? 'true' : 'false';
+		await api.setSetting('automix', settings.automix);
 	}
 
 	// --- Equalizer state ---
@@ -1186,10 +1193,35 @@
 
 	async function setQuality(q: string) {
 		settings.quality = q;
+		if (q === 'DOLBY_ATMOS') {
+			settings.dolby_atmos = 'true';
+			setDolbyAtmos(true);
+			await api.setSetting('dolby_atmos', 'true');
+		} else if (q === 'HI_RES_LOSSLESS') {
+			// If Hi-Res is selected, don't think about Dolby at all
+			settings.dolby_atmos = 'false';
+			setDolbyAtmos(false);
+			await api.setSetting('dolby_atmos', 'false');
+		}
 		await api.setSetting('quality', q);
 		// Cached URLs are keyed by video only, so clear them to apply the new quality everywhere.
 		await api.clearCaches();
 		toast.success('Audio quality updated');
+	}
+
+	async function setDolbyAtmosSetting(on: boolean) {
+		settings.dolby_atmos = on ? 'true' : 'false';
+		setDolbyAtmos(on);
+		if (on && settings.quality !== 'HI_RES_LOSSLESS') {
+			settings.quality = 'DOLBY_ATMOS';
+			await api.setSetting('quality', 'DOLBY_ATMOS');
+		} else if (!on && settings.quality === 'DOLBY_ATMOS') {
+			settings.quality = 'LOSSLESS';
+			await api.setSetting('quality', 'LOSSLESS');
+		}
+		await api.setSetting('dolby_atmos', settings.dolby_atmos);
+		await api.clearCaches();
+		toast.success(on ? 'Dolby Atmos prioritized' : 'Dolby Atmos disabled');
 	}
 
 	async function setDownloadQuality(q: string) {
@@ -2384,6 +2416,14 @@
 									tall: true
 								})}
 								{@render row({
+									title: 'Automix',
+									badge: 'Equal-Power',
+									badgeVariant: 'info',
+									desc: 'Seamless equal-power transitions between songs using quarter-sine blending without perceived volume drops.',
+									control: automixSwitch,
+									tall: true
+								})}
+								{@render row({
 									title: 'Volume normalization',
 									desc: 'Match loudness across tracks using replay gain / YouTube loudness data. Turn off for untouched audio masters.',
 									control: normalizeSwitch,
@@ -2395,6 +2435,14 @@
 									badgeVariant: 'info',
 									desc: 'Preferred stream quality when resolving a track. If the selected resolution is unavailable, the next highest resolution will be picked.',
 									control: qualityPicker
+								})}
+								{@render row({
+									title: 'Dolby Atmos',
+									badge: 'Spatial Audio',
+									badgeVariant: 'info',
+									desc: 'When on, prioritize Dolby Atmos spatial streams over standard lossless. If Hi-Res Lossless is selected, Dolby Atmos is ignored.',
+									control: dolbyAtmosSwitch,
+									tall: true
 								})}
 								{@render row({
 									title: 'Audio quality indicator',
@@ -3439,6 +3487,9 @@
 		/>
 		<span class="w-8 text-right font-mono text-xs text-muted-foreground">{crossfadeSecs === 0 ? 'Off' : `${crossfadeSecs}s`}</span>
 	</div>
+{/snippet}
+{#snippet automixSwitch()}
+	<Switch checked={automixOn} onCheckedChange={(val) => setAutomix(val)} />
 {/snippet}
 {#snippet eqSwitch()}
 	<Switch checked={eqEnabled} onCheckedChange={(val) => toggleEqualizer(val)} />
@@ -4635,6 +4686,15 @@
 			{/each}
 		</Select.Content>
 	</Select.Root>
+{/snippet}
+
+{#snippet dolbyAtmosSwitch()}
+	<Switch
+		checked={settings.dolby_atmos === 'true' || settings.quality === 'DOLBY_ATMOS'}
+		disabled={settings.quality === 'HI_RES_LOSSLESS'}
+		onCheckedChange={(on) => setDolbyAtmosSetting(on)}
+		aria-label="Dolby Atmos"
+	/>
 {/snippet}
 
 {#snippet downloadQualityPicker()}

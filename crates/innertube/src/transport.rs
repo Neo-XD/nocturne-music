@@ -372,7 +372,11 @@ impl InnerTube {
     ) -> Result<serde_json::Value, Error> {
         // `path` may already carry query params (e.g. browse continuations); chain accordingly.
         let sep = if path.contains('?') { '&' } else { '?' };
-        let url = format!("{BASE_URL}{path}{sep}prettyPrint=false");
+        let url = if path.starts_with("https://") || path.starts_with("http://") {
+            format!("{path}{sep}prettyPrint=false")
+        } else {
+            format!("{BASE_URL}{path}{sep}prettyPrint=false")
+        };
         let body = serde_json::to_vec(body)?;
 
         let mut delay = Duration::from_millis(500);
@@ -500,8 +504,13 @@ impl InnerTube {
         set(&mut h, "x-goog-api-format-version", "1");
         set(&mut h, "x-youtube-client-name", &client.client_id);
         set(&mut h, "x-youtube-client-version", &client.client_version);
-        set(&mut h, "x-origin", ORIGIN);
-        set(&mut h, "referer", REFERER);
+        let (origin, referer) = if client.client_name == "WEB" {
+            ("https://www.youtube.com", "https://www.youtube.com/")
+        } else {
+            (ORIGIN, REFERER)
+        };
+        set(&mut h, "x-origin", origin);
+        set(&mut h, "referer", referer);
         set(&mut h, "user-agent", &client.user_agent);
 
         let s = self.session.read().unwrap();
@@ -515,7 +524,7 @@ impl InnerTube {
             if let Some(cookie) = &s.cookie {
                 set(&mut h, "cookie", cookie);
                 if let Some(sapisid) = s.sapisid() {
-                    if let Ok(val) = HeaderValue::from_str(&sapisid_hash(&sapisid, ORIGIN)) {
+                    if let Ok(val) = HeaderValue::from_str(&sapisid_hash(&sapisid, origin)) {
                         h.insert(HeaderName::from_static("authorization"), val);
                     }
                 }

@@ -47,6 +47,7 @@
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
 	import WaveformSeekbar from './WaveformSeekbar.svelte';
+	import AudioQualityBadge from './AudioQualityBadge.svelte';
 	import logo from '$lib/assets/icon.png';
 
 	let {
@@ -163,60 +164,10 @@
      stays a plain region rather than becoming a focusable control wrapping every other control. -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 {#snippet audioQualityBadge()}
-	{#if prefs.showAudioQuality && playback.now?.audioQuality}
-		{@const raw = playback.now.audioQuality}
-		{@const rawUpper = raw.toUpperCase()}
-		{@const isAtmos = rawUpper.includes('ATMOS') || rawUpper.includes('DOLBY')}
-		{@const isHires = rawUpper.includes('HI-RES') || rawUpper.includes('HI_RES') || rawUpper.includes('HIRES')}
-		{@const isLossless = rawUpper.includes('LOSSLESS') || rawUpper.includes('FLAC')}
-		{@const isOpus = rawUpper.includes('OPUS')}
-		{@const isAac = rawUpper.includes('AAC') || rawUpper.includes('M4A')}
-		{#if prefs.appLayout === 'applemusic'}
-			{@const short = isAtmos
-				? 'ATMOS'
-				: isHires
-				? 'HIRES'
-				: isLossless
-				? 'LOSSLESS'
-				: isOpus
-				? 'OPUS'
-				: isAac
-				? 'AAC'
-				: rawUpper.split(' ')[0]}
-			<span
-				class="inline-flex items-center px-1 py-0.2 rounded text-[7.5px] font-black tracking-wider uppercase border select-none shrink-0 leading-none {isAtmos ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : isHires ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : isLossless ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : isOpus ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : isAac ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'bg-muted/60 text-muted-foreground border-border/40'}"
-				title="Playback Audio Quality: {raw}"
-			>
-				{short}
-			</span>
-		{:else}
-			<div class="flex items-center gap-1 mt-0.5" in:fade={{ duration: 150 }}>
-				<span
-					class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-semibold tracking-wide border select-none {isAtmos ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : isHires ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : isLossless ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-muted/60 text-muted-foreground/90 border-border/40 font-medium'}"
-					title="Playback Audio Quality"
-				>
-					{#if isAtmos}
-						<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-sky-300">DOLBY ATMOS</span>
-						{#if raw.replace(/DOLBY\s*ATMOS/i, '').trim()}
-							<span class="text-[9px] font-normal opacity-85">{raw.replace(/DOLBY\s*ATMOS/i, '').trim()}</span>
-						{/if}
-					{:else if isHires}
-						<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-amber-300">HI-RES LOSSLESS</span>
-						{#if raw.replace(/HI-RES\s*LOSSLESS/i, '').trim()}
-							<span class="text-[9px] font-normal opacity-90">{raw.replace(/HI-RES\s*LOSSLESS/i, '').trim()}</span>
-						{/if}
-					{:else if isLossless}
-						<span class="text-[8.5px] uppercase tracking-wider font-extrabold text-emerald-300">LOSSLESS</span>
-						{#if raw.replace(/LOSSLESS/i, '').trim()}
-							<span class="text-[9px] font-normal opacity-90">{raw.replace(/LOSSLESS/i, '').trim()}</span>
-						{/if}
-					{:else}
-						<span>{raw}</span>
-					{/if}
-				</span>
-			</div>
-		{/if}
-	{/if}
+	<AudioQualityBadge
+		quality={playback.now?.audioQuality}
+		size={prefs.appLayout === 'applemusic' ? 'xs' : 'sm'}
+	/>
 {/snippet}
 
 <footer
@@ -854,7 +805,8 @@
 					class="block max-w-full text-xs text-muted-foreground"
 				/>
 			</div>
-			{#if prefs.showAudioQuality && playback.now?.audioQuality}
+				{@render audioQualityBadge()}
+			{#if false}
 				<div class="flex items-center gap-1 mt-0.5" in:fade={{ duration: 150 }}>
 					<span
 						class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-semibold tracking-wide border select-none {playback.now.audioQuality.includes('ATMOS') || playback.now.audioQuality.includes('DOLBY') ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : playback.now.audioQuality.includes('HI-RES') || playback.now.audioQuality.includes('HI_RES') ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : playback.now.audioQuality.includes('LOSSLESS') ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-muted/60 text-muted-foreground/90 border-border/40 font-medium'}"

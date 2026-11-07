@@ -48,6 +48,8 @@ pub enum PlayerEvent {
     /// into the next playlist entry or gone idle — the orchestrator asks [`Player::is_idle`].
     TrackFailed(String),
     Error(String),
+    /// Dual-deck crossfade volume ramp completed — hand off active deck and UI to next track.
+    CrossfadeCompleted,
 }
 
 /// mpv end-file reasons (from `mpv_end_file_reason`).
@@ -85,6 +87,7 @@ struct AudioFilters {
     gain_db: Option<f64>,
     semitones: i32,
     crossfade_secs: f64,
+    automix: bool,
     skip_fade_in: bool,
     track_duration: Option<f64>,
     eq_enabled: bool,
@@ -105,6 +108,7 @@ enum InternalDeckEvent {
 pub struct Deck {
     pub id: u8,
     pub mpv: Arc<Mpv>,
+    pub duration: Arc<AtomicU64>,
     af: std::sync::Mutex<AudioFilters>,
 }
 
@@ -126,7 +130,16 @@ impl Deck {
         let _ = mpv.set_property("network-timeout", 30_i64);
         let mpv = Arc::new(mpv);
 
-        Ok(Deck { id, mpv, af: std::sync::Mutex::new(AudioFilters::default()) })
+        Ok(Deck {
+            id,
+            mpv,
+            duration: Arc::new(AtomicU64::new(0)),
+            af: std::sync::Mutex::new(AudioFilters::default()),
+        })
+    }
+
+    pub fn get_duration(&self) -> f64 {
+        f64::from_bits(self.duration.load(Ordering::SeqCst))
     }
 
     fn apply_af(&self) -> Result<(), Error> {
@@ -168,7 +181,11 @@ pub struct Player {
     fading_deck: Arc<AtomicI8>,
     primed_deck: Arc<AtomicI8>,
     crossfade_secs: Arc<AtomicU64>,
+    automix: Arc<AtomicBool>,
     skip_fade_in: Arc<AtomicBool>,
+    crossfade_in_progress: Arc<AtomicBool>,
+    crossfade_epoch: Arc<AtomicU64>,
+    external_tx: tokio::sync::mpsc::UnboundedSender<PlayerEvent>,
     events: Option<UnboundedReceiver<PlayerEvent>>,
     shared_af: Arc<std::sync::Mutex<AudioFilters>>,
     volume: Arc<AtomicI64>,
@@ -191,7 +208,10 @@ impl Player {
         let fading_deck = Arc::new(AtomicI8::new(-1));
         let primed_deck = Arc::new(AtomicI8::new(-1));
         let crossfade_secs = Arc::new(AtomicU64::new(0f64.to_bits()));
+        let automix = Arc::new(AtomicBool::new(false));
         let skip_fade_in = Arc::new(AtomicBool::new(false));
+        let crossfade_in_progress = Arc::new(AtomicBool::new(false));
+        let crossfade_epoch = Arc::new(AtomicU64::new(0));
         let shared_af = Arc::new(std::sync::Mutex::new(AudioFilters::default()));
         let volume = Arc::new(AtomicI64::new(100));
         let speed = Arc::new(AtomicU64::new(1.0f64.to_bits()));
@@ -239,10 +259,11 @@ impl Player {
             let prm = primed_deck.clone();
             let da = deck_a.clone();
             let db = deck_b.clone();
+            let ext = external_tx.clone();
             std::thread::Builder::new()
                 .name("mpv-arbiter".into())
                 .spawn(move || {
-                    arbitrate_events(act, fad, prm, da, db, internal_rx, external_tx);
+                    arbitrate_events(act, fad, prm, da, db, internal_rx, ext);
                 })
                 .expect("spawn mpv arbiter thread");
         }
@@ -254,7 +275,11 @@ impl Player {
             fading_deck,
             primed_deck,
             crossfade_secs,
+            automix,
             skip_fade_in,
+            crossfade_in_progress,
+            crossfade_epoch,
+            external_tx,
             events: Some(external_rx),
             shared_af,
             volume,
@@ -286,10 +311,32 @@ impl Player {
     }
 
     pub fn stop_fading_deck(&self) {
+        self.crossfade_epoch.fetch_add(1, Ordering::SeqCst);
+        self.crossfade_in_progress.store(false, Ordering::SeqCst);
         let f = self.fading_deck.swap(-1, Ordering::SeqCst);
         if f >= 0 {
             self.deck(f as u8).stop();
         }
+        let master = perceptual_to_mpv(self.volume.load(Ordering::SeqCst));
+        let _ = self.active_deck().mpv.set_property("volume", master);
+    }
+
+    pub fn complete_crossfade_early(&self) {
+        if self.crossfade_in_progress.swap(false, Ordering::SeqCst) {
+            self.crossfade_epoch.fetch_add(1, Ordering::SeqCst);
+            let fad = self.fading_deck.swap(-1, Ordering::SeqCst);
+            if fad >= 0 {
+                let incoming_id = fad as u8;
+                let outgoing_id = self.active_deck.swap(incoming_id, Ordering::SeqCst);
+                self.deck(outgoing_id).stop();
+                let master = perceptual_to_mpv(self.volume.load(Ordering::SeqCst));
+                let _ = self.deck(incoming_id).mpv.set_property("volume", master);
+            }
+        }
+    }
+
+    pub fn is_crossfade_in_progress(&self) -> bool {
+        self.crossfade_in_progress.load(Ordering::SeqCst)
     }
 
     pub fn stop_primed_deck(&self) {
@@ -319,7 +366,9 @@ impl Player {
         self.stop_fading_deck();
         self.stop_primed_deck();
 
+        let master = perceptual_to_mpv(self.volume.load(Ordering::SeqCst));
         let active = self.active_deck();
+        let _ = active.mpv.set_property("volume", master);
         active.apply_headers(headers)?;
         {
             let mut af = active.af.lock().unwrap();
@@ -327,6 +376,7 @@ impl Player {
             af.gain_db = gain_db;
             af.semitones = shared.semitones;
             af.crossfade_secs = shared.crossfade_secs;
+            af.automix = shared.automix;
             af.skip_fade_in = self.skip_fade_in.swap(false, Ordering::SeqCst);
             af.track_duration = None;
             af.eq_enabled = shared.eq_enabled;
@@ -343,22 +393,25 @@ impl Player {
         self.enqueue_track(url, &HashMap::new(), None)
     }
 
-    /// Enqueue the next track for either gapless transition (when crossfade is 0)
-    /// or true dual-deck overlapping crossfade (when crossfade > 0).
+    /// Enqueue the next track for either gapless transition (when crossfade is 0 and automix is off)
+    /// or true dual-deck overlapping crossfade (when crossfade > 0 or automix is on).
     pub fn enqueue_track(
         &self,
         url: &str,
         headers: &HashMap<String, String>,
         gain_db: Option<f64>,
     ) -> Result<(), Error> {
-        let xf = self.crossfade_secs();
-        if xf <= 0.0 {
+        let manual_xf = self.crossfade_secs();
+        let automix = self.automix();
+        if manual_xf <= 0.0 && !automix {
             // Gapless single deck
             self.active_deck().apply_headers(headers)?;
             self.active_deck().mpv.command("loadfile", &[url, "append"])?;
             self.primed_deck.store(-1, Ordering::SeqCst);
             return Ok(());
         }
+
+        let xf = if manual_xf > 0.0 { manual_xf } else { 5.0 };
 
         // Dual-deck overlapping crossfade: prime the standby deck
         let standby_id = 1 - self.active_deck.load(Ordering::SeqCst);
@@ -371,7 +424,8 @@ impl Player {
             af.gain_db = gain_db;
             af.semitones = shared.semitones;
             af.crossfade_secs = xf;
-            af.skip_fade_in = false; // Primed lookahead track fades in
+            af.automix = automix;
+            af.skip_fade_in = false;
             af.track_duration = None;
             af.eq_enabled = shared.eq_enabled;
             af.eq_preamp_db = shared.eq_preamp_db;
@@ -384,51 +438,100 @@ impl Player {
 
         self.primed_deck.store(standby_id as i8, Ordering::SeqCst);
 
-        // Also ensure active deck has fade-out configured if duration is known
-        let _ = self.active_deck().apply_af();
-
         Ok(())
     }
 
-    /// True if crossfade is configured (> 0) and the secondary deck is primed and ready.
+    /// True if crossfade or automix is configured and the secondary deck is primed and ready.
     pub fn can_crossfade(&self) -> bool {
-        self.crossfade_secs() > 0.0 && self.primed_deck.load(Ordering::SeqCst) >= 0
+        (self.crossfade_secs() > 0.0 || self.automix())
+            && self.primed_deck.load(Ordering::SeqCst) >= 0
+            && !self.crossfade_in_progress.load(Ordering::SeqCst)
     }
 
-    /// Trigger the overlapping crossfade handoff: starts the primed deck immediately with fade-in,
-    /// marks the current deck as fading-out, and flips active decks.
+    /// Trigger the overlapping crossfade: starts fading in the primed standby deck at 0 volume
+    /// while smoothly fading out the active deck. The active deck remains active until the fade
+    /// completes, at which point the incoming deck becomes active and
+    /// `PlayerEvent::CrossfadeCompleted` is fired so the UI switches to the next song's seekbar.
     pub fn start_crossfade(&self) -> Result<(), Error> {
-        let primed = self.primed_deck.load(Ordering::SeqCst);
+        let primed = self.primed_deck.swap(-1, Ordering::SeqCst);
         if primed < 0 {
             return Ok(());
         }
+        if self.crossfade_in_progress.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+
         let incoming_id = primed as u8;
         let outgoing_id = self.active_deck.load(Ordering::SeqCst);
 
-        let incoming = self.deck(incoming_id);
-        let outgoing = self.deck(outgoing_id);
+        let incoming = self.deck(incoming_id).clone();
+        let outgoing = self.deck(outgoing_id).clone();
 
-        // Start incoming deck playback immediately
+        self.fading_deck.store(incoming_id as i8, Ordering::SeqCst);
+
+        let epoch = self.crossfade_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        let epoch_ref = self.crossfade_epoch.clone();
+        let in_prog_ref = self.crossfade_in_progress.clone();
+        let fad_ref = self.fading_deck.clone();
+        let act_ref = self.active_deck.clone();
+        let vol_ref = self.volume.clone();
+        let is_automix = self.automix();
+        let manual_xf = self.crossfade_secs();
+        let xf_secs = if manual_xf > 0.0 { manual_xf } else { 5.0 };
+        let ext_tx = self.external_tx.clone();
+
+        // Start incoming deck at volume 0
+        let _ = incoming.mpv.set_property("volume", 0.0f64);
         incoming.mpv.set_property("pause", false)?;
 
-        // Switch active deck to incoming, outgoing becomes fading
-        self.fading_deck.store(outgoing_id as i8, Ordering::SeqCst);
-        self.active_deck.store(incoming_id, Ordering::SeqCst);
-        self.primed_deck.store(-1, Ordering::SeqCst);
-
-        // Stop outgoing deck after crossfade completes (with 0.5s safety margin)
-        let xf_secs = self.crossfade_secs();
-        let out_mpv = outgoing.mpv.clone();
-        let fading_ref = self.fading_deck.clone();
         std::thread::Builder::new()
-            .name("crossfade-reaper".into())
+            .name("crossfade-ramp".into())
             .spawn(move || {
-                let wait_ms = ((xf_secs + 0.5) * 1000.0) as u64;
-                std::thread::sleep(std::time::Duration::from_millis(wait_ms));
-                if fading_ref.load(Ordering::SeqCst) == outgoing_id as i8 {
-                    let _ = out_mpv.command("stop", &[]);
-                    fading_ref.store(-1, Ordering::SeqCst);
+                use std::f64::consts::FRAC_PI_2;
+                let step_secs = 0.025f64;
+                let mut elapsed = 0.0f64;
+
+                while elapsed < xf_secs {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+
+                    if epoch_ref.load(Ordering::SeqCst) != epoch {
+                        in_prog_ref.store(false, Ordering::SeqCst);
+                        return;
+                    }
+
+                    let is_paused = outgoing.mpv.get_property::<bool>("pause").unwrap_or(false);
+                    if is_paused {
+                        continue;
+                    }
+
+                    elapsed += step_secs;
+                    let progress = (elapsed / xf_secs).min(1.0);
+
+                    let master = perceptual_to_mpv(vol_ref.load(Ordering::SeqCst));
+                    let (cur_out, cur_in) = if is_automix {
+                        ((FRAC_PI_2 * (1.0 - progress)).sin(), (FRAC_PI_2 * progress).sin())
+                    } else {
+                        (1.0 - progress, progress)
+                    };
+
+                    let _ = outgoing.mpv.set_property("volume", master * cur_out);
+                    let _ = incoming.mpv.set_property("volume", master * cur_in);
                 }
+
+                if epoch_ref.load(Ordering::SeqCst) != epoch {
+                    in_prog_ref.store(false, Ordering::SeqCst);
+                    return;
+                }
+
+                outgoing.stop();
+                let master = perceptual_to_mpv(vol_ref.load(Ordering::SeqCst));
+                let _ = incoming.mpv.set_property("volume", master);
+
+                act_ref.store(incoming_id, Ordering::SeqCst);
+                fad_ref.store(-1, Ordering::SeqCst);
+                in_prog_ref.store(false, Ordering::SeqCst);
+
+                let _ = ext_tx.send(PlayerEvent::CrossfadeCompleted);
             })
             .ok();
 
@@ -491,6 +594,8 @@ impl Player {
     /// Absolute seek in seconds. Immediately terminates any fading-out track.
     pub fn seek(&self, position_secs: f64) -> Result<(), Error> {
         self.stop_fading_deck();
+        let master = perceptual_to_mpv(self.volume.load(Ordering::SeqCst));
+        let _ = self.active_deck().mpv.set_property("volume", master);
         self.active_deck().mpv.command("seek", &[&position_secs.to_string(), "absolute"])?;
         Ok(())
     }
@@ -499,8 +604,10 @@ impl Player {
     pub fn set_volume(&self, volume: i64) -> Result<(), Error> {
         self.volume.store(volume, Ordering::SeqCst);
         let mpv_vol = perceptual_to_mpv(volume);
-        self.deck_a.mpv.set_property("volume", mpv_vol)?;
-        self.deck_b.mpv.set_property("volume", mpv_vol)?;
+        if !self.crossfade_in_progress.load(Ordering::SeqCst) {
+            self.deck_a.mpv.set_property("volume", mpv_vol)?;
+            self.deck_b.mpv.set_property("volume", mpv_vol)?;
+        }
         Ok(())
     }
 
@@ -567,6 +674,30 @@ impl Player {
     /// Read the configured crossfade duration in seconds.
     pub fn crossfade_secs(&self) -> f64 {
         f64::from_bits(self.crossfade_secs.load(Ordering::SeqCst))
+    }
+
+    /// Read whether Automix equal-power transitions are enabled.
+    pub fn automix(&self) -> bool {
+        self.automix.load(Ordering::SeqCst)
+    }
+
+    /// Enable or disable Automix equal-power transitions across both decks.
+    pub fn set_automix(&self, enabled: bool) -> Result<(), Error> {
+        self.automix.store(enabled, Ordering::SeqCst);
+        {
+            let mut shared = self.shared_af.lock().unwrap();
+            shared.automix = enabled;
+        }
+        let active = self.active_deck();
+        active.af.lock().unwrap().automix = enabled;
+        active.apply_af()?;
+
+        let standby_id = 1 - self.active_deck.load(Ordering::SeqCst);
+        let standby = self.deck(standby_id);
+        standby.af.lock().unwrap().automix = enabled;
+        let _ = standby.apply_af();
+
+        Ok(())
     }
 
     /// Set whether the incoming track should bypass the crossfade fade-in (e.g. on manual skip/jump).
@@ -672,18 +803,6 @@ fn af_chain(af: &AudioFilters) -> String {
             pitch_filter(),
             2f64.powf(af.semitones as f64 / 12.0)
         ));
-    }
-    if af.crossfade_secs > 0.0 {
-        let xf = af.crossfade_secs;
-        if !af.skip_fade_in {
-            chain.push(format!("lavfi=[afade=t=in:ss=0:d={xf:.2}]"));
-        }
-        if let Some(dur) = af.track_duration {
-            if dur > xf * 2.0 {
-                let start_out = dur - xf;
-                chain.push(format!("lavfi=[afade=t=out:st={start_out:.2}:d={xf:.2}]"));
-            }
-        }
     }
     chain.join(",")
 }
@@ -794,6 +913,8 @@ fn arbitrate_events(
                 }
             }
             InternalDeckEvent::Duration { deck_id, dur } => {
+                let deck = if deck_id == 0 { &deck_a } else { &deck_b };
+                deck.duration.store(dur.to_bits(), Ordering::SeqCst);
                 if deck_id == active {
                     if external_tx.send(PlayerEvent::Duration(dur)).is_err() {
                         break;

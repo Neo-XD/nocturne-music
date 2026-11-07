@@ -393,6 +393,20 @@ impl Db {
         out
     }
 
+    /// Raw play history `(played_at, song_json)` since `since`.
+    pub fn raw_plays(&self, since: i64) -> Vec<(i64, String)> {
+        let conn = self.0.lock().unwrap();
+        let mut out = Vec::new();
+        let sql = "SELECT played_at, song_json FROM plays WHERE played_at >= ?1 \
+                   ORDER BY played_at DESC";
+        if let Ok(mut stmt) = conn.prepare(sql) {
+            if let Ok(rows) = stmt.query_map([since], |r| Ok((r.get(0)?, r.get(1)?))) {
+                out.extend(rows.flatten());
+            }
+        }
+        out
+    }
+
     // --- playlist membership index (which of your playlists hold a track) ----------------------
     // Populated by `commands::sync_playlist_index`, which walks the library's owned playlists.
     // Nothing here talks to YouTube; it is the answer, cached, so a track list can draw the

@@ -25,7 +25,8 @@
 		BookmarkAdd02Icon,
 		BookmarkMinus02Icon,
 		Cancel01Icon,
-		Download01Icon
+		Download01Icon,
+		SparklesIcon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
@@ -45,7 +46,9 @@
 		toast,
 		isSongDownloaded,
 		deleteDownloadedSong,
-		openDownloadSongPicker
+		openDownloadSongPicker,
+		openUpgradeQuality,
+		playback
 	} from '$lib/player.svelte';
 	import { openLyricSelector } from '$lib/lyric-selector.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
@@ -127,6 +130,7 @@
 	// A local file has no YouTube identity: liking it or putting it in a YTM playlist is not a
 	// thing, so those items don't show. Queue, shortcuts and go-to-album work normally.
 	const isLocal = $derived(api.isLocalId(song.video_id));
+	const canUpgradeQuality = $derived(!isLocal && playback.now?.videoId === song.video_id);
 </script>
 
 <button
@@ -315,6 +319,14 @@
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
 				</svg>
 				Find lyrics...
+			</button>
+		{/if}
+		{#if canUpgradeQuality}
+			<button
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-primary hover:bg-primary/10 font-medium"
+				onclick={(e) => run(e, openUpgradeQuality)}
+			>
+				<HugeiconsIcon icon={SparklesIcon} class="h-4 w-4 text-primary" /> Upgrade quality
 			</button>
 		{/if}
 		{#if linksOnly}

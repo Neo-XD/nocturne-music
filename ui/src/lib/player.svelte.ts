@@ -207,6 +207,8 @@ export const prefs = $state({
 	showAudioQuality: browser ? localStorage.getItem('show_audio_quality') !== 'false' : true,
 	homeInSidebar: browser ? localStorage.getItem('home_in_sidebar') === 'true' : false,
 	waveformSeekbar: browser ? localStorage.getItem('waveform_seekbar') === 'true' : false,
+	automix: browser ? localStorage.getItem('automix') === 'true' : false,
+	dolbyAtmos: browser ? localStorage.getItem('dolby_atmos') === 'true' : false,
 	audioStreamSource: (browser ? (localStorage.getItem('audio_stream_source') as 'ytm' | 'spotify') : null) || 'ytm',
 	listeningHistoryTarget: (browser ? (localStorage.getItem('listening_history_target') as 'both' | 'ytm' | 'spotify') : null) || 'both',
 	pcAudioRecognition: browser ? localStorage.getItem('pc_audio_recognition') !== 'false' : true,
@@ -306,6 +308,23 @@ export function setShowAudioQuality(enabled: boolean) {
 export function setWaveformSeekbar(enabled: boolean) {
 	prefs.waveformSeekbar = enabled;
 	if (browser) localStorage.setItem('waveform_seekbar', enabled ? 'true' : 'false');
+}
+
+export function setAutomix(enabled: boolean) {
+	prefs.automix = enabled;
+	if (browser) {
+		localStorage.setItem('automix', enabled ? 'true' : 'false');
+		api.setSetting('automix', enabled ? 'true' : 'false').catch(() => {});
+	}
+
+}
+
+export function setDolbyAtmos(enabled: boolean) {
+	prefs.dolbyAtmos = enabled;
+	if (browser) {
+		localStorage.setItem('dolby_atmos', enabled ? 'true' : 'false');
+		api.setSetting('dolby_atmos', enabled ? 'true' : 'false').catch(() => {});
+	}
 }
 
 export function setAudioStreamSource(source: 'ytm' | 'spotify') {
@@ -1609,6 +1628,7 @@ export const ui = $state({
 	channelPickerOpen: false,
 	channelPickerRequired: false, // true while a multi-channel login is not finalized yet
 	channelIdentities: [] as AccountIdentity[],
+	upgradeQualityOpen: false,
 	downloadPicker: null as {
 		itemType: 'song' | 'playlist';
 		song?: SongItem;
@@ -1727,6 +1747,14 @@ export function openDownloadPlaylistPicker(options: {
 
 export function closeDownloadPicker() {
 	ui.downloadPicker = null;
+}
+
+export function openUpgradeQuality() {
+	ui.upgradeQualityOpen = true;
+}
+
+export function closeUpgradeQuality() {
+	ui.upgradeQualityOpen = false;
 }
 
 export async function executeDownloadSong(song: SongItem, quality: string) {

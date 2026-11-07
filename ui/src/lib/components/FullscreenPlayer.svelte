@@ -16,7 +16,8 @@
 		Mic01Icon,
 		Queue01Icon,
 		VolumeHighIcon,
-		VolumeMute02Icon
+		VolumeMute02Icon,
+		Comment01Icon
 	} from '@hugeicons/core-free-icons';
 	import * as api from '$lib/api';
 	import type { SongItem } from '$lib/api';
@@ -39,11 +40,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import AnimatedArtwork from './AnimatedArtwork.svelte';
 	import WaveformSeekbar from './WaveformSeekbar.svelte';
+	import AudioQualityBadge from './AudioQualityBadge.svelte';
 	import { appearance } from '$lib/theme.svelte';
 	import LyricsView from './LyricsView.svelte';
 	import QueueList from './QueueList.svelte';
+	import CommentsView from './CommentsView.svelte';
 
-	let activeTab = $state<'lyrics' | 'queue'>('lyrics');
+	let activeTab = $state<'lyrics' | 'queue' | 'comments'>('lyrics');
 	// Default to false for proper fullscreen theater view
 	let userShowPanel = $state(false);
 	let volDragging = $state(false);
@@ -227,6 +230,14 @@
 				activeTab = 'queue';
 				userShowPanel = true;
 			}
+		} else if (e.key.toLowerCase() === 'c') {
+			e.preventDefault();
+			if (userShowPanel && activeTab === 'comments') {
+				userShowPanel = false;
+			} else {
+				activeTab = 'comments';
+				userShowPanel = true;
+			}
 		}
 	}
 
@@ -337,6 +348,24 @@
 					<HugeiconsIcon icon={Queue01Icon} class="h-3.5 w-3.5 {userShowPanel && activeTab === 'queue' ? 'text-primary' : ''}" />
 					<span>Queue</span>
 				</button>
+				<button
+					type="button"
+					onclick={() => {
+						if (activeTab === 'comments' && userShowPanel) {
+							userShowPanel = false;
+						} else {
+							activeTab = 'comments';
+							userShowPanel = true;
+						}
+					}}
+					aria-label="Toggle Comments (C)"
+					class="flex items-center gap-1.5 rounded-[var(--radius,0.45rem)] px-3 py-1.5 text-xs font-medium transition-all duration-200 cursor-pointer {userShowPanel && activeTab === 'comments'
+						? 'bg-white/25 dark:bg-white/15 text-foreground shadow-xs font-semibold'
+						: 'text-foreground/70 hover:text-foreground hover:bg-white/10'}"
+				>
+					<HugeiconsIcon icon={Comment01Icon} class="h-3.5 w-3.5 {userShowPanel && activeTab === 'comments' ? 'text-primary' : ''}" />
+					<span>Comments</span>
+				</button>
 			</div>
 
 			<Button
@@ -414,7 +443,7 @@
 								<h2 class="font-heading text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground truncate">
 									{playback.now?.title ?? 'Nothing playing'}
 								</h2>
-								<div class="mt-1 flex items-center gap-1.5 text-sm sm:text-base font-medium text-muted-foreground truncate">
+								<div class="mt-1 flex items-center gap-2 text-sm sm:text-base font-medium text-muted-foreground">
 									{#if playback.now?.explicit}
 										<ExplicitIcon class="h-3.5 w-3.5 shrink-0" />
 									{/if}
@@ -423,6 +452,7 @@
 										text={playback.now?.artists ?? ''}
 										class="text-muted-foreground hover:text-foreground transition-colors"
 									/>
+									<AudioQualityBadge quality={playback.now?.audioQuality} size="sm" class="shrink-0" />
 								</div>
 							</div>
 
@@ -593,14 +623,18 @@
 					</div>
 				</section>
 
-				<!-- Right Section: Clean transparent Lyrics or Translucent blurred Queue -->
+				<!-- Right Section: Clean transparent Lyrics, Translucent blurred Queue or Comments -->
 				{#if activeTab === 'lyrics'}
 					<section class="relative flex min-h-0 flex-1 h-[72vh] flex-col overflow-hidden [mask-image:linear-gradient(to_bottom,transparent_0%,black_6%,black_94%,transparent_100%)]">
 						<LyricsView expanded={true} />
 					</section>
-				{:else}
+				{:else if activeTab === 'queue'}
 					<section class="relative flex min-h-0 flex-1 h-[72vh] flex-col overflow-hidden rounded-2xl border border-white/15 bg-card/40 dark:bg-black/35 backdrop-blur-2xl shadow-2xl p-3">
 						<QueueList />
+					</section>
+				{:else if activeTab === 'comments'}
+					<section class="relative flex min-h-0 flex-1 h-[72vh] flex-col overflow-hidden rounded-2xl border border-white/15 bg-card/40 dark:bg-black/35 backdrop-blur-2xl shadow-2xl p-4">
+						<CommentsView videoId={playback.now?.videoId} />
 					</section>
 				{/if}
 			</main>

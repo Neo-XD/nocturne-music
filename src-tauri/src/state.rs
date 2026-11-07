@@ -330,6 +330,8 @@ struct QueueState {
     /// Last videoId we re-resolved after a playback failure — guards the one-shot retry in
     /// `on_track_failed` against a retry loop when the retried stream dies too.
     retried: Option<String>,
+    /// Index of upcoming track currently undergoing crossfade overlap transition (if any).
+    crossfade_target: Option<usize>,
 }
 
 impl QueueState {
@@ -1128,8 +1130,25 @@ impl AppState {
 
         // Community Streaming Addons: resolve lossless streams first if quality is above High
         let q_str = self.db.get_setting("quality").unwrap_or_else(|| "HIGH".to_string());
-        let quality_is_above_high =
-            matches!(q_str.as_str(), "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH");
+        let dolby_atmos_pref =
+            self.db.get_setting("dolby_atmos").map(|v| v == "true").unwrap_or(false);
+
+        // Waterfall resolution hierarchy:
+        // - "if hi res then dont think about dolby at all"
+        // - "wen atmos is on prefer the atmos version over lossless"
+        // - "the waterfall tree shud be atmos, hires, lossless, high"
+        let target_tier = if q_str == "HI_RES_LOSSLESS" {
+            "HI_RES_LOSSLESS".to_string()
+        } else if q_str == "DOLBY_ATMOS" || dolby_atmos_pref {
+            "DOLBY_ATMOS".to_string()
+        } else {
+            q_str.clone()
+        };
+
+        let quality_is_above_high = matches!(
+            target_tier.as_str(),
+            "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH"
+        );
         if quality_is_above_high && !is_upload && crate::addons::is_addons_enabled(&self.db) {
             let track_meta = {
                 let q = self.queue.lock().await;
@@ -1149,19 +1168,26 @@ impl AppState {
                             d.parse().ok()
                         }
                     });
-                    (i.title.clone(), i.artists.clone(), dur_secs)
+                    (i.title.clone(), i.artists.clone(), i.album.clone(), dur_secs)
                 })
             };
 
-            let (t, a, d) = match track_meta {
-                Some((t, a, d)) => (t, a, d),
-                None => (String::new(), String::new(), None),
+            let (t, a, al, d) = match track_meta {
+                Some((t, a, al, d)) => (t, a, al, d),
+                None => (String::new(), String::new(), None, None),
             };
 
             if !t.trim().is_empty() || !video_id.is_empty() {
-                if let Some(mut addon_data) =
-                    crate::addons::resolve_from_addons(&self.db, &t, &a, d, &q_str, Some(video_id))
-                        .await
+                if let Some(mut addon_data) = crate::addons::resolve_from_addons_waterfall(
+                    &self.db,
+                    &t,
+                    &a,
+                    al.as_deref(),
+                    d,
+                    &target_tier,
+                    Some(video_id),
+                )
+                .await
                 {
                     addon_data.video_id = video_id.to_owned();
                     return Ok(addon_data);
@@ -1333,6 +1359,7 @@ impl AppState {
                     &self.db,
                     t,
                     a,
+                    None,
                     duration_secs,
                     &q_str,
                     Some(video_id),
@@ -1446,6 +1473,7 @@ impl AppState {
             q.current = 0;
             q.played_from = 0; // new queue, nothing played in it yet
             q.lookahead_loaded = None;
+            q.crossfade_target = None;
             q.radio_seed = None; // single-song queue → autoplay re-seeds from the last track
             q.radio = false;
             // Shuffle is sticky across queues: keep it ON (re-snapshotted after radio hydration).
@@ -1863,6 +1891,7 @@ impl AppState {
             }
             q.seek_to(index);
             q.lookahead_loaded = None;
+            q.crossfade_target = None;
         }
         // The next mpv tick is seconds away (a resolve has to finish first); until then
         // `current_position` would still report the outgoing track's position.
@@ -1881,6 +1910,14 @@ impl AppState {
     pub async fn on_track_ended(self: &std::sync::Arc<Self>) {
         if self.lt.is_guest().await {
             return; // the host drives track changes for guests; don't auto-advance locally
+        }
+        let in_crossfade = {
+            let q = self.queue.lock().await;
+            q.crossfade_target.is_some() || self.player.is_crossfade_in_progress()
+        };
+        if in_crossfade {
+            self.on_crossfade_completed().await;
+            return;
         }
         let (has_next, primed) = {
             let mut q = self.queue.lock().await;
@@ -2303,6 +2340,59 @@ impl AppState {
             backfill_metadata(qi, data.duration.as_deref(), data.artists.as_deref(), data.is_video);
         }
         tracing::debug!(index = next_idx, "gapless lookahead primed");
+        let me = self.clone();
+        tauri::async_runtime::spawn(async move {
+            me.prefetch_lookahead_two_ahead(gen, next_idx).await;
+        });
+    }
+
+    /// Look ahead 2 songs (`current + 2`) and pre-match / pre-resolve so that
+    /// rapid or short skips are virtually instantaneous with zero lag or delay.
+    /// To ensure zero performance sacrifice during active playback, this runs
+    /// asynchronously in the background with a 1.5s delay after the 1-ahead
+    /// track is enqueued into mpv.
+    async fn prefetch_lookahead_two_ahead(self: &std::sync::Arc<Self>, gen: u64, next_idx: usize) {
+        // Yield so mpv buffer loading and current track playback have 100% priority.
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+        if self.generation.load(Ordering::SeqCst) != gen {
+            return;
+        }
+
+        let two_ahead = {
+            let q = self.queue.lock().await;
+            let Some(two_idx) = next_index(q.items.len(), next_idx, q.repeat) else {
+                return;
+            };
+            if two_idx == next_idx {
+                return;
+            }
+            match q.items.get(two_idx) {
+                Some(item) => (item.video_id.clone(), item.is_upload),
+                None => return,
+            }
+        };
+
+        let (video_id, is_upload) = two_ahead;
+
+        // If local, offline or downloaded, skip network pre-matching
+        if crate::local::is_local_song(&video_id)
+            || crate::download::get_downloaded_file(&self.app, &self.db, &video_id).is_some()
+            || self.is_offline_mode()
+        {
+            return;
+        }
+
+        let now = now_secs();
+        if self.db.get_stream(&video_id, now + 60).is_some() {
+            return;
+        }
+
+        tracing::debug!(
+            video_id = %video_id,
+            "pre-matching 2-ahead lookahead song in background"
+        );
+        let _ = self.resolve(&video_id, is_upload).await;
     }
 
     /// Background cache audio bytes for quick listening to already listened songs.
@@ -2389,38 +2479,153 @@ impl AppState {
             }
         }
 
-        let Ok(bytes) = res.bytes().await else {
-            return;
+        let tmp_path = dir.join(format!("{clean_id}.tmp"));
+        let mut file = match tokio::fs::File::create(&tmp_path).await {
+            Ok(f) => f,
+            Err(_) => return,
         };
 
-        if self.generation.load(Ordering::SeqCst) != gen {
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+        let mut stream = res.bytes_stream();
+        let mut header_buf = Vec::with_capacity(512);
+        let mut total_written = 0usize;
+
+        while let Some(chunk_res) = stream.next().await {
+            if self.generation.load(Ordering::SeqCst) != gen {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return;
+            }
+            let chunk = match chunk_res {
+                Ok(c) => c,
+                Err(_) => {
+                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                    return;
+                }
+            };
+            if header_buf.len() < 512 {
+                let take = (512 - header_buf.len()).min(chunk.len());
+                header_buf.extend_from_slice(&chunk[..take]);
+            }
+            if let Err(_) = file.write_all(&chunk).await {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return;
+            }
+            total_written += chunk.len();
+        }
+        let _ = file.flush().await;
+        drop(file);
+
+        if self.generation.load(Ordering::SeqCst) != gen
+            || total_written < 4096
+            || !crate::cache::is_valid_audio_bytes(&header_buf)
+        {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
             return;
         }
 
-        if !crate::cache::is_valid_audio_bytes(&bytes) || bytes.len() < 4096 {
-            return;
-        }
-
-        if let Some(detected) = crate::cache::detect_audio_extension_from_bytes(&bytes) {
+        if let Some(detected) = crate::cache::detect_audio_extension_from_bytes(&header_buf) {
             ext = detected;
         }
 
-        let tmp_path = dir.join(format!("{clean_id}.tmp"));
         let target_path = dir.join(format!("{clean_id}.{ext}"));
+        let _ = tokio::fs::rename(&tmp_path, &target_path).await;
         let app_handle = self.app.clone();
+        let _ = app_handle.asset_protocol_scope().allow_file(&target_path);
+
         let limit_mb = self.db.get_setting("cache_limit_mb");
         let limit_mb = limit_mb.and_then(|s| s.parse::<u64>().ok()).filter(|&lim| lim > 0);
+        if let Some(lim) = limit_mb {
+            tokio::task::spawn_blocking(move || {
+                let _ = crate::cache::prune_cache_to_limit(&app_handle, lim * 1024 * 1024);
+                crate::trim_memory();
+            });
+        } else {
+            crate::trim_memory();
+        }
+    }
 
-        tokio::task::spawn_blocking(move || {
-            if std::fs::write(&tmp_path, &bytes).is_ok() {
-                let _ = std::fs::rename(&tmp_path, &target_path);
-                let _ = app_handle.asset_protocol_scope().allow_file(&target_path);
+    /// User-initiated quality upgrade from 3-dot context menu.
+    /// Attempts resolution with waterfall fallback (Dolby Atmos -> Hi-Res -> Lossless)
+    /// and hot-swaps the active player stream at the current position.
+    pub async fn upgrade_playback_quality(
+        self: &std::sync::Arc<Self>,
+        target_tier: &str,
+    ) -> Result<String, String> {
+        let (item, current_pos) = {
+            let q = self.queue.lock().await;
+            let item = q.items.get(q.current).cloned();
+            let pos = self.current_position();
+            (item, pos)
+        };
+        let item = item.ok_or_else(|| "No track is currently playing".to_string())?;
 
-                if let Some(lim) = limit_mb {
-                    let _ = crate::cache::prune_cache_to_limit(&app_handle, lim * 1024 * 1024);
-                }
+        let dur_secs = item.duration.as_deref().and_then(|d| {
+            let parts: Vec<&str> = d.split(':').collect();
+            if parts.len() == 2 {
+                let m: f64 = parts[0].parse().ok()?;
+                let s: f64 = parts[1].parse().ok()?;
+                Some(m * 60.0 + s)
+            } else if parts.len() == 3 {
+                let h: f64 = parts[0].parse().ok()?;
+                let m: f64 = parts[1].parse().ok()?;
+                let s: f64 = parts[2].parse().ok()?;
+                Some(h * 3600.0 + m * 60.0 + s)
+            } else {
+                d.parse().ok()
             }
         });
+
+        let hq_stream = crate::addons::resolve_from_addons_waterfall(
+            &self.db,
+            &item.title,
+            &item.artists,
+            item.album.as_deref(),
+            dur_secs,
+            target_tier,
+            Some(&item.video_id),
+        )
+        .await;
+
+        let Some(mut data) = hq_stream else {
+            return Err(
+                "Failed to fetch HQ track, it is unavailable on the selected addons".to_string()
+            );
+        };
+
+        data.video_id = item.video_id.clone();
+        let stream_url = mpv_stream_url(&data);
+        let quality_label = data.audio_quality.clone().unwrap_or_else(|| "Lossless".to_string());
+
+        if let Err(e) =
+            self.player.load(&stream_url, &data.headers, loudness_gain(data.loudness_db))
+        {
+            return Err(format!("Player failed to load HQ stream: {}", e));
+        }
+        let _ = self.player.seek(current_pos);
+        let _ = self.player.play();
+
+        {
+            let mut q = self.queue.lock().await;
+            q.current_client = Some(data.stream_client.clone());
+            q.current_audio_quality = Some(quality_label.clone());
+            let cur = q.current;
+            if let Some(qi) = q.items.get_mut(cur) {
+                if qi.video_id == item.video_id {
+                    backfill_metadata(
+                        qi,
+                        data.duration.as_deref(),
+                        data.artists.as_deref(),
+                        data.is_video,
+                    );
+                }
+            }
+        }
+
+        self.emit_now_playing(&item, &data.stream_client, Some(&quality_label));
+        self.emit_queue().await;
+        crate::trim_memory();
+        Ok(quality_label)
     }
 
     async fn current_item(&self) -> Option<SongItem> {
@@ -2856,16 +3061,19 @@ impl AppState {
         });
     }
 
-    /// Check if playback has reached the crossfade overlap threshold (pos >= duration - crossfade_secs)
+    /// Check if playback has reached the crossfade overlap threshold (pos >= duration - xf)
     /// and a lookahead track is primed on the secondary deck. If so, immediately begins fading in
-    /// the incoming track on the secondary deck while fading out the outgoing track.
+    /// the incoming track on the secondary deck while smoothly fading out the outgoing track.
+    /// The seekbar and now-playing remain on the outgoing track until the fade-in completes.
     async fn check_crossfade_trigger(self: &std::sync::Arc<Self>, pos: f64) {
-        let xf = self.player.crossfade_secs();
-        if xf <= 0.0 {
+        let manual_xf = self.player.crossfade_secs();
+        let automix = self.player.automix();
+        if manual_xf <= 0.0 && !automix {
             return;
         }
+        let xf = if manual_xf > 0.0 { manual_xf } else { 5.0 };
         let (next_idx, should_trigger) = {
-            let q = self.queue.lock().await;
+            let mut q = self.queue.lock().await;
             if q.repeat == RepeatMode::One {
                 return;
             }
@@ -2875,27 +3083,48 @@ impl AppState {
             if pos < q.duration - xf {
                 return;
             }
+            if q.crossfade_target.is_some() || self.player.is_crossfade_in_progress() {
+                return;
+            }
             let Some(next_idx) = q.lookahead_loaded else {
                 return;
             };
-            (next_idx, self.player.can_crossfade())
+            if !self.player.can_crossfade() {
+                return;
+            }
+            q.crossfade_target = Some(next_idx);
+            (next_idx, true)
         };
 
         if !should_trigger {
             return;
         }
 
-        // Start overlapping crossfade: unpause primed deck with fade-in, fade out current deck
-        if let Err(e) = self.player.start_crossfade() {
-            tracing::warn!(error = %e, "start_crossfade failed");
+        tracing::info!(
+            target_index = next_idx,
+            xf_secs = xf,
+            "starting smooth crossfade volume transition"
+        );
+        if let Err(err) = self.player.start_crossfade().map_err(|e| e.to_string()) {
+            tracing::warn!(error = %err, "start_crossfade failed");
+            let mut q = self.queue.lock().await;
+            q.crossfade_target = None;
+        }
+    }
+
+    /// Called when the dual-deck crossfade volume ramp finishes (or when outgoing deck ends).
+    /// Handoffs the active deck and switches the UI seekbar and now-playing to the next track.
+    pub async fn on_crossfade_completed(self: &std::sync::Arc<Self>) {
+        if self.lt.is_guest().await {
             return;
         }
-
-        self.latest_position.store(0f64.to_bits(), Ordering::SeqCst);
         let gen = self.generation.load(Ordering::SeqCst);
-        let (next_item, quality) = {
+        let next_idx = {
             let mut q = self.queue.lock().await;
-            q.current = next_idx;
+            let Some(next) = q.crossfade_target.take().or(q.lookahead_loaded.take()) else {
+                return;
+            };
+            q.seek_to(next);
             q.lookahead_loaded = None;
             let _ = q.lookahead_gain.take();
             q.current_client = q.lookahead_client.take();
@@ -2903,18 +3132,47 @@ impl AppState {
             q.playback_ping = q.lookahead_playback_ping.take();
             q.cpn = innertube::generate_cpn();
             q.history_pinged = false;
-            q.duration = 0.0;
-            (q.items.get(next_idx).cloned(), q.current_audio_quality.clone())
+            next
         };
 
-        if let Some(item) = next_item {
+        self.player.complete_crossfade_early();
+
+        let mut dur = self.player.active_deck().get_duration();
+        if dur <= 0.0 {
+            dur = self.player.active_deck().mpv.get_property::<f64>("duration").unwrap_or(0.0);
+        }
+        let pos = self.player.active_deck().mpv.get_property::<f64>("time-pos").unwrap_or(0.0);
+
+        {
+            let mut q = self.queue.lock().await;
+            if dur > 0.0 {
+                q.duration = dur;
+            }
+        }
+        self.latest_position.store(pos.to_bits(), Ordering::SeqCst);
+
+        if let Some(item) = self.current_item().await {
+            let quality = self.queue.lock().await.current_audio_quality.clone();
             self.emit_now_playing(&item, "crossfade", quality.as_deref());
             self.refresh_rating(&item.video_id, gen);
         }
+
+        if dur > 0.0 {
+            let _ = self.app.emit("duration", serde_json::json!({ "duration": dur }));
+            if let Some(m) = &self.media {
+                m.set_duration(dur);
+            }
+            if let Some(d) = &self.discord {
+                d.set_duration(dur);
+            }
+            self.lastfm.set_duration(dur);
+        }
+
+        let _ = self.app.emit("position", serde_json::json!({ "position": pos }));
         self.emit_queue().await;
         self.persist_queue().await;
         self.lt_broadcast_current_track(0, true).await;
-        tracing::info!(index = next_idx, "advanced to next track (overlapping crossfade)");
+        tracing::info!(index = next_idx, "crossfade handoff completed to next track");
 
         let me = self.clone();
         tauri::async_runtime::spawn(async move {
@@ -3437,6 +3695,7 @@ impl AppState {
         if self.lt.is_guest().await {
             return Ok(()); // guests can't scrub — the host controls the timeline
         }
+        self.queue.lock().await.crossfade_target = None;
         self.player.seek(position).map_err(|e| e.to_string())?;
         if self.lt.is_host().await {
             self.lt

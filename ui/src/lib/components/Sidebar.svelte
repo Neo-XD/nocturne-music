@@ -30,7 +30,6 @@
 	import PlaylistMenu from './PlaylistMenu.svelte';
 	import FolderMenu from './FolderMenu.svelte';
 	import CreatePlaylistDialog from './CreatePlaylistDialog.svelte';
-	import ListeningStatsDialog from './ListeningStatsDialog.svelte';
 	import AppleIcon from '$lib/components/icons/AppleIcon.svelte';
 	import YtmIcon from '$lib/components/icons/YtmIcon.svelte';
 	import SpotifyIcon from '$lib/components/icons/SpotifyIcon.svelte';
@@ -744,20 +743,25 @@
 			{@render statsRow()}
 		</div>
 	{/if}
-
-	<ListeningStatsDialog bind:open={statsDialogOpen} />
 </aside>
 
 {#snippet statsRow()}
-	<button
-		type="button"
-		onclick={() => (statsDialogOpen = true)}
+	<a
+		href="/stats"
 		title="Listening Stats"
 		aria-label="Listening Stats"
-		class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground cursor-pointer {collapsed
+		class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-colors {collapsed
 			? 'justify-center w-full'
-			: 'justify-start w-full'}"
+			: 'justify-start w-full'} {isActive('/stats')
+			? 'bg-primary/10 text-primary font-semibold'
+			: 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
 	>
+		{#if isActive('/stats')}
+			<span
+				transition:scale={{ duration: 200, start: 0.4 }}
+				class="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary"
+			></span>
+		{/if}
 		<HugeiconsIcon
 			icon={Analytics01Icon}
 			class="h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110"
@@ -765,7 +769,7 @@
 		{#if !collapsed}
 			<span class="truncate">Listening Stats</span>
 		{/if}
-	</button>
+	</a>
 {/snippet}
 
 {#snippet playlistRow(pl: BrowseItem, inFolder: boolean = false)}

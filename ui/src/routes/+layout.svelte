@@ -32,6 +32,7 @@
 	import ListenTogetherRequestDialog from '$lib/components/ListenTogetherRequestDialog.svelte';
 	import LinkDialog from '$lib/components/LinkDialog.svelte';
 	import DownloadQualityDialog from '$lib/components/DownloadQualityDialog.svelte';
+	import UpgradeQualityDialog from '$lib/components/UpgradeQualityDialog.svelte';
 	import MiniPlayer from '$lib/components/MiniPlayer.svelte';
 	import NowPlaying from '$lib/components/NowPlaying.svelte';
 	import NowPlayingSidebar from '$lib/components/NowPlayingSidebar.svelte';
@@ -374,6 +375,7 @@
 	<ListenTogetherRequestDialog />
 	<LinkDialog />
 	<DownloadQualityDialog />
+	<UpgradeQualityDialog />
 	{#if lyricSelector.request}
 		{@const request = lyricSelector.request}
 		<LyricSelectorModal

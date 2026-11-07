@@ -374,7 +374,7 @@
 		const smooth = easeSwipe(progress);
 		const pct = Math.min(100, Math.max(0, Math.round(smooth * 100)));
 		const tail = Math.min(100, pct + 4);
-		return `linear-gradient(90deg, #ffffff 0%, #ffffff ${pct}%, rgba(255,255,255,0.35) ${tail}%, rgba(255,255,255,0.35) 100%)`;
+		return `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, color-mix(in srgb, var(--foreground) 35%, transparent) ${tail}%, color-mix(in srgb, var(--foreground) 35%, transparent) 100%)`;
 	}
 
 	function getWordRenderInfo(word: api.LyricWord, currentMs: number, style: LyricsAnimationStyle) {
@@ -388,43 +388,43 @@
 		if (style === 'wave') {
 			return {
 				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, color-mix(in srgb, var(--foreground) 75%, transparent) ${Math.min(100, pct + 2)}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.04] drop-shadow-[0_0_12px_rgba(255,255,255,0.45)]' : ''
+				cls: isCurrent ? 'scale-[1.025] drop-shadow-[0_0_12px_rgba(255,255,255,0.4)]' : ''
 			};
 		}
 		if (style === 'apple') {
 			return {
-				bg: `linear-gradient(90deg, #ffffff 0%, #ffffff ${pct}%, rgba(255,255,255,0.38) ${tail}%, rgba(255,255,255,0.38) 100%)`,
-				cls: isCurrent ? 'scale-[1.035] drop-shadow-[0_0_14px_rgba(255,255,255,0.6)] font-extrabold' : ''
+				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, color-mix(in srgb, var(--foreground) 38%, transparent) ${tail}%, color-mix(in srgb, var(--foreground) 38%, transparent) 100%)`,
+				cls: isCurrent ? 'scale-[1.02] drop-shadow-[0_0_12px_rgba(255,255,255,0.5)]' : ''
 			};
 		}
 		if (style === 'karaoke') {
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.03] drop-shadow-[0_0_12px_rgba(255,255,255,0.5)] font-black text-foreground' : ''
+				bg: `linear-gradient(90deg, var(--primary) 0%, var(--primary) ${pct}%, var(--muted-foreground) ${Math.min(100, pct + 1)}%, var(--muted-foreground) 100%)`,
+				cls: isCurrent ? 'scale-[1.01] drop-shadow-[0_0_10px_rgba(var(--primary-rgb,255,255,255),0.5)]' : ''
 			};
 		}
 		if (style === 'glow') {
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${Math.min(100, pct + 8)}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.05] drop-shadow-[0_0_20px_rgba(255,255,255,0.7)] font-extrabold' : ''
+				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, color-mix(in srgb, var(--foreground) 50%, var(--muted-foreground)) ${Math.min(100, pct + 6)}%, var(--muted-foreground) ${Math.min(100, pct + 12)}%, var(--muted-foreground) 100%)`,
+				cls: isCurrent ? 'drop-shadow-[0_0_16px_rgba(var(--primary-rgb,255,255,255),0.75)]' : ''
 			};
 		}
 		if (style === 'slide') {
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.03] translate-x-0.5 drop-shadow-[0_0_12px_rgba(255,255,255,0.4)] font-extrabold' : ''
+				bg: `linear-gradient(90deg, var(--primary) 0%, var(--primary) ${pct}%, var(--muted-foreground) ${Math.min(100, pct + 1)}%, var(--muted-foreground) 100%)`,
+				cls: ''
 			};
 		}
 		if (style === 'fade') {
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${Math.min(100, pct + 8)}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'drop-shadow-[0_0_10px_rgba(255,255,255,0.3)] font-bold' : ''
+				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, color-mix(in srgb, var(--foreground) 50%, var(--muted-foreground)) ${Math.min(100, pct + 6)}%, var(--muted-foreground) ${Math.min(100, pct + 12)}%, var(--muted-foreground) 100%)`,
+				cls: ''
 			};
 		}
 		if (style === 'og') {
 			return {
-				bg: `linear-gradient(90deg, var(--foreground) 0%, var(--foreground) ${pct}%, var(--muted-foreground) ${tail}%, var(--muted-foreground) 100%)`,
-				cls: isCurrent ? 'scale-[1.03] font-bold' : ''
+				bg: `linear-gradient(90deg, var(--primary) 0%, var(--primary) ${pct}%, var(--muted-foreground) ${Math.min(100, pct + 1)}%, var(--muted-foreground) 100%)`,
+				cls: ''
 			};
 		}
 		// 'none' / static
@@ -437,11 +437,11 @@
 
 	function getLineFallbackClass(isHighlight: boolean, style: LyricsAnimationStyle): string {
 		if (!isHighlight) return '';
-		if (style === 'wave') return 'bg-gradient-to-r from-foreground via-foreground to-foreground/80 bg-clip-text text-transparent drop-shadow-[0_0_14px_rgba(255,255,255,0.35)]';
+		if (style === 'wave') return 'text-foreground font-bold';
 		if (style === 'apple' || style === 'apple_v2') return 'text-foreground drop-shadow-[0_0_16px_rgba(255,255,255,0.35)]';
-		if (style === 'karaoke') return 'text-foreground drop-shadow-[0_0_14px_rgba(255,255,255,0.4)]';
+		if (style === 'karaoke') return 'text-primary font-bold';
 		if (style === 'glow') return 'text-foreground drop-shadow-[0_0_20px_rgba(255,255,255,0.5)]';
-		if (style === 'slide') return 'translate-x-2 text-foreground drop-shadow-[0_0_12px_rgba(255,255,255,0.3)]';
+		if (style === 'slide') return 'text-foreground font-bold';
 		if (style === 'fade') return 'text-foreground drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]';
 		if (style === 'og') return 'text-foreground font-bold drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]';
 		return 'text-foreground font-bold';
@@ -449,11 +449,11 @@
 
 	function getLineClasses(isHighlight: boolean, isPast: boolean, dist: number, style: LyricsAnimationStyle): string {
 		if (isHighlight) {
-			if (style === 'wave') return 'scale-[1.04] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_16px_rgba(255,255,255,0.35)]';
-			if (style === 'apple' || style === 'apple_v2') return 'scale-[1.035] -translate-y-0.5 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_20px_rgba(255,255,255,0.35)]';
-			if (style === 'karaoke') return 'scale-[1.02] translate-y-0 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(255,255,255,0.4)]';
-			if (style === 'glow') return 'scale-[1.04] -translate-y-0.5 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_20px_rgba(255,255,255,0.5)]';
-			if (style === 'slide') return 'scale-[1.02] translate-x-2 text-foreground font-extrabold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(255,255,255,0.35)]';
+			if (style === 'wave') return 'scale-[1.03] -translate-y-0.5 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_16px_rgba(255,255,255,0.35)]';
+			if (style === 'apple' || style === 'apple_v2') return 'scale-[1.025] -translate-y-0.5 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_18px_rgba(255,255,255,0.35)]';
+			if (style === 'karaoke') return 'scale-100 translate-y-0 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_12px_rgba(var(--primary-rgb,255,255,255),0.4)]';
+			if (style === 'glow') return 'scale-[1.03] -translate-y-0.5 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_24px_rgba(var(--primary-rgb,255,255,255),0.6)]';
+			if (style === 'slide') return 'scale-100 translate-x-3 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_14px_rgba(255,255,255,0.35)]';
 			if (style === 'fade') return 'scale-100 translate-y-0 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]';
 			if (style === 'og') return 'scale-[1.03] translate-y-0 text-foreground font-bold opacity-100 blur-0 drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]';
 			return 'scale-100 translate-y-0 text-foreground font-bold opacity-100 blur-0';
@@ -461,15 +461,15 @@
 
 		if (isPast) {
 			if (style === 'wave') {
-				if (dist === 1) return 'scale-100 translate-y-0 font-bold text-muted-foreground/80 opacity-75 blur-0 hover:blur-none hover:opacity-100';
-				if (dist === 2) return 'scale-100 translate-y-0 font-bold text-muted-foreground/60 opacity-50 blur-[0.6px] hover:blur-none hover:opacity-90';
-				if (dist === 3) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/45 opacity-30 blur-[1.4px] hover:blur-none hover:opacity-80';
-				return 'scale-100 translate-y-0 font-medium text-muted-foreground/35 opacity-20 blur-[2.4px] hover:blur-none hover:opacity-75';
+				if (dist === 1) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/80 opacity-75 blur-0 hover:blur-none hover:opacity-100';
+				if (dist === 2) return 'scale-100 translate-y-0 font-medium text-muted-foreground/60 opacity-50 blur-[0.6px] hover:blur-none hover:opacity-90';
+				if (dist === 3) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/60 opacity-50 blur-[1.2px] hover:blur-none hover:opacity-85';
+				return 'scale-100 translate-y-0 font-medium text-muted-foreground/50 opacity-40 blur-[1.8px] hover:blur-none hover:opacity-80';
 			}
 			if (style === 'apple' || style === 'apple_v2') {
 				if (dist === 1) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/75 opacity-70 blur-0 hover:opacity-95';
 				if (dist === 2) return 'scale-100 translate-y-0 font-medium text-muted-foreground/50 opacity-45 blur-[0.4px] hover:blur-none hover:opacity-90';
-				return 'scale-100 translate-y-0 font-normal text-muted-foreground/35 opacity-25 blur-[0.8px] hover:blur-none hover:opacity-80';
+				return 'scale-100 translate-y-0 font-normal text-muted-foreground/50 opacity-45 blur-[0.8px] hover:blur-none hover:opacity-85';
 			}
 			if (style === 'karaoke') {
 				return 'scale-100 translate-y-0 font-medium text-muted-foreground/45 opacity-45 blur-0 hover:opacity-85';
@@ -493,15 +493,15 @@
 
 		// Upcoming lines
 		if (style === 'wave') {
-			if (dist === 1) return 'scale-100 translate-y-0 font-bold text-muted-foreground/80 opacity-75 blur-0 hover:blur-none hover:opacity-100';
-			if (dist === 2) return 'scale-100 translate-y-0 font-bold text-muted-foreground/60 opacity-50 blur-[0.6px] hover:blur-none hover:opacity-90';
-			if (dist === 3) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/45 opacity-30 blur-[1.4px] hover:blur-none hover:opacity-80';
-			return 'scale-100 translate-y-0 font-medium text-muted-foreground/35 opacity-20 blur-[2.4px] hover:blur-none hover:opacity-75';
+			if (dist === 1) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/80 opacity-75 blur-0 hover:blur-none hover:opacity-100';
+			if (dist === 2) return 'scale-100 translate-y-0 font-medium text-muted-foreground/60 opacity-50 blur-[0.6px] hover:blur-none hover:opacity-90';
+			if (dist === 3) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/60 opacity-50 blur-[1.2px] hover:blur-none hover:opacity-85';
+			return 'scale-100 translate-y-0 font-medium text-muted-foreground/50 opacity-40 blur-[1.8px] hover:blur-none hover:opacity-80';
 		}
 		if (style === 'apple' || style === 'apple_v2') {
 			if (dist === 1) return 'scale-100 translate-y-0 font-semibold text-muted-foreground/80 opacity-75 blur-0 hover:opacity-100';
 			if (dist === 2) return 'scale-100 translate-y-0 font-medium text-muted-foreground/55 opacity-50 blur-[0.4px] hover:blur-none hover:opacity-90';
-			return 'scale-100 translate-y-0 font-normal text-muted-foreground/40 opacity-30 blur-[0.8px] hover:blur-none hover:opacity-80';
+			return 'scale-100 translate-y-0 font-normal text-muted-foreground/55 opacity-45 blur-[0.8px] hover:blur-none hover:opacity-85';
 		}
 		if (style === 'karaoke') {
 			return 'scale-100 translate-y-0 font-medium text-muted-foreground/65 opacity-65 blur-0 hover:opacity-90';

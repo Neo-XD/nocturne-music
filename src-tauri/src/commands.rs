@@ -7,9 +7,8 @@ use std::sync::Arc;
 use base64::Engine;
 
 use innertube::{
-    AlbumPage, ArtistPage, BrowseItem, CommentItem, CommentRepliesResult, CommentsPage,
-    HomePage, PlaylistContinuation, PlaylistPage, PlaylistSort,
-    Rating, SearchResults, SongItem,
+    AlbumPage, ArtistPage, BrowseItem, CommentItem, CommentRepliesResult, CommentsPage, HomePage,
+    PlaylistContinuation, PlaylistPage, PlaylistSort, Rating, SearchResults, SongItem,
 };
 use tauri::{Emitter, State};
 
@@ -2400,21 +2399,25 @@ pub async fn get_local_stats(state: St<'_>, days: Option<u32>) -> Result<LocalSt
         let clean_song = shed_queue_context(song);
         total_plays += 1;
 
-        let dur = clean_song.duration.as_deref().and_then(|d| {
-            let parts: Vec<&str> = d.split(':').collect();
-            if parts.len() == 2 {
-                let m: u64 = parts[0].parse().ok()?;
-                let s: u64 = parts[1].parse().ok()?;
-                Some(m * 60 + s)
-            } else if parts.len() == 3 {
-                let h: u64 = parts[0].parse().ok()?;
-                let m: u64 = parts[1].parse().ok()?;
-                let s: u64 = parts[2].parse().ok()?;
-                Some(h * 3600 + m * 60 + s)
-            } else {
-                None
-            }
-        }).unwrap_or(180);
+        let dur = clean_song
+            .duration
+            .as_deref()
+            .and_then(|d| {
+                let parts: Vec<&str> = d.split(':').collect();
+                if parts.len() == 2 {
+                    let m: u64 = parts[0].parse().ok()?;
+                    let s: u64 = parts[1].parse().ok()?;
+                    Some(m * 60 + s)
+                } else if parts.len() == 3 {
+                    let h: u64 = parts[0].parse().ok()?;
+                    let m: u64 = parts[1].parse().ok()?;
+                    let s: u64 = parts[2].parse().ok()?;
+                    Some(h * 3600 + m * 60 + s)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(180);
         total_duration_secs += dur;
 
         let hour = ((played_at % 86400) / 3600).clamp(0, 23) as usize;
@@ -2431,22 +2434,16 @@ pub async fn get_local_stats(state: St<'_>, days: Option<u32>) -> Result<LocalSt
 
         if let Some(alb) = &clean_song.album {
             if !alb.trim().is_empty() {
-                album_counts
-                    .entry(alb.clone())
-                    .and_modify(|(_, _, c)| *c += 1)
-                    .or_insert((
-                        clean_song.artists.clone(),
-                        clean_song.thumbnail.clone(),
-                        1,
-                    ));
+                album_counts.entry(alb.clone()).and_modify(|(_, _, c)| *c += 1).or_insert((
+                    clean_song.artists.clone(),
+                    clean_song.thumbnail.clone(),
+                    1,
+                ));
             }
         }
 
         if recent_plays.len() < 30 {
-            recent_plays.push(RecentPlayItem {
-                played_at,
-                song: clean_song,
-            });
+            recent_plays.push(RecentPlayItem { played_at, song: clean_song });
         }
     }
 
@@ -2469,8 +2466,11 @@ pub async fn get_local_stats(state: St<'_>, days: Option<u32>) -> Result<LocalSt
 
     let mut top_albums: Vec<_> = album_counts
         .into_iter()
-        .map(|(name, (artist, thumbnail, play_count))| {
-            TopAlbumStat { name, artist, thumbnail, play_count }
+        .map(|(name, (artist, thumbnail, play_count))| TopAlbumStat {
+            name,
+            artist,
+            thumbnail,
+            play_count,
         })
         .collect();
     top_albums.sort_by(|a, b| b.play_count.cmp(&a.play_count));
@@ -4656,11 +4656,7 @@ pub async fn get_comments(
     continuation: Option<String>,
 ) -> Result<CommentsPage, String> {
     let client = comments_client(&state)?;
-    state
-        .it
-        .comments(client, &video_id, continuation.as_deref())
-        .await
-        .map_err(|e| e.to_string())
+    state.it.comments(client, &video_id, continuation.as_deref()).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -4669,21 +4665,13 @@ pub async fn get_comment_replies(
     continuation: String,
 ) -> Result<CommentRepliesResult, String> {
     let client = comments_client(&state)?;
-    state
-        .it
-        .comment_replies(client, &continuation)
-        .await
-        .map_err(|e| e.to_string())
+    state.it.comment_replies(client, &continuation).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn perform_comment_action(state: St<'_>, action: String) -> Result<(), String> {
     let client = comments_client(&state)?;
-    state
-        .it
-        .perform_comment_action(client, &action)
-        .await
-        .map_err(|e| e.to_string())
+    state.it.perform_comment_action(client, &action).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -4693,11 +4681,7 @@ pub async fn create_comment(
     text: String,
 ) -> Result<Option<CommentItem>, String> {
     let client = comments_client(&state)?;
-    state
-        .it
-        .create_comment(client, &create_params, &text)
-        .await
-        .map_err(|e| e.to_string())
+    state.it.create_comment(client, &create_params, &text).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -4707,11 +4691,7 @@ pub async fn create_comment_reply(
     text: String,
 ) -> Result<Option<CommentItem>, String> {
     let client = comments_client(&state)?;
-    state
-        .it
-        .create_comment_reply(client, &reply_params, &text)
-        .await
-        .map_err(|e| e.to_string())
+    state.it.create_comment_reply(client, &reply_params, &text).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

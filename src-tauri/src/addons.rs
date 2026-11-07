@@ -502,37 +502,127 @@ pub fn set_addons_enabled(db: &Db, enabled: bool) {
 // ── BitChord-Grade High-Accuracy Track Matcher ────────────────────────────────
 
 const VERSION_WORDS: &[&str] = &[
-    "remix", "remixes", "rmx", "refix", "flip", "bootleg", "mashup", "medley",
-    "live", "concert", "unplugged", "acoustic", "instrumental", "karaoke",
-    "vocals", "vocal", "acapella", "acappella", "backing", "stems", "stem",
-    "cover", "demo", "reprise", "remake", "rework", "extended", "edit",
-    "version", "mix", "dub", "vip", "session", "sessions",
-    "sped", "slowed", "reverb", "nightcore", "lofi", "orchestral", "symphonic",
-    "part", "pt", "chapter",
+    "remix",
+    "remixes",
+    "rmx",
+    "refix",
+    "flip",
+    "bootleg",
+    "mashup",
+    "medley",
+    "live",
+    "concert",
+    "unplugged",
+    "acoustic",
+    "instrumental",
+    "karaoke",
+    "vocals",
+    "vocal",
+    "acapella",
+    "acappella",
+    "backing",
+    "stems",
+    "stem",
+    "cover",
+    "demo",
+    "reprise",
+    "remake",
+    "rework",
+    "extended",
+    "edit",
+    "version",
+    "mix",
+    "dub",
+    "vip",
+    "session",
+    "sessions",
+    "sped",
+    "slowed",
+    "reverb",
+    "nightcore",
+    "lofi",
+    "orchestral",
+    "symphonic",
+    "part",
+    "pt",
+    "chapter",
 ];
 
 const NEUTRAL_SEGMENTS: &[&str] = &[
-    "albumversion", "originalversion", "originalmix", "singleversion",
-    "radioversion", "radioedit", "stereoversion", "monoversion",
-    "studioversion", "fullversion", "standardversion", "explicitversion",
-    "deluxeversion", "originaltrack",
+    "albumversion",
+    "originalversion",
+    "originalmix",
+    "singleversion",
+    "radioversion",
+    "radioedit",
+    "stereoversion",
+    "monoversion",
+    "studioversion",
+    "fullversion",
+    "standardversion",
+    "explicitversion",
+    "deluxeversion",
+    "originaltrack",
 ];
 
 const TRAILING_NOISE: &[&str] = &[
-    "song", "songs", "video", "audio", "lyrics", "lyric", "lyrical",
-    "official", "full", "hd", "hq", "4k", "mp3", "ost", "soundtrack",
+    "song",
+    "songs",
+    "video",
+    "audio",
+    "lyrics",
+    "lyric",
+    "lyrical",
+    "official",
+    "full",
+    "hd",
+    "hq",
+    "4k",
+    "mp3",
+    "ost",
+    "soundtrack",
 ];
 
-const TRAILING_TAKES: &[&str] = &[
-    "instrumental", "karaoke", "acapella", "acappella", "remix", "rmx", "nightcore",
-];
+const TRAILING_TAKES: &[&str] =
+    &["instrumental", "karaoke", "acapella", "acappella", "remix", "rmx", "nightcore"];
 
 const NOISE_WORDS: &[&str] = &[
-    "official", "video", "audio", "lyrics", "lyric", "lyrical", "visualizer",
-    "song", "songs", "full", "music", "the", "and", "from", "feat", "ft",
-    "featuring", "with", "new", "latest", "free", "download", "remaster",
-    "remastered", "explicit", "clean", "bonus", "track", "deluxe", "original",
-    "album", "single", "hd", "hq", "4k", "mp3",
+    "official",
+    "video",
+    "audio",
+    "lyrics",
+    "lyric",
+    "lyrical",
+    "visualizer",
+    "song",
+    "songs",
+    "full",
+    "music",
+    "the",
+    "and",
+    "from",
+    "feat",
+    "ft",
+    "featuring",
+    "with",
+    "new",
+    "latest",
+    "free",
+    "download",
+    "remaster",
+    "remastered",
+    "explicit",
+    "clean",
+    "bonus",
+    "track",
+    "deluxe",
+    "original",
+    "album",
+    "single",
+    "hd",
+    "hq",
+    "4k",
+    "mp3",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -563,11 +653,8 @@ fn classify_segment(
 ) {
     let re_punct = Regex::new(r"[^\p{L}\p{N}\s]").unwrap();
     let cleaned = re_punct.replace_all(segment, " ");
-    let words: Vec<String> = cleaned
-        .split_whitespace()
-        .map(|w| w.to_lowercase())
-        .filter(|w| !w.is_empty())
-        .collect();
+    let words: Vec<String> =
+        cleaned.split_whitespace().map(|w| w.to_lowercase()).filter(|w| !w.is_empty()).collect();
 
     if words.is_empty() {
         return;
@@ -696,7 +783,11 @@ pub fn artist_names(artist: &str) -> Vec<Vec<String>> {
                 .map(|t| t.to_lowercase())
                 .filter(|t| t.len() > 1)
                 .collect();
-            if tokens.is_empty() { None } else { Some(tokens) }
+            if tokens.is_empty() {
+                None
+            } else {
+                Some(tokens)
+            }
         })
         .collect()
 }
@@ -898,7 +989,6 @@ fn has_version_keyword(s: &str, keyword: &str) -> bool {
     }
 }
 
-
 fn is_hires_text(text: &str) -> bool {
     let re = Regex::new(r"(?i)hi[-_ ]?res|24[-_ ]?bit|96\s*khz|192\s*khz").unwrap();
     re.is_match(text)
@@ -972,11 +1062,7 @@ fn format_quality_label(
             || raw_lower.contains("e-ac-3"))
             && !raw_lower.contains("atmos");
 
-        let prefix = if is_ddp {
-            "DOLBY DIGITAL PLUS"
-        } else {
-            "DOLBY ATMOS"
-        };
+        let prefix = if is_ddp { "DOLBY DIGITAL PLUS" } else { "DOLBY ATMOS" };
 
         let mut parts = Vec::new();
         if let Some(sr) = sample_rate {
@@ -1198,9 +1284,7 @@ async fn resolve_candidate_from_addon(
         "LOW" => ("low", None),
         _ => ("lossless", None),
     };
-    let atmos_query = maybe_atmos
-        .map(|a| format!("&atmos={}", a))
-        .unwrap_or_default();
+    let atmos_query = maybe_atmos.map(|a| format!("&atmos={}", a)).unwrap_or_default();
 
     let p_artist = primary_artist(artist);
     let s_title = searchable_title(query_title, artist);
@@ -1262,10 +1346,7 @@ async fn resolve_candidate_from_addon(
                 );
             }
         } else {
-            eprintln!(
-                "[addon] [{}] Search timed out (>{}ms)",
-                addon.name, ADDON_TIMEOUT_MS
-            );
+            eprintln!("[addon] [{}] Search timed out (>{}ms)", addon.name, ADDON_TIMEOUT_MS);
         }
     }
 
@@ -1292,11 +1373,7 @@ async fn resolve_candidate_from_addon(
             Ok(score) => {
                 eprintln!(
                     "[addon] [{}] Match accepted: \"{}\" by \"{}\" ({:?}) -> SCORE: {}",
-                    addon.name,
-                    cand_raw_title,
-                    cand_raw_artist,
-                    track.duration,
-                    score
+                    addon.name, cand_raw_title, cand_raw_artist, track.duration, score
                 );
                 scored_candidates.push((score, track));
             }
@@ -1316,9 +1393,8 @@ async fn resolve_candidate_from_addon(
         );
     } else {
         // BitChord rule: if any candidate matches credited artist, retain only credited artist rows
-        let has_artist_match = scored_candidates
-            .iter()
-            .any(|(_, c)| shares_artist(artist, &c.resolved_artist()));
+        let has_artist_match =
+            scored_candidates.iter().any(|(_, c)| shares_artist(artist, &c.resolved_artist()));
         if has_artist_match {
             scored_candidates.retain(|(_, c)| shares_artist(artist, &c.resolved_artist()));
         }
@@ -1344,106 +1420,99 @@ async fn resolve_candidate_from_addon(
         let candidate_artist = candidate.resolved_artist();
         let candidate_artwork = candidate.resolved_artwork();
 
-        let (stream_url, addon_stream, custom_headers) =
-            if let Some(direct_url) = candidate.resolved_stream_url() {
-                if !direct_url.trim().is_empty() {
-                    eprintln!(
-                        "[addon] [{}] Using search result streamURL directly",
-                        addon.name
-                    );
-                    (
-                        direct_url.clone(),
-                        AddonStream {
-                            url: Some(direct_url),
-                            format: candidate.format.clone(),
-                            audio_quality: candidate.audio_quality.clone(),
-                            audio_mode: candidate.audio_mode.clone(),
-                            audio_modes: candidate.audio_modes.clone(),
-                            atmos: candidate.atmos,
-                            ..Default::default()
-                        },
-                        HashMap::new(),
-                    )
+        let (stream_url, addon_stream, custom_headers) = if let Some(direct_url) =
+            candidate.resolved_stream_url()
+        {
+            if !direct_url.trim().is_empty() {
+                eprintln!("[addon] [{}] Using search result streamURL directly", addon.name);
+                (
+                    direct_url.clone(),
+                    AddonStream {
+                        url: Some(direct_url),
+                        format: candidate.format.clone(),
+                        audio_quality: candidate.audio_quality.clone(),
+                        audio_mode: candidate.audio_mode.clone(),
+                        audio_modes: candidate.audio_modes.clone(),
+                        atmos: candidate.atmos,
+                        ..Default::default()
+                    },
+                    HashMap::new(),
+                )
+            } else {
+                continue;
+            }
+        } else {
+            let stream_ep = format!(
+                "{}/stream/{}?quality={}{}",
+                base_url,
+                urlencoding::encode(&candidate.id),
+                tier,
+                atmos_query
+            );
+
+            eprintln!("[addon] [{}] Requesting stream: id=\"{}\" ...", addon.name, candidate.id);
+
+            let stream_start = std::time::Instant::now();
+            let mut stream_res = None;
+
+            let req = browser_request(client, &stream_ep, ADDON_TIMEOUT_MS);
+            if let Ok(res) = req.send().await {
+                let elapsed = stream_start.elapsed().as_millis();
+                if res.status().is_success() {
+                    if let Ok(val) = res.json::<serde_json::Value>().await {
+                        if let Some(resolved) = parse_stream_response(val, Some(query_title)) {
+                            eprintln!(
+                                "[addon] [{}] Stream endpoint OK in {}ms",
+                                addon.name, elapsed
+                            );
+                            stream_res = Some(resolved);
+                        }
+                    }
                 } else {
-                    continue;
+                    eprintln!(
+                        "[addon] [{}] Stream endpoint returned HTTP {} in {}ms",
+                        addon.name,
+                        res.status(),
+                        elapsed
+                    );
                 }
             } else {
-                let stream_ep = format!(
-                    "{}/stream/{}?quality={}{}",
-                    base_url,
-                    urlencoding::encode(&candidate.id),
-                    tier,
-                    atmos_query
-                );
-
                 eprintln!(
-                    "[addon] [{}] Requesting stream: id=\"{}\" ...",
-                    addon.name, candidate.id
+                    "[addon] [{}] Stream endpoint timed out (>{}ms)",
+                    addon.name, ADDON_TIMEOUT_MS
                 );
+            }
 
-                let stream_start = std::time::Instant::now();
-                let mut stream_res = None;
-
-                let req = browser_request(client, &stream_ep, ADDON_TIMEOUT_MS);
+            // Stremio ID fallback
+            if stream_res.is_none()
+                && (candidate.id.starts_with("tt") || candidate.id.starts_with("yt_id:"))
+            {
+                let stremio_ep = format!(
+                    "{}/stream/music/{}.json",
+                    base_url,
+                    urlencoding::encode(&candidate.id)
+                );
+                let req = browser_request(client, &stremio_ep, ADDON_TIMEOUT_MS);
                 if let Ok(res) = req.send().await {
-                    let elapsed = stream_start.elapsed().as_millis();
                     if res.status().is_success() {
                         if let Ok(val) = res.json::<serde_json::Value>().await {
-                            if let Some(resolved) =
-                                parse_stream_response(val, Some(query_title))
-                            {
-                                eprintln!(
-                                    "[addon] [{}] Stream endpoint OK in {}ms",
-                                    addon.name, elapsed
-                                );
-                                stream_res = Some(resolved);
-                            }
+                            stream_res = parse_stream_response(val, Some(query_title));
                         }
-                    } else {
-                        eprintln!(
-                            "[addon] [{}] Stream endpoint returned HTTP {} in {}ms",
-                            addon.name,
-                            res.status(),
-                            elapsed
-                        );
                     }
-                } else {
+                }
+            }
+
+            match stream_res {
+                Some(r) => r,
+                None => {
                     eprintln!(
-                        "[addon] [{}] Stream endpoint timed out (>{}ms)",
-                        addon.name, ADDON_TIMEOUT_MS
+                        "[addon] [{}] Stream unavailable for id=\"{}\"",
+                        addon.name, candidate.id
                     );
+                    continue;
                 }
-
-                // Stremio ID fallback
-                if stream_res.is_none()
-                    && (candidate.id.starts_with("tt") || candidate.id.starts_with("yt_id:"))
-                {
-                    let stremio_ep = format!(
-                        "{}/stream/music/{}.json",
-                        base_url,
-                        urlencoding::encode(&candidate.id)
-                    );
-                    let req = browser_request(client, &stremio_ep, ADDON_TIMEOUT_MS);
-                    if let Ok(res) = req.send().await {
-                        if res.status().is_success() {
-                            if let Ok(val) = res.json::<serde_json::Value>().await {
-                                stream_res = parse_stream_response(val, Some(query_title));
-                            }
-                        }
-                    }
-                }
-
-                match stream_res {
-                    Some(r) => r,
-                    None => {
-                        eprintln!(
-                            "[addon] [{}] Stream unavailable for id=\"{}\"",
-                            addon.name, candidate.id
-                        );
-                        continue;
-                    }
-                }
-            };
+            }
+        };
 
         let combined_quality_text = format!(
             "{} {} {} {} {} {} {} {}",
@@ -1695,17 +1764,12 @@ pub async fn resolve_from_addons(
         video_id.unwrap_or_default()
     );
     if let Some(cached) = get_cached_addon_stream(&cache_key) {
-        eprintln!(
-            "[addon] ── In-memory cache hit for \"{}\" [{}] ──",
-            query_title, quality_pref
-        );
+        eprintln!("[addon] ── In-memory cache hit for \"{}\" [{}] ──", query_title, quality_pref);
         return Some(cached);
     }
 
     let start_total = std::time::Instant::now();
-    eprintln!(
-        "[addon] ════════════════════════════════════════════════════════════════"
-    );
+    eprintln!("[addon] ════════════════════════════════════════════════════════════════");
     eprintln!(
         "[addon] Resolving: \"{}\" by \"{}\" (tier: {}, dur: {:?}s) across {} addon(s)",
         query_title,
@@ -1770,18 +1834,14 @@ pub async fn resolve_from_addons(
             data.stream_client,
             total_elapsed
         );
-        eprintln!(
-            "[addon] ════════════════════════════════════════════════════════════════"
-        );
+        eprintln!("[addon] ════════════════════════════════════════════════════════════════");
         cache_addon_stream(cache_key, data.clone());
     } else {
         eprintln!(
             "[addon] ── No addon matched for \"{}\" in {}ms. Snapping to YouTube Music. ──",
             query_title, total_elapsed
         );
-        eprintln!(
-            "[addon] ════════════════════════════════════════════════════════════════"
-        );
+        eprintln!("[addon] ════════════════════════════════════════════════════════════════");
     }
 
     best.map(|(_, _, data)| data)
@@ -1837,16 +1897,7 @@ pub async fn resolve_from_addons_waterfall(
                     return Some(res);
                 }
             }
-            resolve_from_addons(
-                db,
-                title,
-                artist,
-                album,
-                duration_secs,
-                "LOSSLESS",
-                video_id,
-            )
-            .await
+            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
         }
         "HI_RES_LOSSLESS" => {
             // If Hi-Res, do not think about Dolby at all: Hi-Res -> Lossless -> High
@@ -1866,40 +1917,14 @@ pub async fn resolve_from_addons_waterfall(
                     return Some(res);
                 }
             }
-            resolve_from_addons(
-                db,
-                title,
-                artist,
-                album,
-                duration_secs,
-                "LOSSLESS",
-                video_id,
-            )
-            .await
+            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
         }
         "LOSSLESS" | "VERY_HIGH" => {
-            resolve_from_addons(
-                db,
-                title,
-                artist,
-                album,
-                duration_secs,
-                "LOSSLESS",
-                video_id,
-            )
-            .await
+            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
         }
         _ => {
-            resolve_from_addons(
-                db,
-                title,
-                artist,
-                album,
-                duration_secs,
-                target_tier,
-                video_id,
-            )
-            .await
+            resolve_from_addons(db, title, artist, album, duration_secs, target_tier, video_id)
+                .await
         }
     }
 }

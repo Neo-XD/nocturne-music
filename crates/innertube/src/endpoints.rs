@@ -7,6 +7,7 @@ use crate::models::browse::{
     self, AlbumPage, ArtistPage, BrowseItem, HomePage, MoodSection, PlaylistContinuation,
     PlaylistPage, PlaylistSort, SearchResults,
 };
+use crate::models::comments::{self, CommentItem, CommentRepliesResult, CommentsPage};
 use crate::models::context::Context;
 use crate::models::lyrics::{self, PlainLyrics, TimedLyricLine};
 use crate::models::metadata::{
@@ -920,6 +921,133 @@ impl InnerTube {
             SubBody { context: self.context_for(client), channel_ids: vec![channel_id.to_owned()] };
         self.post(path, client, &body, true).await?;
         Ok(())
+    }
+
+    // --- comments ----------------------------------------------------------------------------
+
+    /// Fetch a page of comments for a video, either the initial page or via continuation.
+    pub async fn comments(
+        &self,
+        client: &YouTubeClient,
+        video_id: &str,
+        continuation: Option<&str>,
+    ) -> Result<CommentsPage, Error> {
+        let token = match continuation {
+            Some(c) => c.to_owned(),
+            None => {
+                #[derive(Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct VideoNextBody {
+                    context: Context,
+                    video_id: String,
+                }
+                let body = VideoNextBody {
+                    context: self.context_for(client),
+                    video_id: video_id.to_owned(),
+                };
+                let root_resp = self.post("next", client, &body, true).await?;
+                match comments::extract_root_comments_token(&root_resp) {
+                    Some(tok) => tok,
+                    None => return Ok(CommentsPage::default()),
+                }
+            }
+        };
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ContinuationBody {
+            context: Context,
+            continuation: String,
+        }
+        let body = ContinuationBody { context: self.context_for(client), continuation: token };
+        let value = self.post("next", client, &body, true).await?;
+        Ok(comments::parse_comments_page(&value))
+    }
+
+    /// Fetch threaded replies for a comment via its replies continuation token.
+    pub async fn comment_replies(
+        &self,
+        client: &YouTubeClient,
+        continuation: &str,
+    ) -> Result<CommentRepliesResult, Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ContinuationBody {
+            context: Context,
+            continuation: String,
+        }
+        let body = ContinuationBody {
+            context: self.context_for(client),
+            continuation: continuation.to_owned(),
+        };
+        let value = self.post("next", client, &body, true).await?;
+        Ok(comments::parse_comment_replies(&value))
+    }
+
+    /// Perform a comment action (like, unlike, etc.) using its action string.
+    pub async fn perform_comment_action(
+        &self,
+        client: &YouTubeClient,
+        action: &str,
+    ) -> Result<(), Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ActionBody {
+            context: Context,
+            actions: Vec<String>,
+        }
+        let body =
+            ActionBody { context: self.context_for(client), actions: vec![action.to_owned()] };
+        self.post("comment/perform_comment_action", client, &body, true).await?;
+        Ok(())
+    }
+
+    /// Post a new top-level comment on a video using `createCommentParams`.
+    pub async fn create_comment(
+        &self,
+        client: &YouTubeClient,
+        create_params: &str,
+        text: &str,
+    ) -> Result<Option<CommentItem>, Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CreateBody {
+            context: Context,
+            create_comment_params: String,
+            comment_text: String,
+        }
+        let body = CreateBody {
+            context: self.context_for(client),
+            create_comment_params: create_params.to_owned(),
+            comment_text: text.to_owned(),
+        };
+        let value = self.post("comment/create_comment", client, &body, true).await?;
+        let page = comments::parse_comments_page(&value);
+        Ok(page.comments.into_iter().next())
+    }
+
+    /// Post a reply to an existing comment using `createCommentReplyParams`.
+    pub async fn create_comment_reply(
+        &self,
+        client: &YouTubeClient,
+        reply_params: &str,
+        text: &str,
+    ) -> Result<Option<CommentItem>, Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ReplyBody {
+            context: Context,
+            create_comment_reply_params: String,
+            comment_text: String,
+        }
+        let body = ReplyBody {
+            context: self.context_for(client),
+            create_comment_reply_params: reply_params.to_owned(),
+            comment_text: text.to_owned(),
+        };
+        let value = self.post("comment/create_comment_reply", client, &body, true).await?;
+        let res = comments::parse_comment_replies(&value);
+        Ok(res.replies.into_iter().next())
     }
 }
 

@@ -694,7 +694,7 @@ pub async fn profile(state: &AppState) -> Option<Profile> {
     parse_profile(&body)
 }
 
-#[derive(Debug, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Profile {
     pub image: Option<String>,
     pub url: Option<String>,
@@ -727,6 +727,173 @@ fn parse_profile(body: &serde_json::Value) -> Option<Profile> {
         tracks: num(u.get("track_count")),
         since: num(u.pointer("/registered/unixtime")),
     })
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastfmStatItem {
+    pub name: String,
+    pub artist: Option<String>,
+    pub play_count: u64,
+    pub url: Option<String>,
+    pub image: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastfmStats {
+    pub username: String,
+    pub profile: Option<Profile>,
+    pub top_artists: Vec<LastfmStatItem>,
+    pub top_tracks: Vec<LastfmStatItem>,
+    pub top_albums: Vec<LastfmStatItem>,
+}
+
+fn extract_image(val: Option<&serde_json::Value>) -> Option<String> {
+    let images = val.and_then(|v| v.as_array())?;
+    ["extralarge", "large", "medium"].iter().find_map(|size| {
+        images
+            .iter()
+            .find(|i| i.get("size").and_then(|s| s.as_str()) == Some(size))?
+            .get("#text")?
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+pub async fn stats(state: &AppState, period: Option<&str>) -> Option<LastfmStats> {
+    let name = state.db.get_setting("lastfm_username").filter(|s| !s.is_empty())?;
+    let api_key = resolve_api_key(&state.db);
+    let api_secret = resolve_api_secret(&state.db);
+    if api_key.is_empty() || api_secret.is_empty() {
+        return None;
+    }
+    let p = period.unwrap_or("1month").to_string();
+
+    let artists_fut = call(
+        "user.getTopArtists",
+        vec![
+            ("user".to_string(), name.clone()),
+            ("period".to_string(), p.clone()),
+            ("limit".to_string(), "20".to_string()),
+        ],
+        false,
+        &api_key,
+        &api_secret,
+    );
+    let tracks_fut = call(
+        "user.getTopTracks",
+        vec![
+            ("user".to_string(), name.clone()),
+            ("period".to_string(), p.clone()),
+            ("limit".to_string(), "20".to_string()),
+        ],
+        false,
+        &api_key,
+        &api_secret,
+    );
+    let albums_fut = call(
+        "user.getTopAlbums",
+        vec![
+            ("user".to_string(), name.clone()),
+            ("period".to_string(), p.clone()),
+            ("limit".to_string(), "20".to_string()),
+        ],
+        false,
+        &api_key,
+        &api_secret,
+    );
+    let info_fut = call(
+        "user.getInfo",
+        vec![("user".to_string(), name.clone())],
+        false,
+        &api_key,
+        &api_secret,
+    );
+
+    let (artists_res, tracks_res, albums_res, info_res) =
+        tokio::join!(artists_fut, tracks_fut, albums_fut, info_fut);
+
+    let profile = info_res.ok().and_then(|b| parse_profile(&b));
+
+    let mut top_artists = Vec::new();
+    if let Ok(body) = artists_res {
+        if let Some(list) = body.pointer("/topartists/artist").and_then(|v| v.as_array()) {
+            for a in list {
+                if let Some(n) = a.get("name").and_then(|v| v.as_str()) {
+                    let count = a
+                        .get("playcount")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    top_artists.push(LastfmStatItem {
+                        name: n.to_owned(),
+                        artist: None,
+                        play_count: count,
+                        url: a.get("url").and_then(|v| v.as_str()).map(str::to_owned),
+                        image: extract_image(a.get("image")),
+                    });
+                }
+            }
+        }
+    }
+
+    let mut top_tracks = Vec::new();
+    if let Ok(body) = tracks_res {
+        if let Some(list) = body.pointer("/toptracks/track").and_then(|v| v.as_array()) {
+            for t in list {
+                if let Some(n) = t.get("name").and_then(|v| v.as_str()) {
+                    let artist_name = t
+                        .get("artist")
+                        .and_then(|a| a.get("name").or(Some(a)))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned);
+                    let count = t
+                        .get("playcount")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    top_tracks.push(LastfmStatItem {
+                        name: n.to_owned(),
+                        artist: artist_name,
+                        play_count: count,
+                        url: t.get("url").and_then(|v| v.as_str()).map(str::to_owned),
+                        image: extract_image(t.get("image")),
+                    });
+                }
+            }
+        }
+    }
+
+    let mut top_albums = Vec::new();
+    if let Ok(body) = albums_res {
+        if let Some(list) = body.pointer("/topalbums/album").and_then(|v| v.as_array()) {
+            for al in list {
+                if let Some(n) = al.get("name").and_then(|v| v.as_str()) {
+                    let artist_name = al
+                        .get("artist")
+                        .and_then(|a| a.get("name").or(Some(a)))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned);
+                    let count = al
+                        .get("playcount")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    top_albums.push(LastfmStatItem {
+                        name: n.to_owned(),
+                        artist: artist_name,
+                        play_count: count,
+                        url: al.get("url").and_then(|v| v.as_str()).map(str::to_owned),
+                        image: extract_image(al.get("image")),
+                    });
+                }
+            }
+        }
+    }
+
+    Some(LastfmStats { username: name, profile, top_artists, top_tracks, top_albums })
 }
 
 pub(crate) fn open_browser(url: &str) -> Result<(), String> {
