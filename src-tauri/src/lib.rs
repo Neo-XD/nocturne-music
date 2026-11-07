@@ -24,6 +24,7 @@ mod potoken;
 pub mod recognition;
 pub mod remotesync;
 mod session;
+mod spotify_connect;
 mod state;
 #[cfg(target_os = "windows")]
 mod taskbar;
@@ -338,6 +339,7 @@ pub fn run() {
 
             // Last.fm scrobbler — parks until a session key exists (titlebar connect flow).
             let lastfm = lastfm::spawn(&db);
+            let spotify_connect = spotify_connect::spawn(&db, handle.clone());
 
             // Listen Together session (context/19). Server URL is a DB setting so "home PC → VPS" is
             // config, not a rebuild. The sync channel feeds the guest-playback bridge below.
@@ -359,6 +361,7 @@ pub fn run() {
                 media,
                 discord,
                 lastfm,
+                spotify_connect,
             ));
             app.manage(app_state.clone());
             spawn_heap_trimmer(app_state.db.clone());
@@ -697,6 +700,11 @@ pub fn run() {
             commands::ytm_transfer_to_spotify,
             commands::spotify_get_sync_mode,
             commands::spotify_set_sync_mode,
+            commands::spotify_connect_status,
+            commands::spotify_connect_set_enabled,
+            commands::spotify_connect_set_device_name,
+            commands::spotify_connect_set_scrobble_enabled,
+            commands::spotify_connect_get_scrobbles,
             recognition::recognize_song_signature,
             recognition::capture_pc_audio,
             commands::get_global_hotkeys,

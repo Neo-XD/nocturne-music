@@ -50,6 +50,7 @@ pub struct AppState {
     discord: Option<DiscordHandle>,
     /// Last.fm scrobbler. Same feed again; parks until a session key is set (titlebar button).
     pub lastfm: crate::lastfm::LastfmHandle,
+    pub spotify_connect: crate::spotify_connect::SpotifyConnectHandle,
     queue: Mutex<QueueState>,
     /// Bumped on every explicit `play`/jump so superseded async resolves discard their result
     /// (cancellation without JoinHandle bookkeeping). context/06 §6.
@@ -383,6 +384,7 @@ impl AppState {
         media: Option<MediaHandle>,
         discord: Option<DiscordHandle>,
         lastfm: crate::lastfm::LastfmHandle,
+        spotify_connect: crate::spotify_connect::SpotifyConnectHandle,
     ) -> Self {
         AppState {
             it,
@@ -396,6 +398,7 @@ impl AppState {
             media,
             discord,
             lastfm,
+            spotify_connect,
             queue: Mutex::new(QueueState::default()),
             is_playing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
@@ -2787,6 +2790,7 @@ impl AppState {
             d.set_track(item);
         }
         self.lastfm.set_track(item);
+        self.spotify_connect.set_track(item);
         if stream_client != "restored"
             && self.db.get_setting("track_notifications").as_deref() == Some("true")
         {
@@ -3166,6 +3170,7 @@ impl AppState {
                 d.set_duration(dur);
             }
             self.lastfm.set_duration(dur);
+            self.spotify_connect.set_duration(dur);
         }
 
         let _ = self.app.emit("position", serde_json::json!({ "position": pos }));
@@ -3193,6 +3198,7 @@ impl AppState {
                 d.set_duration(secs);
             }
             self.lastfm.set_duration(secs);
+            self.spotify_connect.set_duration(secs);
         }
     }
 
@@ -3467,6 +3473,7 @@ impl AppState {
                 d.set_position(pos);
             }
             self.lastfm.set_position(pos);
+            self.spotify_connect.set_position(pos);
         }
     }
 

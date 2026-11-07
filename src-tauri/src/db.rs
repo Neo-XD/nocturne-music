@@ -107,6 +107,15 @@ impl Db {
             );
             CREATE INDEX IF NOT EXISTS downloaded_tracks_artist ON downloaded_tracks(artist);
             CREATE INDEX IF NOT EXISTS downloaded_tracks_album ON downloaded_tracks(album);
+            CREATE TABLE IF NOT EXISTS spotify_scrobbles (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                title        TEXT NOT NULL,
+                artist       TEXT NOT NULL,
+                album        TEXT,
+                spotify_id   TEXT,
+                scrobbled_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS spotify_scrobbles_time ON spotify_scrobbles(scrobbled_at);
             "#,
         )?;
         // Migrate pre-Phase-4 DBs that predate the loudness_db column. Errors ("duplicate column")
@@ -694,6 +703,59 @@ impl Db {
         }
         missing
     }
+
+    pub fn record_spotify_scrobble(
+        &self,
+        title: &str,
+        artist: &str,
+        album: Option<&str>,
+        spotify_id: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.0.lock().unwrap();
+        conn.execute(
+            "INSERT INTO spotify_scrobbles (title, artist, album, spotify_id, scrobbled_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![title, artist, album, spotify_id, now_secs()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_spotify_scrobbles(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<SpotifyScrobbleRecord>, rusqlite::Error> {
+        let conn = self.0.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, artist, album, spotify_id, scrobbled_at
+             FROM spotify_scrobbles ORDER BY scrobbled_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |r| {
+            Ok(SpotifyScrobbleRecord {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                artist: r.get(2)?,
+                album: r.get(3)?,
+                spotify_id: r.get(4)?,
+                scrobbled_at: r.get(5)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn get_spotify_scrobble_count(&self) -> u64 {
+        let conn = self.0.lock().unwrap();
+        conn.query_row("SELECT COUNT(*) FROM spotify_scrobbles", [], |r| r.get(0)).unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SpotifyScrobbleRecord {
+    pub id: i64,
+    pub title: String,
+    pub artist: String,
+    pub album: Option<String>,
+    pub spotify_id: Option<String>,
+    pub scrobbled_at: i64,
 }
 
 const LOCAL_TRACK_UPSERT: &str =

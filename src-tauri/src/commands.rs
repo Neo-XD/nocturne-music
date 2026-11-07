@@ -2941,10 +2941,12 @@ pub struct SpotifyPlaylistSummary {
     pub url: String,
 }
 
-async fn refresh_spotify_dev_token(state: &AppState) -> Result<String, String> {
-    let client_id = state.db.get_setting("spotify_client_id").unwrap_or_default();
-    let client_secret = state.db.get_setting("spotify_client_secret").unwrap_or_default();
-    let refresh_token = state.db.get_setting("spotify_refresh_token").unwrap_or_default();
+pub(crate) async fn refresh_spotify_dev_token_from_db(
+    db: &crate::db::Db,
+) -> Result<String, String> {
+    let client_id = db.get_setting("spotify_client_id").unwrap_or_default();
+    let client_secret = db.get_setting("spotify_client_secret").unwrap_or_default();
+    let refresh_token = db.get_setting("spotify_refresh_token").unwrap_or_default();
 
     if refresh_token.is_empty() || client_id.is_empty() {
         return Err("Spotify Developer credentials missing or expired. Please re-link in profile."
@@ -2985,24 +2987,25 @@ async fn refresh_spotify_dev_token(state: &AppState) -> Result<String, String> {
         .to_string();
     let expires_in = json["expires_in"].as_u64().unwrap_or(3600);
 
-    let _ = state.db.set_setting("spotify_access_token", &new_access);
-    let _ = state.db.set_setting("spotify_token_expires_at", &(now + expires_in).to_string());
+    let _ = db.set_setting("spotify_access_token", &new_access);
+    let _ = db.set_setting("spotify_token_expires_at", &(now + expires_in).to_string());
     if let Some(new_refresh) = json["refresh_token"].as_str() {
-        let _ = state.db.set_setting("spotify_refresh_token", new_refresh);
+        let _ = db.set_setting("spotify_refresh_token", new_refresh);
     }
 
     Ok(new_access)
 }
 
-async fn get_spotify_token(state: &AppState) -> Result<String, String> {
-    let auth_type = state.db.get_setting("spotify_auth_type").unwrap_or_default();
+async fn refresh_spotify_dev_token(state: &AppState) -> Result<String, String> {
+    refresh_spotify_dev_token_from_db(&state.db).await
+}
+
+pub(crate) async fn get_spotify_token_from_db(db: &crate::db::Db) -> Result<String, String> {
+    let auth_type = db.get_setting("spotify_auth_type").unwrap_or_default();
     if auth_type == "dev_api" {
-        let access_token = state.db.get_setting("spotify_access_token").unwrap_or_default();
-        let expires_at: u64 = state
-            .db
-            .get_setting("spotify_token_expires_at")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let access_token = db.get_setting("spotify_access_token").unwrap_or_default();
+        let expires_at: u64 =
+            db.get_setting("spotify_token_expires_at").and_then(|s| s.parse().ok()).unwrap_or(0);
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3013,10 +3016,10 @@ async fn get_spotify_token(state: &AppState) -> Result<String, String> {
             return Ok(access_token);
         }
 
-        return refresh_spotify_dev_token(state).await;
+        return refresh_spotify_dev_token_from_db(db).await;
     }
 
-    let cookie = state.db.get_setting("spotify_sp_dc").unwrap_or_default();
+    let cookie = db.get_setting("spotify_sp_dc").unwrap_or_default();
     let clean = cookie.trim();
     if clean.is_empty() {
         return Err(
@@ -3048,6 +3051,10 @@ async fn get_spotify_token(state: &AppState) -> Result<String, String> {
         .ok_or_else(|| "Could not extract access token from Spotify response".to_string())?;
 
     Ok(access_token.to_string())
+}
+
+async fn get_spotify_token(state: &AppState) -> Result<String, String> {
+    get_spotify_token_from_db(&state.db).await
 }
 
 #[tauri::command]
@@ -4232,6 +4239,65 @@ pub async fn spotify_set_sync_mode(
     let _ = state.db.set_setting("spotify_playlist_sync_mode", valid_mode);
     let _ = app.emit("spotify-sync-mode-changed", valid_mode);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn spotify_connect_status(
+    state: St<'_>,
+) -> Result<crate::spotify_connect::SpotifyConnectStatus, String> {
+    let enabled = state.db.get_setting("spotify_connect_enabled").as_deref() != Some("false");
+    let scrobble_enabled =
+        state.db.get_setting("spotify_scrobble_enabled").as_deref() != Some("false");
+    let device_name = state
+        .db
+        .get_setting("spotify_connect_device_name")
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Nocturne".to_string());
+    let device_id = state.db.get_setting("spotify_connect_device_id").unwrap_or_default();
+    let total_scrobbles = state.db.get_spotify_scrobble_count();
+    let active = state.spotify_connect.is_active();
+
+    Ok(crate::spotify_connect::SpotifyConnectStatus {
+        enabled,
+        device_name,
+        device_id,
+        active,
+        scrobble_enabled,
+        total_scrobbles,
+    })
+}
+
+#[tauri::command]
+pub async fn spotify_connect_set_enabled(state: St<'_>, enabled: bool) -> Result<(), String> {
+    state.spotify_connect.set_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn spotify_connect_set_device_name(state: St<'_>, name: String) -> Result<(), String> {
+    state.spotify_connect.set_device_name(name);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn spotify_connect_set_scrobble_enabled(
+    state: St<'_>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.spotify_connect.set_scrobble_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn spotify_connect_get_scrobbles(
+    state: St<'_>,
+    limit: Option<u32>,
+) -> Result<Vec<crate::db::SpotifyScrobbleRecord>, String> {
+    let lim = limit.unwrap_or(50).clamp(1, 200);
+    state
+        .db
+        .get_spotify_scrobbles(lim)
+        .map_err(|e| format!("Failed to read Spotify scrobbles: {e}"))
 }
 
 // --- Song downloader ------------------------------------------------------------------------
