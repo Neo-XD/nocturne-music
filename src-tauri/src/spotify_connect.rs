@@ -83,10 +83,16 @@ enum ConnectMsg {
 }
 
 #[derive(Clone)]
+struct InternalConnectState {
+    event: SpotifyConnectStateEvent,
+    anchor: Option<std::time::Instant>,
+}
+
+#[derive(Clone)]
 pub struct SpotifyConnectHandle {
     tx: UnboundedSender<ConnectMsg>,
     active: Arc<AtomicBool>,
-    current_state: Arc<std::sync::Mutex<Option<SpotifyConnectStateEvent>>>,
+    current_state: Arc<std::sync::Mutex<Option<InternalConnectState>>>,
 }
 
 impl SpotifyConnectHandle {
@@ -119,7 +125,20 @@ impl SpotifyConnectHandle {
     }
 
     pub fn get_current_state(&self) -> Option<SpotifyConnectStateEvent> {
-        self.current_state.lock().ok().and_then(|g| g.clone())
+        self.current_state.lock().ok().and_then(|g| {
+            g.as_ref().map(|s| {
+                let mut ev = s.event.clone();
+                if let Some(anchor) = s.anchor {
+                    let elapsed = anchor.elapsed().as_millis() as u64;
+                    if ev.duration_ms > 0 {
+                        ev.position_ms = (ev.position_ms + elapsed).min(ev.duration_ms);
+                    } else {
+                        ev.position_ms += elapsed;
+                    }
+                }
+                ev
+            })
+        })
     }
 }
 
@@ -350,7 +369,7 @@ async fn run_connect_session(
         position_ms: 0,
     };
     if let Ok(mut lk) = current_state.lock() {
-        *lk = Some(initial_ev.clone());
+        *lk = Some(InternalConnectState { event: initial_ev.clone(), anchor: None });
     }
     let _ = app.emit("spotify-connect-state", initial_ev);
 
@@ -392,7 +411,10 @@ async fn run_connect_session(
                         position_ms: position_ms as u64,
                     };
                     if let Ok(mut lk) = cur_state_clone.lock() {
-                        *lk = Some(ev.clone());
+                        *lk = Some(InternalConnectState {
+                            event: ev.clone(),
+                            anchor: Some(std::time::Instant::now()),
+                        });
                     }
                     let _ = app_clone.emit("spotify-connect-state", ev);
                 }
@@ -408,7 +430,7 @@ async fn run_connect_session(
                         position_ms: position_ms as u64,
                     };
                     if let Ok(mut lk) = cur_state_clone.lock() {
-                        *lk = Some(ev.clone());
+                        *lk = Some(InternalConnectState { event: ev.clone(), anchor: None });
                     }
                     let _ = app_clone.emit("spotify-connect-state", ev);
                 }
@@ -424,7 +446,7 @@ async fn run_connect_session(
                         position_ms: 0,
                     };
                     if let Ok(mut lk) = cur_state_clone.lock() {
-                        *lk = Some(ev.clone());
+                        *lk = None;
                     }
                     let _ = app_clone.emit("spotify-connect-state", ev);
                 }

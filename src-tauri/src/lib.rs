@@ -711,6 +711,7 @@ pub fn run() {
             commands::spotify_play_pause,
             commands::spotify_next_track,
             commands::spotify_previous_track,
+            commands::spotify_seek,
             recognition::recognize_song_signature,
             recognition::capture_pc_audio,
             commands::get_global_hotkeys,

@@ -4674,6 +4674,37 @@ pub async fn spotify_previous_track(state: St<'_>) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+pub async fn spotify_seek(state: St<'_>, position_ms: u64) -> Result<(), String> {
+    let token = get_spotify_token(&state).await?;
+    let client = crate::http::client();
+    let url = format!("https://api.spotify.com/v1/me/player/seek?position_ms={position_ms}");
+
+    let mut res = client
+        .put(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Spotify seek error: {e}"))?;
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+            res = client
+                .put(&url)
+                .header("Authorization", format!("Bearer {new_token}"))
+                .send()
+                .await
+                .map_err(|e| format!("Spotify seek error: {e}"))?;
+        }
+    }
+
+    if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        Ok(())
+    } else {
+        Err(format!("Spotify seek error: status {}", res.status()))
+    }
+}
+
 // --- Song downloader ------------------------------------------------------------------------
 
 #[tauri::command]
