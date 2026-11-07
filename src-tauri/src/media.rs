@@ -207,16 +207,51 @@ pub(crate) fn handle_event(app: &AppHandle, event: MediaControlEvent) {
         let Some(state) = app.try_state::<Arc<AppState>>() else { return };
         let state = state.inner().clone();
         match event {
-            MediaControlEvent::Play | MediaControlEvent::Toggle => state.resume_or_toggle().await,
+            MediaControlEvent::Play | MediaControlEvent::Toggle => {
+                if state.spotify_connect.is_active() {
+                    let is_playing = state
+                        .spotify_connect
+                        .get_current_state()
+                        .map(|s| s.is_playing)
+                        .unwrap_or(false);
+                    let _ = crate::commands::spotify_play_pause_impl(&state, !is_playing).await;
+                } else {
+                    state.resume_or_toggle().await;
+                }
+            }
             MediaControlEvent::Pause | MediaControlEvent::Stop => {
-                let _ = state.player.pause();
+                if state.spotify_connect.is_active() {
+                    let _ = crate::commands::spotify_play_pause_impl(&state, false).await;
+                } else {
+                    let _ = state.player.pause();
+                }
             }
             // GNOME's panel media widget calls MPRIS Raise when the entry itself is clicked.
             MediaControlEvent::Raise => crate::tray::show_main(&app),
-            MediaControlEvent::Next => state.next_in_queue().await,
-            MediaControlEvent::Previous => state.prev_in_queue().await,
+            MediaControlEvent::Next => {
+                if state.spotify_connect.is_active() {
+                    let _ = crate::commands::spotify_next_track_impl(&state).await;
+                } else {
+                    state.next_in_queue().await;
+                }
+            }
+            MediaControlEvent::Previous => {
+                if state.spotify_connect.is_active() {
+                    let _ = crate::commands::spotify_previous_track_impl(&state).await;
+                } else {
+                    state.prev_in_queue().await;
+                }
+            }
             MediaControlEvent::SetPosition(MediaPosition(pos)) => {
-                let _ = state.player.seek(pos.as_secs_f64());
+                if state.spotify_connect.is_active() {
+                    let _ = crate::commands::spotify_seek_impl(
+                        &state,
+                        (pos.as_secs_f64() * 1000.0) as u64,
+                    )
+                    .await;
+                } else {
+                    let _ = state.player.seek(pos.as_secs_f64());
+                }
             }
             MediaControlEvent::SeekBy(dir, by) => {
                 let delta = if matches!(dir, SeekDirection::Forward) {
@@ -224,11 +259,33 @@ pub(crate) fn handle_event(app: &AppHandle, event: MediaControlEvent) {
                 } else {
                     -by.as_secs_f64()
                 };
-                let _ = state.player.seek((state.current_position() + delta).max(0.0));
+                if state.spotify_connect.is_active() {
+                    let cur_pos = state
+                        .spotify_connect
+                        .get_current_state()
+                        .map(|s| s.position_ms as f64 / 1000.0)
+                        .unwrap_or(0.0);
+                    let target = (cur_pos + delta).max(0.0);
+                    let _ =
+                        crate::commands::spotify_seek_impl(&state, (target * 1000.0) as u64).await;
+                } else {
+                    let _ = state.player.seek((state.current_position() + delta).max(0.0));
+                }
             }
             MediaControlEvent::Seek(dir) => {
                 let delta = if matches!(dir, SeekDirection::Forward) { 10.0 } else { -10.0 };
-                let _ = state.player.seek((state.current_position() + delta).max(0.0));
+                if state.spotify_connect.is_active() {
+                    let cur_pos = state
+                        .spotify_connect
+                        .get_current_state()
+                        .map(|s| s.position_ms as f64 / 1000.0)
+                        .unwrap_or(0.0);
+                    let target = (cur_pos + delta).max(0.0);
+                    let _ =
+                        crate::commands::spotify_seek_impl(&state, (target * 1000.0) as u64).await;
+                } else {
+                    let _ = state.player.seek((state.current_position() + delta).max(0.0));
+                }
             }
             _ => {}
         }

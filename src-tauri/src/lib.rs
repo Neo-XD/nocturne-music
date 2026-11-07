@@ -895,6 +895,18 @@ fn spawn_event_pump(
 
                     if let Some(rs) = app.try_state::<Arc<remotesync::RemoteSyncController>>() {
                         if rs.has_connected_clients() {
+                            rs.broadcast_action(remotesync::RemotePlaybackAction {
+                                kind: if playing {
+                                    "play".to_string()
+                                } else {
+                                    "pause".to_string()
+                                },
+                                playing,
+                                position_ms: (state.current_position() * 1000.0) as i64,
+                                track: None,
+                                queue: None,
+                                volume: 0.0,
+                            });
                             let snapshot = state.playback_snapshot().await;
                             let st = remotesync::room_state_from_snapshot(&snapshot);
                             rs.broadcast_state(st);

@@ -2706,6 +2706,26 @@ impl AppState {
         })
     }
 
+    pub fn is_playing(&self) -> bool {
+        self.is_playing.load(Ordering::Relaxed)
+    }
+
+    pub async fn broadcast_remote_state(&self) {
+        if let Some(rs) = self.app.try_state::<Arc<crate::remotesync::RemoteSyncController>>() {
+            if rs.has_connected_clients() {
+                let snapshot = self.playback_snapshot().await;
+                let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+                rs.broadcast_state(st);
+            }
+        }
+    }
+
+    pub fn broadcast_remote_action(&self, action: crate::remotesync::RemotePlaybackAction) {
+        if let Some(rs) = self.app.try_state::<Arc<crate::remotesync::RemoteSyncController>>() {
+            rs.broadcast_action(action);
+        }
+    }
+
     /// Ask YouTube what the current track's rating actually is, and tell every window if it
     /// differs from the snapshot they were just handed. Issue #93.
     ///
@@ -3732,11 +3752,21 @@ impl AppState {
         }
         self.queue.lock().await.crossfade_target = None;
         self.player.seek(position).map_err(|e| e.to_string())?;
+        let _ = self.app.emit("position", serde_json::json!({ "position": position }));
         if self.lt.is_host().await {
             self.lt
                 .broadcast_playback(Playback::at(PlaybackKind::Seek, (position * 1000.0) as i64))
                 .await;
         }
+        self.broadcast_remote_action(crate::remotesync::RemotePlaybackAction {
+            kind: "seek".to_string(),
+            playing: self.is_playing(),
+            position_ms: (position * 1000.0) as i64,
+            track: None,
+            queue: None,
+            volume: 0.0,
+        });
+        self.broadcast_remote_state().await;
         Ok(())
     }
 
@@ -3790,6 +3820,7 @@ impl AppState {
         // actually near.
         self.extend_queue_radio(gen).await;
         self.lt_broadcast_queue().await;
+        self.broadcast_remote_state().await;
     }
 
     /// Set the repeat mode. Repeat-one is enforced by mpv's `loop-file` (seamless, no end-file
@@ -3828,6 +3859,7 @@ impl AppState {
         self.persist_queue().await;
         // Repeat-all newly on while playing the last track: the wrap target needs priming.
         self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
+        self.broadcast_remote_state().await;
     }
 
     /// "Play next" from a ⋯ menu: the tracks land at the "up next" boundary — right after the

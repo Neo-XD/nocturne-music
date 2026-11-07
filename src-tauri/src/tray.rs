@@ -51,9 +51,33 @@ fn handle_menu(app: &AppHandle, id: &str) {
             let id = other.to_string();
             tauri::async_runtime::spawn(async move {
                 match id.as_str() {
-                    "play_pause" => state.resume_or_toggle().await,
-                    "next" => state.next_in_queue().await,
-                    "prev" => state.prev_in_queue().await,
+                    "play_pause" => {
+                        if state.spotify_connect.is_active() {
+                            let is_playing = state
+                                .spotify_connect
+                                .get_current_state()
+                                .map(|s| s.is_playing)
+                                .unwrap_or(false);
+                            let _ =
+                                crate::commands::spotify_play_pause_impl(&state, !is_playing).await;
+                        } else {
+                            state.resume_or_toggle().await;
+                        }
+                    }
+                    "next" => {
+                        if state.spotify_connect.is_active() {
+                            let _ = crate::commands::spotify_next_track_impl(&state).await;
+                        } else {
+                            state.next_in_queue().await;
+                        }
+                    }
+                    "prev" => {
+                        if state.spotify_connect.is_active() {
+                            let _ = crate::commands::spotify_previous_track_impl(&state).await;
+                        } else {
+                            state.prev_in_queue().await;
+                        }
+                    }
                     _ => {}
                 }
             });

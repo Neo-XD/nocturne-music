@@ -496,10 +496,26 @@ async fn run_connect_session(
                     let _ = app_clone.emit("duration", serde_json::json!({ "duration": dur_sec }));
                     let _ = app_clone.emit("position", serde_json::json!({ "position": pos_sec }));
 
+                    if let Some(state) =
+                        app_clone.try_state::<std::sync::Arc<crate::state::AppState>>()
+                    {
+                        let _ = state.player.pause();
+                        state.media_set_playing(true);
+                    }
+                    crate::tray::set_playing(&app_clone, true);
+
                     if let Some(rs) = app_clone
                         .try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
                     {
                         if rs.is_running() {
+                            rs.broadcast_action(listen_protocol::handshake::RemotePlaybackAction {
+                                kind: "play".into(),
+                                position_ms: position_ms as i64,
+                                playing: true,
+                                track: None,
+                                queue: None,
+                                volume: 0.0,
+                            });
                             let st = listen_protocol::RoomState {
                                 room_code: "DIRECT".into(),
                                 host_id: "desktop".into(),
@@ -542,6 +558,26 @@ async fn run_connect_session(
                     }
                     let _ = app_clone.emit("spotify-connect-state", ev);
                     let _ = app_clone.emit("playback-state", "paused");
+                    if let Some(state) =
+                        app_clone.try_state::<std::sync::Arc<crate::state::AppState>>()
+                    {
+                        state.media_set_playing(false);
+                    }
+                    crate::tray::set_playing(&app_clone, false);
+                    if let Some(rs) = app_clone
+                        .try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
+                    {
+                        if rs.is_running() {
+                            rs.broadcast_action(listen_protocol::handshake::RemotePlaybackAction {
+                                kind: "pause".into(),
+                                position_ms: position_ms as i64,
+                                playing: false,
+                                track: None,
+                                queue: None,
+                                volume: 0.0,
+                            });
+                        }
+                    }
                 }
                 PlayerEvent::Stopped { .. } => {
                     let ev = SpotifyConnectStateEvent {
@@ -558,6 +594,27 @@ async fn run_connect_session(
                         *lk = None;
                     }
                     let _ = app_clone.emit("spotify-connect-state", ev);
+                    let _ = app_clone.emit("playback-state", "paused");
+                    if let Some(state) =
+                        app_clone.try_state::<std::sync::Arc<crate::state::AppState>>()
+                    {
+                        state.media_set_playing(false);
+                    }
+                    crate::tray::set_playing(&app_clone, false);
+                    if let Some(rs) = app_clone
+                        .try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
+                    {
+                        if rs.is_running() {
+                            rs.broadcast_action(listen_protocol::handshake::RemotePlaybackAction {
+                                kind: "pause".into(),
+                                position_ms: 0,
+                                playing: false,
+                                track: None,
+                                queue: None,
+                                volume: 0.0,
+                            });
+                        }
+                    }
                     let _ = app_clone.emit("playback-state", "paused");
                 }
                 _ => {}

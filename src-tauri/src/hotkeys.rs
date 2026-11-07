@@ -181,13 +181,30 @@ pub fn execute_action(app: &AppHandle, action: HotkeyAction) {
         let state = state.inner().clone();
         match action {
             HotkeyAction::PlayPause => {
-                state.resume_or_toggle().await;
+                if state.spotify_connect.is_active() {
+                    let is_playing = state
+                        .spotify_connect
+                        .get_current_state()
+                        .map(|s| s.is_playing)
+                        .unwrap_or(false);
+                    let _ = crate::commands::spotify_play_pause_impl(&state, !is_playing).await;
+                } else {
+                    state.resume_or_toggle().await;
+                }
             }
             HotkeyAction::NextTrack => {
-                state.next_in_queue().await;
+                if state.spotify_connect.is_active() {
+                    let _ = crate::commands::spotify_next_track_impl(&state).await;
+                } else {
+                    state.next_in_queue().await;
+                }
             }
             HotkeyAction::PrevTrack => {
-                state.prev_in_queue().await;
+                if state.spotify_connect.is_active() {
+                    let _ = crate::commands::spotify_previous_track_impl(&state).await;
+                } else {
+                    state.prev_in_queue().await;
+                }
             }
             HotkeyAction::VolumeUp => change_volume(&state, &app, |v| v + 5),
             HotkeyAction::VolumeDown => change_volume(&state, &app, |v| v - 5),
@@ -200,12 +217,34 @@ pub fn execute_action(app: &AppHandle, action: HotkeyAction) {
                 }
             }),
             HotkeyAction::SeekForward => {
-                let pos = state.current_position();
-                let _ = state.user_seek((pos + 10.0).max(0.0)).await;
+                if state.spotify_connect.is_active() {
+                    let cur_pos = state
+                        .spotify_connect
+                        .get_current_state()
+                        .map(|s| s.position_ms as f64 / 1000.0)
+                        .unwrap_or(0.0);
+                    let target = (cur_pos + 10.0).max(0.0);
+                    let _ =
+                        crate::commands::spotify_seek_impl(&state, (target * 1000.0) as u64).await;
+                } else {
+                    let pos = state.current_position();
+                    let _ = state.user_seek((pos + 10.0).max(0.0)).await;
+                }
             }
             HotkeyAction::SeekBackward => {
-                let pos = state.current_position();
-                let _ = state.user_seek((pos - 10.0).max(0.0)).await;
+                if state.spotify_connect.is_active() {
+                    let cur_pos = state
+                        .spotify_connect
+                        .get_current_state()
+                        .map(|s| s.position_ms as f64 / 1000.0)
+                        .unwrap_or(0.0);
+                    let target = (cur_pos - 10.0).max(0.0);
+                    let _ =
+                        crate::commands::spotify_seek_impl(&state, (target * 1000.0) as u64).await;
+                } else {
+                    let pos = state.current_position();
+                    let _ = state.user_seek((pos - 10.0).max(0.0)).await;
+                }
             }
             HotkeyAction::ToggleShuffle => {
                 state.toggle_shuffle().await;
@@ -233,6 +272,24 @@ fn change_volume(state: &AppState, app: &AppHandle, f: impl FnOnce(i64) -> i64) 
         }
         state.db.set_setting("volume", &volume.to_string());
         let _ = app.emit("volume", volume);
+        if state.spotify_connect.is_active() {
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(st) = app_clone.try_state::<Arc<AppState>>() {
+                    let _ = crate::commands::spotify_set_volume_impl(&st, volume as u8).await;
+                }
+            });
+        }
+        if let Some(rs) = app.try_state::<Arc<crate::remotesync::RemoteSyncController>>() {
+            rs.broadcast_action(crate::remotesync::RemotePlaybackAction {
+                kind: "set_volume".to_string(),
+                position_ms: 0,
+                track: None,
+                queue: None,
+                playing: state.is_playing(),
+                volume: volume as f64 / 100.0,
+            });
+        }
     }
 }
 

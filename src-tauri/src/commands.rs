@@ -10,7 +10,7 @@ use innertube::{
     AlbumPage, ArtistPage, BrowseItem, CommentItem, CommentRepliesResult, CommentsPage, HomePage,
     PlaylistContinuation, PlaylistPage, PlaylistSort, Rating, SearchResults, SongItem,
 };
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::state::{AppState, ON_REPEAT_ID, ON_REPEAT_LIMIT, ON_REPEAT_WINDOW_SECS};
 
@@ -53,6 +53,9 @@ pub async fn search_cards(
 #[tauri::command]
 pub async fn play(state: St<'_>, item: SongItem) -> Result<(), String> {
     let state = state.inner().clone();
+    if state.spotify_connect.is_active() {
+        let _ = spotify_play_pause_impl(&state, false).await;
+    }
     state.play_song(item).await;
     Ok(())
 }
@@ -60,6 +63,9 @@ pub async fn play(state: St<'_>, item: SongItem) -> Result<(), String> {
 #[tauri::command]
 pub async fn play_index(state: St<'_>, index: usize) -> Result<(), String> {
     let state = state.inner().clone();
+    if state.spotify_connect.is_active() {
+        let _ = spotify_play_pause_impl(&state, false).await;
+    }
     state.play_index(index).await;
     Ok(())
 }
@@ -117,12 +123,18 @@ pub async fn clear_queued(state: St<'_>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn next_track(state: St<'_>) -> Result<(), String> {
+    if state.spotify_connect.is_active() {
+        return spotify_next_track_impl(&state).await;
+    }
     state.inner().clone().next_in_queue().await;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn prev_track(state: St<'_>) -> Result<(), String> {
+    if state.spotify_connect.is_active() {
+        return spotify_previous_track_impl(&state).await;
+    }
     state.inner().clone().prev_in_queue().await;
     Ok(())
 }
@@ -149,12 +161,20 @@ pub async fn set_repeat(state: St<'_>, mode: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn toggle_pause(state: St<'_>) -> Result<(), String> {
     let state = state.inner().clone();
+    if state.spotify_connect.is_active() {
+        let is_playing =
+            state.spotify_connect.get_current_state().map(|s| s.is_playing).unwrap_or(false);
+        return spotify_play_pause_impl(&state, !is_playing).await;
+    }
     state.resume_or_toggle().await;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn seek(state: St<'_>, position: f64) -> Result<(), String> {
+    if state.spotify_connect.is_active() {
+        return spotify_seek_impl(&state, (position * 1000.0) as u64).await;
+    }
     // Routed through AppState so a Listen Together host broadcasts the seek and a guest is blocked.
     state.user_seek(position).await
 }
@@ -168,6 +188,20 @@ pub async fn set_volume(state: St<'_>, volume: i64) -> Result<(), String> {
     // There is one volume and there can be two windows (the mini player). Without this the one
     // that didn't move the slider keeps showing the old level and lies about what you're hearing.
     let _ = state.app.emit("volume", volume);
+    if state.spotify_connect.is_active() {
+        let _ = spotify_set_volume_impl(&state, volume.clamp(0, 100) as u8).await;
+    }
+    if let Some(rs) = state.app.try_state::<Arc<crate::remotesync::RemoteSyncController>>() {
+        rs.broadcast_action(crate::remotesync::RemotePlaybackAction {
+            kind: "set_volume".to_string(),
+            position_ms: 0,
+            track: None,
+            queue: None,
+            playing: state.is_playing(),
+            volume: volume as f64 / 100.0,
+        });
+        state.broadcast_remote_state().await;
+    }
     Ok(())
 }
 
@@ -983,6 +1017,9 @@ pub async fn play_playlist(
     continuation: Option<String>,
 ) -> Result<(), String> {
     let state = state.inner().clone();
+    if state.spotify_connect.is_active() {
+        let _ = spotify_play_pause_impl(&state, false).await;
+    }
     state
         .play_tracks(items, start, source_id, source_name, shuffle.unwrap_or(false), continuation)
         .await;
@@ -4613,7 +4650,11 @@ pub async fn spotify_transfer_playback(
 
 #[tauri::command]
 pub async fn spotify_play_pause(state: St<'_>, play: bool) -> Result<(), String> {
-    let token = get_spotify_token(&state).await?;
+    spotify_play_pause_impl(&state, play).await
+}
+
+pub async fn spotify_play_pause_impl(state: &AppState, play: bool) -> Result<(), String> {
+    let token = get_spotify_token(state).await?;
     let client = crate::http::client();
     let endpoint = if play { "play" } else { "pause" };
     let url = format!("https://api.spotify.com/v1/me/player/{endpoint}");
@@ -4626,7 +4667,7 @@ pub async fn spotify_play_pause(state: St<'_>, play: bool) -> Result<(), String>
         .map_err(|e| format!("Spotify play/pause error: {e}"))?;
 
     if res.status() == reqwest::StatusCode::UNAUTHORIZED {
-        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+        if let Ok(new_token) = refresh_spotify_dev_token(state).await {
             res = client
                 .put(&url)
                 .header("Authorization", format!("Bearer {new_token}"))
@@ -4637,6 +4678,22 @@ pub async fn spotify_play_pause(state: St<'_>, play: bool) -> Result<(), String>
     }
 
     if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        state.media_set_playing(play);
+        crate::tray::set_playing(&state.app, play);
+        let _ = state.app.emit("playback-state", if play { "playing" } else { "paused" });
+        if let Some(rs) = state.app.try_state::<Arc<crate::remotesync::RemoteSyncController>>() {
+            rs.broadcast_action(crate::remotesync::RemotePlaybackAction {
+                kind: if play { "play".to_string() } else { "pause".to_string() },
+                playing: play,
+                position_ms: 0,
+                track: None,
+                queue: None,
+                volume: 0.0,
+            });
+            let snapshot = state.playback_snapshot().await;
+            let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+            rs.broadcast_state(st);
+        }
         Ok(())
     } else {
         Err(format!("Spotify control error: status {}", res.status()))
@@ -4645,7 +4702,11 @@ pub async fn spotify_play_pause(state: St<'_>, play: bool) -> Result<(), String>
 
 #[tauri::command]
 pub async fn spotify_next_track(state: St<'_>) -> Result<(), String> {
-    let token = get_spotify_token(&state).await?;
+    spotify_next_track_impl(&state).await
+}
+
+pub async fn spotify_next_track_impl(state: &AppState) -> Result<(), String> {
+    let token = get_spotify_token(state).await?;
     let client = crate::http::client();
     let url = "https://api.spotify.com/v1/me/player/next";
 
@@ -4657,7 +4718,7 @@ pub async fn spotify_next_track(state: St<'_>) -> Result<(), String> {
         .map_err(|e| format!("Spotify next track error: {e}"))?;
 
     if res.status() == reqwest::StatusCode::UNAUTHORIZED {
-        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+        if let Ok(new_token) = refresh_spotify_dev_token(state).await {
             res = client
                 .post(url)
                 .header("Authorization", format!("Bearer {new_token}"))
@@ -4668,6 +4729,16 @@ pub async fn spotify_next_track(state: St<'_>) -> Result<(), String> {
     }
 
     if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        if let Some(rs) = state.app.try_state::<Arc<crate::remotesync::RemoteSyncController>>() {
+            rs.broadcast_action(crate::remotesync::RemotePlaybackAction {
+                kind: "next".to_string(),
+                playing: true,
+                position_ms: 0,
+                track: None,
+                queue: None,
+                volume: 0.0,
+            });
+        }
         Ok(())
     } else {
         Err(format!("Spotify next error: status {}", res.status()))
@@ -4676,7 +4747,11 @@ pub async fn spotify_next_track(state: St<'_>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn spotify_previous_track(state: St<'_>) -> Result<(), String> {
-    let token = get_spotify_token(&state).await?;
+    spotify_previous_track_impl(&state).await
+}
+
+pub async fn spotify_previous_track_impl(state: &AppState) -> Result<(), String> {
+    let token = get_spotify_token(state).await?;
     let client = crate::http::client();
     let url = "https://api.spotify.com/v1/me/player/previous";
 
@@ -4688,7 +4763,7 @@ pub async fn spotify_previous_track(state: St<'_>) -> Result<(), String> {
         .map_err(|e| format!("Spotify previous track error: {e}"))?;
 
     if res.status() == reqwest::StatusCode::UNAUTHORIZED {
-        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+        if let Ok(new_token) = refresh_spotify_dev_token(state).await {
             res = client
                 .post(url)
                 .header("Authorization", format!("Bearer {new_token}"))
@@ -4699,6 +4774,16 @@ pub async fn spotify_previous_track(state: St<'_>) -> Result<(), String> {
     }
 
     if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        if let Some(rs) = state.app.try_state::<Arc<crate::remotesync::RemoteSyncController>>() {
+            rs.broadcast_action(crate::remotesync::RemotePlaybackAction {
+                kind: "previous".to_string(),
+                playing: true,
+                position_ms: 0,
+                track: None,
+                queue: None,
+                volume: 0.0,
+            });
+        }
         Ok(())
     } else {
         Err(format!("Spotify previous error: status {}", res.status()))
@@ -4707,7 +4792,11 @@ pub async fn spotify_previous_track(state: St<'_>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn spotify_seek(state: St<'_>, position_ms: u64) -> Result<(), String> {
-    let token = get_spotify_token(&state).await?;
+    spotify_seek_impl(&state, position_ms).await
+}
+
+pub async fn spotify_seek_impl(state: &AppState, position_ms: u64) -> Result<(), String> {
+    let token = get_spotify_token(state).await?;
     let client = crate::http::client();
     let url = format!("https://api.spotify.com/v1/me/player/seek?position_ms={position_ms}");
 
@@ -4719,7 +4808,7 @@ pub async fn spotify_seek(state: St<'_>, position_ms: u64) -> Result<(), String>
         .map_err(|e| format!("Spotify seek error: {e}"))?;
 
     if res.status() == reqwest::StatusCode::UNAUTHORIZED {
-        if let Ok(new_token) = refresh_spotify_dev_token(&state).await {
+        if let Ok(new_token) = refresh_spotify_dev_token(state).await {
             res = client
                 .put(&url)
                 .header("Authorization", format!("Bearer {new_token}"))
@@ -4730,10 +4819,53 @@ pub async fn spotify_seek(state: St<'_>, position_ms: u64) -> Result<(), String>
     }
 
     if res.status().is_success() || res.status() == reqwest::StatusCode::NO_CONTENT {
+        let _ = state
+            .app
+            .emit("position", serde_json::json!({ "position": position_ms as f64 / 1000.0 }));
+        if let Some(rs) = state.app.try_state::<Arc<crate::remotesync::RemoteSyncController>>() {
+            rs.broadcast_action(crate::remotesync::RemotePlaybackAction {
+                kind: "seek".to_string(),
+                playing: true,
+                position_ms: position_ms as i64,
+                track: None,
+                queue: None,
+                volume: 0.0,
+            });
+            let snapshot = state.playback_snapshot().await;
+            let st = crate::remotesync::room_state_from_snapshot(&snapshot);
+            rs.broadcast_state(st);
+        }
         Ok(())
     } else {
         Err(format!("Spotify seek error: status {}", res.status()))
     }
+}
+
+pub async fn spotify_set_volume_impl(state: &AppState, volume_percent: u8) -> Result<(), String> {
+    let token = match get_spotify_token(state).await {
+        Ok(t) => t,
+        Err(_) => return Ok(()),
+    };
+    let client = crate::http::client();
+    let url =
+        format!("https://api.spotify.com/v1/me/player/volume?volume_percent={volume_percent}");
+
+    let res = match client.put(&url).header("Authorization", format!("Bearer {token}")).send().await
+    {
+        Ok(r) => r,
+        Err(_) => return Ok(()),
+    };
+
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(new_token) = refresh_spotify_dev_token(state).await {
+            let _ = client
+                .put(&url)
+                .header("Authorization", format!("Bearer {new_token}"))
+                .send()
+                .await;
+        }
+    }
+    Ok(())
 }
 
 // --- Song downloader ------------------------------------------------------------------------

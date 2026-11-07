@@ -450,6 +450,10 @@ export async function syncSpotifyPlayback(force = false) {
 			return;
 		}
 
+		if (playback.now?.streamClient !== 'Spotify' && !pb.is_playing && !force) {
+			return;
+		}
+
 		const spId = pb.item.id ? `SP:${pb.item.id}` : `SP:${pb.item.name}`;
 		const isSameTrack = playback.now?.videoId === spId;
 		const durSec = pb.item.duration_ms ? pb.item.duration_ms / 1000 : 0;
@@ -714,6 +718,9 @@ export const openPlayer = () => {
 /** Play one track (a search row, a song card, a shelf), and show it. */
 export function playSong(song: SongItem) {
 	openPlayer();
+	if (playback.now?.streamClient === 'Spotify') {
+		void api.spotifyPlayPause(false);
+	}
 	return api.play(song);
 }
 
@@ -1692,6 +1699,9 @@ export function playFrom(
 	pl.touchPick(personal, source.id);
 	savePersonal();
 	openPlayer();
+	if (playback.now?.streamClient === 'Spotify') {
+		void api.spotifyPlayPause(false);
+	}
 	return api.playPlaylist(items, start, sourceId, source.title, shuffle, continuation);
 }
 
@@ -2066,6 +2076,9 @@ export function initApp(mini = false): () => void {
 		api.onLtNotice((msg) => toast(msg)),
 		api.onSpotifyConnectState((event) => {
 			if (event.active && event.title) {
+				if (playback.now?.streamClient !== 'Spotify' && !event.is_playing) {
+					return;
+				}
 				const spId = `SP:${event.title}:${event.artist || ''}`;
 				const isSame = playback.now?.title === event.title;
 				const durSec = event.duration_ms / 1000;

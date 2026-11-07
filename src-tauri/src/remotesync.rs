@@ -9,9 +9,8 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
-use listen_protocol::handshake::{
-    run_handshake, HandshakeOutcome, RemotePlaybackAction, SyncWireMessage,
-};
+pub use listen_protocol::handshake::RemotePlaybackAction;
+use listen_protocol::handshake::{run_handshake, HandshakeOutcome, SyncWireMessage};
 use listen_protocol::pairing::{is_valid_pin, PairingGate, Refusal};
 use listen_protocol::{RoomState, Track};
 use serde::{Deserialize, Serialize};
@@ -257,6 +256,16 @@ impl RemoteSyncController {
             return;
         }
         let msg = SyncWireMessage::SyncState { state };
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = self.broadcast_tx.send(json);
+        }
+    }
+
+    pub fn broadcast_action(&self, action: RemotePlaybackAction) {
+        if !self.has_connected_clients() {
+            return;
+        }
+        let msg = SyncWireMessage::PlaybackAction { action };
         if let Ok(json) = serde_json::to_string(&msg) {
             let _ = self.broadcast_tx.send(json);
         }
@@ -553,6 +562,47 @@ async fn handle_connection(
 }
 
 async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction) {
+    if state.spotify_connect.is_active() {
+        match action.kind.as_str() {
+            "play" => {
+                let _ = crate::commands::spotify_play_pause_impl(state, true).await;
+            }
+            "pause" | "transfer_to_phone" => {
+                let _ = crate::commands::spotify_play_pause_impl(state, false).await;
+            }
+            "toggle" => {
+                let is_playing = state
+                    .spotify_connect
+                    .get_current_state()
+                    .map(|s| s.is_playing)
+                    .unwrap_or(false);
+                let _ = crate::commands::spotify_play_pause_impl(state, !is_playing).await;
+            }
+            "seek" => {
+                let _ = crate::commands::spotify_seek_impl(state, action.position_ms as u64).await;
+            }
+            "next_track" | "next" => {
+                let _ = crate::commands::spotify_next_track_impl(state).await;
+            }
+            "previous_track" | "prev" | "previous" => {
+                let _ = crate::commands::spotify_previous_track_impl(state).await;
+            }
+            "set_volume" => {
+                let vol = (action.volume * 100.0).clamp(0.0, 100.0) as i64;
+                let _ = state.player.set_volume(vol);
+                let _ = state.app.emit("volume", vol);
+                let _ = crate::commands::spotify_set_volume_impl(state, vol as u8).await;
+            }
+            _ => {}
+        }
+        if !matches!(
+            action.kind.as_str(),
+            "change_track" | "transfer_to_desktop" | "sync_queue_from_mobile"
+        ) {
+            return;
+        }
+    }
+
     match action.kind.as_str() {
         "play" => {
             let _ = state.player.play();
@@ -581,6 +631,9 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
             state.prev_in_queue().await;
         }
         "change_track" | "transfer_to_desktop" | "sync_queue_from_mobile" => {
+            if state.spotify_connect.is_active() {
+                let _ = crate::commands::spotify_play_pause_impl(state, false).await;
+            }
             if let Some(queue) = action.queue.filter(|q| !q.is_empty()) {
                 let items: Vec<innertube::SongItem> = queue
                     .into_iter()
