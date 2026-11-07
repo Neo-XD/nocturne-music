@@ -4,6 +4,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use base64::Engine;
+
 use innertube::{
     AlbumPage, ArtistPage, BrowseItem, CommentItem, CommentRepliesResult, CommentsPage,
     HomePage, PlaylistContinuation, PlaylistPage, PlaylistSort,
@@ -2159,9 +2161,28 @@ pub async fn release_notes() -> Result<Vec<ReleaseNote>, String> {
     }
 
     let mut notes = vec![
-        v100_beta2_note, v100_beta1_note, v090_note, v087_note, v086_note, v085_note, v084_note, v083_note, v082_note,
-        v081_note, v080_note, v072_note, v071_note, v07d_note, v067_note, v066_note, v065_note,
-        v064_note, v063_note, v062_note, v061_note, v06_note,
+        v100_beta2_note,
+        v100_beta1_note,
+        v090_note,
+        v087_note,
+        v086_note,
+        v085_note,
+        v084_note,
+        v083_note,
+        v082_note,
+        v081_note,
+        v080_note,
+        v072_note,
+        v071_note,
+        v07d_note,
+        v067_note,
+        v066_note,
+        v065_note,
+        v064_note,
+        v063_note,
+        v062_note,
+        v061_note,
+        v06_note,
     ];
 
     let known_versions: std::collections::HashSet<String> = notes
@@ -4707,7 +4728,6 @@ pub async fn fetch_image_data_url(url: String) -> Result<String, String> {
         .unwrap_or("image/jpeg")
         .to_string();
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
-    use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{};base64,{}", content_type, b64))
 }

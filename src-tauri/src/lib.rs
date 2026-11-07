@@ -172,10 +172,17 @@ pub fn run() {
         if std::env::var_os("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_none() {
             std::env::set_var(
                 "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-                "--disable-features=CalculateNativeWinOcclusion,ResourceSuspension,TranslateUI \
-                 --enable-features=ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes,CanvasOOMHandling \
-                 --enable-gpu-rasterization --disable-backgrounding-occluded-windows \
-                 --disable-background-networking --disable-component-update",
+                concat!(
+                    "--disable-features=CalculateNativeWinOcclusion,",
+                    "ResourceSuspension,TranslateUI ",
+                    "--enable-features=",
+                    "ThrottleDisplayNoneAndVisibilityHiddenCrossOriginIframes,",
+                    "CanvasOOMHandling ",
+                    "--enable-gpu-rasterization ",
+                    "--disable-backgrounding-occluded-windows ",
+                    "--disable-background-networking ",
+                    "--disable-component-update",
+                ),
             );
         }
     }

@@ -1236,7 +1236,8 @@ async fn resolve_candidate_from_addon(
         );
 
         let search_start = std::time::Instant::now();
-        if let Ok(res) = browser_request(client, &search_url, ADDON_TIMEOUT_MS).send().await {
+        let req = browser_request(client, &search_url, ADDON_TIMEOUT_MS);
+        if let Ok(res) = req.send().await {
             let elapsed = search_start.elapsed().as_millis();
             if res.status().is_success() {
                 if let Ok(val) = res.json::<serde_json::Value>().await {
@@ -1383,11 +1384,14 @@ async fn resolve_candidate_from_addon(
                 let stream_start = std::time::Instant::now();
                 let mut stream_res = None;
 
-                if let Ok(res) = browser_request(client, &stream_ep, ADDON_TIMEOUT_MS).send().await {
+                let req = browser_request(client, &stream_ep, ADDON_TIMEOUT_MS);
+                if let Ok(res) = req.send().await {
                     let elapsed = stream_start.elapsed().as_millis();
                     if res.status().is_success() {
                         if let Ok(val) = res.json::<serde_json::Value>().await {
-                            if let Some(resolved) = parse_stream_response(val, Some(query_title)) {
+                            if let Some(resolved) =
+                                parse_stream_response(val, Some(query_title))
+                            {
                                 eprintln!(
                                     "[addon] [{}] Stream endpoint OK in {}ms",
                                     addon.name, elapsed
@@ -1450,7 +1454,7 @@ async fn resolve_candidate_from_addon(
             addon_stream.codec.as_deref().unwrap_or_default(),
             candidate.audio_quality.as_deref().unwrap_or_default(),
             candidate.format.as_deref().unwrap_or_default(),
-            addon_stream.audio_mode.as_deref().unwrap_or_default()
+            addon_stream.audio_mode.as_deref().unwrap_or_default(),
         );
 
         let is_atmos = addon_stream.is_dolby_atmos() || candidate.is_dolby_atmos();
@@ -1587,7 +1591,7 @@ async fn resolve_candidate_from_addon(
                                 addon_stream.audio_quality.as_deref().unwrap_or_default(),
                                 addon_stream.format.as_deref().unwrap_or_default(),
                                 addon_stream.codec.as_deref().unwrap_or_default(),
-                                addon_stream.audio_mode.as_deref().unwrap_or_default()
+                                addon_stream.audio_mode.as_deref().unwrap_or_default(),
                             );
                             let codec = addon_stream
                                 .codec
