@@ -55,10 +55,10 @@
     },
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libmpv2", "libc6 (>= 2.39)"]
+        "depends": ["libwebkit2gtk-4.1-0", "libmpv2", "libc6 (>= 2.39)", "libasound2t64 | libasound2"]
       },
       "rpm": {
-        "depends": ["libappindicator-gtk3", "mpv-libs"]
+        "depends": ["libappindicator-gtk3", "mpv-libs", "alsa-lib"]
       }
     }
   },
