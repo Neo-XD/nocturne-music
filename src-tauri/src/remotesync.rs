@@ -655,21 +655,43 @@ async fn apply_remote_action(state: &Arc<AppState>, action: RemotePlaybackAction
 
 pub fn room_state_from_snapshot(v: &Value) -> RoomState {
     let now_obj = v.get("now").filter(|n| !n.is_null());
-    let (video_id, title, artists, thumbnail, duration) = if let Some(n) = now_obj {
+    let (video_id, title, artists, thumbnail, duration_ms) = if let Some(n) = now_obj {
+        let dur_ms = n
+            .get("duration_ms")
+            .and_then(Value::as_i64)
+            .or_else(|| {
+                n.get("duration")
+                    .and_then(Value::as_str)
+                    .map(|s| crate::state::parse_duration_ms(Some(s)))
+            })
+            .or_else(|| n.get("duration").and_then(Value::as_f64).map(|d| (d * 1000.0) as i64))
+            .or_else(|| v.get("duration_ms").and_then(Value::as_i64))
+            .or_else(|| v.get("duration").and_then(Value::as_f64).map(|d| (d * 1000.0) as i64))
+            .unwrap_or(0);
         (
             n.get("videoId").and_then(Value::as_str).unwrap_or_default().to_string(),
             n.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
             n.get("artists").and_then(Value::as_str).unwrap_or_default().to_string(),
             n.get("thumbnail").and_then(Value::as_str).map(str::to_string),
-            n.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+            dur_ms,
         )
     } else {
+        let dur_ms = v
+            .get("duration_ms")
+            .and_then(Value::as_i64)
+            .or_else(|| {
+                v.get("duration")
+                    .and_then(Value::as_str)
+                    .map(|s| crate::state::parse_duration_ms(Some(s)))
+            })
+            .or_else(|| v.get("duration").and_then(Value::as_f64).map(|d| (d * 1000.0) as i64))
+            .unwrap_or(0);
         (
             v.get("videoId").and_then(Value::as_str).unwrap_or_default().to_string(),
             v.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
             v.get("artists").and_then(Value::as_str).unwrap_or_default().to_string(),
             v.get("thumbnail").and_then(Value::as_str).map(str::to_string),
-            v.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+            dur_ms,
         )
     };
 
@@ -684,7 +706,7 @@ pub fn room_state_from_snapshot(v: &Value) -> RoomState {
             title,
             artist: artists,
             thumbnail,
-            duration_ms: (duration * 1000.0) as i64,
+            duration_ms,
             queued_by: None,
         })
     } else {

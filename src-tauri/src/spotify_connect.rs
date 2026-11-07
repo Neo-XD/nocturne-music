@@ -16,7 +16,7 @@ use librespot::playback::config::{AudioFormat, PlayerConfig};
 use librespot::playback::mixer::softmixer::SoftMixer;
 use librespot::playback::mixer::{Mixer, MixerConfig};
 use librespot::playback::player::{Player, PlayerEvent};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 const DEFAULT_SPOTIFY_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
@@ -433,6 +433,7 @@ async fn run_connect_session(
                     let mut artist = None;
                     let mut album = None;
                     let mut duration_ms = 0u64;
+                    let mut cover_url = None;
 
                     if let Ok(meta) = SpTrack::get(&session_clone, &track_id).await {
                         title = Some(meta.name);
@@ -445,15 +446,21 @@ async fn run_connect_session(
                                 .collect::<Vec<_>>()
                                 .join(", "),
                         );
+                        cover_url = meta
+                            .album
+                            .covers
+                            .first()
+                            .and_then(|img| img.id.to_base16().ok())
+                            .map(|hex| format!("https://i.scdn.co/image/{hex}"));
                     }
 
                     let ev = SpotifyConnectStateEvent {
                         active: true,
                         is_playing: true,
-                        title,
-                        artist,
-                        album,
-                        cover_url: None,
+                        title: title.clone(),
+                        artist: artist.clone(),
+                        album: album.clone(),
+                        cover_url: cover_url.clone(),
                         duration_ms,
                         position_ms: position_ms as u64,
                     };
@@ -464,6 +471,60 @@ async fn run_connect_session(
                         });
                     }
                     let _ = app_clone.emit("spotify-connect-state", ev);
+
+                    let sp_id = format!("SP:{}", track_id.to_base62().unwrap_or_default());
+                    let dur_sec = (duration_ms as f64) / 1000.0;
+                    let pos_sec = (position_ms as f64) / 1000.0;
+
+                    let _ = app_clone.emit(
+                        "now-playing",
+                        serde_json::json!({
+                            "videoId": sp_id,
+                            "title": title,
+                            "artists": artist,
+                            "album": album,
+                            "thumbnail": cover_url,
+                            "duration": ((duration_ms / 1000) as i64).to_string(),
+                            "streamClient": "Spotify",
+                            "audioQuality": "Spotify Connect",
+                            "rating": "indifferent",
+                            "isVideo": false,
+                            "explicit": false,
+                        }),
+                    );
+                    let _ = app_clone.emit("playback-state", "playing");
+                    let _ = app_clone.emit("duration", serde_json::json!({ "duration": dur_sec }));
+                    let _ = app_clone.emit("position", serde_json::json!({ "position": pos_sec }));
+
+                    if let Some(rs) = app_clone
+                        .try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
+                    {
+                        if rs.is_running() {
+                            let st = listen_protocol::RoomState {
+                                room_code: "DIRECT".into(),
+                                host_id: "desktop".into(),
+                                users: vec![],
+                                current_track: Some(listen_protocol::Track {
+                                    id: sp_id,
+                                    title: title.unwrap_or_default(),
+                                    artist: artist.unwrap_or_default(),
+                                    thumbnail: cover_url,
+                                    duration_ms: duration_ms as i64,
+                                    queued_by: None,
+                                }),
+                                is_playing: true,
+                                position_ms: position_ms as i64,
+                                last_update_ms: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis()
+                                    as i64,
+                                volume: 1.0,
+                                queue: vec![],
+                            };
+                            rs.broadcast_state(st);
+                        }
+                    }
                 }
                 PlayerEvent::Paused { position_ms, .. } => {
                     let ev = SpotifyConnectStateEvent {
@@ -480,6 +541,7 @@ async fn run_connect_session(
                         *lk = Some(InternalConnectState { event: ev.clone(), anchor: None });
                     }
                     let _ = app_clone.emit("spotify-connect-state", ev);
+                    let _ = app_clone.emit("playback-state", "paused");
                 }
                 PlayerEvent::Stopped { .. } => {
                     let ev = SpotifyConnectStateEvent {
@@ -496,6 +558,7 @@ async fn run_connect_session(
                         *lk = None;
                     }
                     let _ = app_clone.emit("spotify-connect-state", ev);
+                    let _ = app_clone.emit("playback-state", "paused");
                 }
                 _ => {}
             }

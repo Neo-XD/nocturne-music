@@ -2800,17 +2800,45 @@ impl AppState {
         // ~1s throttle, so a restored seek position (and the play-state self-heal) lands at once.
         self.last_media_push.store(0, Ordering::Relaxed);
 
-        let snapshot = serde_json::json!({
-            "now": Self::now_playing_json(item, stream_client, audio_quality),
-            "paused": false,
-            "position": 0.0,
-            "duration": 0.0,
-            "volume": saved_volume(&self.db),
-        });
+        let dur_ms = parse_duration_ms(item.duration.as_deref());
+        let dur_secs = (dur_ms as f64) / 1000.0;
+        if dur_secs > 0.0 {
+            let _ = self.app.emit("duration", serde_json::json!({ "duration": dur_secs }));
+        }
+        let _ = self.app.emit("position", serde_json::json!({ "position": 0.0 }));
+
         if let Some(rs) =
             self.app.try_state::<std::sync::Arc<crate::remotesync::RemoteSyncController>>()
         {
             if rs.is_running() {
+                let q_items = self
+                    .queue
+                    .try_lock()
+                    .map(|q| {
+                        q.items
+                            .iter()
+                            .map(|t| {
+                                serde_json::json!({
+                                    "id": t.video_id,
+                                    "title": t.title,
+                                    "artist": t.artists,
+                                    "thumbnail": t.thumbnail,
+                                    "duration_ms": parse_duration_ms(t.duration.as_deref()),
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                let snapshot = serde_json::json!({
+                    "now": Self::now_playing_json(item, stream_client, audio_quality),
+                    "paused": false,
+                    "position": 0.0,
+                    "duration": dur_secs,
+                    "duration_ms": dur_ms,
+                    "volume": saved_volume(&self.db),
+                    "queue": q_items,
+                });
                 let st = crate::remotesync::room_state_from_snapshot(&snapshot);
                 rs.broadcast_state(st);
             }
@@ -4441,7 +4469,7 @@ fn shuffle_new_queue(items: &mut [SongItem], start: usize) -> usize {
 }
 
 /// Parse a `"m:ss"` / `"h:mm:ss"` duration string to ms (0 if absent/unparseable).
-fn parse_duration_ms(s: Option<&str>) -> i64 {
+pub(crate) fn parse_duration_ms(s: Option<&str>) -> i64 {
     let Some(s) = s else { return 0 };
     let parts: Vec<i64> = s.split(':').filter_map(|p| p.trim().parse().ok()).collect();
     let secs = match parts.as_slice() {
