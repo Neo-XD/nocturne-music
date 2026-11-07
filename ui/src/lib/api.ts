@@ -1170,6 +1170,48 @@ export const onSpotifyConnectState = (cb: (event: SpotifyConnectStateEvent) => v
 export const onSpotifyScrobbled = (cb: (event: SpotifyScrobbleRecord) => void) =>
 	listen<SpotifyScrobbleRecord>('spotify-scrobbled', (e) => cb(e.payload));
 
+export interface SpotifyDevice {
+	id: string | null;
+	is_active: boolean;
+	is_private_session: boolean;
+	is_restricted: boolean;
+	name: string;
+	device_type: string;
+	volume_percent: number | null;
+	supports_volume: boolean;
+}
+
+export interface SpotifyPlaybackTrack {
+	id: string | null;
+	name: string;
+	artists: string;
+	album_name: string | null;
+	album_cover_url: string | null;
+	duration_ms: number;
+}
+
+export interface SpotifyPlaybackState {
+	is_playing: boolean;
+	progress_ms: number | null;
+	device: SpotifyDevice | null;
+	item: SpotifyPlaybackTrack | null;
+	shuffle_state: boolean;
+	repeat_state: string;
+}
+
+export const spotifyGetDevices = () =>
+	invoke<SpotifyDevice[]>('spotify_get_devices');
+export const spotifyGetPlayback = () =>
+	invoke<SpotifyPlaybackState | null>('spotify_get_playback');
+export const spotifyTransferPlayback = (deviceId: string, play = true) =>
+	invoke<void>('spotify_transfer_playback', { deviceId, play });
+export const spotifyPlayPause = (play: boolean) =>
+	invoke<void>('spotify_play_pause', { play });
+export const spotifyNextTrack = () =>
+	invoke<void>('spotify_next_track');
+export const spotifyPreviousTrack = () =>
+	invoke<void>('spotify_previous_track');
+
 // --- PC Audio Music Recognition (Shazam / SongRec) ------------------------------------------
 export interface RecognizedSong {
 	found: boolean;
