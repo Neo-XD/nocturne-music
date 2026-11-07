@@ -1,7 +1,19 @@
 // App-wide keyboard shortcuts and custom keybindings system.
 import { browser } from '$app/environment';
 import * as api from './api';
-import { cycleRepeat, np, nudgeVolume, playback, toggleMute, ui, toast, refreshView } from './player.svelte';
+import {
+	cycleRepeat,
+	np,
+	nudgeVolume,
+	playback,
+	toggleMute,
+	ui,
+	toast,
+	refreshView,
+	handleTogglePause,
+	handleNextTrack,
+	handlePrevTrack
+} from './player.svelte';
 
 export const IS_MAC = browser && typeof navigator !== 'undefined' && navigator.platform.startsWith('Mac');
 
@@ -305,7 +317,7 @@ export function initShortcuts() {
 		// 3. Play / Pause (Space or ;)
 		if (matchesCombo(e, keybindings.playPause) || (!e.ctrlKey && !e.metaKey && e.key === ';')) {
 			if (typingNow || e.altKey || e.shiftKey) return;
-			api.togglePause();
+			handleTogglePause();
 			e.preventDefault();
 			return;
 		}
@@ -317,12 +329,12 @@ export function initShortcuts() {
 
 		// 4. Playback controls
 		if (matchesCombo(e, keybindings.nextTrack)) {
-			api.nextTrack();
+			handleNextTrack();
 			e.preventDefault();
 			return;
 		}
 		if (matchesCombo(e, keybindings.prevTrack)) {
-			api.prevTrack();
+			handlePrevTrack();
 			e.preventDefault();
 			return;
 		}

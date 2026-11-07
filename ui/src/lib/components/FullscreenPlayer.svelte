@@ -31,7 +31,11 @@
 		nudgeVolume,
 		dragVolume,
 		commitVolume,
-		toggleMute
+		toggleMute,
+		handleTogglePause,
+		handleSeek,
+		handleNextTrack,
+		handlePrevTrack
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import { getSongMotionArtwork } from '$lib/canvas';
@@ -182,9 +186,8 @@
 
 	function onSeekCommit(e: Event) {
 		const v = Number((e.target as HTMLInputElement).value);
-		playback.position = v;
 		seekDrag = null;
-		api.seek(v);
+		handleSeek(v);
 	}
 
 	function cycleRepeat() {
@@ -201,13 +204,13 @@
 			np.fullscreenOpen = false;
 		} else if (e.key === ' ' || e.code === 'Space') {
 			e.preventDefault();
-			api.togglePause();
+			handleTogglePause();
 		} else if (e.key === 'ArrowRight') {
 			e.preventDefault();
-			api.seek(Math.min(durationNum, playback.position + 5));
+			handleSeek(Math.min(durationNum, playback.position + 5));
 		} else if (e.key === 'ArrowLeft') {
 			e.preventDefault();
-			api.seek(Math.max(0, playback.position - 5));
+			handleSeek(Math.max(0, playback.position - 5));
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			nudgeVolume(5);
@@ -396,8 +399,8 @@
 					<div
 						role="button"
 						tabindex="0"
-						onclick={() => api.togglePause()}
-						onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && api.togglePause()}
+						onclick={() => handleTogglePause()}
+						onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleTogglePause()}
 						class="group/art relative w-full max-h-[44vh] max-w-[19rem] sm:max-w-[23rem] lg:max-w-[26rem] aspect-square overflow-hidden rounded-3xl ring-1 ring-white/10 shadow-2xl transition-transform duration-300 hover:scale-[1.01] cursor-pointer"
 						title={playback.paused ? 'Play' : 'Pause'}
 					>
@@ -510,9 +513,8 @@
 									barCount={72}
 									onSeek={(v) => (seekDrag = v)}
 									onCommit={(v) => {
-										playback.position = v;
 										seekDrag = null;
-										api.seek(v);
+										handleSeek(v);
 									}}
 								/>
 							{:else}
@@ -551,7 +553,7 @@
 							<Button
 								variant="ghost"
 								size="icon"
-								onclick={() => api.prevTrack()}
+								onclick={() => handlePrevTrack()}
 								class="text-foreground hover:text-primary cursor-pointer"
 								aria-label="Previous track"
 							>
@@ -559,7 +561,7 @@
 							</Button>
 							<button
 								type="button"
-								onclick={() => api.togglePause()}
+								onclick={() => handleTogglePause()}
 								class="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition hover:scale-105 active:scale-95 cursor-pointer"
 								aria-label={playback.paused ? 'Play' : 'Pause'}
 							>
@@ -568,7 +570,7 @@
 							<Button
 								variant="ghost"
 								size="icon"
-								onclick={() => api.nextTrack()}
+								onclick={() => handleNextTrack()}
 								class="text-foreground hover:text-primary cursor-pointer"
 								aria-label="Next track"
 							>
@@ -648,8 +650,8 @@
 				<div
 					role="button"
 					tabindex="0"
-					onclick={() => api.togglePause()}
-					onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && api.togglePause()}
+					onclick={() => handleTogglePause()}
+					onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleTogglePause()}
 					class="group/art relative w-full max-h-[50vh] sm:max-h-[56vh] max-w-[22rem] sm:max-w-[28rem] lg:max-w-[34rem] aspect-square overflow-hidden rounded-3xl ring-1 ring-white/10 shadow-2xl transition-transform duration-300 hover:scale-[1.01] cursor-pointer"
 					title={playback.paused ? 'Play' : 'Pause'}
 				>
@@ -715,9 +717,8 @@
 									barCount={72}
 									onSeek={(v) => (seekDrag = v)}
 									onCommit={(v) => {
-										playback.position = v;
 										seekDrag = null;
-										api.seek(v);
+										handleSeek(v);
 									}}
 								/>
 							{:else}
@@ -756,7 +757,7 @@
 							<Button
 								variant="ghost"
 								size="icon"
-								onclick={() => api.prevTrack()}
+								onclick={() => handlePrevTrack()}
 								class="text-foreground hover:text-primary cursor-pointer"
 								aria-label="Previous track"
 							>
@@ -764,7 +765,7 @@
 							</Button>
 							<button
 								type="button"
-								onclick={() => api.togglePause()}
+								onclick={() => handleTogglePause()}
 								class="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition hover:scale-105 active:scale-95 cursor-pointer"
 								aria-label={playback.paused ? 'Play' : 'Pause'}
 							>
@@ -773,7 +774,7 @@
 							<Button
 								variant="ghost"
 								size="icon"
-								onclick={() => api.nextTrack()}
+								onclick={() => handleNextTrack()}
 								class="text-foreground hover:text-primary cursor-pointer"
 								aria-label="Next track"
 							>

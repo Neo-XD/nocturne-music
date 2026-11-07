@@ -423,6 +423,134 @@ export async function loadSpotifyPlaylists() {
 	}
 }
 
+function formatDurationSecs(secs: number): string {
+	const t = Math.max(0, Math.floor(secs));
+	const h = Math.floor(t / 3600);
+	const m = Math.floor((t % 3600) / 60);
+	const s = t % 60;
+	const mm = h ? m.toString().padStart(2, '0') : `${m}`;
+	return `${h ? `${h}:` : ''}${mm}:${s.toString().padStart(2, '0')}`;
+}
+
+let spotifySyncTimer: any = null;
+let spotifyTickTimer: any = null;
+
+export async function syncSpotifyPlayback(force = false) {
+	if (!spotify.status.linked) {
+		const conn = await api.spotifyConnectStatus().catch(() => null);
+		if (!conn?.active && !conn?.enabled) return;
+	}
+
+	try {
+		const pb = await api.spotifyGetPlayback();
+		if (!pb || !pb.item) {
+			if (playback.now?.streamClient === 'Spotify') {
+				playback.paused = true;
+			}
+			return;
+		}
+
+		const spId = pb.item.id ? `SP:${pb.item.id}` : `SP:${pb.item.name}`;
+		const isSameTrack = playback.now?.videoId === spId;
+		const durSec = pb.item.duration_ms ? pb.item.duration_ms / 1000 : 0;
+		const posSec = (pb.progress_ms ?? 0) / 1000;
+
+		if (!isSameTrack || force || playback.now?.streamClient !== 'Spotify') {
+			playback.now = {
+				videoId: spId,
+				title: pb.item.name,
+				artists: pb.item.artists,
+				album: pb.item.album_name,
+				thumbnail: pb.item.album_cover_url || undefined,
+				duration: durSec ? formatDurationSecs(durSec) : undefined,
+				streamClient: 'Spotify',
+				audioQuality: 'Spotify Connect'
+			};
+			playback.duration = durSec;
+			playback.position = posSec;
+			playback.positionAt = performance.now();
+			playback.paused = !pb.is_playing;
+			playback.rating = 'indifferent';
+		} else {
+			playback.duration = durSec;
+			playback.paused = !pb.is_playing;
+
+			const elapsed = (performance.now() - playback.positionAt) / 1000;
+			const estimatedPos = playback.position + (playback.paused ? 0 : elapsed);
+			const drift = Math.abs(estimatedPos - posSec);
+
+			if (playback.paused || drift > 0.8) {
+				playback.position = posSec;
+				playback.positionAt = performance.now();
+			}
+		}
+	} catch {
+		// Ignore transient errors
+	}
+}
+
+export function startSpotifyPlaybackSync() {
+	if (spotifyTickTimer) return;
+	spotifyTickTimer = setInterval(() => {
+		if (playback.now?.streamClient === 'Spotify' && !playback.paused) {
+			const now = performance.now();
+			const dt = (now - playback.positionAt) / 1000;
+			if (dt >= 0.2) {
+				playback.position = Math.min(playback.duration, playback.position + dt);
+				playback.positionAt = now;
+			}
+		}
+	}, 250);
+
+	if (!spotifySyncTimer) {
+		spotifySyncTimer = setInterval(() => {
+			void syncSpotifyPlayback();
+		}, 1500);
+	}
+	void syncSpotifyPlayback();
+}
+
+export function handleTogglePause() {
+	if (playback.now?.streamClient === 'Spotify') {
+		const nextPaused = !playback.paused;
+		playback.paused = nextPaused;
+		playback.positionAt = performance.now();
+		void api.spotifyPlayPause(!nextPaused);
+		setTimeout(() => void syncSpotifyPlayback(true), 300);
+	} else {
+		api.togglePause();
+	}
+}
+
+export function handleSeek(positionSecs: number) {
+	playback.position = positionSecs;
+	playback.positionAt = performance.now();
+	if (playback.now?.streamClient === 'Spotify') {
+		void api.spotifySeek(Math.round(positionSecs * 1000));
+		setTimeout(() => void syncSpotifyPlayback(true), 350);
+	} else {
+		api.seek(positionSecs);
+	}
+}
+
+export function handleNextTrack() {
+	if (playback.now?.streamClient === 'Spotify') {
+		void api.spotifyNextTrack();
+		setTimeout(() => void syncSpotifyPlayback(true), 400);
+	} else {
+		api.nextTrack();
+	}
+}
+
+export function handlePrevTrack() {
+	if (playback.now?.streamClient === 'Spotify') {
+		void api.spotifyPreviousTrack();
+		setTimeout(() => void syncSpotifyPlayback(true), 400);
+	} else {
+		api.prevTrack();
+	}
+}
+
 
 export function setLyricsAnimationStyle(style: LyricsAnimationStyle) {
 	prefs.lyricsAnimationStyle = style;
@@ -1935,9 +2063,45 @@ export function initApp(mini = false): () => void {
 			if (s.role !== 'none' && playback.speed !== 1) setTempoPitch(1, playback.semitones);
 			applyLtState(s);
 		}),
-		api.onLtNotice((msg) => toast(msg))
+		api.onLtNotice((msg) => toast(msg)),
+		api.onSpotifyConnectState((event) => {
+			if (event.active && event.title) {
+				const spId = `SP:${event.title}:${event.artist || ''}`;
+				const isSame = playback.now?.title === event.title;
+				const durSec = event.duration_ms / 1000;
+				const posSec = event.position_ms / 1000;
+
+				if (!isSame || playback.now?.streamClient !== 'Spotify') {
+					playback.now = {
+						videoId: spId,
+						title: event.title,
+						artists: event.artist || '',
+						album: event.album,
+						thumbnail: event.cover_url || undefined,
+						duration: durSec ? formatDurationSecs(durSec) : undefined,
+						streamClient: 'Spotify',
+						audioQuality: 'Spotify Connect'
+					};
+					playback.duration = durSec;
+					playback.position = posSec;
+					playback.positionAt = performance.now();
+					playback.paused = !event.is_playing;
+					playback.rating = 'indifferent';
+				} else {
+					playback.duration = durSec;
+					playback.paused = !event.is_playing;
+					playback.position = posSec;
+					playback.positionAt = performance.now();
+				}
+				void syncSpotifyPlayback();
+			}
+		})
 	];
-	const teardown = () => subs.forEach((u) => u.then((f) => f()));
+	const teardown = () => {
+		subs.forEach((u) => u.then((f) => f()));
+		if (spotifySyncTimer) clearInterval(spotifySyncTimer);
+		if (spotifyTickTimer) clearInterval(spotifyTickTimer);
+	};
 	api.getQueue()
 		.then((q) => (playback.queue = q))
 		.catch(() => {});
@@ -1989,5 +2153,6 @@ export function initApp(mini = false): () => void {
 	// Seed the Listen Together state (server URL, any active room after a UI reload).
 	api.ltGetState().then(applyLtState).catch(() => {});
 	void refreshSpotify();
+	startSpotifyPlaybackSync();
 	return teardown;
 }

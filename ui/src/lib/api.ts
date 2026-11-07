@@ -1211,6 +1211,8 @@ export const spotifyNextTrack = () =>
 	invoke<void>('spotify_next_track');
 export const spotifyPreviousTrack = () =>
 	invoke<void>('spotify_previous_track');
+export const spotifySeek = (positionMs: number) =>
+	invoke<void>('spotify_seek', { positionMs });
 
 // --- PC Audio Music Recognition (Shazam / SongRec) ------------------------------------------
 export interface RecognizedSong {

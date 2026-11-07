@@ -39,7 +39,11 @@
 		openMiniPlayer,
 		toggleMute,
 		toggleNowPlayingLike,
-		wheelVolume
+		wheelVolume,
+		handleTogglePause,
+		handleSeek,
+		handleNextTrack,
+		handlePrevTrack
 	} from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
 	import ExplicitIcon from './ExplicitIcon.svelte';
@@ -133,9 +137,8 @@
 	}
 	function onSeekCommit(e: Event) {
 		const v = Number((e.target as HTMLInputElement).value);
-		playback.position = v;
 		seekDrag = null;
-		api.seek(v);
+		handleSeek(v);
 	}
 
 	const onVolume = (e: Event) => dragVolume(Number((e.target as HTMLInputElement).value));
@@ -230,19 +233,19 @@
 						<HugeiconsIcon icon={ShuffleIcon} class="h-4.5 w-4.5 {shuffleOn ? 'text-rose-500' : ''}" />
 					</Button>
 				{/if}
-				<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous" class="h-9 w-9">
+				<Button variant="ghost" size="icon-sm" onclick={() => handlePrevTrack()} aria-label="Previous" class="h-9 w-9">
 					<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
 				</Button>
 				<Button
 					variant="default"
 					size="icon"
 					class="rounded-full size-10 bg-foreground text-background hover:scale-105 transition-transform"
-					onclick={() => api.togglePause()}
+					onclick={() => handleTogglePause()}
 					aria-label="Play/pause"
 				>
 					<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-5 w-5" />
 				</Button>
-				<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next" class="h-9 w-9">
+				<Button variant="ghost" size="icon-sm" onclick={() => handleNextTrack()} aria-label="Next" class="h-9 w-9">
 					<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
 				</Button>
 				{#if prefs.visibleIcons.playerbar.repeat}
@@ -387,19 +390,19 @@
 
 		<!-- Left: Controls & Time -->
 		<div class="flex items-center gap-2 shrink-0">
-			<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous">
+			<Button variant="ghost" size="icon-sm" onclick={() => handlePrevTrack()} aria-label="Previous">
 				<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
 			</Button>
 			<Button
 				variant="ghost"
 				size="icon-sm"
 				class="rounded-full size-9 bg-foreground/10 hover:bg-foreground/20 text-foreground"
-				onclick={() => api.togglePause()}
+				onclick={() => handleTogglePause()}
 				aria-label="Play/pause"
 			>
 				<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-5 w-5" />
 			</Button>
-			<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next">
+			<Button variant="ghost" size="icon-sm" onclick={() => handleNextTrack()} aria-label="Next">
 				<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
 			</Button>
 			<span class="text-xs text-muted-foreground font-mono tabular-nums pl-1">
@@ -586,18 +589,18 @@
 						<span class="absolute bottom-0.5 left-1/2 -translate-x-1/2 size-1 rounded-full bg-emerald-500"></span>
 					{/if}
 				</Button>
-				<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous">
+				<Button variant="ghost" size="icon-sm" onclick={() => handlePrevTrack()} aria-label="Previous">
 					<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
 				</Button>
 				<button
 					type="button"
 					class="size-8 rounded-full bg-white text-black hover:scale-105 active:scale-95 transition-transform flex items-center justify-center shadow-md cursor-pointer"
-					onclick={() => api.togglePause()}
+					onclick={() => handleTogglePause()}
 					aria-label="Play/pause"
 				>
 					<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-5 w-5 fill-current" />
 				</button>
-				<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next">
+				<Button variant="ghost" size="icon-sm" onclick={() => handleNextTrack()} aria-label="Next">
 					<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
 				</Button>
 				<Button
@@ -632,9 +635,8 @@
 							barCount={50}
 							onSeek={(v) => (seekDrag = v)}
 							onCommit={(v) => {
-								playback.position = v;
 								seekDrag = null;
-								api.seek(v);
+								handleSeek(v);
 							}}
 						/>
 					</div>
@@ -914,14 +916,14 @@
 					{/if}
 				</Button>
 			{/if}
-			<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous">
+			<Button variant="ghost" size="icon-sm" onclick={() => handlePrevTrack()} aria-label="Previous">
 				<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
 			</Button>
 			<Button
 				variant="default"
 				size="icon"
 				class="rounded-full"
-				onclick={() => api.togglePause()}
+				onclick={() => handleTogglePause()}
 				aria-label="Play/pause"
 			>
 				<!-- HugeiconsIcon only re-renders `altIcon`/`showAlt`, not `icon` (frozen at mount) —
@@ -933,7 +935,7 @@
 				class="h-5 w-5"
 			/>
 			</Button>
-			<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next">
+			<Button variant="ghost" size="icon-sm" onclick={() => handleNextTrack()} aria-label="Next">
 				<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
 			</Button>
 			{#if prefs.visibleIcons.playerbar.repeat}
@@ -971,9 +973,8 @@
 						barCount={60}
 						onSeek={(v) => (seekDrag = v)}
 						onCommit={(v) => {
-							playback.position = v;
 							seekDrag = null;
-							api.seek(v);
+							handleSeek(v);
 						}}
 					/>
 				</div>
