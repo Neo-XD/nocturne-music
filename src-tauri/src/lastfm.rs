@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use innertube::models::metadata::ArtistRun;
 use innertube::SongItem;
 use md5::{Digest, Md5};
 use tauri::Emitter;
@@ -188,6 +189,7 @@ pub struct Track {
     pub video_id: String,
     pub title: String,
     pub artists: String,
+    pub artist_runs: Vec<ArtistRun>,
     pub album: Option<String>,
     pub is_video: bool,
 }
@@ -198,6 +200,7 @@ impl From<&SongItem> for Track {
             video_id: item.video_id.clone(),
             title: item.title.clone(),
             artists: item.artists.clone(),
+            artist_runs: item.artist_runs.clone(),
             album: item.album.clone(),
             is_video: item.is_video,
         }
@@ -452,7 +455,7 @@ pub fn resolve(t: &Track, cfg: &ScrobbleConfig) -> Resolved {
         }
     }
     if cfg.primary_artist {
-        r.artist = primary_artist(&r.artist, cfg.primary_strict);
+        r.artist = primary_artist(&r.artist, cfg.primary_strict, &t.artist_runs);
     }
     for (i, (rule, re)) in cfg.rules.iter().zip(&compiled).enumerate() {
         if let Some(re) = re {
@@ -509,8 +512,37 @@ fn split_title(title: &str) -> Option<(String, String)> {
     (!artist.is_empty() && !song.is_empty()).then(|| (artist.to_owned(), song.to_owned()))
 }
 
-fn primary_artist(artists: &str, strict: bool) -> String {
-    let end = artists.find(|c: char| c == ',' || (strict && c == '&')).unwrap_or(artists.len());
+fn primary_artist(artists: &str, strict: bool, runs: &[ArtistRun]) -> String {
+    let mut cuts = vec![","];
+    if strict {
+        cuts.push("&");
+        let linked = |r: &ArtistRun| r.id.is_some();
+        cuts.extend(
+            runs.windows(3)
+                .filter(|w| linked(&w[0]) && !linked(&w[1]) && linked(&w[2]))
+                .map(|w| w[1].text.as_str())
+                .filter(|j| !j.trim().is_empty()),
+        );
+    }
+    // A cut inside a linked run is part of one artist's name: "Macklemore & Ryan Lewis" and
+    // "Tyler, The Creator" are one channel each (#650). Runs are in byline order.
+    let mut linked = Vec::new();
+    let mut from = 0;
+    for r in runs.iter().filter(|r| !r.text.is_empty()) {
+        if let Some(at) = artists[from..].find(r.text.as_str()) {
+            let span = from + at..from + at + r.text.len();
+            from = span.end;
+            if r.id.is_some() {
+                linked.push(span);
+            }
+        }
+    }
+    let end = cuts
+        .iter()
+        .flat_map(|c| artists.match_indices(c).map(|(i, _)| i))
+        .filter(|i| !linked.iter().any(|s| s.contains(i)))
+        .min()
+        .unwrap_or(artists.len());
     let first = artists[..end].trim();
     if first.is_empty() {
         artists.to_owned()
@@ -985,6 +1017,52 @@ mod tests {
         assert!(!crosses_threshold(29.0, 20.0, &cfg));
         assert!(!crosses_threshold(120.0, 0.0, &cfg));
         assert!(crosses_threshold(240.0, 0.0, &cfg));
+    }
+
+    #[test]
+    fn primary_artist_cuts_at_commas_and_only_at_ampersands_when_strict() {
+        assert_eq!(primary_artist("Artist A, Artist B", false, &[]), "Artist A");
+        assert_eq!(primary_artist("Kendrick Lamar,SZA", false, &[]), "Kendrick Lamar");
+        assert_eq!(primary_artist("Future & Metro Boomin", false, &[]), "Future & Metro Boomin");
+        assert_eq!(primary_artist("Future & Metro Boomin", true, &[]), "Future");
+        assert_eq!(primary_artist("Simon&Garfunkel", true, &[]), "Simon");
+        assert_eq!(primary_artist("A & B, C", true, &[]), "A");
+        assert_eq!(primary_artist("A, B & C", true, &[]), "A");
+        assert_eq!(primary_artist("Delara", true, &[]), "Delara");
+        assert_eq!(primary_artist(", Artist B", true, &[]), ", Artist B");
+        assert_eq!(primary_artist("& Juliet", true, &[]), "& Juliet");
+    }
+
+    #[test]
+    fn primary_artist_strict_cuts_at_youtubes_own_joiner() {
+        let run =
+            |text: &str, id: Option<&str>| ArtistRun { text: text.into(), id: id.map(Into::into) };
+        let runs =
+            [run("underscores", Some("UC1")), run(" y ", None), run("Jane Remover", Some("UC2"))];
+        let byline = "underscores y Jane Remover";
+        assert_eq!(primary_artist(byline, true, &runs), "underscores");
+        assert_eq!(primary_artist(byline, false, &runs), byline);
+        assert_eq!(primary_artist(byline, true, &[]), byline);
+        let runs = [run("A", Some("UC1")), run(" y B", None)];
+        assert_eq!(primary_artist("A y B", true, &runs), "A y B");
+    }
+
+    #[test]
+    fn primary_artist_keeps_a_linked_name_whole() {
+        let run =
+            |text: &str, id: Option<&str>| ArtistRun { text: text.into(), id: id.map(Into::into) };
+        let one = [run("Macklemore & Ryan Lewis", Some("UC1"))];
+        assert_eq!(
+            primary_artist("Macklemore & Ryan Lewis", true, &one),
+            "Macklemore & Ryan Lewis"
+        );
+        let one = [run("Tyler, The Creator", Some("UC1"))];
+        assert_eq!(primary_artist("Tyler, The Creator", false, &one), "Tyler, The Creator");
+        let runs =
+            [run("Kool & The Gang", Some("UC1")), run(" & ", None), run("Someone", Some("UC2"))];
+        assert_eq!(primary_artist("Kool & The Gang & Someone", true, &runs), "Kool & The Gang");
+        let runs = [run("Kool & The Gang", Some("UC1")), run(", ", None), run("B", Some("UC2"))];
+        assert_eq!(primary_artist("Kool & The Gang, B", true, &runs), "Kool & The Gang");
     }
 
     #[test]
