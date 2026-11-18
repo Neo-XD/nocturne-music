@@ -21,7 +21,7 @@
 	import * as api from '$lib/api';
 	import type { LocalStats, LastfmStats, SongItem } from '$lib/api';
 	import { thumb } from '$lib/thumb';
-	import { playback, toast } from '$lib/player.svelte';
+	import { playback, toast, ui } from '$lib/player.svelte';
 
 	let activeSource = $state<'local' | 'lastfm'>('local');
 	let timeRangeDays = $state<number>(30);
@@ -591,13 +591,14 @@
 					<p class="text-xs text-muted-foreground mt-1.5 max-w-sm">
 						Connect your Last.fm account in Settings to sync and view your global scrobbling history, top artists, tracks, and albums here.
 					</p>
-					<a
-						href="/settings"
+					<button
+						type="button"
+						onclick={() => (ui.settingsOpen = true)}
 						class="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:opacity-95 transition-all cursor-pointer"
 					>
 						<HugeiconsIcon icon={Settings01Icon} class="h-4 w-4" />
 						<span>Open Settings to Connect</span>
-					</a>
+					</button>
 				</div>
 			{:else if lastfmStats}
 				<!-- Last.fm User Profile Banner -->
