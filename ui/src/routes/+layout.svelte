@@ -64,7 +64,7 @@
 	// Right sidebar: only 1 right sidebar can be active at a time.
 	// Closing a sidebar cleanly closes it without resurrecting any previous sidebar.
 	type RightSidebarId = 'np' | 'queue' | 'lyrics' | 'devices';
-	const allowsNowPlayingSidebar = $derived(prefs.appLayout === 'default' || prefs.appLayout === 'spotify');
+	const allowsNowPlayingSidebar = $derived(prefs.appLayout === 'default');
 	let activeRightSidebar = $state<RightSidebarId | null>(np.sidebarOpen ? 'np' : null);
 
 	$effect(() => {

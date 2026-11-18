@@ -4136,10 +4136,6 @@
 							<NocturneIcon class="size-5" />
 						{:else if preset.id === 'applemusic'}
 							<AppleIcon class="size-5 text-rose-500" />
-						{:else if preset.id === 'ytm'}
-							<YtmIcon class="size-5 text-red-500" />
-						{:else if preset.id === 'spotify'}
-							<SpotifyIcon class="size-5 text-emerald-500" />
 						{/if}
 					</div>
 					{#if isSelected}

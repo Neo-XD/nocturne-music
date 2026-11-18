@@ -69,7 +69,7 @@ export const toggleDevicesSidebar = () => {
 
 export type FloatingSidebarMode = 'both' | 'left' | 'right' | 'none';
 
-export type AppLayoutMode = 'default' | 'applemusic' | 'ytm' | 'spotify';
+export type AppLayoutMode = 'default' | 'applemusic';
 
 export interface AppLayoutPreset {
 	id: AppLayoutMode;
@@ -93,20 +93,6 @@ export const APP_LAYOUT_PRESETS: AppLayoutPreset[] = [
 		subtitle: 'Cupertino Classic',
 		badge: 'Apple Music',
 		description: 'Centered floating pill dock, clean navigation hierarchy, and minimalist Apple aesthetic.'
-	},
-	{
-		id: 'ytm',
-		name: 'YouTube Music',
-		subtitle: 'Streaming Native',
-		badge: 'YouTube Music',
-		description: 'Full-width bottom bar with edge scrubber, centered search bar, and streamlined navigation.'
-	},
-	{
-		id: 'spotify',
-		name: 'Spotify',
-		subtitle: 'Iconic Desktop',
-		badge: 'Spotify',
-		description: 'Classic 3-column player with 2-row transport, prominent circular play button, and Your Library panel.'
 	}
 ];
 
@@ -189,7 +175,11 @@ export const LYRICS_ANIMATION_OPTIONS: LyricsAnimationOption[] = [
 const initialMode = getInitialFloatingMode();
 
 export const prefs = $state({
-	appLayout: (browser ? (localStorage.getItem('app_layout_mode') as AppLayoutMode) : null) || 'default',
+	appLayout: (() => {
+		if (!browser) return 'default';
+		const saved = localStorage.getItem('app_layout_mode');
+		return saved === 'applemusic' ? 'applemusic' : 'default';
+	})(),
 	customizationMode: (browser ? (localStorage.getItem('customization_mode') as 'basic' | 'extreme') : null) || 'basic',
 	lyricsAnimationStyle: (browser ? (localStorage.getItem('lyrics_animation_style') as LyricsAnimationStyle) : null) || 'wave',
 	musicVideos: false,

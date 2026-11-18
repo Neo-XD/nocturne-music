@@ -217,7 +217,7 @@
 	<!-- Centered sticky search bar (or drag region on thin windows) -->
 	{#if prefs.visibleIcons.titlebar.search && !isThin}
 		<div data-tauri-drag-region class="flex flex-1 justify-center items-center mx-2 min-w-0">
-			<div data-tauri-drag-region class="flex justify-center items-center w-full {prefs.appLayout === 'ytm' ? 'max-w-[480px]' : prefs.appLayout === 'spotify' ? 'max-w-[440px]' : 'max-w-[340px]'}">
+			<div data-tauri-drag-region class="flex justify-center items-center w-full max-w-[340px]">
 				<TopSearchBar />
 			</div>
 		</div>

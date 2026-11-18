@@ -266,84 +266,6 @@
 			</a>
 			{@render statsRow()}
 
-		{:else if prefs.appLayout === 'ytm'}
-			<a
-				href="/"
-				title="Home"
-				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/') ? 'bg-red-500/10 text-red-500 font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
-			>
-				<HugeiconsIcon icon={Home01Icon} class="h-4 w-4 shrink-0" />
-				{#if !collapsed}<span class="truncate">Home</span>{/if}
-			</a>
-			<a
-				href="/library"
-				title="Library"
-				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/library') ? 'bg-red-500/10 text-red-500 font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
-			>
-				<HugeiconsIcon icon={LibraryIcon} class="h-4 w-4 shrink-0" />
-				{#if !collapsed}<span class="truncate">Library</span>{/if}
-			</a>
-			{@render statsRow()}
-
-			{#if !collapsed}
-				<button
-					type="button"
-					onclick={() => {
-						playlistDialogPlatform = 'ytm';
-						playlistDialogOpen = true;
-					}}
-					class="w-full mt-2 flex items-center justify-center gap-1.5 rounded-full border border-border/80 bg-muted/40 hover:bg-muted/70 py-1.5 px-3 text-xs font-semibold text-foreground transition-colors cursor-pointer"
-				>
-					<HugeiconsIcon icon={Add01Icon} class="size-3.5" />
-					<span>New playlist</span>
-				</button>
-			{/if}
-
-		{:else if prefs.appLayout === 'spotify'}
-			<a
-				href="/"
-				title="Home"
-				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/') ? 'bg-emerald-500/10 text-emerald-400 font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
-			>
-				<HugeiconsIcon icon={Home01Icon} class="h-4 w-4 shrink-0" />
-				{#if !collapsed}<span class="truncate">Home</span>{/if}
-			</a>
-			<a
-				href="/library"
-				title="Library"
-				class="group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors {collapsed ? 'justify-center' : 'justify-start'} {isActive('/library') ? 'bg-emerald-500/10 text-emerald-400 font-semibold' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'}"
-			>
-				<HugeiconsIcon icon={LibraryIcon} class="h-4 w-4 shrink-0" />
-				{#if !collapsed}<span class="truncate">Library</span>{/if}
-			</a>
-			{@render statsRow()}
-
-			{#if !collapsed}
-				<div class="flex items-center gap-1.5 pt-1.5 overflow-x-auto scrollbar-none">
-					<button
-						type="button"
-						class="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-muted/60 hover:bg-muted text-foreground transition-colors cursor-pointer"
-						onclick={() => goto('/library')}
-					>
-						Playlists
-					</button>
-					<button
-						type="button"
-						class="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-muted/30 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-						onclick={() => goto('/library?tab=artists')}
-					>
-						Artists
-					</button>
-					<button
-						type="button"
-						class="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-muted/30 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-						onclick={() => goto('/library?tab=albums')}
-					>
-						Albums
-					</button>
-				</div>
-			{/if}
-
 		{:else}
 			{#if prefs.homeInSidebar}
 				<a
@@ -714,7 +636,7 @@
 		</Dialog.Root>
 	{/if}
 
-	{#if !['applemusic', 'ytm', 'spotify'].includes(prefs.appLayout)}
+	{#if prefs.appLayout !== 'applemusic'}
 		<!-- Bottom Navigation for Nocturne Theme (Library & Stats) -->
 		<div class="mt-auto shrink-0 pt-2 border-t border-border/40 space-y-0.5">
 			<a
