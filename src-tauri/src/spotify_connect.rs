@@ -375,7 +375,15 @@ async fn run_connect_session(
 ) -> Result<(), String> {
     let session_config = SessionConfig { device_id: device_id.clone(), ..Default::default() };
 
-    let session = Session::new(session_config, None);
+    let cache_dir = app.path().app_cache_dir().ok().map(|d| d.join("spotify_cache"));
+    if let Some(ref d) = cache_dir {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let cache = cache_dir.and_then(|d| {
+        librespot::core::cache::Cache::new(Some(d.clone()), None, Some(d.join("audio")), None).ok()
+    });
+
+    let session = Session::new(session_config, cache);
     session
         .connect(creds.clone(), true)
         .await

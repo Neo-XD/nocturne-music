@@ -239,6 +239,21 @@
 		return tex;
 	}
 
+	function downscaleImg(img: HTMLImageElement): TexImageSource {
+		if (img.naturalWidth <= 512 && img.naturalHeight <= 512) return img;
+		const c = document.createElement('canvas');
+		const maxDim = 512;
+		const scale = Math.min(maxDim / img.naturalWidth, maxDim / img.naturalHeight);
+		c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+		c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+		const ctx = c.getContext('2d');
+		if (ctx) {
+			ctx.drawImage(img, 0, 0, c.width, c.height);
+			return c;
+		}
+		return img;
+	}
+
 	function uploadTex(gl: WebGLRenderingContext, source: TexImageSource): WebGLTexture | null {
 		const tex = gl.createTexture();
 		if (!tex) return null;
@@ -274,7 +289,7 @@
 					img.src = resolvedSrc;
 				});
 				if (!gl || !program || currentSrc !== reqSrc) return;
-				newTex = uploadTex(gl, img);
+				newTex = uploadTex(gl, downscaleImg(img));
 			} else {
 				let fetchUrl = newSrc;
 				try {
@@ -282,7 +297,11 @@
 					if (res.ok) {
 						const blob = await res.blob();
 						if (typeof createImageBitmap === 'function') {
-							const bitmap = await createImageBitmap(blob);
+							const bitmap = await createImageBitmap(blob, {
+								resizeWidth: 512,
+								resizeHeight: 512,
+								resizeQuality: 'medium'
+							});
 							if (!gl || !program || currentSrc !== reqSrc) return;
 							newTex = uploadTex(gl, bitmap);
 						} else {
@@ -295,7 +314,7 @@
 							});
 							URL.revokeObjectURL(blobUrl);
 							if (!gl || !program || currentSrc !== reqSrc) return;
-							newTex = uploadTex(gl, img);
+							newTex = uploadTex(gl, downscaleImg(img));
 						}
 					}
 				} catch {}
@@ -311,7 +330,7 @@
 						img.src = newSrc;
 					});
 					if (!gl || !program || currentSrc !== reqSrc) return;
-					newTex = uploadTex(gl, img);
+					newTex = uploadTex(gl, downscaleImg(img));
 				}
 			}
 

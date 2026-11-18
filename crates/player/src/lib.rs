@@ -120,13 +120,13 @@ impl Deck {
         mpv.set_property("gapless-audio", "yes")?;
         mpv.set_property("prefetch-playlist", "yes")?;
         mpv.set_property("cache", "yes")?;
-        mpv.set_property("cache-on-disk", "no")?;
+        mpv.set_property("cache-on-disk", "yes")?;
         let deck_cache = format!("{cache_dir}/deck_{id}");
         let _ = std::fs::create_dir_all(&deck_cache);
         mpv.set_property("demuxer-cache-dir", deck_cache.as_str())?;
-        mpv.set_property("demuxer-max-bytes", 64 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-max-back-bytes", 32 * 1024 * 1024_i64)?;
-        mpv.set_property("demuxer-readahead-secs", 360.0_f64)?;
+        mpv.set_property("demuxer-max-bytes", 16 * 1024 * 1024_i64)?;
+        mpv.set_property("demuxer-max-back-bytes", 4 * 1024 * 1024_i64)?;
+        mpv.set_property("demuxer-readahead-secs", 60.0_f64)?;
         let _ = mpv.set_property("network-timeout", 30_i64);
         let mpv = Arc::new(mpv);
 
