@@ -541,7 +541,7 @@ export function skipBy(deltaSecs: number) {
 	if (!playback.now) return;
 	const dur = playback.duration || Infinity;
 	const next = Math.max(0, Math.min(dur, playback.position + deltaSecs));
-	commitSeek(next);
+	handleSeek(next);
 }
 
 export function handleNextTrack() {

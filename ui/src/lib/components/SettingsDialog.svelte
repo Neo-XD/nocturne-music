@@ -3511,7 +3511,7 @@
 			max={12}
 			step={1}
 			value={crossfadeSecs}
-			onValueChange={(val) => setCrossfade(val)}
+			oninput={(e) => setCrossfade(Number((e.currentTarget as HTMLInputElement).value))}
 			class="flex-1"
 		/>
 		<span class="w-8 text-right font-mono text-xs text-muted-foreground">{crossfadeSecs === 0 ? 'Off' : `${crossfadeSecs}s`}</span>
