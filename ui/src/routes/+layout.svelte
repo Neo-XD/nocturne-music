@@ -17,7 +17,7 @@
 	import { theme, appearance, applyArtworkAccent, prewarmArtworkAccent, initTheme } from '$lib/theme.svelte';
 	import { thumb } from '$lib/thumb';
 	import { blockForeignDrag, dragScroll } from '$lib/dnd';
-	import { suppressNative } from '$lib/menu';
+	import { notePress, skipSelectClick, suppressNative } from '$lib/menu';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Titlebar from '$lib/components/Titlebar.svelte';
 	import ResizeBorders from '$lib/components/ResizeBorders.svelte';
@@ -229,6 +229,8 @@
 	ondragover={blockForeignDrag}
 	ondrop={blockForeignDrag}
 	oncontextmenu={suppressNative}
+	onpointerdowncapture={notePress}
+	onclickcapture={skipSelectClick}
 	onclick={handleGlobalClick}
 />
 

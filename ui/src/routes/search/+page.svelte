@@ -6,7 +6,7 @@
 </script>
 
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
@@ -149,6 +149,15 @@
 		} else if (!urlQuery && lastUrlQuery) {
 			resetSearch();
 		}
+	});
+
+	// Emptying the field by hand is the same as clearing (#647): back to browse page.
+	$effect(() => {
+		if (query || !(res || searching || error)) return;
+		untrack(() => {
+			resetSearch();
+			goto('/search', { keepFocus: true });
+		});
 	});
 
 	onMount(() => {

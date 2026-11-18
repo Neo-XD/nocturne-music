@@ -59,6 +59,15 @@
 	let controlsVisible = $state(true);
 	let mouseTimer: any = null;
 
+	let lastX = NaN;
+	let lastY = NaN;
+	function onPointerMove(e: MouseEvent) {
+		if (e.screenX === lastX && e.screenY === lastY) return;
+		lastX = e.screenX;
+		lastY = e.screenY;
+		onUserActivity();
+	}
+
 	function onUserActivity() {
 		controlsVisible = true;
 		if (mouseTimer) clearTimeout(mouseTimer);
@@ -253,11 +262,11 @@
 	const coverSrc = $derived(thumb(playback.now?.thumbnail, 1080));
 </script>
 
-<svelte:window onkeydown={onKey} onmousemove={onUserActivity} onpointerdown={onUserActivity} />
+<svelte:window onkeydown={onKey} onmousemove={onPointerMove} onpointerdown={onUserActivity} />
 
 <!-- Fullscreen Root Container: Covers whole screen at z-[90] -->
 <div
-	class="fixed inset-0 z-[90] flex flex-col select-none overflow-hidden bg-background text-foreground animate-in fade-in-0 duration-300 {!userShowPanel && (!controlsVisible && !playback.paused) ? 'cursor-none' : ''}"
+	class="fixed inset-0 z-[90] flex flex-col select-none overflow-hidden bg-background text-foreground animate-in fade-in-0 duration-300 {!userShowPanel && (!controlsVisible && !playback.paused) ? 'cursor-none [&_*]:cursor-none' : ''}"
 	tabindex="-1"
 >
 	<!-- Dynamic Background: Canvas Motion OR Shaders OR Static Cover Wash -->

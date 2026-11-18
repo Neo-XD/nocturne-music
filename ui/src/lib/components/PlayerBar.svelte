@@ -86,7 +86,7 @@
 		playback.rating = next;
 		if (playback.now?.videoId) {
 			try {
-				await api.setRating(playback.now.videoId, next);
+				await api.rate(playback.now.videoId, next);
 			} catch (e) {
 				console.error('Failed to set rating:', e);
 			}
@@ -143,6 +143,9 @@
 
 	const onVolume = (e: Event) => dragVolume(Number((e.target as HTMLInputElement).value));
 	const onVolumeCommit = (e: Event) => commitVolume(Number((e.target as HTMLInputElement).value));
+	const volumePct = $derived(
+		`${Math.round(playback.volume)}\u00a0%`
+	);
 
 	const isControl = (t: EventTarget | null) =>
 		!!(t as HTMLElement | null)?.closest?.(
@@ -330,7 +333,7 @@
 					</Button>
 				{/if}
 				{#if prefs.visibleIcons.playerbar.volume}
-					<div class="hidden items-center gap-1 sm:flex pl-1">
+					<div class="group/vol relative hidden items-center gap-1 sm:flex pl-1">
 						<Button
 							variant="ghost"
 							size="icon-sm"
@@ -356,7 +359,12 @@
 							onchange={onVolumeCommit}
 							onwheel={wheelVolume}
 							aria-label="Volume"
+							aria-valuetext={volumePct}
 						/>
+						<span
+							class="pointer-events-none invisible absolute end-full me-1 whitespace-nowrap text-xs text-muted-foreground tabular-nums group-hover/vol:visible group-focus-within/vol:visible"
+							aria-hidden="true">{volumePct}</span
+						>
 					</div>
 				{/if}
 			</div>
@@ -471,7 +479,7 @@
 
 		<!-- Right: Volume + Repeat + Shuffle + Expand -->
 		<div class="flex items-center gap-1.5 shrink-0">
-			<div class="hidden items-center gap-1 md:flex pr-2">
+			<div class="group/vol relative hidden items-center gap-1 md:flex pr-2">
 				<Button
 					variant="ghost"
 					size="icon-sm"
@@ -497,7 +505,12 @@
 					onchange={onVolumeCommit}
 					onwheel={wheelVolume}
 					aria-label="Volume"
+					aria-valuetext={volumePct}
 				/>
+				<span
+					class="pointer-events-none invisible absolute end-full me-1 whitespace-nowrap text-xs text-muted-foreground tabular-nums group-hover/vol:visible group-focus-within/vol:visible"
+					aria-hidden="true">{volumePct}</span
+				>
 			</div>
 			<Button
 				variant="ghost"
@@ -701,7 +714,7 @@
 					<SpeakerIcon class="h-4 w-4" />
 				</Button>
 			{/if}
-			<div class="hidden items-center gap-1 md:flex pl-1">
+			<div class="group/vol relative hidden items-center gap-1 md:flex pl-1">
 				<Button
 					variant="ghost"
 					size="icon-sm"
@@ -727,7 +740,12 @@
 					onchange={onVolumeCommit}
 					onwheel={wheelVolume}
 					aria-label="Volume"
+					aria-valuetext={volumePct}
 				/>
+				<span
+					class="pointer-events-none invisible absolute end-full me-1 whitespace-nowrap text-xs text-muted-foreground tabular-nums group-hover/vol:visible group-focus-within/vol:visible"
+					aria-hidden="true">{volumePct}</span
+				>
 			</div>
 			<Button
 				variant="ghost"
@@ -999,7 +1017,7 @@
 	<div class="flex flex-1 items-center justify-end gap-2">
 		<!-- Volume is the first control to drop on a narrow window (OS volume still works). -->
 		{#if prefs.visibleIcons.playerbar.volume}
-			<div class="hidden items-center gap-1 md:flex">
+			<div class="group/vol relative hidden items-center gap-1 md:flex">
 				<Button
 					variant="ghost"
 					size="icon-sm"
@@ -1026,7 +1044,12 @@
 					onchange={onVolumeCommit}
 					onwheel={wheelVolume}
 					aria-label="Volume"
+					aria-valuetext={volumePct}
 				/>
+				<span
+					class="pointer-events-none invisible absolute end-full me-1 whitespace-nowrap text-xs text-muted-foreground tabular-nums group-hover/vol:visible group-focus-within/vol:visible"
+					aria-hidden="true">{volumePct}</span
+				>
 			</div>
 		{/if}
 		<!-- One cluster, so they sit tighter to each other than to the volume slider. -->

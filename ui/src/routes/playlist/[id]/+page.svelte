@@ -80,7 +80,7 @@
 	let error = $state<string | null>(null);
 	let loadingMore = $state(false);
 	let moreError = $state(false);
-	let inflight: Promise<void> | null = null;
+	let inflight = $state.raw<Promise<void> | null>(null);
 	let confirmingDelete = $state(false);
 	// A song cover is only the fallback: a playlist's own artwork is always the hero backdrop when
 	// it has one. It also keeps auto-generated playlists from ending up with an empty header.
@@ -484,12 +484,16 @@
 			pl = {
 				...pl,
 				items: [...pl.items, ...more.items],
-				// An empty page would leave the sentinel in view with nothing to show — that's the end.
+				// An empty page would leave the window at the end with nothing to show: that's the end.
 				continuation: more.items.length ? more.continuation : undefined
 			};
 			cacheCurrent();
+			// A page handing back the token it was fetched with made no progress. Treated as a failed
+			// one (retry button, and a walk reports the playlist partial), or the window, still at
+			// the end, would fetch it again for as long as it sat there.
+			if (pl.continuation === token) moreError = true;
 		} catch {
-			// Stop auto-loading and offer a retry — auto-retrying a visible sentinel would spin.
+			// Stop auto-loading and offer a retry: auto-retrying at the end of the list would spin.
 			moreError = true;
 		} finally {
 			loadingMore = false;
@@ -515,16 +519,17 @@
 		scrollContainer.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
 	}
 
-	// One page per approach to the bottom: the observer only fires when the sentinel *enters* view,
-	// so an appended page that pushes it back out is required before the next fetch. rootMargin
-	// starts the fetch early enough that the rows are usually there by the time you reach them.
-	function sentinel(node: HTMLElement) {
-		const io = new IntersectionObserver(([e]) => e.isIntersecting && loadMore(), {
-			rootMargin: '600px 0px'
-		});
-		io.observe(node);
-		return () => io.disconnect();
-	}
+	// The next page once the window reaches the last rows that have arrived. The window already
+	// overscans past the viewport, so the fetch starts while those rows are still below it. This
+	// was an IntersectionObserver on a sentinel under the rows, which never fired for a reporter
+	// at 125% whose list stopped scrolling with the sentinel just outside the visible box (#652);
+	// the window is worked out from the scroller's own scrollTop, so it reaches the end whenever
+	// the scroller does. A failed page stays failed until the retry button: re-fetching on every
+	// scroll would spin.
+	$effect(() => {
+		if (pl?.continuation && !moreError && !inflight && win.end >= shown.length)
+			untrack(() => loadMore());
+	});
 
 	// A filter can only match rows that have arrived, and a narrowed list never pushes the sentinel
 	// back out of view, so the observer fires once and stops. Same walk a sort needs, for the same
@@ -977,10 +982,7 @@
 							</Button>
 						</div>
 					{:else}
-						<!-- The sentinel sits above the skeletons: it triggers the next page as it scrolls
-						     into range, so the rest of a long playlist arrives without a button. -->
 						<div aria-busy={loadingMore}>
-							<div {@attach sentinel}></div>
 							{#if loadingMore}
 								{#each Array(4) as _, i (i)}
 									<TrackRowSkeleton />
