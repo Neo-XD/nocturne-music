@@ -6,7 +6,9 @@ import {
 	np,
 	nudgeVolume,
 	playback,
+	skipBy,
 	toggleMute,
+	toggleNowPlayingRating,
 	ui,
 	toast,
 	refreshView,
@@ -24,6 +26,7 @@ export type ShortcutAction =
 	| 'prevTrack'
 	| 'shuffle'
 	| 'repeat'
+	| 'likeTrack'
 	| 'mute'
 	| 'volumeUp'
 	| 'volumeDown'
@@ -84,6 +87,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 		defaultKey: 'Ctrl+R'
 	},
 	{
+		id: 'likeTrack',
+		label: 'Like / unlike track',
+		description: 'Toggle like on currently playing song',
+		group: 'Playback',
+		defaultKey: 'Ctrl+L'
+	},
+	{
 		id: 'mute',
 		label: 'Mute / Unmute',
 		description: 'Toggle audio mute',
@@ -141,6 +151,7 @@ export const DEFAULT_KEYBINDINGS: Record<ShortcutAction, string> = {
 	prevTrack: 'Ctrl+D',
 	shuffle: 'Ctrl+S',
 	repeat: 'Ctrl+R',
+	likeTrack: 'Ctrl+L',
 	mute: 'Ctrl+M',
 	volumeUp: 'Ctrl+>',
 	volumeDown: 'Ctrl+<',
@@ -322,6 +333,17 @@ export function initShortcuts() {
 			return;
 		}
 
+		// ← / → seek 10 s (when not focused on form controls or sliders)
+		if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+			if (!playback.now || typingNow || e.altKey || e.shiftKey || e.ctrlKey || e.metaKey) return;
+			const ARROW_OWNERS =
+				'input,textarea,select,[contenteditable],[role=slider],[role=dialog],[role=alertdialog],[role=menu],[role=listbox],[role=tablist],[role=radiogroup]';
+			if (e.target instanceof HTMLElement && e.target.closest(ARROW_OWNERS)) return;
+			skipBy(e.key === 'ArrowLeft' ? -10 : 10);
+			e.preventDefault();
+			return;
+		}
+
 		// Don't intercept shortcuts when typing in inputs unless Ctrl or Alt is held
 		if (typingNow && !e.ctrlKey && !e.metaKey && !e.altKey) {
 			return;
@@ -345,6 +367,12 @@ export function initShortcuts() {
 		}
 		if (matchesCombo(e, keybindings.repeat)) {
 			cycleRepeat();
+			e.preventDefault();
+			return;
+		}
+		if (matchesCombo(e, keybindings.likeTrack)) {
+			if (!playback.now || api.isLocalId(playback.now.videoId)) return;
+			toggleNowPlayingRating();
 			e.preventDefault();
 			return;
 		}
