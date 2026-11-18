@@ -228,6 +228,17 @@ mod imp {
             .tooltip("Nocturne")
             .on_menu_event(|app, event| handle_menu(app, event.id.as_ref()))
             .on_tray_icon_event(|tray, event| {
+                #[cfg(target_os = "macos")]
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: tauri::tray::MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    show_main(tray.app_handle());
+                }
+
+                #[cfg(not(target_os = "macos"))]
                 if let TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } = event {
                     show_main(tray.app_handle());
                 }

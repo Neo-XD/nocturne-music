@@ -3,6 +3,7 @@
 pub mod addons;
 pub mod appicon;
 mod audioproxy;
+mod autopause;
 pub mod cache;
 mod cipher;
 mod commands;
@@ -31,6 +32,7 @@ mod taskbar;
 mod tray;
 mod videoproxy;
 mod webview;
+mod windowtitle;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -217,6 +219,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         // Folder picker for the local-music library (local.rs).
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
@@ -364,6 +367,10 @@ pub fn run() {
                 spotify_connect,
             ));
             app.manage(app_state.clone());
+            app_state.set_auto_pause_enabled(
+                app_state.db.get_setting("auto_pause_other_audio").as_deref() == Some("true"),
+            );
+            autopause::spawn(app_state.clone());
             spawn_heap_trimmer(app_state.db.clone());
 
             // Remote Device Playback Sync (Direct IP / Tailscale with PIN)
@@ -797,6 +804,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|handle, event| {
+            // macOS: Clicking the Dock icon when close-to-tray hid the window brings it back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                tray::show_main(handle);
+            }
+
             // The hidden cipher/PoToken webviews are windows too, so closing the main window no
             // longer auto-exits the app. Quit when the main window is destroyed.
             if let tauri::RunEvent::WindowEvent {
