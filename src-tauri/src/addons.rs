@@ -52,7 +52,7 @@ fn cache_addon_stream(key: String, data: PlaybackData) {
 
 pub const ADDONS_KEY: &str = "streaming_addons";
 pub const ADDONS_ENABLED_KEY: &str = "streaming_addons_enabled";
-pub const ADDON_TIMEOUT_MS: u64 = 1000;
+pub const ADDON_TIMEOUT_MS: u64 = 4000;
 
 /// BitChord addon user-agent header. Addons strictly verifying BitChord compatibility
 /// expect this user-agent to avoid rejecting third-party hosts.
@@ -781,7 +781,7 @@ pub fn artist_names(artist: &str) -> Vec<Vec<String>> {
             let tokens: Vec<String> = cleaned
                 .split_whitespace()
                 .map(|t| t.to_lowercase())
-                .filter(|t| t.len() > 1)
+                .filter(|t| !t.is_empty())
                 .collect();
             if tokens.is_empty() {
                 None
@@ -793,17 +793,25 @@ pub fn artist_names(artist: &str) -> Vec<Vec<String>> {
 }
 
 pub fn shares_artist(wanted: &str, got: &str) -> bool {
-    let want = artist_names(wanted);
-    let have = artist_names(got);
+    let clean_w = wanted.replace(" - Topic", "").replace("VEVO", "");
+    let clean_g = got.replace(" - Topic", "").replace("VEVO", "");
+    let want = artist_names(&clean_w);
+    let have = artist_names(&clean_g);
     if want.is_empty() || have.is_empty() {
         return false;
     }
     for w in &want {
         for h in &have {
-            // subslice containment
-            let w_match = h.windows(w.len()).any(|win| win == w.as_slice());
-            let h_match = w.windows(h.len()).any(|win| win == h.as_slice());
-            if w_match || h_match {
+            if w == h {
+                return true;
+            }
+            if h.len() >= w.len() && h.windows(w.len()).any(|win| win == w.as_slice()) {
+                return true;
+            }
+            if w.len() >= h.len() && w.windows(h.len()).any(|win| win == h.as_slice()) {
+                return true;
+            }
+            if w.iter().any(|t| t.len() >= 3 && h.contains(t)) {
                 return true;
             }
         }

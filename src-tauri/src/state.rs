@@ -1171,7 +1171,13 @@ impl AppState {
             target_tier.as_str(),
             "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH"
         );
-        if quality_is_above_high && !is_upload && crate::addons::is_addons_enabled(&self.db) {
+        let has_active_addons = crate::addons::is_addons_enabled(&self.db)
+            && crate::addons::get_addons(&self.db).iter().any(|a| a.enabled);
+
+        if (quality_is_above_high || has_active_addons)
+            && !is_upload
+            && crate::addons::is_addons_enabled(&self.db)
+        {
             let track_meta = {
                 let q = self.queue.lock().await;
                 q.items.iter().find(|i| i.video_id == video_id).map(|i| {
@@ -1366,8 +1372,12 @@ impl AppState {
 
         let quality_is_above_high =
             matches!(q_str.as_str(), "LOSSLESS" | "HI_RES_LOSSLESS" | "DOLBY_ATMOS" | "VERY_HIGH");
+        let has_active_addons = crate::addons::is_addons_enabled(&self.db)
+            && crate::addons::get_addons(&self.db).iter().any(|a| a.enabled);
 
-        if quality_is_above_high && crate::addons::is_addons_enabled(&self.db) {
+        if (quality_is_above_high || has_active_addons)
+            && crate::addons::is_addons_enabled(&self.db)
+        {
             let t = title.unwrap_or_default();
             let a = artist.unwrap_or_default();
             if !t.trim().is_empty() || !video_id.is_empty() {
