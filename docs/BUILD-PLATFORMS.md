@@ -138,7 +138,12 @@ cargo tauri build --bundles deb   # → target/release/bundle/deb/nocturne_*.deb
 6. **The re-sign is mandatory on Apple Silicon.** arm64 macOS refuses to execute a Mach-O with no
    valid signature, the linker's ad-hoc one is invalidated by every install-name rewrite above, and
    the symptom is the app dying instantly with `Killed: 9`. Ad-hoc (`--sign -`) is enough to run;
-   it is not enough to satisfy Gatekeeper on a downloaded app (see `RELEASING.md` §6).
+   it is not enough to satisfy Gatekeeper on a downloaded app (see `RELEASING.md` §6). Users strip the quarantine flag on first launch with:
+   ```bash
+   xattr -cr "/Applications/Nocturne Music.app"
+   # or
+   xattr -dr com.apple.quarantine "/Applications/Nocturne Music.app"
+   ```
 - `bundle.macOS.minimumSystemVersion` is **14.0** because Homebrew bottles are built per macOS
   version, so whatever the CI runner ships is the floor. It tracks `runs-on` in the workflow.
 - Media keys use **MPNowPlayingInfoCenter / MPRemoteCommandCenter** (Control Center + the Now

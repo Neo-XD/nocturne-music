@@ -71,7 +71,23 @@ Sharing one goal:
 | Linux (Ubuntu/Debian) | `.deb` | No self-update. Needs Ubuntu 24.04+ / Debian 13+; apt pulls libmpv and webkit2gtk in for you | Tested and working |
 | Linux (Fedora/RHEL) | `.rpm` | Needs `mpv-libs` installed (`sudo dnf install mpv-libs`). Updates through dnf, not in-app | Tested and working |
 | Windows | `-setup.exe` | Self-updating NSIS installer | Tested and working as expected |
-| macOS | `.dmg` `.app` | Availible On Releases. `.dmg` is not self updating | untested for nocturne |
+| macOS (Apple Silicon) | `.dmg` / `.app` | Available on Releases. Unsigned, so first launch needs `xattr -dr com.apple.quarantine "/Applications/Nocturne Music.app"` (see below) | Built & verified |
+
+---
+
+### macOS First Launch & Gatekeeper Fix
+
+Because Nocturne is not signed with an expensive Apple Developer certificate, macOS Gatekeeper will block the application on first launch and show a warning that **"Nocturne Music is damaged and can't be opened"** or **"Apple cannot check it for malicious software"**.
+
+To run Nocturne on macOS:
+1. Drag **Nocturne Music.app** into your **Applications** (`/Applications`) folder.
+2. Open **Terminal** (press <kbd>Cmd</kbd> + <kbd>Space</kbd>, type `Terminal`, and press <kbd>Enter</kbd>).
+3. Run the following command to clear Apple's quarantine attribute:
+   ```bash
+   xattr -cr "/Applications/Nocturne Music.app"
+   ```
+   *(Alternatively: `xattr -dr com.apple.quarantine "/Applications/Nocturne Music.app"`)*
+4. Open **Nocturne Music** normally from Launchpad or Applications.
 
 ---
 

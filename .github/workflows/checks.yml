@@ -1,26 +1,18 @@
 name: Checks
 
-# Formatting only, on purpose.
+# Continuous integration checks across all platforms.
 #
-# WHY THIS EXISTS: PR #13 ran `cargo fmt` against a repo that had no `rustfmt.toml`, so rustfmt's
-# defaults reformatted 21 files the change never touched and buried ~900 lines of real work inside a
-# 2400-line diff. The convention was written down only in a gitignored CLAUDE.md, so the contributor
-# had no way to know. `rustfmt.toml` is committed now and the tree was normalised to it, which means
-# the drift is detectable mechanically instead of during review.
-#
-# WHY NOT ALSO BUILD AND TEST HERE: `nocturne-app` links libmpv and webkit2gtk, so testing it needs
-# the full Tauri system-dependency install and a cold Rust compile. This job needs neither: rustfmt
-# parses the source and never builds it, so it finishes in seconds on a bare runner and stays cheap
-# enough to run on every push. If you do want tests in CI later, add a separate job rather than
-# weighing this one down, and note that `cargo test -p innertube -p player` covers the pure-Rust
-# crates without any of that system setup.
+# WHY THIS EXISTS:
+# Verifies that code formatting, frontend typechecking/build, unit tests, and cross-platform
+# backend builds (Linux, Windows, macOS) all pass cleanly on every push and PR, WITHOUT
+# publishing any releases or attaching assets.
 
 on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
-# A second push to the same PR makes the earlier run irrelevant.
 concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: true
@@ -30,17 +22,15 @@ permissions:
 
 jobs:
   rustfmt:
+    name: Rust Formatting
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # `components: rustfmt` rather than the default toolchain: nothing here compiles, so the rest
-      # would only be download time.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
 
-      # --all covers every workspace member, --check reports and exits non-zero instead of editing.
       - name: cargo fmt --all --check
         run: cargo fmt --all --check
 
@@ -48,6 +38,173 @@ jobs:
         if: failure()
         run: |
           echo "::notice::Run 'cargo fmt --all' locally and commit the result."
-          echo "rustfmt.toml at the repo root matches the existing style, so this should only"
-          echo "touch code you actually changed. If it wants to reformat files you never opened,"
-          echo "please open an issue instead of committing the churn."
+
+  ui:
+    name: UI Typecheck & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Svelte typecheck
+        working-directory: ui
+        run: pnpm check
+
+      - name: Frontend build
+        working-directory: ui
+        run: pnpm build
+
+  linux:
+    name: Linux Build & Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libdbus-1-dev libmpv-dev libjack-jackd2-0 glib-networking \
+            libasound2-dev mold
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Frontend build
+        working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Test core crates
+        run: cargo test -p innertube -p listen-protocol -p sync-server
+
+      - name: Check nocturne-app
+        run: cargo check -p nocturne-app
+
+  windows:
+    name: Windows Build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      MPV_DEV_URL: https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261010/mpv-dev-x86_64-20261010-git-b2c255c13e.7z
+      MPV_DIR: ${{ github.workspace }}\.libmpv
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Frontend build
+        working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Rust (MSVC)
+        shell: bash
+        run: rustup default stable-msvc
+
+      - name: RUSTFLAGS (libmpv link path)
+        shell: bash
+        run: echo "RUSTFLAGS=-L native=${{ github.workspace }}\.libmpv" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: libmpv import library
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "$env:MPV_DIR" | Out-Null
+          curl.exe -fsSL -o "$env:MPV_DIR\mpv-dev.7z" "$env:MPV_DEV_URL"
+          7z x "$env:MPV_DIR\mpv-dev.7z" -o"$env:MPV_DIR" -y | Out-Null
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          Set-Location "$env:MPV_DIR"
+          $names = & dumpbin /exports libmpv-2.dll |
+            Select-String -Pattern '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\w+)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+          if ($names.Count -lt 50) { throw "parsed only $($names.Count) exports from libmpv-2.dll" }
+          @("EXPORTS") + ($names | ForEach-Object { "    $_" }) | Set-Content -Path mpv.def -Encoding ascii
+          & lib /def:mpv.def /name:libmpv-2.dll /out:mpv.lib /machine:x64
+          if (-not (Test-Path "$env:MPV_DIR\mpv.lib")) { throw "lib.exe did not produce mpv.lib" }
+          Copy-Item "$env:MPV_DIR\libmpv-2.dll" "$env:GITHUB_WORKSPACE\src-tauri\libmpv-2.dll" -Force
+
+      - name: Check nocturne-app
+        run: cargo check -p nocturne-app
+
+  macos:
+    name: macOS Build
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libmpv
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: |
+          set -euo pipefail
+          brew install mpv
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Frontend build
+        working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check nocturne-app
+        run: cargo check -p nocturne-app
