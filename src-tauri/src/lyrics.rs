@@ -231,7 +231,67 @@ fn serialize_cached_lyrics(lyrics: &Lyrics) -> Option<String> {
 
 fn deserialize_cached_lyrics(json: &str) -> Option<Lyrics> {
     let cached: CachedLyrics = serde_json::from_str(json).ok()?;
-    (cached.version == LYRICS_CACHE_VERSION).then_some(cached.lyrics)
+    (cached.version == LYRICS_CACHE_VERSION).then(|| decode_cached(cached.lyrics))
+}
+
+/// Lyrics cached before TTML entities were decoded (#695) keep `&apos;` forever otherwise.
+pub fn decode_cached(mut l: Lyrics) -> Lyrics {
+    let fix = |t: &mut String| {
+        if t.contains('&') {
+            *t = decode_xml_entities(t);
+        }
+    };
+    for line in &mut l.lines {
+        fix(&mut line.text);
+        if let Some(translation) = &mut line.translation {
+            fix(translation);
+        }
+        for w in line.words.iter_mut().flatten() {
+            fix(&mut w.text);
+        }
+    }
+    l
+}
+
+/// `&apos;` and friends back into text (#695): Apple's TTML escapes every apostrophe. The five
+/// XML names plus numeric references; anything else stays as written.
+pub fn decode_xml_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        rest = &rest[amp..];
+        let decoded = rest.bytes().take(11).position(|b| b == b';').and_then(|end| {
+            let c = match &rest[1..end] {
+                "amp" => '&',
+                "lt" => '<',
+                "gt" => '>',
+                "quot" => '"',
+                "apos" => '\'',
+                n => {
+                    let n = n.strip_prefix('#')?;
+                    let code = match n.strip_prefix(['x', 'X']) {
+                        Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                        None => n.parse().ok()?,
+                    };
+                    char::from_u32(code)?
+                }
+            };
+            Some((c, end))
+        });
+        match decoded {
+            Some((c, end)) => {
+                out.push(c);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Keep Unison and Karaoke Mugen results out of persistent positive lyrics caching. Kara.moe's
