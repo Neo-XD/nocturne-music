@@ -90,8 +90,6 @@
 	import ColorPicker from '$lib/components/ColorPicker.svelte';
 	import Changelog from '$lib/components/Changelog.svelte';
 	import AppleIcon from '$lib/components/icons/AppleIcon.svelte';
-	import YtmIcon from '$lib/components/icons/YtmIcon.svelte';
-	import SpotifyIcon from '$lib/components/icons/SpotifyIcon.svelte';
 	import SpotifyConnectSettings from '$lib/components/SpotifyConnectSettings.svelte';
 	import NocturneIcon from '$lib/components/icons/NocturneIcon.svelte';
 	import * as Popover from '$lib/components/ui/popover';
@@ -1921,7 +1919,7 @@
 									<div class={CARD}>
 										{@render row({
 											title: 'Interface Layout Style',
-											desc: 'Transform Nocturne with layout presets for Apple Music, YouTube Music, or Spotify alongside Nocturne default.',
+											desc: 'Choose between the signature Nocturne glassmorphic interface and the Cupertino-inspired Apple Music pill dock.',
 											below: appLayoutSelector,
 											tall: true
 										})}
@@ -4117,7 +4115,7 @@
 	</div>
 {/snippet}
 {#snippet appLayoutSelector()}
-	<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+	<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 		{#each APP_LAYOUT_PRESETS as preset (preset.id)}
 			{@const isSelected = prefs.appLayout === preset.id}
 			<button
