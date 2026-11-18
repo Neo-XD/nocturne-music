@@ -63,6 +63,8 @@ pub struct BrowseItem {
 #[serde(rename_all = "camelCase")]
 pub struct Section {
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<&'static str>,
     pub items: Vec<BrowseItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub more_browse_id: Option<String>,
@@ -346,7 +348,8 @@ pub fn parse_home(root: &Value) -> HomePage {
                 more.and_then(|e| e.get("browseId")).and_then(Value::as_str).map(str::to_owned);
             let more_params =
                 more.and_then(|e| e.get("params")).and_then(Value::as_str).map(str::to_owned);
-            sections.push(Section { title, items, more_browse_id, more_params });
+            let kind = super::home_shelves::kind(&title, more_browse_id.as_deref());
+            sections.push(Section { title, kind, items, more_browse_id, more_params });
         }
     }
     HomePage { chips, sections, continuation: continuation_token(root) }
