@@ -32,6 +32,11 @@ pub const ON_REPEAT_WINDOW_SECS: i64 = 30 * 24 * 60 * 60;
 /// How many songs it holds by default (user-customizable in settings).
 pub const ON_REPEAT_LIMIT: usize = 50;
 
+/// How long other media must play before the music pauses, and how long it must stay quiet before
+/// the music resumes.
+const AUTO_PAUSE_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+const AUTO_RESUME_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
 pub struct AppState {
     pub it: InnerTube,
     pub clients: Clients,
@@ -72,6 +77,16 @@ pub struct AppState {
     last_pos_persist: AtomicU64,
     /// Wall-clock secs of the last position push to the OS media controls (throttled ~1s).
     last_media_push: AtomicU64,
+    /// The `auto_pause_other_audio` setting, mirrored so the watcher callback needn't read the db.
+    auto_pause_enabled: AtomicBool,
+    /// The watcher's last report: is another app playing media right now.
+    external_audio: AtomicBool,
+    /// True only while we hold the music paused because of other media, so we resume our own
+    /// pause and never one the user made.
+    auto_paused: AtomicBool,
+    /// Bumped on every state change and settings change; a delayed action runs only if it is
+    /// still the latest.
+    auto_pause_gen: AtomicU64,
     /// videoId → (the googlevideo URL the loopback proxy streams from, unix seconds it stops being
     /// treated as usable). Written by the `video_stream` command, read by `videoproxy::handle` and
     /// by `video_stream` itself: an entry that is still live answers a reopen with no network at
@@ -408,6 +423,10 @@ impl AppState {
             latest_position: AtomicU64::new(0),
             last_pos_persist: AtomicU64::new(0),
             last_media_push: AtomicU64::new(0),
+            auto_pause_enabled: AtomicBool::new(false),
+            external_audio: AtomicBool::new(false),
+            auto_paused: AtomicBool::new(false),
+            auto_pause_gen: AtomicU64::new(0),
             last_queue_fingerprint: AtomicU64::new(0),
             last_persisted_fingerprint: AtomicU64::new(0),
             auth: tokio::sync::Mutex::default(),
@@ -1518,6 +1537,10 @@ impl AppState {
                 for item in &next.items {
                     if item.video_id != video_id {
                         q.items.push(item.clone());
+                    } else if let Some(have) =
+                        q.items.iter_mut().find(|i| i.video_id == item.video_id)
+                    {
+                        have.album = have.album.take().or_else(|| item.album.clone());
                     }
                 }
                 if let Some(album) = next
@@ -2682,7 +2705,7 @@ impl AppState {
             "now": item.as_ref().map(|i| Self::now_playing_json(i, "current", current_quality.as_deref())),
             "paused": !self.is_playing.load(Ordering::Relaxed),
             "position": self.current_position(),
-            "duration": duration,
+            "duration": if duration > 0.0 { duration } else { item.as_ref().map_or(0.0, row_secs) },
             "volume": saved_volume(&self.db),
             "queue": queue_items.into_iter().map(|it| {
                 let dur_ms = it.duration.as_deref().map(|d| {
@@ -2792,6 +2815,7 @@ impl AppState {
             .app
             .emit("now-playing", Self::now_playing_json(item, stream_client, audio_quality));
         let _ = self.app.emit("playback-state", "playing");
+        crate::windowtitle::apply(&self.app, Some(item));
         // Push the same metadata to the OS media widget (context/16) and Discord.
         if let Some(m) = &self.media {
             // MPRIS/SMTC want a URL; a local track's artwork is a path, so hand it a file:// one.
@@ -2871,6 +2895,9 @@ impl AppState {
     /// `current_position()` here (the last tick can predate a track change) can't poison its
     /// timeline.
     pub fn media_set_playing(&self, playing: bool) {
+        if playing {
+            self.auto_paused.store(false, Ordering::Relaxed);
+        }
         self.is_playing.store(playing, Ordering::Relaxed);
         if let Some(m) = &self.media {
             m.set_playback(playing, self.current_position());
@@ -2879,6 +2906,71 @@ impl AppState {
         crate::taskbar::set_playing(&self.app, playing);
         if let Some(d) = &self.discord {
             d.set_playing(playing);
+        }
+    }
+
+    /// Turn auto-pause on or off at runtime (the `auto_pause_other_audio` setting). Turning it on
+    /// acts at once if other media is already playing; turning it off drops our claim on any pause
+    /// we made and leaves playback as it is.
+    pub fn set_auto_pause_enabled(self: &Arc<Self>, on: bool) {
+        self.auto_pause_enabled.store(on, Ordering::Relaxed);
+        self.auto_pause_gen.fetch_add(1, Ordering::SeqCst); // cancels anything pending
+        if on {
+            if self.external_audio.load(Ordering::Relaxed) {
+                self.schedule_auto_pause(true);
+            }
+        } else {
+            self.auto_paused.store(false, Ordering::Relaxed);
+            self.external_audio.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether the `auto_pause_other_audio` setting is on. The watcher thread only polls the OS
+    /// while it is.
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+    pub fn auto_pause_enabled(&self) -> bool {
+        self.auto_pause_enabled.load(Ordering::Relaxed)
+    }
+
+    /// Called by the platform watcher whenever it learns whether another app is playing media.
+    /// Repeats of the same answer are ignored, so a chatty watcher can't keep restarting the delay.
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+    pub fn on_external_audio(self: &Arc<Self>, active: bool) {
+        if self.external_audio.swap(active, Ordering::Relaxed) == active {
+            return;
+        }
+        self.schedule_auto_pause(active);
+    }
+
+    fn schedule_auto_pause(self: &Arc<Self>, active: bool) {
+        let generation = self.auto_pause_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        if !self.auto_pause_enabled.load(Ordering::Relaxed) {
+            return;
+        }
+        let me = self.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(if active { AUTO_PAUSE_DELAY } else { AUTO_RESUME_DELAY }).await;
+            if me.auto_pause_gen.load(Ordering::SeqCst) != generation
+                || !me.auto_pause_enabled.load(Ordering::Relaxed)
+            {
+                return;
+            }
+            me.apply_external_audio(active).await;
+        });
+    }
+
+    async fn apply_external_audio(self: &Arc<Self>, active: bool) {
+        if self.lt.is_guest().await || self.lt.is_host().await {
+            return;
+        }
+        if active {
+            if self.player.is_idle() || !self.is_playing() {
+                return;
+            }
+            self.auto_paused.store(true, Ordering::Relaxed);
+            let _ = self.player.pause();
+        } else if self.auto_paused.swap(false, Ordering::Relaxed) && !self.is_playing() {
+            let _ = self.player.play();
         }
     }
 
@@ -3452,6 +3544,7 @@ impl AppState {
         let pos = self.db.get_setting("queue_position").and_then(|s| s.parse::<f64>().ok());
         if let Some(p) = pos.filter(|p| *p > 0.0) {
             *self.pending_seek.lock().unwrap() = Some((items[current].video_id.clone(), p));
+            self.latest_position.store(p.to_bits(), Ordering::SeqCst);
         }
         {
             let mut q = self.queue.lock().await;
@@ -3480,6 +3573,10 @@ impl AppState {
             // has never been seen here (issue #93).
             self.refresh_rating(&item.video_id, self.generation.load(Ordering::SeqCst));
             let _ = self.app.emit("playback-state", "paused");
+            let _ = self
+                .app
+                .emit("position", serde_json::json!({ "position": self.current_position() }));
+            let _ = self.app.emit("duration", serde_json::json!({ "duration": row_secs(&item) }));
         }
         self.emit_queue().await;
 
@@ -3749,6 +3846,16 @@ impl AppState {
     pub async fn user_seek(&self, position: f64) -> Result<(), String> {
         if self.lt.is_guest().await {
             return Ok(()); // guests can't scrub — the host controls the timeline
+        }
+        if self.player.is_idle() {
+            // Nothing loaded to seek, as with a track restored at launch: move where it will
+            // start instead, which an exit before play also saves (#502).
+            if let Some(item) = self.current_item().await {
+                *self.pending_seek.lock().unwrap() = Some((item.video_id, position));
+                self.latest_position.store(position.to_bits(), Ordering::SeqCst);
+                let _ = self.app.emit("position", serde_json::json!({ "position": position }));
+            }
+            return Ok(());
         }
         self.queue.lock().await.crossfade_target = None;
         self.player.seek(position).map_err(|e| e.to_string())?;
@@ -4511,6 +4618,11 @@ pub(crate) fn parse_duration_ms(s: Option<&str>) -> i64 {
         _ => 0,
     };
     secs * 1000
+}
+
+/// A queue row's own length in seconds (0 when it states none).
+fn row_secs(item: &SongItem) -> f64 {
+    parse_duration_ms(item.duration.as_deref()) as f64 / 1000.0
 }
 
 fn format_duration(ms: i64) -> String {

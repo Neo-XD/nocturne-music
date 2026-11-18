@@ -298,6 +298,7 @@ const UI_SETTINGS: &[&str] = &[
     "autoplay",
     "hide_videos",
     "prevent_duplicates",
+    "auto_pause_other_audio",
     "update_banner",
     "lyrics_boidu",
     "lyrics_betterlyrics",
@@ -413,6 +414,9 @@ pub async fn set_setting(
     }
     if key == "automix" {
         let _ = state.player.set_automix(value == "true");
+    }
+    if key == "auto_pause_other_audio" {
+        state.inner().set_auto_pause_enabled(value == "true");
     }
     if key == "equalizer_enabled" || key == "equalizer_preamp" || key == "equalizer_bands" {
         let enabled = state.db.get_setting("equalizer_enabled").as_deref() == Some("true");

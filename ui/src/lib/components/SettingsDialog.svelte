@@ -914,6 +914,7 @@
 	const filterExplicitOn = $derived(settings.filter_explicit === 'true');
 	const animatedArtworkOn = $derived(settings.animated_artwork !== 'false');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
+	const autoPauseOn = $derived(settings.auto_pause_other_audio === 'true');
 	const updateBannerOn = $derived(settings.update_banner !== 'false');
 	const crossfadeSecs = $derived(parseInt(settings.crossfade_seconds || '0', 10) || 0);
 	const automixOn = $derived(settings.automix === 'true');
@@ -1288,6 +1289,11 @@
 	async function setPreventDuplicates(on: boolean) {
 		settings.prevent_duplicates = on ? 'true' : 'false';
 		await api.setSetting('prevent_duplicates', settings.prevent_duplicates);
+	}
+
+	async function setAutoPause(on: boolean) {
+		settings.auto_pause_other_audio = on ? 'true' : 'false';
+		await api.setSetting('auto_pause_other_audio', settings.auto_pause_other_audio);
 	}
 
 	async function setUpdateBanner(on: boolean) {
@@ -2505,6 +2511,12 @@
 									title: 'Prevent duplicate tracks in queue',
 									desc: "Adding a track that's already in the queue moves it from its old position instead of adding a second copy.",
 									control: dupSwitch,
+									tall: true
+								})}
+								{@render row({
+									title: 'Pause when other apps play media',
+									desc: 'Pause while another app, such as a browser tab or a video player, plays media, and resume when it stops. Notification sounds and games do not count.',
+									control: autoPauseSwitch,
 									tall: true
 								})}
 								{@render row({
@@ -4181,6 +4193,10 @@
 {#snippet dupSwitch()}<Switch
 		checked={preventDuplicatesOn}
 		onCheckedChange={setPreventDuplicates}
+	/>{/snippet}
+{#snippet autoPauseSwitch()}<Switch
+		checked={autoPauseOn}
+		onCheckedChange={setAutoPause}
 	/>{/snippet}
 {#snippet filterExplicitSwitch()}<Switch
 		checked={filterExplicitOn}

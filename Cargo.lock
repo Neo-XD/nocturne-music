@@ -4487,6 +4487,7 @@ dependencies = [
  "urlencoding",
  "webkit2gtk",
  "windows 0.61.3",
+ "zbus 5.18.0",
 ]
 
 [[package]]

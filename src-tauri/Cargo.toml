@@ -69,6 +69,9 @@ librespot = { version = "0.6.0", default-features = false, features = ["rodio-ba
 # `Window::hwnd()` hands us a matching HWND.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Media_Control",
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_System_Com",
@@ -82,3 +85,4 @@ ksni = "0.3.6"
 libc = "0.2"
 # Reaching the WebKitGTK settings wry leaves at browser defaults. Must track wry's version.
 webkit2gtk = { version = "2.0", features = ["v2_40"] }
+zbus = "5"
