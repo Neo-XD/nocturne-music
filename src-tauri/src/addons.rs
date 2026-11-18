@@ -41,22 +41,27 @@ fn get_cached_addon_stream(key: &str) -> Option<PlaybackData> {
     None
 }
 
-fn cache_addon_stream(key: String, data: PlaybackData) {
+fn cache_addon_stream(key: String, video_id: Option<&str>, data: PlaybackData) {
     if let Ok(mut cache) = get_addon_cache().lock() {
         if cache.len() >= 500 {
             cache.retain(|_, (t, _)| t.elapsed() < Duration::from_secs(7200));
         }
-        cache.insert(key, (Instant::now(), data));
+        cache.insert(key, (Instant::now(), data.clone()));
+        if let Some(vid) = video_id {
+            if !vid.is_empty() {
+                cache.insert(format!("vid:{}", vid), (Instant::now(), data));
+            }
+        }
     }
 }
 
 pub const ADDONS_KEY: &str = "streaming_addons";
 pub const ADDONS_ENABLED_KEY: &str = "streaming_addons_enabled";
-pub const ADDON_TIMEOUT_MS: u64 = 4000;
+/// BitChord-grade addon network timeout (15s to tolerate cold-cache FLAC providers).
+pub const ADDON_TIMEOUT_MS: u64 = 15000;
 
-/// BitChord addon user-agent header. Addons strictly verifying BitChord compatibility
-/// expect this user-agent to avoid rejecting third-party hosts.
-pub const ADDON_UA: &str = "BitChord/v1.9.0 Nocturne/v1.0.0";
+/// BitChord addon user-agent header matching BitChord client specification.
+pub const ADDON_UA: &str = "BitChord/v1.9.0";
 pub const BROWSER_UA: &str = concat!(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
     "AppleWebKit/537.36 (KHTML, like Gecko) ",
@@ -468,6 +473,45 @@ pub async fn test_addon_manifest(url: &str) -> Result<AddonManifest, String> {
             Err(e) => {
                 last_err = e;
                 continue;
+            }
+        }
+    }
+
+    // BitChord probe fallback: Ask `/search?q=music` directly.
+    // An addon that omits a manifest or hosts it at a custom path is still fully
+    // functional if its search endpoint responds to queries.
+    let probe_url = format!("{}/search?q=music&quality=lossless", base);
+    let probe_req = browser_request(&client, &probe_url, ADDON_TIMEOUT_MS);
+    if let Ok(res) = probe_req.send().await {
+        if res.status().is_success() {
+            if let Ok(text) = res.text().await {
+                if !text.trim().starts_with('<') {
+                    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&text) {
+                        let tracks = parse_search_response(json_val);
+                        if !tracks.is_empty() {
+                            let host = base
+                                .strip_prefix("https://")
+                                .or_else(|| base.strip_prefix("http://"))
+                                .unwrap_or(&base)
+                                .split('/')
+                                .next()
+                                .unwrap_or("addon");
+                            let id = format!("addon_{}", host.replace(['.', ':', '-'], "_"));
+                            let name = host.to_string();
+                            tracing::info!(base = %base, id = %id, "Synthesizing addon manifest from active /search endpoint");
+                            return Ok(AddonManifest {
+                                id,
+                                name,
+                                version: "1.0.0".to_string(),
+                                resources: vec!["search".to_string(), "stream".to_string()],
+                                types: None,
+                                description: Some("Synthesized from active search endpoint".to_string()),
+                                allow_downloads: None,
+                                check_valid_lossless: None,
+                            });
+                        }
+                    }
+                }
             }
         }
     }
@@ -1286,8 +1330,7 @@ async fn resolve_candidate_from_addon(
     let base_url = normalize_base_url(&addon.base_url);
     let (tier, maybe_atmos) = match quality_pref {
         "DOLBY_ATMOS" => ("lossless", Some("auto")),
-        "HI_RES_LOSSLESS" => ("hires", None),
-        "LOSSLESS" | "VERY_HIGH" => ("lossless", None),
+        "HI_RES_LOSSLESS" | "LOSSLESS" | "VERY_HIGH" => ("lossless", None),
         "HIGH" => ("high", None),
         "LOW" => ("low", None),
         _ => ("lossless", None),
@@ -1536,17 +1579,8 @@ async fn resolve_candidate_from_addon(
 
         let is_atmos = addon_stream.is_dolby_atmos() || candidate.is_dolby_atmos();
 
-        // If Hi-Res Lossless or Lossless is requested, do not consider Dolby Atmos at all
+        // If stereo Hi-Res / Lossless / High is requested, do not serve immersive Dolby Atmos
         if quality_pref != "DOLBY_ATMOS" && is_atmos {
-            continue;
-        }
-
-        // If Dolby Atmos is requested, prefer Atmos tracks
-        if quality_pref == "DOLBY_ATMOS" && !is_atmos {
-            eprintln!(
-                "[addon] [{}] Candidate \"{}\" was not Atmos; trying next candidate",
-                addon.name, candidate_title
-            );
             continue;
         }
 
@@ -1589,11 +1623,14 @@ async fn resolve_candidate_from_addon(
             format!("{}:{:02}", sec / 60, sec % 60)
         });
 
+        // BitChord ranking tier hierarchy: Atmos (4) > Hi-Res Lossless (3) > Lossless (2) > High (1)
         let quality_tier_rank = if is_atmos && quality_pref == "DOLBY_ATMOS" {
-            3
+            4
         } else if quality_label.contains("HI-RES") {
-            2
+            3
         } else if quality_label.contains("LOSSLESS") {
+            2
+        } else if quality_label.contains("320") || quality_label.contains("256") || quality_label.contains("HIGH") {
             1
         } else {
             0
@@ -1690,10 +1727,12 @@ async fn resolve_candidate_from_addon(
                                 &combined_quality_text,
                             );
                             let quality_tier_rank = if is_atmos && quality_pref == "DOLBY_ATMOS" {
-                                3
+                                4
                             } else if quality_label.contains("HI-RES") {
-                                2
+                                3
                             } else if quality_label.contains("LOSSLESS") {
+                                2
+                            } else if quality_label.contains("320") || quality_label.contains("256") || quality_label.contains("HIGH") {
                                 1
                             } else {
                                 0
@@ -1762,6 +1801,16 @@ pub async fn resolve_from_addons(
     let query_title = if !clean_title.is_empty() { &clean_title } else { title };
     if query_title.trim().is_empty() && video_id.unwrap_or_default().is_empty() {
         return None;
+    }
+
+    // BitChord StreamChoice cache check: prevent flipping streams / redundant fetches
+    if let Some(vid) = video_id {
+        if !vid.is_empty() {
+            if let Some(cached) = get_cached_addon_stream(&format!("vid:{}", vid)) {
+                eprintln!("[addon] ── StreamChoice cache hit for video_id=\"{}\" [{}] ──", vid, quality_pref);
+                return Some(cached);
+            }
+        }
     }
 
     let cache_key = format!(
@@ -1843,7 +1892,7 @@ pub async fn resolve_from_addons(
             total_elapsed
         );
         eprintln!("[addon] ════════════════════════════════════════════════════════════════");
-        cache_addon_stream(cache_key, data.clone());
+        cache_addon_stream(cache_key, video_id, data.clone());
     } else {
         eprintln!(
             "[addon] ── No addon matched for \"{}\" in {}ms. Snapping to YouTube Music. ──",
@@ -1855,8 +1904,9 @@ pub async fn resolve_from_addons(
     best.map(|(_, _, data)| data)
 }
 
-/// Waterfall HQ resolver: attempts the requested tier (e.g. DOLBY_ATMOS)
-/// and cascades down gracefully to HI_RES_LOSSLESS and LOSSLESS.
+/// Waterfall HQ resolver: uses BitChord-style single-pass tier ranking
+/// to attempt premium renditions (Dolby Atmos / Hi-Res Lossless) and cascade
+/// gracefully to standard Lossless or High Quality without redundant network cycles.
 pub async fn resolve_from_addons_waterfall(
     db: &Db,
     title: &str,
@@ -1870,69 +1920,5 @@ pub async fn resolve_from_addons_waterfall(
         return None;
     }
 
-    match target_tier {
-        "DOLBY_ATMOS" => {
-            // Waterfall tree: 1. Atmos -> 2. Hi-Res -> 3. Lossless -> 4. High
-            if let Some(res) = resolve_from_addons(
-                db,
-                title,
-                artist,
-                album,
-                duration_secs,
-                "DOLBY_ATMOS",
-                video_id,
-            )
-            .await
-            {
-                let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
-                if is_atmos_text(&q_upper) {
-                    return Some(res);
-                }
-            }
-            if let Some(res) = resolve_from_addons(
-                db,
-                title,
-                artist,
-                album,
-                duration_secs,
-                "HI_RES_LOSSLESS",
-                video_id,
-            )
-            .await
-            {
-                let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
-                if q_upper.contains("HI-RES") {
-                    return Some(res);
-                }
-            }
-            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
-        }
-        "HI_RES_LOSSLESS" => {
-            // If Hi-Res, do not think about Dolby at all: Hi-Res -> Lossless -> High
-            if let Some(res) = resolve_from_addons(
-                db,
-                title,
-                artist,
-                album,
-                duration_secs,
-                "HI_RES_LOSSLESS",
-                video_id,
-            )
-            .await
-            {
-                let q_upper = res.audio_quality.as_deref().unwrap_or_default().to_uppercase();
-                if q_upper.contains("HI-RES") {
-                    return Some(res);
-                }
-            }
-            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
-        }
-        "LOSSLESS" | "VERY_HIGH" => {
-            resolve_from_addons(db, title, artist, album, duration_secs, "LOSSLESS", video_id).await
-        }
-        _ => {
-            resolve_from_addons(db, title, artist, album, duration_secs, target_tier, video_id)
-                .await
-        }
-    }
+    resolve_from_addons(db, title, artist, album, duration_secs, target_tier, video_id).await
 }
